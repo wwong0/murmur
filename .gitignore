@@ -1,0 +1,41 @@
+# --- from the standard Node template, the parts that apply here ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Secrets. Change 1b's host identity is a secret today; change 7a adds more.
+.env
+.env.*
+!.env.example
+
+# OS junk. Development is on Windows, change 6 runs on Linux.
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# --- this project ---
+
+# Build output — esbuild regenerates these from `public/`. Tracking them means
+# every source edit shows twice in the diff, once as cause and once as effect.
+*.bundle.js
+*.bundle.js.map
+
+# Generated media — `npm run content` in step0/ rebuilds it (~2.3 GB, 1800
+# fMP4 segments of synthetic testsrc2).
+step0/content/
+
+# Scratch from the spike rig's runs.
+spike-host-origin/.tmp/
+
+# Session handoff notes — transient by construction; the durable record is the
+# change's artifacts.
+.claude/temp/
+
+# NOT ignored, deliberately:
+#   *.md anywhere — the docs are the review surface. Session D3 edits them, and
+#     they are inside the diff it reviews. An untracked doc is the one thing a
+#     subtractive review cannot undo.
+#   step0/results/, spike-host-origin/results/ — measurement records, not build
+#     output. They are the evidence behind FINDINGS.md and RESULT.md.
+#   package-lock.json — the hls.js version is load-bearing (PLAN.md, change 7a).

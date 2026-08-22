@@ -1,0 +1,24 @@
+{
+  "name": "watchalong-app",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Synced P2P Watchalong — room server, signalling transport, and the plain pages changes 2-10 build on.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node server/room-server.mjs",
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/check-structure.mjs && node scripts/build.mjs",
+    "check": "node scripts/check-structure.mjs && node scripts/protocol-check.mjs",
+    "verify:browser": "node scripts/verify-browser.mjs"
+  },
+  "dependencies": {
+    "hls.js": "^1.7.0",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

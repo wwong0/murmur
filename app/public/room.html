@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Synced Watchalong</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0e1116;
+    --panel: #161b22;
+    --border: #2a313c;
+    --fg: #d6e0ea;
+    --fg-dim: #8993a1;
+    --accent: #4fb0ff;
+    --warn: #ffb454;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, Menlo, monospace;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    padding: 1rem;
+    gap: 1rem;
+  }
+  h1 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0;
+    color: var(--fg-dim);
+    letter-spacing: 0.02em;
+  }
+  .layout {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  video {
+    background: #000;
+    width: 100%;
+    max-width: 960px;
+    aspect-ratio: 16 / 9;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  .side {
+    flex: 1 1 240px;
+    min-width: 220px;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.75rem;
+  }
+  .panel h2 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--fg-dim);
+    margin: 0 0 0.5rem 0;
+  }
+  #status-line {
+    font-size: 0.85rem;
+  }
+  #clock-line {
+    font-size: 0.85rem;
+    color: var(--fg-dim);
+  }
+  #roster {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  #roster li {
+    padding: 0.25rem 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+  }
+  #notices {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 0.8rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  #notices li {
+    padding: 0.2rem 0.4rem;
+    border-left: 2px solid var(--border);
+    color: var(--fg-dim);
+  }
+  #notices li.gap {
+    border-left-color: var(--warn);
+    color: var(--warn);
+  }
+</style>
+</head>
+<body>
+  <h1>synced watchalong</h1>
+  <div class="layout">
+    <video id="video" controls muted playsinline autoplay></video>
+    <div class="side">
+      <div class="panel">
+        <h2>connection</h2>
+        <div id="status-line">unknown</div>
+        <div id="clock-line"></div>
+      </div>
+      <div class="panel">
+        <h2>roster</h2>
+        <ul id="roster"></ul>
+      </div>
+      <div class="panel">
+        <h2>notices</h2>
+        <ul id="notices"></ul>
+      </div>
+    </div>
+  </div>
+  <script src="/room.bundle.js"></script>
+</body>
+</html>

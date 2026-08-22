@@ -1,0 +1,65 @@
+// scripts/protocol-check.mjs
+//
+// Drives the room server with several websocket clients from Node and asserts
+// the routing, ordering, presence, identity, liveness, gap-detection and
+// non-interpretation rules the whole transport rests on.
+//
+// It needs no browser and no harness — KEEP IT CHEAP. A check that takes thirty
+// seconds is one you run occasionally, and a check run occasionally has stopped
+// catching things early. That is why the server takes its liveness interval as
+// a setting (design.md D8), and why the refusal-policy checks in the
+// room-client suite run as a concurrent group rather than in sequence.
+//
+// The servers are started IN THIS PROCESS on ephemeral ports, so their clocks
+// and this process's share a `performance.timeOrigin` and the round-trip
+// assertions can check the full ordering t1 <= ts.recv <= ts.send <= t4 exactly.
+//
+// This file is only the running order. The assertions live in check/suites/**,
+// the machinery in check/harness.mjs, and the servers in check/fixtures.mjs —
+// which boots them on import, so importing a suite is enough to have something
+// to run it against.
+//
+// No test framework — step0/ establishes invariant checks in plain scripts as
+// this project's convention (see step0/scripts/aggregate.mjs).
+//
+// Node 24, ESM.
+
+import { report } from './check/harness.mjs';
+import { describeFixtures, disposeFixtures } from './check/fixtures.mjs';
+
+import mediaSuite from './check/suites/media.mjs';
+import joinSuite from './check/suites/join.mjs';
+import hostSuite from './check/suites/host.mjs';
+import identitySuite from './check/suites/identity.mjs';
+import routingSuite from './check/suites/routing.mjs';
+import presenceSuite from './check/suites/presence.mjs';
+import timeEchoSuite from './check/suites/time-echo.mjs';
+import robustnessSuite from './check/suites/robustness.mjs';
+import livenessSuite from './check/suites/liveness.mjs';
+import roomClientSuite from './check/suites/room-client.mjs';
+import clockSuite from './check/suites/clock.mjs';
+import clockSyncSuite from './check/suites/clock-sync.mjs';
+
+console.log(describeFixtures());
+
+// Order matters only for legibility: each suite takes rooms of its own, so none
+// of them can observe another.
+for (const suite of [
+  mediaSuite,
+  joinSuite,
+  hostSuite,
+  identitySuite,
+  routingSuite,
+  presenceSuite,
+  timeEchoSuite,
+  robustnessSuite,
+  livenessSuite,
+  roomClientSuite,
+  clockSuite,
+  clockSyncSuite,
+]) {
+  await suite();
+}
+
+await disposeFixtures();
+process.exit(report());
