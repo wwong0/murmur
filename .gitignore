@@ -32,6 +32,12 @@ spike-host-origin/.tmp/
 # change's artifacts.
 .claude/temp/
 
+# IDE workspace state. Per-machine and per-developer — module paths, code-style
+# defaults, VCS mappings — and it carries none of the project's reasoning.
+.idea/
+*.iml
+.vscode/
+
 # NOT ignored, deliberately:
 #   *.md anywhere — the docs are the review surface. Session D3 edits them, and
 #     they are inside the diff it reviews. An untracked doc is the one thing a
