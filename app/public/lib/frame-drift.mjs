@@ -199,6 +199,10 @@ export function createDriftLog(config = {}) {
     add,
     read,
     summary,
+    /** The newest sequence number issued, 0 before the first record. */
+    get latestSeq() {
+      return nextSeq - 1;
+    },
     get counters() {
       return { ...counters };
     },

@@ -36,9 +36,20 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {} } = {}) 
     }
   }
 
-  function load() {
+  /**
+   * Open the media at `startPositionMs`, which hls.js applies as it starts
+   * loading. THIS IS NOT A SEEK: nothing here writes `currentTime`, and the
+   * position is chosen before anything is playing (3b design.md D1).
+   *
+   * @param {{startPositionMs?: number|null}} [at]  null loads wherever hls.js would
+   */
+  function load({ startPositionMs = null } = {}) {
+    const startPosition = Number.isFinite(startPositionMs) ? startPositionMs / 1000 : -1;
     if (Hls.isSupported()) {
-      hls = new Hls({ ...hlsConfig });
+      // `startPosition` LAST. It is this call's argument, chosen by the load
+      // rule; `hlsConfig` is construction-time config, and letting it silently
+      // win would put playback somewhere no decision named.
+      hls = new Hls({ ...hlsConfig, startPosition });
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) {
           emitError({ fatal: true, type: data.type, details: data.details, error: data.error });
@@ -62,7 +73,9 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {} } = {}) 
         hls.loadSource(src);
       });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = src;
+      // A media fragment, not a seek — the position is part of the source the
+      // element is given, the same way `startPosition` is for hls.js.
+      video.src = startPosition >= 0 ? `${src}#t=${startPosition}` : src;
     } else {
       emitError({ fatal: true, type: 'unsupported', details: 'neither hls.js nor native HLS is supported' });
     }
@@ -75,8 +88,19 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {} } = {}) 
     }
   }
 
+  /**
+   * Throw the open media away and open it again at a new position, as ONE call
+   * — the only mechanism D1's re-open has. A caller that could reach `destroy`
+   * and `load` separately could also leave the page with neither.
+   */
+  function reopen({ startPositionMs = null } = {}) {
+    destroy();
+    load({ startPositionMs });
+  }
+
   return {
     load,
+    reopen,
     destroy,
     /** Subscribe to fatal player errors. Returns an unsubscribe function. */
     onError(fn) {

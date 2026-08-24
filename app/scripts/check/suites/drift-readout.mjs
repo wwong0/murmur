@@ -1,0 +1,86 @@
+// scripts/check/suites/drift-readout.mjs
+//
+// The one line of text the page shows about drift, and — the part that matters
+// — what it says when there is nothing to show. A healthy page never reaches
+// those branches, so the browser pass cannot exercise them: it would have to
+// break a real client's clock to see one. Here they are three lines of setup.
+//
+// NO SERVER, NO BROWSER, NO ELAPSED TIME. The read-out reads a log and a status
+// and returns a string; both are supplied by the caller.
+
+import { check, assert, assertEqual } from '../harness.mjs';
+import { createDriftLog } from '../../../public/lib/frame-drift.mjs';
+import { createDriftReadout, DRIFT_LINE_RE } from '../../../public/lib/drift-readout.mjs';
+import { MISSING_CLOCK } from '../../../public/lib/playback-start.mjs';
+
+/** The load rule's status, as the read-out consumes it — set directly by each check. */
+function fakePlayback(state = { playing: false, missing: MISSING_CLOCK }) {
+  const held = { state };
+  return { held, state: () => held.state };
+}
+
+/** A record carrying one drift figure. Only `driftMs` reaches the line. */
+const drifted = (driftMs) => ({ ok: true, record: { driftMs, clock: {} } });
+
+function rig() {
+  const log = createDriftLog();
+  const playback = fakePlayback();
+  return { log, playback, readout: createDriftReadout({ log, playback }) };
+}
+
+export default async function driftReadoutSuite() {
+  await check('drift read-out: a page that is not playing names the input it is waiting for', async () => {
+    const { playback, readout } = rig();
+    assertEqual(readout.text(), `drift: not playing — waiting for ${MISSING_CLOCK}`, 'the missing input is named, not summarised');
+
+    // Nothing missing and still not playing is the OTHER fault, and the line
+    // must not name an input the page holds — that sends change 6 after the
+    // wrong thing (playback-start.mjs).
+    playback.held.state = { playing: false, missing: null };
+    assertEqual(readout.text(), 'drift: not playing — the player did not open', 'a page holding both inputs and not playing says so');
+  });
+
+  await check('drift read-out: playing and recording nothing says WHICH counter is rising, fastest first', async () => {
+    const { log, playback, readout } = rig();
+    playback.held.state = { playing: true, missing: null };
+    assertEqual(readout.text(), 'drift: no new records — nothing recorded yet', 'the first line has no previous counters to compare against');
+
+    // rVFC silent: no frame was offered at all, which is a different fault from
+    // frames arriving and being refused.
+    assertEqual(readout.text(), 'drift: no new records — no frames offered — rVFC is silent', 'no frames offered is reported as no frames offered');
+
+    for (let i = 0; i < 3; i++) log.add({ ok: false, reason: 'noEpoch' });
+    for (let i = 0; i < 5; i++) log.add({ ok: false, reason: 'noClock' });
+    assertEqual(readout.text(), 'drift: no new records — noClock rising (5 total)', 'the fastest riser is the one named, and it reports its running total');
+
+    // The order is by RATE, not by total, AND THE FIXTURE SEPARATES THE TWO:
+    // over this interval noEpoch rises twice as fast as noClock while ending
+    // with a lower total, so an ordering by total would name the other one.
+    for (let i = 0; i < 2; i++) log.add({ ok: false, reason: 'noEpoch' });
+    log.add({ ok: false, reason: 'noClock' });
+    assertEqual(readout.text(), 'drift: no new records — noEpoch rising (5 total)', 'the reason rising fastest since the last line wins, whatever the totals are');
+  });
+
+  await check('drift read-out: with records it reports the latest drift and the rolling window, in the shape the browser pass asserts', async () => {
+    const { log, playback, readout } = rig();
+    playback.held.state = { playing: true, missing: null };
+    for (const ms of [-12.34, 4, 8, 100]) log.add(drifted(ms));
+
+    const line = readout.text();
+    const matched = DRIFT_LINE_RE.exec(line);
+    assert(matched !== null, `the line matches the published contract — got ${JSON.stringify(line)}`);
+    assertEqual(Number(matched[1]), 4, 'over the four records the ring holds');
+    // Median of an even set is the mean of the middle two — 4 and 8 — which is
+    // the drift log's definition and must not become a second one here.
+    assertEqual(line, 'drift: +100.0ms · rolling window over the last 4 frames: median +6.0ms, p99 +100.0ms', 'the newest record leads, the window follows');
+
+    // A second call with nothing new falls to the no-records branch rather than
+    // repeating the last figure, which would read as a live measurement.
+    assertEqual(readout.text(), 'drift: no new records — no frames offered — rVFC is silent', 'a stale figure is not reprinted as a fresh one');
+
+    // And the window is the RING, not the unread tail: one new record reports a
+    // median over all five, not over the one.
+    log.add(drifted(8));
+    assertEqual(readout.text(), 'drift: +8.0ms · rolling window over the last 5 frames: median +8.0ms, p99 +100.0ms', 'the window covers every record held, not only the new ones');
+  });
+}

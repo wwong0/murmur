@@ -12,8 +12,15 @@ import { createRoomClient } from './lib/room-client.mjs';
 import { readBody } from './lib/envelope.mjs';
 import { createPlayer } from './lib/player.mjs';
 import { createClockSync, websocketProbe } from './lib/clock-sync.mjs';
+import { createRoomTimeline } from './lib/room-timeline.mjs';
+import { createDriftLog } from './lib/frame-drift.mjs';
+import { createFrameSampler } from './lib/frame-sampler.mjs';
+import { createPlaybackStart } from './lib/playback-start.mjs';
+import { createDriftReadout } from './lib/drift-readout.mjs';
 
-console.log('[app] build', __BUILD_ID__);
+const BUILD_ID = __BUILD_ID__;
+
+console.log('[app] build', BUILD_ID);
 
 // ---------------------------------------------------------------------------
 // Config from the query string. The change 6 harness drives clients by URL,
@@ -40,6 +47,7 @@ const url = `${wsScheme}//${window.location.host}/ws`;
 const video = document.getElementById('video');
 const statusLine = document.getElementById('status-line');
 const clockLine = document.getElementById('clock-line');
+const driftLine = document.getElementById('drift-line');
 const rosterEl = document.getElementById('roster');
 const noticesEl = document.getElementById('notices');
 
@@ -96,11 +104,16 @@ client.onEvent('reconnecting', ({ inMs }) => {
   addNotice(`reconnecting in ${inMs}ms`);
 });
 
-client.onEvent('joined', ({ clientId, roster, role: heldRole }) => {
+client.onEvent('joined', (joined) => {
   // The role reported is the one the server gave this membership, not the one
   // the query string asked for.
-  addNotice(`joined as ${clientId} (${heldRole})`);
-  renderRoster(roster);
+  addNotice(`joined as ${joined.clientId} (${joined.role})`);
+  renderRoster(joined.roster);
+  // THE WHOLE REPLY, not the roster: the join time in it is the only thing that
+  // tells a reclaimed membership from a new one, and a new one lands in a room
+  // whose epoch this page must not carry over (change 3a design.md D2).
+  timeline.observeJoin(joined);
+  tickPlayback();
 });
 
 client.onEvent('superseded', () => {
@@ -140,9 +153,9 @@ client.on('presence', (env) => {
   const body = readBody(env);
   addNotice(`presence: ${body.event} — ${body.member?.tabId ?? body.member?.clientId}`);
   renderRoster(body.roster);
+  timeline.observeRoster(body.roster);
+  tickPlayback();
 });
-
-client.connect();
 
 // ---------------------------------------------------------------------------
 // Clock sync
@@ -176,11 +189,97 @@ renderClock();
 setInterval(renderClock, 1000);
 
 // ---------------------------------------------------------------------------
-// Player
+// Player, the room timeline, and the drift instrument
 // ---------------------------------------------------------------------------
 
 const player = createPlayer({ video });
 player.onError((detail) => {
   addNotice(`player error: ${detail.type ?? 'unknown'} ${detail.details ?? ''}`, { warn: true });
 });
-player.load();
+
+const timeline = createRoomTimeline();
+const driftLog = createDriftLog();
+// The video element carries its own `requestVideoFrameCallback`; the sampler's
+// default binding calls it on the element it was handed.
+const sampler = createFrameSampler({ video, timeline, clock: clockSync, log: driftLog });
+
+/**
+ * A re-open is a SEAM IN THE DRIFT SERIES, not an excursion in it: the records
+ * before it were measured against the epoch it replaces, and the sequence number
+ * it fell on is what marks them (D1).
+ */
+const seams = [];
+
+const playback = createPlaybackStart({
+  timeline,
+  clock: clockSync,
+  open({ positionMs, epochMs, reopen }) {
+    const seconds = (positionMs / 1000).toFixed(2);
+    if (reopen) {
+      seams.push({ afterSeq: driftLog.latestSeq, epochMs, positionMs });
+      sampler.stop();
+      player.reopen({ startPositionMs: positionMs });
+      addNotice(`timeline reference revised — re-opened at ${seconds}s`, { warn: true });
+    } else {
+      player.load({ startPositionMs: positionMs });
+      addNotice(`playback opened at ${seconds}s`);
+    }
+    sampler.start();
+  },
+});
+
+// ---------------------------------------------------------------------------
+// The drift read-out
+// ---------------------------------------------------------------------------
+
+const driftReadout = createDriftReadout({ log: driftLog, playback });
+
+/**
+ * Poll the load rule, then repaint the line WHETHER OR NOT THE POLL GOT THERE.
+ * `poll` deliberately lets a player that threw reach its caller so the next tick
+ * retries it (playback-start.mjs rule 3), and this is the last place that
+ * failure can be reported from: room-client hands a throwing subscriber to a
+ * `subscriber-error` event nothing here listens to (CONSTRAINTS.md →
+ * *Verification*). An unpainted line goes on naming an input the page stopped
+ * missing seconds ago.
+ *
+ * Also called from the roster handlers, because a reference point arriving is
+ * not worth a tick's wait.
+ */
+function tickPlayback() {
+  try {
+    playback.poll();
+  } catch (err) {
+    addNotice(`the player did not open: ${err?.message ?? err}`, { warn: true });
+  }
+  driftLine.textContent = driftReadout.text();
+}
+
+tickPlayback();
+setInterval(tickPlayback, 250);
+
+// ---------------------------------------------------------------------------
+// The harness seam (D2)
+//
+// Change 6 reads these as values over CDP, `playing` above all: a client that
+// never played downloads nothing, which makes the host upload multiplier of
+// criteria 2 and 3 look BETTER (CONSTRAINTS.md → *Measurement*).
+//
+// Functions, not values — a consumer evaluating this expression twice must get
+// two readings, not one frozen at load.
+// ---------------------------------------------------------------------------
+
+window.__app = {
+  buildId: BUILD_ID,
+  room,
+  tabId,
+  clock: () => clockSync.read(),
+  drift: (afterSeq = 0) => driftLog.read({ afterSeq }),
+  // THE CANONICAL ROLLING WINDOW. Published so no consumer has to re-derive a
+  // median from `drift().records` and get a second one — the browser pass did,
+  // and its two figures did not share a definition of the middle of an even set.
+  summary: () => driftLog.summary(),
+  playback: () => ({ ...playback.state(), callbacks: sampler.callbacks, sampling: sampler.running, seams }),
+};
+
+client.connect();

@@ -48,26 +48,50 @@
 //    scripts/protocol-check.mjs instead.
 
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { WebSocket } from 'ws';
+import { fileURLToPath } from 'node:url';
+import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep } from './cdp.mjs';
+import { DRIFT_LINE_RE } from '../public/lib/drift-readout.mjs';
 
-const CHROME = 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
 const PORT = 9223;
 const ORIGIN = 'http://127.0.0.1:8100';
-const FLAGS = [
-  '--autoplay-policy=no-user-gesture-required',
-  '--disable-renderer-backgrounding',
-  '--disable-backgrounding-occluded-windows',
-  '--disable-background-timer-throttling',
-  '--disable-features=CalculateNativeWinOcclusion',
-  '--no-first-run',
-  '--no-default-browser-check',
-];
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const cdpHttp = (pathname) => cdpHttpOn(PORT, pathname);
+
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'app-verify-'));
+const BUNDLE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'room.bundle.js');
+
+/**
+ * The gap the run IMPOSES between the two windows (3b design.md D3). Without it
+ * the assertion below cannot fail: open both at the same instant and a working
+ * timeline and a DELETED timeline both put both windows near position zero, so
+ * the observation is identical in the two worlds it has to separate. With it,
+ * a working timeline makes the second window catch up and a broken one leaves
+ * it ten seconds behind. It is the input to the experiment, not dead time.
+ */
+const WINDOW_GAP_MS = 10000;
+
+/**
+ * How far apart the two windows' drift figures may be. NOT "one segment
+ * duration": four seconds would admit a state in which the start position
+ * achieved nothing. Measured over two runs during change 3b task 4 — the two
+ * windows landed 96ms and 112ms apart — so this sits just above that and two
+ * orders below the 10s the imposed gap produces with the timeline removed.
+ */
+const POSITION_TOLERANCE_MS = 200;
+
+/**
+ * One window against the room, which is a LOOSER question than the one above:
+ * every client lands a fixed distance behind, because time passes between
+ * choosing the start position and displaying the first frame (design.md D1).
+ * Measured at 119–241ms; this bounds that, and change 4 is what closes it.
+ */
+const DRIFT_TOLERANCE_MS = 400;
+
+const sha = (text) => crypto.createHash('sha256').update(text).digest('hex').slice(0, 12);
 
 const URL_A = `${ORIGIN}/room.html?room=demo&role=host&tab=A`;
 const URL_B = `${ORIGIN}/room.html?room=demo&role=viewer&tab=B`;
@@ -80,87 +104,85 @@ const chrome = spawn(
   { stdio: 'ignore' }
 );
 
-async function cdpHttp(pathname) {
-  for (let i = 0; i < 80; i++) {
-    try {
-      const res = await fetch(`http://127.0.0.1:${PORT}${pathname}`);
-      const text = await res.text();
-      try {
-        return JSON.parse(text); // /json/close answers in plain text
-      } catch {
-        return { text };
-      }
-    } catch {
-      await sleep(250);
-    }
-  }
-  throw new Error(`CDP not reachable at ${pathname}`);
-}
-
-class Tab {
-  constructor(label, target) {
-    this.label = label;
-    this.id = 0;
-    this.pending = new Map();
-    this.targetId = target.id;
-    this.ws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
-    this.ready = new Promise((resolve) => this.ws.once('open', resolve));
-    this.ws.on('error', () => {});
-    this.ws.on('message', (raw) => {
-      const msg = JSON.parse(raw.toString());
-      if (msg.id && this.pending.has(msg.id)) {
-        const { resolve } = this.pending.get(msg.id);
-        this.pending.delete(msg.id);
-        resolve(msg.result);
-        return;
-      }
-      if (msg.method === 'Runtime.consoleAPICalled') {
-        const text = msg.params.args.map((a) => (a.value !== undefined ? a.value : (a.description ?? a.type))).join(' ');
-        console.log(`  [${this.label}] ${text}`);
-      }
-      if (msg.method === 'Runtime.exceptionThrown') {
-        console.log(`  [${this.label}] EXCEPTION ${msg.params.exceptionDetails.text}`);
-      }
-    });
-  }
-  send(method, params = {}) {
-    const id = ++this.id;
-    this.ws.send(JSON.stringify({ id, method, params }));
-    return new Promise((resolve) => this.pending.set(id, { resolve }));
-  }
-  async evaluate(expression) {
-    const r = await this.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-    if (r.exceptionDetails) throw new Error(`${this.label}: ${r.exceptionDetails.text}`);
-    return r.result.value;
-  }
-}
-
+/**
+ * A page in its OWN Chrome window — a second tab in one window is a background
+ * tab, and a background tab does not autoplay, which is what made the first run
+ * of this report the host "not playing" when the host was fine.
+ *
+ * `alreadyOpen` is the first window, the one Chrome was launched with: nothing
+ * to spawn, and nothing to exclude, because that target is the one being looked
+ * for.
+ */
 async function attach(label, url, alreadyOpen = false) {
-  const before = alreadyOpen ? new Set() : new Set((await cdpHttp('/json/list')).map((t) => t.id));
-  if (!alreadyOpen) {
-    spawn(CHROME, [...FLAGS, '--new-window', `--user-data-dir=${profile}`, '--window-size=700,500', url], { stdio: 'ignore' });
-  }
-  for (let i = 0; i < 80; i++) {
-    const list = await cdpHttp('/json/list');
-    const found = list.find((t) => t.type === 'page' && !before.has(t.id) && t.url.startsWith(url.split('?')[0]));
-    if (found && found.webSocketDebuggerUrl) {
-      const tab = new Tab(label, found);
-      await tab.ready;
-      await tab.send('Runtime.enable');
-      return tab;
-    }
-    await sleep(250);
-  }
-  throw new Error(`window for ${label} never appeared`);
+  if (alreadyOpen) return attachTo(PORT, url, { label });
+  const before = new Set((await cdpHttp('/json/list')).map((t) => t.id));
+  spawn(CHROME, [...FLAGS, '--new-window', `--user-data-dir=${profile}`, '--window-size=700,500', url], { stdio: 'ignore' });
+  return attachTo(PORT, url, { label, exclude: before });
 }
 
+// `currentTime` appears here and NOWHERE ELSE IN THIS FILE, for two questions it
+// can answer: is this element playing, and has it advanced. It is not a drift
+// primitive and is not used as one (`CONSTRAINTS.md` → *Playback measurement*):
+// every figure below about WHERE a window is — the two-window agreement of 3.5
+// included — is read from the drift records, which come from
+// `requestVideoFrameCallback`.
 const PROBE = `({
   time: document.querySelector('video').currentTime,
   paused: document.querySelector('video').paused,
   members: [...document.querySelectorAll('#roster li')].map(li => li.textContent.trim()),
   status: (document.querySelector('#status-line')||{}).textContent,
+  clockText: (document.querySelector('#clock-line')||{}).textContent,
+  driftText: (document.querySelector('#drift-line')||{}).textContent,
   notices: [...document.querySelectorAll('#notices li')].map(li => li.textContent.trim()),
 })`;
+
+/**
+ * The harness seam (3b design.md D2), as change 6 will read it: values, not text
+ * scraped back out of a string formatted for a person. `latest` is the newest
+ * drift record — one client against the room timeline, NOT criterion 1's
+ * pairwise figure.
+ */
+const SEAM = `(() => {
+  const app = window.__app;
+  if (!app) return { present: false };
+  const drift = app.drift(0);
+  return {
+    present: true,
+    buildId: app.buildId,
+    clock: app.clock(),
+    playback: app.playback(),
+    counters: drift.counters,
+    held: drift.records.length,
+    latest: drift.records[drift.records.length - 1] ?? null,
+    // THE PAGE'S OWN ROLLING WINDOW, not a second one derived here. This
+    // re-derivation took the upper of the middle two where the log takes their
+    // mean, so the figure the run reported was never quite the one the page did.
+    summary: app.summary(),
+  };
+})()`;
+
+/** The seam, once the bundle has run. A page probed before that reports nothing. */
+async function seamOf(tab, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const seam = await tab.evaluate(SEAM);
+    if (seam.present || Date.now() > deadline) return seam;
+    await sleep(250);
+  }
+}
+
+/**
+ * How far this window has played PAST WHERE IT OPENED. `currentTime` on its own
+ * stopped meaning "it is playing" the moment change 3b made playback start at
+ * the room's position: the second window opens WINDOW_GAP_MS in BY CONSTRUCTION,
+ * so `time > 1` is true of it before it has shown a single frame. A window whose
+ * start position is unreadable yields NaN, which fails every comparison below
+ * rather than passing one.
+ */
+function advancedMs(seam, probe) {
+  const startedAt = seam.playback?.startedAtMediaMs;
+  return Number.isFinite(startedAt) ? probe.time * 1000 - startedAt : NaN;
+}
 
 const failures = [];
 function expect(label, cond, detail) {
@@ -175,6 +197,28 @@ try {
 
   console.log('\n--- 7.1 / 7.2: two windows, one room ---');
   const a = await attach('A/host', URL_A, true);
+
+  console.log('\n--- 3.1: which build is this run talking to? ---');
+  // A 200 on /room.html proves something is answering, not what it is
+  // (`CONSTRAINTS.md` → *Reachable is not fresh*). This detects a page running a
+  // DIFFERENT build, not a page misreporting its own — do not read it as more
+  // than that (3b design.md D3).
+  const seamEarly = await seamOf(a);
+  expect('3.1 the page publishes the harness seam', seamEarly.present === true, JSON.stringify(seamEarly).slice(0, 120));
+  const served = await (await fetch(`${ORIGIN}/room.bundle.js`)).text();
+  const onDisk = fs.readFileSync(BUNDLE_PATH, 'utf8');
+  console.log(`  build id: ${seamEarly.buildId} · served ${sha(served)} · on disk ${sha(onDisk)}`);
+  expect('3.1 the origin serves this tree’s bundle', sha(served) === sha(onDisk), `served ${sha(served)}, on disk ${sha(onDisk)}`);
+  expect(
+    '3.1 the page is running the bundle the origin is serving',
+    typeof seamEarly.buildId === 'string' && served.includes(seamEarly.buildId),
+    `page reports ${seamEarly.buildId}`
+  );
+
+  // THE IMPOSED GAP (3.4) — the input to the experiment, not dead time. Read
+  // WINDOW_GAP_MS before shortening or removing it.
+  console.log(`\n--- 3.4: opening the second window ${WINDOW_GAP_MS / 1000}s late, on purpose ---`);
+  await sleep(WINDOW_GAP_MS);
   const b = await attach('B/view', URL_B);
 
   await sleep(20000);
@@ -182,14 +226,71 @@ try {
   const pb = await b.evaluate(PROBE);
   console.log('  A:', JSON.stringify(pa));
   console.log('  B:', JSON.stringify(pb));
-  expect('7.1 both windows are playing', pa.time > 1 && pb.time > 1, `A t=${pa.time.toFixed(2)}s B t=${pb.time.toFixed(2)}s`);
+  // ONE SEAM READING PER WINDOW, taken here and used by every assertion down to
+  // 3.5: `startedAtMediaMs` and the drift window have to describe the same
+  // instant as `pa`/`pb` for the two to be compared at all.
+  const sa = await seamOf(a);
+  const sb = await seamOf(b);
+  const advA = advancedMs(sa, pa);
+  const advB = advancedMs(sb, pb);
+  expect('7.1 both windows have played on past where they opened', advA > 1000 && advB > 1000, `A +${(advA / 1000).toFixed(1)}s past its start, B +${(advB / 1000).toFixed(1)}s`);
   expect('7.1 both rosters show two members', pa.members.length === 2 && pb.members.length === 2, `A=${pa.members.length} B=${pb.members.length}`);
   expect('7.1 rosters agree', JSON.stringify(pa.members.slice().sort()) === JSON.stringify(pb.members.slice().sort()));
+
+  console.log('\n--- 3.2 / 3.3: what the page SAYS, not merely that the element is there ---');
+  // Change 2's refusal-status defect — a `version-mismatch` reported to the user
+  // as a host collision — reached review because the probe read element contents
+  // and asserted nothing about them.
+  const CLOCK_RE = /^clock: [+-]\d+\.\d+ms ± \d+\.\d+ms \(\d+ samples\)$/;
+  // The line's shape comes from the module that builds it, so this and the free
+  // suite covering the same format cannot drift apart (public/lib/drift-readout.mjs).
+  for (const [label, probe] of [['A', pa], ['B', pb]]) {
+    console.log(`  ${label} clock line: ${JSON.stringify(probe.clockText)}`);
+    console.log(`  ${label} drift line: ${JSON.stringify(probe.driftText)}`);
+    expect(`3.2 ${label}'s clock line stops saying "no estimate"`, !/no estimate/i.test(probe.clockText ?? ''), probe.clockText);
+    expect(`3.2 ${label}'s clock line reports an offset, an uncertainty and a sample count`, CLOCK_RE.test((probe.clockText ?? '').trim()), probe.clockText);
+    const drift = DRIFT_LINE_RE.exec((probe.driftText ?? '').trim());
+    expect(`3.3 ${label}'s drift line reports a finite drift over a nonzero frame count`, drift !== null && Number(drift[1]) > 0, probe.driftText);
+    expect(`3.3 ${label}'s summary is labelled a rolling window, not "median drift"`, !/median drift/i.test(probe.driftText ?? ''), probe.driftText);
+  }
+
+  console.log('\n--- 3.5 / 3.6 / 3.7: the two windows are in the same room, at the same place ---');
+  console.log('  A seam:', JSON.stringify({ playback: sa.playback, summary: sa.summary, counters: sa.counters }));
+  console.log('  B seam:', JSON.stringify({ playback: sb.playback, summary: sb.summary, counters: sb.counters }));
+
+  // 3.7 — playback status as a VALUE, so change 6 can refuse a non-playing
+  // client rather than average it in (D2). THE NO-CLOCK CASE IS NOT ASSERTED
+  // HERE: reaching that state from a browser would need a test-only switch in
+  // the page. scripts/check/suites/playback-start.mjs owns it, where a fake
+  // clock makes it trivial (D3).
+  for (const [label, seam] of [['A', sa], ['B', sb]]) {
+    expect(`3.7 ${label} reports through the seam that it started playback`, seam.playback?.playing === true, JSON.stringify(seam.playback));
+    expect(`3.7 ${label} reports no missing input`, seam.playback?.missing === null, JSON.stringify(seam.playback?.missing));
+    expect(`3.7 ${label} opened the media exactly once`, seam.playback?.opens === 1 && seam.playback?.reopens === 0, `opens=${seam.playback?.opens} reopens=${seam.playback?.reopens}`);
+  }
+
+  // 3.6 — a pairwise figure across clients holding different reference points is
+  // meaningless, so this is asserted before the two are compared at all.
+  expect('3.6 both windows hold the same timeline reference point', sa.latest?.epochMs === sb.latest?.epochMs && Number.isFinite(sa.latest?.epochMs), `A=${sa.latest?.epochMs} B=${sb.latest?.epochMs}`);
+  expect(`3.6 A is within ${DRIFT_TOLERANCE_MS}ms of the room`, Math.abs(sa.summary?.medianDriftMs ?? Infinity) <= DRIFT_TOLERANCE_MS, `median ${sa.summary?.medianDriftMs?.toFixed(1)}ms over ${sa.summary?.framesHeld} frames`);
+  expect(`3.6 B is within ${DRIFT_TOLERANCE_MS}ms of the room`, Math.abs(sb.summary?.medianDriftMs ?? Infinity) <= DRIFT_TOLERANCE_MS, `median ${sb.summary?.medianDriftMs?.toFixed(1)}ms over ${sb.summary?.framesHeld} frames`);
+
+  // 3.5 — the two windows agree with EACH OTHER. Drift is media minus scheduled
+  // against a shared epoch, which is what makes two readings taken at different
+  // instants comparable at all.
+  const spread = Math.abs((sa.summary?.medianDriftMs ?? NaN) - (sb.summary?.medianDriftMs ?? NaN));
+  expect(
+    `3.5 the late window caught up: the two agree to within ${POSITION_TOLERANCE_MS}ms, not the ${WINDOW_GAP_MS / 1000}s it opened late`,
+    spread <= POSITION_TOLERANCE_MS,
+    `${spread.toFixed(1)}ms apart`
+  );
 
   await sleep(15000);
   const pa2 = await a.evaluate(PROBE);
   const pb2 = await b.evaluate(PROBE);
-  expect('7.2 playback continues past the first few segments', pa2.time > 12 && pb2.time > 12, `A t=${pa2.time.toFixed(2)}s B t=${pb2.time.toFixed(2)}s`);
+  const advA2 = advancedMs(await seamOf(a), pa2);
+  const advB2 = advancedMs(await seamOf(b), pb2);
+  expect('7.2 playback continues past the first few segments', advA2 > 12000 && advB2 > 12000, `A +${(advA2 / 1000).toFixed(1)}s past its start, B +${(advB2 / 1000).toFixed(1)}s`);
   expect('7.2 neither window stalled', pa2.time > pa.time + 5 && pb2.time > pb.time + 5, `A +${(pa2.time - pa.time).toFixed(1)}s, B +${(pb2.time - pb.time).toFixed(1)}s`);
 
   console.log('\n--- 7.1: closing one updates the other ---');
@@ -248,14 +349,20 @@ try {
   console.log('  A2 final status:', JSON.stringify(pa4.status));
   console.log('  A (incumbent) roster:', JSON.stringify(pa1.members));
 
-  expect('7.3a the newcomer eventually gives up, and says the name is in use', /refused:/i.test(pa4.status) && /in use/i.test(pa4.status), pa4.status);
+  // NAMES THE CODE, not merely the word "refused". The bare /refused:/ this
+  // read before went red the moment change 2 made the page say `refused
+  // (tab-taken):`, and stayed red for two changes because nobody runs this file
+  // mid-change (CONSTRAINTS.md → *A check outside `npm run check`*).
+  const REFUSED_RE = /^refused \(tab-taken\): .*in use/i;
+  expect('7.3a the newcomer eventually gives up, and says which name is in use', REFUSED_RE.test(pa4.status ?? ''), pa4.status);
   expect('7.3a the incumbent still holds the role', pa1.members.some((m) => /host/.test(m) && /^A /.test(m)), JSON.stringify(pa1.members));
   expect('7.3a the viewer still sees exactly one host', pv.members.filter((m) => /host/.test(m)).length === 1, JSON.stringify(pv.members));
   // A refused join is a directed error that consumes no `seq`, so the room
   // never observes the attempt at all — no join, no leave, no presence. That
   // holds for every one of the retries, not just the first.
   expect('7.3a the room observed no membership change at any point', !duringContest.some((n) => /presence/.test(n)), JSON.stringify(duringContest));
-  expect('7.3a the viewer kept playing throughout', pv.time > 5 && !pv.paused, `t=${pv.time.toFixed(2)}s`);
+  const advV = advancedMs(await seamOf(v), pv);
+  expect('7.3a the viewer kept playing throughout', advV > 5000 && !pv.paused, `+${(advV / 1000).toFixed(1)}s past its start`);
 
   // Give the refused tab several backoff intervals to misbehave.
   await sleep(4000);
@@ -263,7 +370,7 @@ try {
   const swaps = pv2.notices.slice(noticesBefore).filter((n) => /presence/.test(n)).length;
   expect('7.3a the refused tab stays down once it has given up', swaps === 0, `${swaps} presence events after the refusal`);
   const pa4b = await a2.evaluate(PROBE);
-  expect('7.3a and does not resume retrying', /refused:/i.test(pa4b.status), pa4b.status);
+  expect('7.3a and does not resume retrying', REFUSED_RE.test(pa4b.status ?? ''), pa4b.status);
   await cdpHttp(`/json/close/${a2.targetId}`);
 
   console.log('\n--- 7.3b: closing the host tab and reopening it with the same tab id ---');
@@ -280,7 +387,8 @@ try {
   // briefly hostless, which the spec explicitly permits.
   expect('7.3b the reopened host holds the role again', pa5.members.some((m) => /host/.test(m) && /^A /.test(m)), JSON.stringify(pa5.members));
   expect('7.3b the viewer ends with exactly one host', pv3.members.filter((m) => /host/.test(m)).length === 1, JSON.stringify(pv3.members));
-  expect('7.3b the viewer kept playing throughout', pv3.time > 10 && !pv3.paused, `t=${pv3.time.toFixed(2)}s`);
+  const advV3 = advancedMs(await seamOf(v), pv3);
+  expect('7.3b the viewer kept playing throughout', advV3 > 10000 && !pv3.paused, `+${(advV3 / 1000).toFixed(1)}s past its start`);
 
   console.log('\n--- 7.3c: reloading the host tab (change 1b task 4.3) ---');
   // The case design.md D4 names as the accepted hole: a reload throws the
