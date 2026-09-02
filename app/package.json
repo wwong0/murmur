@@ -12,6 +12,7 @@
     "dev": "node scripts/dev.mjs",
     "build": "node scripts/check-structure.mjs && node scripts/build.mjs",
     "check": "node scripts/check-structure.mjs && node scripts/protocol-check.mjs",
+    "ratios": "node scripts/check-structure.mjs --ratios",
     "verify:browser": "node scripts/verify-browser.mjs"
   },
   "dependencies": {

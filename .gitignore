@@ -14,6 +14,9 @@ Thumbs.db
 desktop.ini
 .DS_Store
 
+# Git Bash crash debris. Written into the repo root by whichever shell died.
+*.stackdump
+
 # --- this project ---
 
 # Build output — esbuild regenerates these from `public/`. Tracking them means

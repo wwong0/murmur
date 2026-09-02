@@ -30,10 +30,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const APP_DIR = path.resolve(__dirname, '..');
+const REPO_DIR = path.resolve(APP_DIR, '..');
 const PUBLIC_DIR = path.join(APP_DIR, 'public');
 const LIB_DIR = path.join(PUBLIC_DIR, 'lib');
 const SERVER_DIR = path.join(APP_DIR, 'server');
@@ -208,6 +210,72 @@ function checkProse(file) {
     `rule 4: prose ratio ${ratio.toFixed(2)} exceeds ${MAX_PROSE_RATIO} — comments are re-arguing decisions that belong in the change's design.md (CONSTRAINTS.md → *Artifacts*)`
   );
 }
+
+// ---------------------------------------------------------------------------
+// --ratios: rule 4's measurement without rule 4's floor
+// ---------------------------------------------------------------------------
+
+/**
+ * Session D3 is required to compute the prose ratio over the files in the diff
+ * (CONSTRAINTS.md → *Artifacts*), and MIN_CODE_LINES suppresses exactly the files
+ * that requirement exists for: change 3a shipped room-timeline.mjs at 1.32 —
+ * 66 prose lines against 50 of code — with the gate reporting nothing, because
+ * 50 is under the floor. So the check that runs on every build cannot be the
+ * one D3 relies on.
+ *
+ * Reports, never fails. There is no threshold here on purpose: a number D3 is
+ * handed and must judge is the point, and a second gate would only teach the
+ * same lesson rule 4 already teaches about deleting to satisfy a counter.
+ */
+const RATIOS_RANGE = 'main...HEAD'; // the range D3 reviews; the label below must not drift from it
+
+function reportRatios() {
+  let files;
+  let scope;
+  try {
+    const out = execFileSync('git', ['diff', '--name-only', '--diff-filter=d', RATIOS_RANGE], {
+      cwd: APP_DIR,
+      encoding: 'utf8',
+    });
+    files = out.split('\n').filter(Boolean);
+    scope = `git diff ${RATIOS_RANGE}`;
+  } catch {
+    files = [];
+    scope = null;
+  }
+
+  // On main, or with no source in the diff, measure everything rule 4 scans.
+  // An empty report reads as "nothing is over the line" when it means "nothing
+  // was looked at", which is the failure this whole mode exists to prevent.
+  const isSource = (f) => f.endsWith('.js') || f.endsWith('.mjs');
+  let paths = files
+    .filter(isSource)
+    .filter((f) => !f.endsWith('.bundle.js'))
+    .map((f) => path.resolve(REPO_DIR, f))
+    .filter((f) => fs.existsSync(f));
+  if (paths.length === 0) {
+    paths = [
+      ...walk(PUBLIC_DIR, isSource),
+      ...walk(SERVER_DIR, isSource),
+      ...walk(path.join(APP_DIR, 'scripts'), isSource),
+    ];
+    scope = scope === null ? 'whole tree (no git)' : 'whole tree (no source in diff)';
+  }
+
+  const rows = paths
+    .map((file) => ({ file, ...proseRatio(fs.readFileSync(file, 'utf8')) }))
+    .sort((a, b) => b.ratio - a.ratio);
+
+  console.log(`[ratios] ${rows.length} source file(s), scope: ${scope}`);
+  console.log(`[ratios] house style ~0.6; rule 4 warns above ${MAX_PROSE_RATIO} and only at ${MIN_CODE_LINES}+ lines of code`);
+  for (const r of rows) {
+    const flag = r.ratio > MAX_PROSE_RATIO ? (r.code < MIN_CODE_LINES ? ' <- over, and under rule 4 floor' : ' <- over') : '';
+    console.log(`  ${r.ratio.toFixed(2)}  ${String(r.prose).padStart(4)} prose /${String(r.code).padStart(5)} code  ${displayPath(r.file)}${flag}`);
+  }
+  process.exit(0);
+}
+
+if (process.argv.includes('--ratios')) reportRatios();
 
 // ---------------------------------------------------------------------------
 // Run all four rules
