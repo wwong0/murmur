@@ -10,6 +10,10 @@
 //    its correction is below 1.
 //  - The band's dispersion arm has no √n factor: display cadence is periodic, not
 //    independent noise (design.md D1). Reintroducing it makes the band too narrow.
+//  - That arm is a range between quantiles and must never become a distance from
+//    the centre. A cadence puts its arms AT the quantiles and its median ON one
+//    of them, so any centre-distance statistic — a MAD, a standard deviation —
+//    reads its smallest exactly where the estimate reads its largest.
 //  - `state().rate` is the last value handed to `apply`, not the value computed
 //    this poll; settled must describe what the media element actually received.
 //  - The half-width comes from a fresh `clock.read()` at poll time, never records.
@@ -28,7 +32,6 @@ export const CLOSE_BUDGET_MS = 60000;
 export const RATE_EPSILON = 1e-6;
 
 const BASE_RATE = 1;
-const MAD_SCALE = 1.4826;
 const DEFAULT_SETTINGS = Object.freeze({
   MAX_RATE_DEVIATION,
   TIME_CONSTANT_MS,
@@ -46,8 +49,32 @@ function median(values) {
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-function spread(values, centre) {
-  return MAD_SCALE * median(values.map((value) => Math.abs(value - centre)));
+function quantile(sorted, p) {
+  const position = (sorted.length - 1) * p;
+  const below = Math.floor(position);
+  const above = Math.ceil(position);
+  return sorted[below] + (sorted[above] - sorted[below]) * (position - below);
+}
+
+/**
+ * The window's `p95 - p5`. A cadence puts its arms AT THE QUANTILES, so a range
+ * between quantiles cannot be moved by which arm holds the majority — where a
+ * MAD, measuring distance from a median that sits on the majority arm, reads
+ * zero on exactly the poll where the estimate is furthest out (design.md D1).
+ * No scale factor, so no constant: the quantity is the excursion itself.
+ */
+function spread(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  return quantile(sorted, 0.95) - quantile(sorted, 0.05);
+}
+
+/**
+ * The frame's own display instant on the LOCAL clock. `displaySharedMs` carries
+ * whichever offset was in force when the record was taken, so anything asking
+ * *when* rather than *where* must take that offset back off first.
+ */
+function displayLocalOf(record) {
+  return record.displaySharedMs - record.clock.offsetMs;
 }
 
 export function createDriftController({ log, clock, apply, settings: overrides = {}, now }) {
@@ -66,6 +93,7 @@ export function createDriftController({ log, clock, apply, settings: overrides =
   let firstCorrectionAt = null;
   let insideBandAt = null;
   let settledLatched = false;
+  let excursionAt = null;
   let estimateMs = null;
   let bandMs = null;
   let spreadMs = null;
@@ -88,6 +116,7 @@ export function createDriftController({ log, clock, apply, settings: overrides =
     staleHold = dropReason === 'stale';
     insideBandAt = null;
     settledLatched = false;
+    excursionAt = null;
     lastDrop = { reason: dropReason, atMs };
   }
 
@@ -129,7 +158,13 @@ export function createDriftController({ log, clock, apply, settings: overrides =
     else {
       const advance = (estimate.counters?.reanchors ?? 0) - lastReanchors;
       if (advance > 0) {
-        for (let i = 0; i < advance; i++) drop('reanchor', atMs, beforeReadSeq);
+        // EVERY record produced so far, not only those read by the last poll.
+        // A re-anchor is observed at poll time, but the frames that arrived in
+        // the gap before it were measured against the anchor it replaced — cut
+        // at `beforeReadSeq` they survive, and a window straddling the event
+        // averages two worlds into a confident zero. Over-dropping costs one
+        // MIN_RECORDS hold; under-dropping costs a wrong answer.
+        for (let i = 0; i < advance; i++) drop('reanchor', atMs, log.latestSeq);
       }
       lastReanchors = estimate.counters?.reanchors ?? lastReanchors;
     }
@@ -143,7 +178,10 @@ export function createDriftController({ log, clock, apply, settings: overrides =
       records.push(record);
       if (record.seq > dropCutoffSeq) recordsSinceDrop += 1;
     }
-    if (incoming.length > 0) lastSeenAt = atMs;
+    // WHEN THE NEWEST FRAME WAS SHOWN, not when this poll ran. A backlog read
+    // late is old feedback: stamping it `now` hands the correction another
+    // STALE_AFTER_MS over frames nobody is producing any more.
+    if (incoming.length > 0) lastSeenAt = displayLocalOf(incoming[incoming.length - 1]);
     else if (!polled) lastSeenAt = atMs;
     if (incoming.length > 0) staleHold = false;
     polled = true;
@@ -162,6 +200,7 @@ export function createDriftController({ log, clock, apply, settings: overrides =
       fastestCloseMs = null;
       insideBandAt = null;
       settledLatched = false;
+      excursionAt = null;
       applyRate(BASE_RATE, atMs);
       mode = 'waiting';
       reason = 'no-clock';
@@ -169,9 +208,12 @@ export function createDriftController({ log, clock, apply, settings: overrides =
     }
 
     halfWidthMs = Number.isFinite(estimate.halfWidthMs) ? estimate.halfWidthMs : null;
-    const sharedNow = atMs + offsetMs;
-    const windowStart = sharedNow - settings.ESTIMATE_WINDOW_MS;
-    const rolling = records.filter((record) => record.displaySharedMs > windowStart);
+    // Recency is judged on the LOCAL instant, so an offset step moves neither
+    // the window nor its membership. Restating each record's drift onto the
+    // current offset (below) while testing membership against the offset it was
+    // recorded under is what emptied a full window at an ordinary step.
+    const windowStart = atMs - settings.ESTIMATE_WINDOW_MS;
+    const rolling = records.filter((record) => displayLocalOf(record) > windowStart);
     windowRecords = rolling.length;
     const controlWindow = rolling.filter((record) => record.seq > dropCutoffSeq);
     controlRecords = controlWindow.length;
@@ -192,7 +234,7 @@ export function createDriftController({ log, clock, apply, settings: overrides =
     if (controlWindow.length > 0) {
       const values = controlWindow.map((record) => record.driftMs + record.clock.offsetMs - offsetMs);
       estimateMs = median(values);
-      spreadMs = spread(values, estimateMs);
+      spreadMs = spread(values);
       bandMs = Math.max(halfWidthMs ?? 0, spreadMs);
     } else {
       estimateMs = null;
@@ -200,22 +242,29 @@ export function createDriftController({ log, clock, apply, settings: overrides =
       bandMs = null;
     }
 
-    if (staleHold && incoming.length === 0) {
+    // `staleHold` alone: a poll can now READ a backlog and still be stale,
+    // because staleness is the newest frame's age rather than this poll's luck.
+    // Requiring an empty read here reported that case as `waiting`, naming a
+    // shortage of records for a page that had stopped producing them.
+    if (staleHold) {
       applyRate(BASE_RATE, atMs);
       insideBandAt = null;
       settledLatched = false;
+      excursionAt = null;
       mode = 'stale';
       reason = 'no-records';
     } else if (recordsSinceDrop < settings.MIN_RECORDS) {
       applyRate(BASE_RATE, atMs);
       insideBandAt = null;
       settledLatched = false;
+      excursionAt = null;
       mode = 'waiting';
       reason = 'too-few-records';
     } else if (estimateMs === null) {
       applyRate(BASE_RATE, atMs);
       insideBandAt = null;
       settledLatched = false;
+      excursionAt = null;
       mode = 'waiting';
       reason = 'too-few-records';
     } else {
@@ -223,18 +272,46 @@ export function createDriftController({ log, clock, apply, settings: overrides =
       const excess = Math.sign(estimateMs) * Math.max(0, Math.abs(estimateMs) - bandMs);
       fastestCloseMs = Math.abs(excess) / settings.MAX_RATE_DEVIATION;
       const correction = Math.max(-settings.MAX_RATE_DEVIATION, Math.min(settings.MAX_RATE_DEVIATION, -excess / settings.TIME_CONSTANT_MS));
-      const nextRate = BASE_RATE + correction;
-      applyRate(nextRate, atMs);
-      if (Math.abs(estimateMs) > bandMs) {
+      const inside = Math.abs(estimateMs) <= bandMs;
+      // ONE POLL DOES NOT UNLATCH `settled`. The window's membership turns over
+      // as its boundary sweeps the frame grid, so its composition is occasionally
+      // unrepresentative for a single poll — an estimate several milliseconds out
+      // between neighbours reading a fraction of one — and believed immediately
+      // it costs the whole dwell. An excursion is neither acted on nor believed
+      // until it has outlived one ESTIMATE_WINDOW_MS, by which point every record
+      // in the window is new and it cannot be composition. The horizon is that
+      // window, not a new constant. Cost, bounded and accepted in D3: a real
+      // desync is held uncorrected for up to 1s against a 4000ms time constant.
+      if (inside) excursionAt = null;
+      else if (settledLatched && excursionAt === null) excursionAt = atMs;
+      const believed = !inside && (!settledLatched || atMs - excursionAt >= settings.ESTIMATE_WINDOW_MS);
+      // The correction is held with the label: a composition artifact is not
+      // drift, and a `settled` coexisting with a rate off 1.0 would contradict
+      // its own definition and 4b's browser bar with it.
+      applyRate(believed ? BASE_RATE + correction : BASE_RATE, atMs);
+      if (believed) {
         insideBandAt = null;
         settledLatched = false;
         mode = fastestCloseMs > settings.CLOSE_BUDGET_MS ? 'beyond-rate-authority' : 'correcting';
         reason = null;
       } else {
         if (insideBandAt === null) insideBandAt = atMs;
-        if (rate === BASE_RATE && atMs - insideBandAt >= settings.SETTLED_FOR_MS) {
+        // A CLIENT THAT NEVER CORRECTED HAS NOT CONVERGED — its band merely
+        // covers its error, which is `declining` and must stay distinguishable
+        // from `settled`. D3 measures settling from the first applied
+        // correction, so with no such correction there is no settling time:
+        // reporting 0 claimed instant convergence for a client that had done
+        // nothing, and 4b's browser bar would have passed on it.
+        // THE SAME EPSILON ON BOTH SIDES OF THE SAME QUESTION. `applyRate`
+        // refuses to write a rate within RATE_EPSILON of the last one, so a
+        // client whose final correction parks the applied rate four billionths
+        // above unity never writes exact 1.0 again — and `rate === BASE_RATE`
+        // held it in `declining` with a null settlingMs forever, inside the
+        // band, at a rate the media element treats as normal speed. Observed
+        // from -100ms at 60Hz, which is client B's own measured offset.
+        if (Math.abs(rate - BASE_RATE) <= settings.RATE_EPSILON && firstCorrectionAt !== null && atMs - insideBandAt >= settings.SETTLED_FOR_MS) {
           settledLatched = true;
-          if (settlingMs === null) settlingMs = firstCorrectionAt === null ? 0 : atMs - firstCorrectionAt;
+          if (settlingMs === null) settlingMs = atMs - firstCorrectionAt;
         }
         mode = settledLatched ? 'settled' : 'declining';
         reason = null;

@@ -248,13 +248,20 @@ const driftReadout = createDriftReadout({ log: driftLog, playback });
  * not worth a tick's wait.
  */
 function tickPlayback() {
-  let failedAt = 'the player did not open';
+  // SEPARATE TRIES, because the controller's stale rule is what returns the
+  // rate to 1.0 when frames stop. A re-open that throws has already stopped the
+  // sampler, so sharing one try left the last correction applied open-loop for
+  // as long as the open kept failing — the one condition the stale rule exists
+  // to end.
   try {
     playback.poll();
-    failedAt = 'the drift controller did not poll';
+  } catch (err) {
+    addNotice(`the player did not open: ${err?.message ?? err}`, { warn: true });
+  }
+  try {
     controller.poll();
   } catch (err) {
-    addNotice(`${failedAt}: ${err?.message ?? err}`, { warn: true });
+    addNotice(`the drift controller did not poll: ${err?.message ?? err}`, { warn: true });
   }
   driftLine.textContent = driftReadout.text();
 }

@@ -42,6 +42,7 @@ import clockSyncSuite from './check/suites/clock-sync.mjs';
 import roomTimelineSuite from './check/suites/room-timeline.mjs';
 import driftSuite from './check/suites/drift.mjs';
 import driftControllerSuite from './check/suites/drift-controller.mjs';
+import driftConvergenceSuite from './check/suites/drift-convergence.mjs';
 import playbackStartSuite from './check/suites/playback-start.mjs';
 import driftReadoutSuite from './check/suites/drift-readout.mjs';
 
@@ -65,6 +66,7 @@ for (const suite of [
   roomTimelineSuite,
   driftSuite,
   driftControllerSuite,
+  driftConvergenceSuite,
   playbackStartSuite,
   driftReadoutSuite,
 ]) {
