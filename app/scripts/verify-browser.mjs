@@ -53,7 +53,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep } from './cdp.mjs';
+import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep, killChrome } from './cdp.mjs';
 import { DRIFT_LINE_RE } from '../public/lib/drift-readout.mjs';
 
 const PORT = 9223;
@@ -154,6 +154,12 @@ const SEAM = `(() => {
     counters: drift.counters,
     held: drift.records.length,
     latest: drift.records[drift.records.length - 1] ?? null,
+    // THE WHOLE ARRAY, not a figure derived from it. The sawtooth amplitude the
+    // controller's simulated plant runs on is measured from these records and
+    // never chosen (change 4a design.md D8), and change 4b's model check reads
+    // Chrome's real scatter back beside the plant's. Deleting this line costs
+    // the only route from a real player to that constant.
+    records: drift.records,
     // THE PAGE'S OWN ROLLING WINDOW, not a second one derived here. This
     // re-derivation took the upper of the middle two where the log takes their
     // mean, so the figure the run reported was never quite the one the page did.
@@ -426,8 +432,7 @@ try {
   failures.push(err.message);
 } finally {
   console.log(`\n${failures.length === 0 ? 'ALL PASS' : `${failures.length} FAILURE(S): ${failures.join('; ')}`}`);
-  chrome.kill();
-  spawn('taskkill', ['/F', '/IM', 'chrome.exe'], { stdio: 'ignore' });
+  killChrome(chrome, profile);
   await sleep(1500);
   try {
     fs.rmSync(profile, { recursive: true, force: true });

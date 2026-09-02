@@ -14,6 +14,7 @@ import { createPlayer } from './lib/player.mjs';
 import { createClockSync, websocketProbe } from './lib/clock-sync.mjs';
 import { createRoomTimeline } from './lib/room-timeline.mjs';
 import { createDriftLog } from './lib/frame-drift.mjs';
+import { createDriftController } from './lib/drift-controller.mjs';
 import { createFrameSampler } from './lib/frame-sampler.mjs';
 import { createPlaybackStart } from './lib/playback-start.mjs';
 import { createDriftReadout } from './lib/drift-readout.mjs';
@@ -203,12 +204,12 @@ const driftLog = createDriftLog();
 // default binding calls it on the element it was handed.
 const sampler = createFrameSampler({ video, timeline, clock: clockSync, log: driftLog });
 
-/**
- * A re-open is a SEAM IN THE DRIFT SERIES, not an excursion in it: the records
- * before it were measured against the epoch it replaces, and the sequence number
- * it fell on is what marks them (D1).
- */
-const seams = [];
+const controller = createDriftController({
+  log: driftLog,
+  clock: clockSync,
+  apply: (rate) => { video.playbackRate = rate; },
+  now: () => performance.timeOrigin + performance.now(),
+});
 
 const playback = createPlaybackStart({
   timeline,
@@ -216,9 +217,9 @@ const playback = createPlaybackStart({
   open({ positionMs, epochMs, reopen }) {
     const seconds = (positionMs / 1000).toFixed(2);
     if (reopen) {
-      seams.push({ afterSeq: driftLog.latestSeq, epochMs, positionMs });
       sampler.stop();
       player.reopen({ startPositionMs: positionMs });
+      controller.markSeam({ afterSeq: driftLog.latestSeq, epochMs, positionMs });
       addNotice(`timeline reference revised — re-opened at ${seconds}s`, { warn: true });
     } else {
       player.load({ startPositionMs: positionMs });
@@ -236,9 +237,9 @@ const driftReadout = createDriftReadout({ log: driftLog, playback });
 
 /**
  * Poll the load rule, then repaint the line WHETHER OR NOT THE POLL GOT THERE.
- * `poll` deliberately lets a player that threw reach its caller so the next tick
- * retries it (playback-start.mjs rule 3), and this is the last place that
- * failure can be reported from: room-client hands a throwing subscriber to a
+ * The playback and drift polls deliberately let their errors reach this caller
+ * so the next tick can retry (playback-start.mjs rule 3), and this is the last place
+ * that failure can be reported from: room-client hands a throwing subscriber to a
  * `subscriber-error` event nothing here listens to (CONSTRAINTS.md →
  * *Verification*). An unpainted line goes on naming an input the page stopped
  * missing seconds ago.
@@ -247,10 +248,13 @@ const driftReadout = createDriftReadout({ log: driftLog, playback });
  * not worth a tick's wait.
  */
 function tickPlayback() {
+  let failedAt = 'the player did not open';
   try {
     playback.poll();
+    failedAt = 'the drift controller did not poll';
+    controller.poll();
   } catch (err) {
-    addNotice(`the player did not open: ${err?.message ?? err}`, { warn: true });
+    addNotice(`${failedAt}: ${err?.message ?? err}`, { warn: true });
   }
   driftLine.textContent = driftReadout.text();
 }
@@ -279,7 +283,11 @@ window.__app = {
   // median from `drift().records` and get a second one — the browser pass did,
   // and its two figures did not share a definition of the middle of an even set.
   summary: () => driftLog.summary(),
-  playback: () => ({ ...playback.state(), callbacks: sampler.callbacks, sampling: sampler.running, seams }),
+  // BESIDE `clock` AND `drift`, not inside `playback()`. The seam below spreads
+  // `playback.state()`, so a key of the same name there would be silently
+  // overwritten by this one rather than colliding visibly.
+  controller: () => controller.state(),
+  playback: () => ({ ...playback.state(), callbacks: sampler.callbacks, sampling: sampler.running, seams: controller.seams }),
 };
 
 client.connect();

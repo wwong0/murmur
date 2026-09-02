@@ -48,3 +48,7 @@ spike-host-origin/.tmp/
 #   step0/results/, spike-host-origin/results/ — measurement records, not build
 #     output. They are the evidence behind FINDINGS.md and RESULT.md.
 #   package-lock.json — the hls.js version is load-bearing (PLAN.md, change 7a).
+
+# Chrome/crashpad debris. Written into the repo root by the browser dev aids
+# and by tooling that launches them.
+debug.log
