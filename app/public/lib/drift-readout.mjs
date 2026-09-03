@@ -11,7 +11,8 @@
 
 import { REFUSAL_REASONS } from './frame-drift.mjs';
 
-const signed = (ms) => `${ms >= 0 ? '+' : ''}${ms.toFixed(1)}ms`;
+/** The panel's millisecond format, shared with diagnostics-overlay.mjs: two copies drift apart. */
+export const signed = (ms) => `${ms >= 0 ? '+' : ''}${ms.toFixed(1)}ms`;
 
 /**
  * THE SHAPE OF THE LINE, WHERE THE LINE IS BUILT — a second copy of it would rot

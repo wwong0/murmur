@@ -45,6 +45,7 @@ import driftControllerSuite from './check/suites/drift-controller.mjs';
 import driftConvergenceSuite from './check/suites/drift-convergence.mjs';
 import playbackStartSuite from './check/suites/playback-start.mjs';
 import driftReadoutSuite from './check/suites/drift-readout.mjs';
+import diagnosticsOverlaySuite from './check/suites/diagnostics-overlay.mjs';
 
 console.log(describeFixtures());
 
@@ -69,6 +70,7 @@ for (const suite of [
   driftConvergenceSuite,
   playbackStartSuite,
   driftReadoutSuite,
+  diagnosticsOverlaySuite,
 ]) {
   await suite();
 }

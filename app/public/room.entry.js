@@ -17,7 +17,7 @@ import { createDriftLog } from './lib/frame-drift.mjs';
 import { createDriftController } from './lib/drift-controller.mjs';
 import { createFrameSampler } from './lib/frame-sampler.mjs';
 import { createPlaybackStart } from './lib/playback-start.mjs';
-import { createDriftReadout } from './lib/drift-readout.mjs';
+import { createDiagnosticsOverlay } from './lib/diagnostics-overlay.mjs';
 
 const BUILD_ID = __BUILD_ID__;
 
@@ -49,6 +49,7 @@ const video = document.getElementById('video');
 const statusLine = document.getElementById('status-line');
 const clockLine = document.getElementById('clock-line');
 const driftLine = document.getElementById('drift-line');
+const controllerLine = document.getElementById('controller-line');
 const rosterEl = document.getElementById('roster');
 const noticesEl = document.getElementById('notices');
 
@@ -174,21 +175,6 @@ const clockSync = createClockSync({
 // a burst, and `joined` fires again on every rejoin.
 client.onEvent('joined', () => clockSync.start());
 
-function renderClock() {
-  const { offsetMs, halfWidthMs, sampleCount } = clockSync.read();
-  if (offsetMs === null) {
-    clockLine.textContent = 'clock: no estimate yet';
-    return;
-  }
-  const sign = offsetMs >= 0 ? '+' : '';
-  clockLine.textContent = `clock: ${sign}${offsetMs.toFixed(1)}ms ± ${halfWidthMs.toFixed(1)}ms (${sampleCount} samples)`;
-}
-
-renderClock();
-// The half-width widens with age even between samples, so a repaint tied only
-// to new samples would freeze a number that is actually growing.
-setInterval(renderClock, 1000);
-
 // ---------------------------------------------------------------------------
 // Player, the room timeline, and the drift instrument
 // ---------------------------------------------------------------------------
@@ -230,10 +216,19 @@ const playback = createPlaybackStart({
 });
 
 // ---------------------------------------------------------------------------
-// The drift read-out
+// The diagnostics overlay
 // ---------------------------------------------------------------------------
 
-const driftReadout = createDriftReadout({ log: driftLog, playback });
+const overlay = createDiagnosticsOverlay({ clock: clockSync, controller, log: driftLog, playback });
+
+// The half-width widens with age even between samples, so a repaint tied only
+// to new samples would freeze a number that is actually growing.
+function paintOverlay() {
+  const lines = overlay.lines();
+  clockLine.textContent = lines.clock;
+  driftLine.textContent = lines.drift;
+  controllerLine.textContent = lines.controller;
+}
 
 /**
  * Poll the load rule, then repaint the line WHETHER OR NOT THE POLL GOT THERE.
@@ -263,7 +258,11 @@ function tickPlayback() {
   } catch (err) {
     addNotice(`the drift controller did not poll: ${err?.message ?? err}`, { warn: true });
   }
-  driftLine.textContent = driftReadout.text();
+  try {
+    paintOverlay();
+  } catch (err) {
+    addNotice(`the overlay did not paint: ${err?.message ?? err}`, { warn: true });
+  }
 }
 
 tickPlayback();
