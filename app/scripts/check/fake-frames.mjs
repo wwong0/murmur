@@ -204,6 +204,12 @@ export function createFrameBinding(fake) {
  * `reads` records the instant each read was taken at, which is how a check
  * proves the estimate was read at the FRAME's display instant rather than at
  * wall-clock now (D5).
+ *
+ * `counters` IS PART OF THAT SHAPE, on both branches, exactly as the filter
+ * reports it. A consumer that reads one — the drift controller watches
+ * `reanchors` — would otherwise need a wrapper around this fixture to put back
+ * what the real clock always had, and a fixture patched at its call sites is no
+ * longer evidence about the real shape.
  */
 export function createFakeClock(config = {}) {
   const state = {
@@ -212,16 +218,20 @@ export function createFakeClock(config = {}) {
     delayTermMs: 3,
     ageTermMs: 1,
     sampleCount: 8,
+    lost: 0,
+    impossible: 0,
+    reanchors: 0,
     ...config,
   };
   const reads = [];
+  const counters = () => ({ lost: state.lost, impossible: state.impossible, reanchors: state.reanchors });
   return {
     state,
     reads,
     read(atMs) {
       reads.push(atMs);
       if (!state.present) {
-        return { offsetMs: null, halfWidthMs: null, delayTermMs: null, ageTermMs: null, sampleCount: 0, atMs };
+        return { offsetMs: null, halfWidthMs: null, delayTermMs: null, ageTermMs: null, sampleCount: 0, counters: counters(), atMs };
       }
       return {
         offsetMs: state.offsetMs,
@@ -229,6 +239,7 @@ export function createFakeClock(config = {}) {
         delayTermMs: state.delayTermMs,
         ageTermMs: state.ageTermMs,
         sampleCount: state.sampleCount,
+        counters: counters(),
         atMs,
       };
     },

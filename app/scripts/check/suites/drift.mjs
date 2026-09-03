@@ -17,7 +17,7 @@
 // `truthDriftMs` rather than against a number written down here — CONSTRAINTS.md
 // → *Measurement*, an uninstrumented rig reports the builder's expectation.
 
-import { check, assert, assertEqual } from '../harness.mjs';
+import { check, assert, assertEqual, assertNear } from '../harness.mjs';
 import {
   createFakeClock,
   createFakeFrames,
@@ -45,13 +45,6 @@ const EPOCH_MS = TIME_ORIGIN_MS + 60_000;
  * whose inputs are whole milliseconds below compares exactly.
  */
 const ULP_MS = 1e-3;
-
-function assertNear(actual, expected, toleranceMs, message) {
-  assert(
-    Math.abs(actual - expected) <= toleranceMs,
-    `${message}: expected ${expected} within ${toleranceMs}, got ${actual}`
-  );
-}
 
 const timelineAt = (epochMs = EPOCH_MS) => {
   const timeline = createRoomTimeline();

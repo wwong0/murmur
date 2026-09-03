@@ -13,16 +13,6 @@ import { createRoomTimeline } from '../../public/lib/room-timeline.mjs';
 
 export const TIME_ORIGIN_MS = DEFAULT_TIME_ORIGIN_MS;
 
-export function controllerClock(base) {
-  return {
-    state: base.state,
-    reads: base.reads,
-    read(atMs) {
-      return { ...base.read(atMs), counters: { reanchors: base.state.reanchors ?? 0 } };
-    },
-  };
-}
-
 export function plant({
   standingError = -240,
   refreshHz = 180,
@@ -39,7 +29,7 @@ export function plant({
   const vsyncMs = 1000 / refreshHz;
   const timeline = createRoomTimeline();
   timeline.observeRoster([{ clientId: 'a', joinedAt: epochMs }]);
-  const clock = controllerClock(createFakeClock({ offsetMs, delayTermMs, ageTermMs, present: clockPresent }));
+  const clock = createFakeClock({ offsetMs, delayTermMs, ageTermMs, present: clockPresent });
   const log = createDriftLog({ capacity: 10000 });
   const applied = [];
   const history = [];
@@ -47,14 +37,16 @@ export function plant({
   const firstDisplayMs = Math.ceil(intervalMs / vsyncMs) * vsyncMs;
   let mediaMs = standingError + firstDisplayMs - intervalMs;
   let frameIndex = 0;
-  let controller;
+  // The applied rate IS the plant's input: media advances at whatever the
+  // controller last wrote, which is what closes the loop.
+  let controllerRate = 1;
 
   const quantisedDisplay = () => {
     const sharedElapsed = simulatedNowMs + offsetMs - epochMs;
     return epochMs + Math.ceil(sharedElapsed / vsyncMs) * vsyncMs;
   };
 
-  controller = createDriftController({
+  const controller = createDriftController({
     log,
     clock,
     apply: (rate) => {
@@ -64,7 +56,6 @@ export function plant({
     settings,
     now: () => simulatedNowMs,
   });
-  let controllerRate = 1;
 
   function deliver({ repeat = false } = {}) {
     if (!repeat) mediaMs += intervalMs;
@@ -106,7 +97,7 @@ export function recordRig({ settings = {}, offsetMs = 0, halfWidthMs = 4 } = {})
   const epochMs = TIME_ORIGIN_MS + 60_000;
   const timeline = createRoomTimeline();
   timeline.observeRoster([{ clientId: 'a', joinedAt: epochMs }]);
-  const clock = controllerClock(createFakeClock({ offsetMs, delayTermMs: halfWidthMs, ageTermMs: 0 }));
+  const clock = createFakeClock({ offsetMs, delayTermMs: halfWidthMs, ageTermMs: 0 });
   const log = createDriftLog({ capacity: 10000 });
   let localNowMs = epochMs + 2000 - offsetMs;
   const applied = [];
@@ -140,14 +131,10 @@ export function recordRig({ settings = {}, offsetMs = 0, halfWidthMs = 4 } = {})
     return outcome;
   }
 
-  function poll() {
-    return controller.poll();
-  }
-
-  return { clock, log, controller, applied, add, poll, advance(ms) { localNowMs += ms; } };
+  return { clock, log, controller, applied, add, advance(ms) { localNowMs += ms; } };
 }
 
-export function runUntil(thing, predicate, limitMs, frameMs = 1000 / 24) {
+export function runUntil(thing, predicate, limitMs) {
   const start = thing.now;
   let frames = 0;
   while (!predicate(thing.controller.state()) && thing.now - start <= limitMs) {

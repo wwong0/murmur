@@ -53,7 +53,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep, killChrome } from './cdp.mjs';
+import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep, disposeChrome } from './cdp.mjs';
 import { DRIFT_LINE_RE } from '../public/lib/drift-readout.mjs';
 
 const PORT = 9223;
@@ -432,10 +432,6 @@ try {
   failures.push(err.message);
 } finally {
   console.log(`\n${failures.length === 0 ? 'ALL PASS' : `${failures.length} FAILURE(S): ${failures.join('; ')}`}`);
-  killChrome(chrome, profile);
-  await sleep(1500);
-  try {
-    fs.rmSync(profile, { recursive: true, force: true });
-  } catch {}
+  await disposeChrome(chrome, profile);
   process.exit(failures.length === 0 ? 0 : 1);
 }

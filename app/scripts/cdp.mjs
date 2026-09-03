@@ -10,25 +10,31 @@
 // reason the protocol check exists next to it.
 
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 import { WebSocket } from 'ws';
+
+export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export const CHROME = 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
 
 /**
- * Kill THIS RUN'S Chrome AND NOTHING ELSE. Both dev aids used to end with
- * `taskkill /F /IM chrome.exe`, which takes down every Chrome on the machine —
- * the developer's own windows included, mid-run, with no warning.
+ * End THIS RUN'S Chrome AND NOTHING ELSE, then take its profile directory with
+ * it. Never widen either kill to `/IM chrome.exe`: that ends every Chrome on the
+ * machine, the developer's own windows included, mid-run and with no warning.
  *
- * Two scopes, both narrow. The tree rooted at the process we spawned is the run:
- * the extra `--new-window` launches hand their window to that same browser
- * process and exit, so `/T` reaches them. The profile sweep is the backstop for
- * a browser process that outlived its launcher, and it can only ever match this
- * run because the `--user-data-dir` is a throwaway directory made for it.
+ * Two scopes, both narrow. The tree rooted at the process we spawned is the run
+ * — the extra `--new-window` launches hand their window to that same browser
+ * process and exit, so `/T` reaches them. The profile sweep is the backstop for a
+ * browser that outlived its launcher, and it can only ever match this run because
+ * the `--user-data-dir` is a throwaway directory made for it.
  *
- * Windows-only, like `CHROME` above. Synchronous on purpose: the caller deletes
- * the profile directory next, and a live Chrome still holds files in it.
+ * The wait belongs here: a Chrome still holding files in the profile is what
+ * makes the removal fail, so whoever ends the browser owns the settling time. A
+ * profile that will not delete is not worth failing a dev aid over.
+ *
+ * Windows-only, like `CHROME` above.
  */
-export function killChrome(child, profile) {
+export async function disposeChrome(child, profile) {
   if (child && child.pid) spawnSync('taskkill', ['/F', '/T', '/PID', String(child.pid)], { stdio: 'ignore' });
   spawnSync(
     'powershell',
@@ -40,6 +46,10 @@ export function killChrome(child, profile) {
     ],
     { stdio: 'ignore' }
   );
+  await sleep(1500);
+  try {
+    fs.rmSync(profile, { recursive: true, force: true });
+  } catch {}
 }
 
 /**
@@ -56,8 +66,6 @@ export const FLAGS = [
   '--no-first-run',
   '--no-default-browser-check',
 ];
-
-export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** The CDP HTTP endpoint, retried until Chrome is up. `/json/close` answers in plain text. */
 export async function cdpHttp(port, pathname) {

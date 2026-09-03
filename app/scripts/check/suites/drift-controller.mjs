@@ -1,4 +1,5 @@
 // This suite drives the pure controller with constructed records and time.
+// Convergence itself is swept next door, in `drift-convergence.mjs`.
 //
 // Traps worth preserving:
 //  - A rate-only authority check lets a controller that never corrects pass, so
@@ -6,28 +7,14 @@
 //  - The stale check uses a shorter silence than the estimate window; otherwise
 //    an empty window could satisfy it without proving the stale rule acted.
 
-import { check, assert, assertEqual } from '../harness.mjs';
-import { plant, recordRig, runUntil, TIME_ORIGIN_MS } from '../drift-plant.mjs';
+import { check, assert, assertEqual, assertNear } from '../harness.mjs';
+import { plant, recordRig, runUntil } from '../drift-plant.mjs';
 import { createDriftController } from '../../../public/lib/drift-controller.mjs';
 
 const MILLISECONDS_TOLERANCE = 0.05;
 const RATE_TOLERANCE = 1e-12;
 
-function near(actual, expected, tolerance, message) {
-  assert(Math.abs(actual - expected) <= tolerance, `${message}: expected ${expected}, got ${actual}`);
-}
-
 export default async function driftControllerSuite() {
-  // THE THREE CONVERGENCE CHECKS BELOW EACH PASS ON A HAND-PICKED STARTING
-  // ERROR. Swept across the -320..-80ms range this project has measured, at the
-  // app's own 250ms poll interval, thirteen of twenty-six starting errors either
-  // never reach `settled` or exceed the budget computed here — at 60Hz eight of
-  // thirteen never settle at all, including client B's measured -104ms. The
-  // cause is the band's dispersion arm collapsing with the parity of the window
-  // count (design.md D1, and the D1-review paragraph under it). Do not read a
-  // green here as convergence being robust, and do not widen these to a sweep
-  // until that decision is settled: the sweep is the ⚑ under change 4b, not a
-  // check to add now.
   await check('drift-controller: both sides stay within rate authority and leave unity', async () => {
     const behind = plant({ standingError: -120 });
     for (let i = 0; i < 18; i++) behind.deliver();
@@ -94,7 +81,7 @@ export default async function driftControllerSuite() {
   await check('drift-controller: startup waits for MIN_RECORDS', async () => {
     const sim = recordRig();
     sim.add(-200);
-    const state = sim.poll();
+    const state = sim.controller.poll();
     assertEqual(state.mode, 'waiting', 'one record does not authorize correction');
     assertEqual(state.reason, 'too-few-records', 'startup identifies the qualification hold');
     assertEqual(state.rate, 1, 'one record leaves the applied rate at unity');
@@ -104,19 +91,19 @@ export default async function driftControllerSuite() {
   await check('drift-controller: seam, re-anchor and stale each drop and rebuild the window', async () => {
     const seam = recordRig();
     for (let i = 0; i < 8; i++) seam.add(100);
-    seam.poll();
+    seam.controller.poll();
     const seamSeq = seam.log.latestSeq;
     seam.controller.markSeam({ afterSeq: seamSeq, epochMs: 1, positionMs: 2 });
-    seam.poll();
+    seam.controller.poll();
     assertEqual(seam.controller.state().lastDrop.reason, 'seam', 'the seam is reported as the drop reason');
     assertEqual(seam.controller.state().mode, 'waiting', 'a seam holds unity while rebuilding');
     for (let i = 0; i < 8; i++) seam.add(-100);
-    seam.poll();
+    seam.controller.poll();
     assert(seam.controller.state().estimateMs < 0, 'records before the seam never enter its rebuilt estimate');
 
     const reanchor = recordRig();
     for (let i = 0; i < 8; i++) reanchor.add(100);
-    reanchor.poll();
+    reanchor.controller.poll();
     // The batch STRADDLES the event: frames keep arriving in the poll gap and
     // the re-anchor lands mid-way through them, which is the only way it ever
     // happens in the page. The controller sees both sides at once, so the cut
@@ -124,30 +111,30 @@ export default async function driftControllerSuite() {
     for (let i = 0; i < 4; i++) reanchor.add(100);
     reanchor.clock.state.reanchors = 1;
     for (let i = 0; i < 4; i++) reanchor.add(-100);
-    reanchor.poll();
+    reanchor.controller.poll();
     assertEqual(reanchor.controller.state().lastDrop.reason, 'reanchor', 'the re-anchor is reported');
     assertEqual(reanchor.controller.state().estimateMs, null, 'a window straddling the re-anchor is dropped whole rather than averaged across it');
     for (let i = 0; i < 8; i++) reanchor.add(-100);
-    reanchor.poll();
+    reanchor.controller.poll();
     assert(reanchor.controller.state().estimateMs < 0, 'records before the re-anchor never enter the rebuilt estimate');
-    near(reanchor.controller.state().estimateMs, -100, MILLISECONDS_TOLERANCE, 'the rebuilt estimate is the post-re-anchor drift alone');
+    assertNear(reanchor.controller.state().estimateMs, -100, MILLISECONDS_TOLERANCE, 'the rebuilt estimate is the post-re-anchor drift alone');
 
     const stale = recordRig({ settings: { STALE_AFTER_MS: 500, ESTIMATE_WINDOW_MS: 1000 } });
     for (let i = 0; i < 8; i++) stale.add(100);
-    stale.poll();
+    stale.controller.poll();
     stale.advance(501);
-    stale.poll();
+    stale.controller.poll();
     assertEqual(stale.controller.state().lastDrop.reason, 'stale', 'the stale gap is reported');
     assertEqual(stale.controller.state().mode, 'stale', 'the stale rule owns the mode');
     for (let i = 0; i < 8; i++) stale.add(-100);
-    stale.poll();
+    stale.controller.poll();
     assert(stale.controller.state().estimateMs < 0, 'records before the stale event never enter the rebuilt estimate');
   });
 
   await check('drift-controller: stale is distinct while its records still fill the window', async () => {
     const sim = recordRig({ settings: { STALE_AFTER_MS: 500, ESTIMATE_WINDOW_MS: 1000 } });
     for (let i = 0; i < 8; i++) sim.add(80);
-    sim.poll();
+    sim.controller.poll();
     sim.advance(501);
     const state = sim.controller.poll();
     assertEqual(state.mode, 'stale', 'silence enters stale mode before the estimate window empties');
@@ -164,7 +151,7 @@ export default async function driftControllerSuite() {
     // exactly the throttled-tab case the stale rule is for.
     const sim = recordRig();
     for (let i = 0; i < 8; i++) sim.add(-300);
-    sim.poll();
+    sim.controller.poll();
     const { STALE_AFTER_MS } = sim.controller.state().settings;
     sim.add(-300);                       // the last frame this page ever shows
     sim.advance(STALE_AFTER_MS + 100);   // silence, with no poll taken inside it
@@ -183,10 +170,10 @@ export default async function driftControllerSuite() {
     // the oldest of them out of the window.
     const sim = recordRig();
     for (let i = 0; i < 40; i++) sim.add(-150);
-    const before = sim.poll();
+    const before = sim.controller.poll();
     assert(before.controlRecords >= before.settings.MIN_RECORDS, 'the window is full before the step');
     sim.clock.state.offsetMs = 300;      // a quieter sample won; no re-anchor
-    const after = sim.poll();
+    const after = sim.controller.poll();
     assertEqual(after.controlRecords, before.controlRecords, 'a step drops no record out of the window');
     assert(after.mode !== 'waiting', 'a step does not re-impose the qualification hold');
     assert(after.counters.restatements > 0, 'the held records were restated rather than merely retained');
@@ -204,9 +191,9 @@ export default async function driftControllerSuite() {
     const dwellRecords = Math.ceil((SETTLED_FOR_MS * 2) / 20);
     for (let i = 0; i < dwellRecords; i++) {
       sim.add(120);
-      if (i % 10 === 0) sim.poll();
+      if (i % 10 === 0) sim.controller.poll();
     }
-    const state = sim.poll();
+    const state = sim.controller.poll();
     assert(Math.abs(state.estimateMs) > 0, 'there is a real error to decline on');
     assert(Math.abs(state.estimateMs) <= state.bandMs, 'the error sits inside the band, so the rate is held');
     assertEqual(state.rate, 1, 'a band wider than the error holds unity');
@@ -218,15 +205,15 @@ export default async function driftControllerSuite() {
   await check('drift-controller: an offset step is restated without a qualification reset', async () => {
     const stepped = recordRig();
     for (let i = 0; i < 8; i++) stepped.add(40, 0);
-    stepped.poll();
+    stepped.controller.poll();
     stepped.clock.state.offsetMs = 20;
     for (let i = 0; i < 2; i++) stepped.add(20, 20);
-    const steppedState = stepped.poll();
+    const steppedState = stepped.controller.poll();
 
     const after = recordRig({ offsetMs: 20 });
     for (let i = 0; i < 8; i++) after.add(20, 20);
-    const afterState = after.poll();
-    near(steppedState.estimateMs, afterState.estimateMs, MILLISECONDS_TOLERANCE, 'records straddling the offset step match post-step records');
+    const afterState = after.controller.poll();
+    assertNear(steppedState.estimateMs, afterState.estimateMs, MILLISECONDS_TOLERANCE, 'records straddling the offset step match post-step records');
     assert(steppedState.counters.restatements >= 8, 'old records were restated onto the current offset');
     assert(steppedState.mode !== 'waiting' || steppedState.reason !== 'too-few-records', 'the step did not re-impose MIN_RECORDS');
   });

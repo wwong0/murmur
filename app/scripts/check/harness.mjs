@@ -46,6 +46,17 @@ export function assertEqual(actual, expected, message) {
   }
 }
 
+/**
+ * The float comparison. The tolerance is REPORTED, not just applied: a near-miss
+ * and a wild miss read identically otherwise, and which one it was decides
+ * whether the slack was too tight or the arithmetic wrong.
+ */
+export function assertNear(actual, expected, tolerance, message) {
+  if (!(Math.abs(actual - expected) <= tolerance)) {
+    throw new Error(`${message}: expected ${expected} within ${tolerance}, got ${actual}`);
+  }
+}
+
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------------------

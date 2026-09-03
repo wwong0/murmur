@@ -52,3 +52,4 @@ spike-host-origin/.tmp/
 # Chrome/crashpad debris. Written into the repo root by the browser dev aids
 # and by tooling that launches them.
 debug.log
+.tmp/

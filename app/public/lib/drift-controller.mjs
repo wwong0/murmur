@@ -11,9 +11,8 @@
 //  - The band's dispersion arm has no √n factor: display cadence is periodic, not
 //    independent noise (design.md D1). Reintroducing it makes the band too narrow.
 //  - That arm is a range between quantiles and must never become a distance from
-//    the centre. A cadence puts its arms AT the quantiles and its median ON one
-//    of them, so any centre-distance statistic — a MAD, a standard deviation —
-//    reads its smallest exactly where the estimate reads its largest.
+//    the centre — a MAD or a standard deviation collapses on a cadence at exactly
+//    the poll where the estimate is furthest out. `spread` below says why.
 //  - `state().rate` is the last value handed to `apply`, not the value computed
 //    this poll; settled must describe what the media element actually received.
 //  - The half-width comes from a fresh `clock.read()` at poll time, never records.
@@ -43,8 +42,10 @@ const DEFAULT_SETTINGS = Object.freeze({
   RATE_EPSILON,
 });
 
-function median(values) {
-  const sorted = [...values].sort((a, b) => a - b);
+// Both statistics take a SORTED array, as frame-drift.mjs's pair next door do.
+// One poll needs the median and the spread of the same window, and sorting once
+// at the call site is what lets them share it.
+function median(sorted) {
   const middle = sorted.length >> 1;
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
@@ -58,13 +59,10 @@ function quantile(sorted, p) {
 
 /**
  * The window's `p95 - p5`. A cadence puts its arms AT THE QUANTILES, so a range
- * between quantiles cannot be moved by which arm holds the majority — where a
- * MAD, measuring distance from a median that sits on the majority arm, reads
- * zero on exactly the poll where the estimate is furthest out (design.md D1).
- * No scale factor, so no constant: the quantity is the excursion itself.
+ * between quantiles cannot be moved by which arm holds the majority (design.md
+ * D1). No scale factor, so no constant: the quantity is the excursion itself.
  */
-function spread(values) {
-  const sorted = [...values].sort((a, b) => a - b);
+function spread(sorted) {
   return quantile(sorted, 0.95) - quantile(sorted, 0.05);
 }
 
@@ -83,7 +81,6 @@ export function createDriftController({ log, clock, apply, settings: overrides =
   let records = [];
   let lastReanchors = null;
   let lastSeenAt = null;
-  let polled = false;
   let dropCutoffSeq = 0;
   let recordsSinceDrop = 0;
   let staleHold = false;
@@ -109,15 +106,37 @@ export function createDriftController({ log, clock, apply, settings: overrides =
   let settlingMs = null;
   const seams = [];
   const drops = { seam: 0, reanchor: 0, stale: 0 };
+  /**
+   * Forget the dwell. `settled` is a claim about an UNBROKEN stretch inside the
+   * band, so everything that breaks one has to clear the whole latch — a drop
+   * that leaves `insideBandAt` standing hands the next latch a dwell it never
+   * served.
+   */
+  function unlatch() {
+    insideBandAt = null;
+    settledLatched = false;
+    excursionAt = null;
+  }
+
   function drop(dropReason, atMs, cutoffSeq) {
     drops[dropReason] += 1;
     dropCutoffSeq = Math.max(dropCutoffSeq, cutoffSeq);
     recordsSinceDrop = 0;
     staleHold = dropReason === 'stale';
-    insideBandAt = null;
-    settledLatched = false;
-    excursionAt = null;
+    unlatch();
     lastDrop = { reason: dropReason, atMs };
+  }
+
+  /**
+   * Unity, and the label that says why it is not correcting. Every outcome that
+   * is not a correction reduces to this — no clock, stale, too few records, no
+   * estimate — and they must differ only in that label.
+   */
+  function hold(atMs, nextMode, nextReason) {
+    applyRate(BASE_RATE, atMs);
+    unlatch();
+    mode = nextMode;
+    reason = nextReason;
   }
 
   function applyRate(nextRate, atMs) {
@@ -154,19 +173,17 @@ export function createDriftController({ log, clock, apply, settings: overrides =
     const offsetMs = estimate.offsetMs;
     const beforeReadSeq = cursor;
 
-    if (lastReanchors === null) lastReanchors = estimate.counters?.reanchors ?? 0;
-    else {
-      const advance = (estimate.counters?.reanchors ?? 0) - lastReanchors;
-      if (advance > 0) {
-        // EVERY record produced so far, not only those read by the last poll.
-        // A re-anchor is observed at poll time, but the frames that arrived in
-        // the gap before it were measured against the anchor it replaced — cut
-        // at `beforeReadSeq` they survive, and a window straddling the event
-        // averages two worlds into a confident zero. Over-dropping costs one
-        // MIN_RECORDS hold; under-dropping costs a wrong answer.
-        for (let i = 0; i < advance; i++) drop('reanchor', atMs, log.latestSeq);
-      }
-      lastReanchors = estimate.counters?.reanchors ?? lastReanchors;
+    const reanchors = estimate.counters?.reanchors;
+    if (lastReanchors === null) lastReanchors = reanchors ?? 0;
+    else if (Number.isFinite(reanchors)) {
+      // EVERY record produced so far, not only those read by the last poll.
+      // A re-anchor is observed at poll time, but the frames that arrived in
+      // the gap before it were measured against the anchor it replaced — cut
+      // at `beforeReadSeq` they survive, and a window straddling the event
+      // averages two worlds into a confident zero. Over-dropping costs one
+      // MIN_RECORDS hold; under-dropping costs a wrong answer.
+      for (let i = lastReanchors; i < reanchors; i++) drop('reanchor', atMs, log.latestSeq);
+      lastReanchors = reanchors;
     }
     for (const seam of pendingSeams) drop('seam', atMs, seam.afterSeq);
     pendingSeams = [];
@@ -180,17 +197,23 @@ export function createDriftController({ log, clock, apply, settings: overrides =
     }
     // WHEN THE NEWEST FRAME WAS SHOWN, not when this poll ran. A backlog read
     // late is old feedback: stamping it `now` hands the correction another
-    // STALE_AFTER_MS over frames nobody is producing any more.
-    if (incoming.length > 0) lastSeenAt = displayLocalOf(incoming[incoming.length - 1]);
-    else if (!polled) lastSeenAt = atMs;
-    if (incoming.length > 0) staleHold = false;
-    polled = true;
+    // STALE_AFTER_MS over frames nobody is producing any more. The null case is
+    // the first poll seeding itself — after it, `lastSeenAt` is always a number.
+    if (incoming.length > 0) {
+      lastSeenAt = displayLocalOf(incoming.at(-1));
+      staleHold = false;
+    } else if (lastSeenAt === null) {
+      lastSeenAt = atMs;
+    }
 
-    if (offsetMs !== null && lastSeenAt !== null && atMs - lastSeenAt >= settings.STALE_AFTER_MS && !staleHold) {
+    if (offsetMs !== null && atMs - lastSeenAt >= settings.STALE_AFTER_MS && !staleHold) {
       drop('stale', atMs, cursor);
     }
 
     if (offsetMs === null) {
+      // The one hold that also erases the measurement: with no offset there is
+      // no window to have counted and no floor to have computed, and a stale
+      // `fastestCloseMs` beside a `no-clock` mode reads as a live figure.
       estimateMs = null;
       bandMs = null;
       spreadMs = null;
@@ -198,12 +221,7 @@ export function createDriftController({ log, clock, apply, settings: overrides =
       windowRecords = 0;
       controlRecords = 0;
       fastestCloseMs = null;
-      insideBandAt = null;
-      settledLatched = false;
-      excursionAt = null;
-      applyRate(BASE_RATE, atMs);
-      mode = 'waiting';
-      reason = 'no-clock';
+      hold(atMs, 'waiting', 'no-clock');
       return snapshot();
     }
 
@@ -220,19 +238,20 @@ export function createDriftController({ log, clock, apply, settings: overrides =
 
     // Count records whose source estimate differs from the current one without
     // maintaining a parallel per-record cache; the arithmetic below is direct.
-    const offsetChanged = lastOffsetMs === null || lastOffsetMs !== offsetMs;
-    if (offsetChanged) {
-      for (const record of controlWindow) {
-        if (record.seq <= beforeReadSeq && record.clock.offsetMs !== offsetMs) restatements += 1;
-      }
-    }
-    for (const record of incoming) {
-      if (controlWindow.includes(record) && record.clock.offsetMs !== offsetMs) restatements += 1;
+    // `beforeReadSeq` splits the control window into the records this poll read
+    // and the ones it was already holding — a new record is restated on arrival,
+    // a held one only on the poll that moved the offset under it.
+    const offsetChanged = lastOffsetMs !== offsetMs;
+    for (const record of controlWindow) {
+      if (record.clock.offsetMs === offsetMs) continue;
+      if (offsetChanged || record.seq > beforeReadSeq) restatements += 1;
     }
     lastOffsetMs = offsetMs;
 
     if (controlWindow.length > 0) {
-      const values = controlWindow.map((record) => record.driftMs + record.clock.offsetMs - offsetMs);
+      const values = controlWindow
+        .map((record) => record.driftMs + record.clock.offsetMs - offsetMs)
+        .sort((a, b) => a - b);
       estimateMs = median(values);
       spreadMs = spread(values);
       bandMs = Math.max(halfWidthMs ?? 0, spreadMs);
@@ -247,41 +266,22 @@ export function createDriftController({ log, clock, apply, settings: overrides =
     // Requiring an empty read here reported that case as `waiting`, naming a
     // shortage of records for a page that had stopped producing them.
     if (staleHold) {
-      applyRate(BASE_RATE, atMs);
-      insideBandAt = null;
-      settledLatched = false;
-      excursionAt = null;
-      mode = 'stale';
-      reason = 'no-records';
-    } else if (recordsSinceDrop < settings.MIN_RECORDS) {
-      applyRate(BASE_RATE, atMs);
-      insideBandAt = null;
-      settledLatched = false;
-      excursionAt = null;
-      mode = 'waiting';
-      reason = 'too-few-records';
-    } else if (estimateMs === null) {
-      applyRate(BASE_RATE, atMs);
-      insideBandAt = null;
-      settledLatched = false;
-      excursionAt = null;
-      mode = 'waiting';
-      reason = 'too-few-records';
+      hold(atMs, 'stale', 'no-records');
+    } else if (recordsSinceDrop < settings.MIN_RECORDS || estimateMs === null) {
+      // Too few since the last drop, or too few inside the window: the same
+      // shortage counted from the two ends, and it reports one reason.
+      hold(atMs, 'waiting', 'too-few-records');
     } else {
-      staleHold = false;
       const excess = Math.sign(estimateMs) * Math.max(0, Math.abs(estimateMs) - bandMs);
       fastestCloseMs = Math.abs(excess) / settings.MAX_RATE_DEVIATION;
       const correction = Math.max(-settings.MAX_RATE_DEVIATION, Math.min(settings.MAX_RATE_DEVIATION, -excess / settings.TIME_CONSTANT_MS));
       const inside = Math.abs(estimateMs) <= bandMs;
-      // ONE POLL DOES NOT UNLATCH `settled`. The window's membership turns over
-      // as its boundary sweeps the frame grid, so its composition is occasionally
-      // unrepresentative for a single poll — an estimate several milliseconds out
-      // between neighbours reading a fraction of one — and believed immediately
-      // it costs the whole dwell. An excursion is neither acted on nor believed
-      // until it has outlived one ESTIMATE_WINDOW_MS, by which point every record
-      // in the window is new and it cannot be composition. The horizon is that
-      // window, not a new constant. Cost, bounded and accepted in D3: a real
-      // desync is held uncorrected for up to 1s against a 4000ms time constant.
+      // ONE POLL DOES NOT UNLATCH `settled`. The window's composition is
+      // occasionally unrepresentative for a single poll, so an excursion is
+      // neither acted on nor believed until it has outlived one
+      // ESTIMATE_WINDOW_MS — by which point every record in the window is new
+      // and it cannot be composition. The horizon is that window, never a new
+      // constant, and the cost of the hold is bounded in design.md D3.
       if (inside) excursionAt = null;
       else if (settledLatched && excursionAt === null) excursionAt = atMs;
       const believed = !inside && (!settledLatched || atMs - excursionAt >= settings.ESTIMATE_WINDOW_MS);
@@ -296,19 +296,14 @@ export function createDriftController({ log, clock, apply, settings: overrides =
         reason = null;
       } else {
         if (insideBandAt === null) insideBandAt = atMs;
+        // Every conjunct below has failed on its own (design.md D3).
         // A CLIENT THAT NEVER CORRECTED HAS NOT CONVERGED — its band merely
-        // covers its error, which is `declining` and must stay distinguishable
-        // from `settled`. D3 measures settling from the first applied
-        // correction, so with no such correction there is no settling time:
-        // reporting 0 claimed instant convergence for a client that had done
-        // nothing, and 4b's browser bar would have passed on it.
-        // THE SAME EPSILON ON BOTH SIDES OF THE SAME QUESTION. `applyRate`
-        // refuses to write a rate within RATE_EPSILON of the last one, so a
-        // client whose final correction parks the applied rate four billionths
-        // above unity never writes exact 1.0 again — and `rate === BASE_RATE`
-        // held it in `declining` with a null settlingMs forever, inside the
-        // band, at a rate the media element treats as normal speed. Observed
-        // from -100ms at 60Hz, which is client B's own measured offset.
+        // covers its error, which is `declining`; settling is measured from the
+        // first applied correction, so without one there is no time to report.
+        // And THE SAME EPSILON ON BOTH SIDES OF THE SAME QUESTION: `applyRate`
+        // refuses to write within RATE_EPSILON of the last rate, so a client
+        // parked just off unity never writes exact 1.0 again and `=== BASE_RATE`
+        // holds it in `declining` forever.
         if (Math.abs(rate - BASE_RATE) <= settings.RATE_EPSILON && firstCorrectionAt !== null && atMs - insideBandAt >= settings.SETTLED_FOR_MS) {
           settledLatched = true;
           if (settlingMs === null) settlingMs = atMs - firstCorrectionAt;

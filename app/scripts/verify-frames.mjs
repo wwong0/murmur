@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CHROME, FLAGS, attach, cdpHttp, sleep, killChrome } from './cdp.mjs';
+import { CHROME, FLAGS, attach, cdpHttp, sleep, disposeChrome } from './cdp.mjs';
 
 const ORIGIN = 'http://127.0.0.1:8100';
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -184,11 +184,7 @@ async function runState({ name, room, port, extraFlags, minimizeAfterAttach }, f
 
     return { name, dCallbacks, elapsedSec, callbacksPerSec, requiredCallbacksPerSec, accepted, acceptRatio, refusalDeltas, mediaAdvancedMs, elapsedMs, pass: passRate && passAccept && passRefusals };
   } finally {
-    killChrome(chrome, profile);
-    await sleep(1500);
-    try {
-      fs.rmSync(profile, { recursive: true, force: true });
-    } catch {}
+    await disposeChrome(chrome, profile);
   }
 }
 

@@ -1,13 +1,9 @@
 // Convergence, swept rather than sampled.
 //
-// This suite exists because its predecessor did not. Three convergence checks
-// lived in `drift-controller.mjs`, each driving the plant from ONE hand-picked
-// standing error, and all three were green while eight of thirteen starting
-// errors at 60Hz never converged at all — the band's dispersion arm read zero on
-// exactly the poll where the estimate was furthest out, and the settled latch
-// compared a rate with `===` against a writer that refuses sub-epsilon writes.
 // A check that samples one point of a continuum reports the point, not the
-// continuum (`docs/constraints/verification.md`).
+// continuum (`docs/constraints/verification.md`) — three checks each driving the
+// plant from one hand-picked standing error were all green while eight of
+// thirteen starting errors at 60Hz never converged at all.
 //
 // So the assertions here sweep the whole −320…−80ms range that task 0 measured,
 // at both refresh rates, at the 250ms interval `room.entry.js` actually polls
@@ -21,7 +17,7 @@
 // change 4a fixed one of them and not the other.
 
 import { check, assert, assertEqual } from '../harness.mjs';
-import { plant } from '../drift-plant.mjs';
+import { plant, runUntil } from '../drift-plant.mjs';
 
 const POLL_EVERY_FRAMES = 6;          // 250ms at 24fps — room.entry.js's interval
 const RUN_FRAMES = POLL_EVERY_FRAMES * 960;   // 240 simulated seconds
@@ -30,7 +26,20 @@ const LAST_ERROR_MS = -80;
 const ERROR_STEP_MS = 20;
 const REFRESH_RATES = [60, 180];
 
+/**
+ * ONE EXPERIMENT, READ SIX TIMES. Every check below asserts a different property
+ * of the SAME run, so the sweep is computed once per refresh rate and shared —
+ * run per check it was 240 simulated seconds × 13 errors × 2 rates × 4 callers.
+ * Sharing is safe because a case is inert once built: the plants are finished
+ * and discarded inside `runSweep`, and nothing downstream writes to a history.
+ */
+const sweeps = new Map();
 function sweep(refreshHz) {
+  if (!sweeps.has(refreshHz)) sweeps.set(refreshHz, runSweep(refreshHz));
+  return sweeps.get(refreshHz);
+}
+
+function runSweep(refreshHz) {
   const cases = [];
   for (let standingError = FIRST_ERROR_MS; standingError <= LAST_ERROR_MS; standingError += ERROR_STEP_MS) {
     const sim = plant({ refreshHz, standingError, pollEvery: POLL_EVERY_FRAMES });
@@ -84,11 +93,10 @@ export default async function driftConvergenceSuite() {
   });
 
   await check('drift-convergence: the band never narrows on the poll where the cadence displaces the estimate', async () => {
-    // The defect this replaces: with a MAD the majority arm sends every deviation
-    // from the median — and the MAD with them — to zero, so the band read its
-    // narrowest at exactly the polls where the estimate read its widest. Assert
-    // the two do not move apart: no poll may combine a displaced estimate with a
-    // dispersion arm that has collapsed below the distance it must cover.
+    // The two arms must not move apart: no poll may combine a displaced estimate
+    // with a dispersion arm that has collapsed below the distance it must cover.
+    // That is what a MAD did on this signal, and what a centre-distance statistic
+    // will do again (design.md D1).
     for (const refreshHz of REFRESH_RATES) {
       const vsyncMs = 1000 / refreshHz;
       for (const { standingError, history } of sweep(refreshHz)) {
@@ -103,11 +111,11 @@ export default async function driftConvergenceSuite() {
   });
 
   await check('drift-convergence: a rate too small to write does not prevent converging', async () => {
-    // `applyRate` refuses to write within RATE_EPSILON of the last rate, so a
-    // client whose final correction parks the applied rate four billionths above
-    // unity never writes exact 1.0 again. Tested against `=== BASE_RATE` that
-    // client held `declining` with a null settlingMs forever. -100ms at 60Hz is
-    // the case that produced it, and it is client B's own measured offset.
+    // PINNED, not swept: -100ms at 60Hz is the case whose final correction parks
+    // the applied rate four billionths above unity, which is what an exact
+    // `=== BASE_RATE` test held in `declining` forever (design.md D3). It is also
+    // client B's own measured offset. The assertion below fails loudly if this
+    // case stops parking off unity, rather than passing vacuously.
     const sim = plant({ refreshHz: 60, standingError: -100, pollEvery: POLL_EVERY_FRAMES });
     for (let i = 0; i < RUN_FRAMES; i++) sim.deliver();
     const settled = sim.history.filter((state) => state.mode === 'settled');
@@ -122,12 +130,7 @@ export default async function driftConvergenceSuite() {
   });
 
   await check('drift-convergence: one outlying poll does not unreport convergence or move the rate', async () => {
-    // The window's membership turns over as its boundary sweeps the frame grid,
-    // so its composition is occasionally unrepresentative for a single poll —
-    // an estimate several milliseconds out between neighbours reading a fraction
-    // of one. Believed immediately it cost the whole 5s dwell.
-    //
-    // SWEEP RATHER THAN PIN A CASE. These are rare — four of the twenty-six
+    // SWEEP RATHER THAN PIN A CASE. Isolated excursions are rare — four of the 26
     // cases produce one each — and which case produces one moves whenever the
     // band or the window does. A check pinned to `-280` at 180Hz proved nothing
     // the moment the band changed, silently, so the sweep collects them across
@@ -151,5 +154,48 @@ export default async function driftConvergenceSuite() {
       }
     }
     assert(excursions > 0, 'the sweep produced no isolated excursion, so this check proved nothing — the plant or the window has changed');
+  });
+
+  await check('drift-convergence: closing a step after settling never reverses the correction', async () => {
+    // Task 2.4. THE SWEEP CANNOT SEE THIS: every case in it starts behind and
+    // stays behind, so after the first latch the controller writes 1.0 or a
+    // same-signed correction and could not reverse if it tried — measured, zero
+    // signed writes to zero reversals across all 26. Asserting on that window
+    // would be a check that cannot fail. So this one injects a real step, in
+    // both directions, and reads the correction that closes it: 9-30 signed
+    // writes per case, which is enough activity for a reversal to show up in.
+    //
+    // The bound is ZERO, not the `<= 2` an earlier version of this assertion
+    // carried. Proportional control of an integrator does not overshoot, so any
+    // reversal at all is the failure D1 names — an integral term winding through
+    // the correction — and 0.05 of one produces exactly one reversal here, which
+    // a bound of 2 would have let through.
+    for (const stepMs of [-200, -80, 80, 200]) {
+      for (const refreshHz of REFRESH_RATES) {
+        const sim = plant({ refreshHz, standingError: -240, pollEvery: POLL_EVERY_FRAMES });
+        for (let i = 0; i < 24; i++) sim.deliver();
+        runUntil(sim, (state) => state.mode === 'settled', 120_000);
+        assertEqual(sim.controller.state().mode, 'settled',
+          `${refreshHz}Hz never settled before the ${stepMs}ms step, so the step proves nothing`);
+
+        const before = sim.history.length;
+        sim.advance(stepMs);
+        for (let i = 0; i < POLL_EVERY_FRAMES * 400; i++) sim.deliver();
+
+        const after = sim.history.slice(before);
+        const written = [];
+        for (let i = 1; i < after.length; i++) {
+          if (after[i].correctionsApplied !== after[i - 1].correctionsApplied) written.push(after[i].rate);
+        }
+        const signs = written.map((rate) => Math.sign(rate - 1)).filter(Boolean);
+        assert(signs.length >= 5,
+          `${refreshHz}Hz: a ${stepMs}ms step drew only ${signs.length} signed corrections, too few for a reversal to be visible`);
+        let reversals = 0;
+        for (let i = 1; i < signs.length; i++) if (signs[i] !== signs[i - 1]) reversals += 1;
+        assertEqual(reversals, 0,
+          `${refreshHz}Hz: closing a ${stepMs}ms step reversed the correction ${reversals} time(s) across ${signs.length} writes`);
+        assertEqual(after.at(-1).mode, 'settled', `${refreshHz}Hz did not re-settle after a ${stepMs}ms step`);
+      }
+    }
   });
 }
