@@ -221,8 +221,8 @@ const playback = createPlaybackStart({
 
 const overlay = createDiagnosticsOverlay({ clock: clockSync, controller, log: driftLog, playback });
 
-// The half-width widens with age even between samples, so a repaint tied only
-// to new samples would freeze a number that is actually growing.
+// ON THE TICK, NOT ON A CLOCK EVENT: the half-width widens with age between
+// samples, so a repaint tied to new samples alone freezes a growing number.
 function paintOverlay() {
   const lines = overlay.lines();
   clockLine.textContent = lines.clock;
@@ -231,13 +231,13 @@ function paintOverlay() {
 }
 
 /**
- * Poll the load rule, then repaint the line WHETHER OR NOT THE POLL GOT THERE.
+ * Poll the load rule, then repaint the lines WHETHER OR NOT THE POLL GOT THERE.
  * The playback and drift polls deliberately let their errors reach this caller
  * so the next tick can retry (playback-start.mjs rule 3), and this is the last place
  * that failure can be reported from: room-client hands a throwing subscriber to a
  * `subscriber-error` event nothing here listens to (CONSTRAINTS.md →
- * *Verification*). An unpainted line goes on naming an input the page stopped
- * missing seconds ago.
+ * *Verification*). An unpainted drift line goes on naming an input the page
+ * stopped missing seconds ago.
  *
  * Also called from the roster handlers, because a reference point arriving is
  * not worth a tick's wait.

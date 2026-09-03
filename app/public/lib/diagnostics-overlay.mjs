@@ -16,16 +16,10 @@ export const CLOCK_LINE_RE =
   /^clock: [+-]\d+\.\d+ms ± \d+\.\d+ms \(\d+ samples\)$/;
 
 /**
- * TWO CONTROLLER SHAPES, NOT ONE, for the reason D1 gives for the two clock
- * shapes: one pattern spanning both is a pattern a page stuck in
- * `waiting · no-clock` satisfies, which is the state a page is in when
- * everything is broken. A consumer that wants "this client is acting on a
- * measurement" must be able to ask for that and be refused.
- *
- * Nothing optional inside either: a poll that reports no reason has computed
- * the estimate, the band and the close together, so a `correcting` line without
- * them is not a shape the controller can produce and not one this module will
- * vouch for.
+ * TWO SHAPES, ONE PER ARM, AND NOTHING OPTIONAL INSIDE EITHER (design.md D1).
+ * One pattern spanning both is satisfied by a page stuck in `waiting · no-clock`,
+ * and a `?` around the figures admits a `correcting` line showing nothing it
+ * corrected from. Neither is a state the controller can reach.
  */
 export const CONTROLLER_LINE_HELD_RE =
   /^controller: rate \d\.\d{6} · [a-z-]+ · [a-z-]+ over \d+ frames$/;

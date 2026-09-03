@@ -91,13 +91,12 @@ const controllerCases = [
     shape: CONTROLLER_LINE_HELD_RE,
   },
   {
-    // EVERY FIELD BUT THE REASON AGREES WITH THE no-clock CASE ABOVE, which is
-    // the whole thing the uniqueness check below tests. Let this one differ in
-    // its frame count or carry figures the other nulls, and the two lines
-    // differ by THAT instead — and the check passes against a builder that
-    // renders no reason at all. The agreement is faithful: an empty window
-    // leaves the controller no estimate to have counted, so it reports this
-    // reason with the same nulls and the same 0 the no-clock arm reports.
+    // EVERY FIELD BUT THE REASON AGREES WITH THE no-clock CASE ABOVE, and must:
+    // let this one differ in its frame count or carry figures the other nulls,
+    // and the two lines differ by THAT instead — so the uniqueness check below
+    // passes against a builder that renders no reason at all (CONSTRAINTS.md →
+    // *Verification*). The agreement is faithful: an empty window leaves the
+    // controller no estimate to have counted.
     name: 'diagnostics overlay: waiting with too few records names its reason',
     state: makeHeldState({ mode: 'waiting', reason: 'too-few-records', windowRecords: 0 }),
     expected: 'controller: rate 1.000000 · waiting · too-few-records over 0 frames',
