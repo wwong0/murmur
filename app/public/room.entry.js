@@ -294,6 +294,7 @@ window.__app = {
   // overwritten by this one rather than colliding visibly.
   controller: () => controller.state(),
   playback: () => ({ ...playback.state(), callbacks: sampler.callbacks, sampling: sampler.running, seams: controller.seams }),
+  timeline: () => ({ epochMs: timeline.epochMs, ...timeline.counters }),
 };
 
 client.connect();
