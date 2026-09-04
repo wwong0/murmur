@@ -112,14 +112,17 @@ export function deriveDriftRecord({ metadata, timeOriginMs, localNowMs, clock, t
   };
 }
 
-function median(sorted) {
+// Exported so the browser pass reports its figures through the same two the
+// summary below does — a second definition of the middle of an even set is how
+// the page and the pass came to disagree once already.
+export function median(sorted) {
   const n = sorted.length;
   const mid = n >> 1;
   return n % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 /** Nearest-rank, so the value reported is one that was actually measured. */
-function percentile(sorted, fraction) {
+export function percentile(sorted, fraction) {
   return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(fraction * sorted.length) - 1))];
 }
 

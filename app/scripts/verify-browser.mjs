@@ -9,6 +9,13 @@
 // converged span and the observation window; the length is the price of a bar
 // the controller can fail (4c design.md D2).
 //
+// IT EXITS NON-ZERO ON THIS TREE, and that is change 4c's result rather than a
+// defect in the pass: 20 failures, four T5 clauses per window because neither
+// window ever reaches `settled`, and the whole T8 block because CDP's offline
+// emulation leaves the websocket up so the seam route never fires. A run
+// producing a different count, or the same count from different assertions, is
+// new information. Change 5 owns both, in `docs/plan/05-*.md`.
+//
 // It exists because CLAUDE.md records that every defect in the host-origin
 // spike was found by attaching over CDP and reading the console, and because
 // design.md D10 settles that the developer here does not look at the page. A
@@ -60,7 +67,18 @@ import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep, dispose
 import { DRIFT_LINE_RE } from '../public/lib/drift-readout.mjs';
 import { MIN_RECORDS, RATE_EPSILON } from '../public/lib/drift-controller.mjs';
 import { CLOCK_LINE_RE, CONTROLLER_LINE_HELD_RE, CONTROLLER_LINE_ACTING_RE } from '../public/lib/diagnostics-overlay.mjs';
-import { plant } from './check/drift-plant.mjs';
+// The arithmetic and the verdicts, next door and pure — this file is the
+// sequence of windows, waits and assertions, and nothing else.
+import {
+  MIN_CONVERGED_RECORDS,
+  PLANT_MEDIAN_MOVEMENT_MS,
+  convergedStats,
+  observationStats,
+  plantSweepMinimum,
+  refreshFrom,
+  standingLag,
+  windowVerdicts,
+} from './drift-figures.mjs';
 
 const PASS_STARTED_AT = Date.now();
 const PORT = 9223;
@@ -104,26 +122,23 @@ const SETTLING_BUDGET_MS = 75_000;
 const SETTLE_POLL_MS = 250;
 // T6 converged span for tightened tolerances (tasks.md 2.4b).
 const CONVERGED_WINDOW_MS = 10_000;
-const MIN_CONVERGED_RECORDS = 120;
-// T7 excursion observation (design.md D4).
+// T7 excursion observation (design.md D4). Every threshold the samples are
+// JUDGED against lives in drift-figures.mjs; these are the driver's cadence.
 const OBSERVE_MS = 60_000;
 const OBSERVE_POLL_MS = 125;
 const OBSERVE_PROGRESS_MS = 10_000;
-const EXCURSION_POLL_MS = 250;
-const PERIODICITY_LIKE = 0.8;
-const PERIODICITY_NOT_LIKE = 0.6;
-const FLOOR_MULTIPLIER = 1.5;
-const PLANT_MEDIAN_MOVEMENT_MS = 1.32;
-const PLANT_ASSERTED_FLOOR = 0.8;
-const RATE_EFFECTIVE = 0.5;
-const RATE_INEFFECTIVE = 0.1;
-const STANDING_LAG_MATCH_MS = 20;
+const SETTLE_PROGRESS_MS = 4_000;
+// 4a's sweep produced a standing lag per window, and the run says whether this
+// hardware reproduces it.
+const REFERENCE_LAG_MS = [-308, -104];
 // T6b line read-back (design.md D1).
 const LINE_READ_DEADLINE_MS = 3_000;
 const LINE_READ_POLL_MS = 250;
 // T8 seam route (design.md D3).
 const DEPART_DEADLINE_MS = 30_000;
+const DEPART_POLL_MS = 1_000;
 const REJOIN_DEADLINE_MS = 30_000;
+const REJOIN_POLL_MS = 500;
 const SEAM_SETTLE_MS = 3_000;
 
 const sha = (text) => crypto.createHash('sha256').update(text).digest('hex').slice(0, 12);
@@ -172,28 +187,18 @@ const PROBE = `({
   notices: [...document.querySelectorAll('#notices li')].map(li => li.textContent.trim()),
 })`;
 
-const RAF_RATE = `(() => new Promise((resolve) => {
+// THE STAMPS, not a statistic taken from them: the panel's rate is derived on
+// this side, through the same median every other figure in the run uses.
+const RAF_STAMPS = `(() => new Promise((resolve) => {
   const stamps = [];
   let finished = false;
-  let guard = null;
   const finish = () => {
     if (finished) return;
     finished = true;
-    if (guard !== null) clearTimeout(guard);
-    const deltas = [];
-    for (let i = 1; i < stamps.length; i++) deltas.push(stamps[i] - stamps[i - 1]);
-    deltas.sort((left, right) => left - right);
-    const middle = deltas.length >> 1;
-    const medianDeltaMs = deltas.length === 0 ? null : deltas.length % 2 === 1
-      ? deltas[middle]
-      : (deltas[middle - 1] + deltas[middle]) / 2;
-    resolve({
-      frameCount: stamps.length,
-      medianDeltaMs,
-      refreshRateHz: Number.isFinite(medianDeltaMs) && medianDeltaMs > 0 ? 1000 / medianDeltaMs : null,
-    });
+    clearTimeout(guard);
+    resolve(stamps.slice());
   };
-  guard = setTimeout(finish, 4000);
+  const guard = setTimeout(finish, 4000);
   const frame = (atMs) => {
     if (finished) return;
     stamps.push(atMs);
@@ -225,7 +230,7 @@ const SEAM = `(() => {
     latest: drift.records[drift.records.length - 1] ?? null,
     // THE WHOLE ARRAY, not a figure derived from it. The sawtooth amplitude the
     // controller's simulated plant runs on is measured from these records and
-    // never chosen (change 4a design.md D8), and change 4b's model check reads
+    // never chosen (change 4a design.md D8), and change 4c's model check reads
     // Chrome's real scatter back beside the plant's. Deleting this line costs
     // the only route from a real player to that constant.
     records: drift.records,
@@ -265,19 +270,28 @@ function expect(label, cond, detail) {
   if (!cond) failures.push(label);
 }
 
-async function sampleSeams(tab, durationMs) {
-  const startedAt = Date.now();
-  const readings = [];
-  let absent = 0;
-  while (Date.now() - startedAt < durationMs) {
-    const seam = await tab.evaluate(SEAM);
-    if (seam.present) readings.push({ atMs: Date.now(), seam });
-    else absent++;
-    const remaining = durationMs - (Date.now() - startedAt);
-    if (remaining <= 0) break;
-    await sleep(Math.min(SETTLE_POLL_MS, remaining));
+/**
+ * Poll `read` every `everyMs` until `done` accepts a reading or `deadlineAt`
+ * passes, and say which of the two ended it. `first` is a reading already in
+ * hand, tested before anything is read.
+ *
+ * ONE PIECE OF DEADLINE ARITHMETIC, where the five waits below had a copy of it
+ * each and the copies had already begun to differ over whether the last sleep
+ * may overrun the deadline. A wait that overruns its budget is how a pass
+ * reports a timeout it never actually waited out.
+ */
+async function pollUntil(read, done, { everyMs, deadlineAt, first }) {
+  let value = first === undefined ? await read() : first;
+  while (!done(value)) {
+    const remaining = deadlineAt - Date.now();
+    if (remaining <= 0) return { value, ok: false };
+    await sleep(Math.min(everyMs, remaining));
+    // The reading that would land ON the deadline is not taken: a wait reports
+    // what it saw INSIDE its budget, and every loop this replaced ended that way.
+    if (Date.now() >= deadlineAt) return { value, ok: false };
+    value = await read();
   }
-  return { readings, absent };
+  return { value, ok: true };
 }
 
 async function waitForSettle(tabs) {
@@ -297,9 +311,9 @@ async function waitForSettle(tabs) {
     firstRecords: null,
     firstClock: null,
   }));
-  let nextProgressAt = startedAt + 4000;
+  let nextProgressAt = startedAt + SETTLE_PROGRESS_MS;
 
-  for (;;) {
+  const readAll = async () => {
     for (const state of states) {
       const seam = await state.tab.evaluate(SEAM);
       if (!seam.present) {
@@ -336,15 +350,17 @@ async function waitForSettle(tabs) {
         const elapsed = state.firstPlaybackAt === null ? 'n/a' : `${((now - state.firstPlaybackAt) / 1000).toFixed(1)}s`;
         console.log(`  ${state.label}: elapsed ${elapsed} · mode ${controller.mode ?? 'null'} · reason ${controller.reason ?? 'null'} · rate ${controller.rate ?? 'null'} · estimateMs ${controller.estimateMs ?? 'null'} · bandMs ${controller.bandMs ?? 'null'} · windowRecords ${controller.windowRecords ?? 'null'} · correctionsApplied ${controller.correctionsApplied ?? 'null'}`);
       }
-      nextProgressAt = now + 4000;
+      nextProgressAt = now + SETTLE_PROGRESS_MS;
     }
+    return states;
+  };
 
-    const complete = (state) => state.firstSettledAt !== null || (state.firstPlaybackAt !== null && now >= state.firstPlaybackAt + SETTLE_DEADLINE_MS);
-    if (states.every(complete) || now >= capAt) break;
-    const remaining = capAt - Date.now();
-    if (remaining <= 0) break;
-    await sleep(Math.min(SETTLE_POLL_MS, remaining));
-  }
+  // A window is done when it has settled, or when its OWN playback start is
+  // SETTLE_DEADLINE_MS behind — the per-window deadline is the point of the
+  // wait, and `capAt` is only the backstop for a window that never played.
+  const settledOrOutOfTime = (state) => state.firstSettledAt !== null
+    || (state.firstPlaybackAt !== null && Date.now() >= state.firstPlaybackAt + SETTLE_DEADLINE_MS);
+  await pollUntil(readAll, (all) => all.every(settledOrOutOfTime), { everyMs: SETTLE_POLL_MS, deadlineAt: capAt });
   return states;
 }
 
@@ -392,203 +408,39 @@ async function observeWindows(tabs, durationMs) {
   return states;
 }
 
-function median(sorted) {
-  if (sorted.length === 0) return null;
-  const middle = sorted.length >> 1;
-  return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
-}
-
-function nearestRank(sorted, fraction) {
-  if (sorted.length === 0) return null;
-  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(fraction * sorted.length) - 1))];
-}
-
-function convergedStats(seam, barSeq) {
-  const records = (seam.records ?? []).filter((record) => record.seq > barSeq);
-  const drifts = records.map((record) => record.driftMs).sort((left, right) => left - right);
-  const enough = records.length >= MIN_CONVERGED_RECORDS && records.every((record) => Number.isFinite(record.driftMs));
-  return {
-    records,
-    convergedCount: records.length,
-    convergedMedianMs: enough ? median(drifts) : null,
-    convergedSpreadMs: enough ? nearestRank(drifts, 0.95) - nearestRank(drifts, 0.05) : null,
-  };
-}
-
-function alternationStats(records) {
-  let pairs = 0;
-  let alternating = 0;
-  for (let i = 1; i < records.length - 1; i++) {
-    const previous = records[i].driftMs - records[i - 1].driftMs;
-    const next = records[i + 1].driftMs - records[i].driftMs;
-    if (!Number.isFinite(previous) || !Number.isFinite(next) || previous === 0 || next === 0) continue;
-    pairs++;
-    if (Math.sign(previous) !== Math.sign(next)) alternating++;
-  }
-  return { pairs, fraction: pairs === 0 ? null : alternating / pairs };
-}
-
-function roundedHistogram(records) {
-  const counts = new Map();
-  for (const record of records) {
-    if (!Number.isFinite(record.driftMs)) continue;
-    const rounded = Math.round(record.driftMs * 2) / 2;
-    const key = rounded.toFixed(1);
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  return [...counts.entries()]
-    .sort(([leftValue, leftCount], [rightValue, rightCount]) => rightCount - leftCount || Number(leftValue) - Number(rightValue))
-    .slice(0, 10)
-    .map(([value, count]) => `${value}ms:${count}`);
-}
-
-function finiteValues(samples, key) {
-  return samples.map((sample) => sample[key]).filter((value) => Number.isFinite(value));
-}
-
-function observationStats(state, convergedRecords) {
-  const firstSettledIndex = state.samples.findIndex((sample) => sample.mode === 'settled');
-  const afterSettled = firstSettledIndex < 0 ? [] : state.samples.slice(firstSettledIndex);
-  const settled = afterSettled.filter((sample) => sample.mode === 'settled');
-  const acting = state.samples.filter((sample) => sample.reason === null);
-  const population = settled.length > 0 ? settled : acting;
-  const populationLabel = settled.length > 0 ? 'settled' : 'acting';
-  const spreadValues = finiteValues(population, 'spreadMs').sort((left, right) => left - right);
-  const estimateValues = finiteValues(population, 'estimateMs');
-  const spreadMedianMs = median(spreadValues);
-  const spreadMaxMs = spreadValues.length ? Math.max(...spreadValues) : null;
-  const medianMovementMs = estimateValues.length ? Math.max(...estimateValues) - Math.min(...estimateValues) : null;
-  const actingRates = finiteValues(acting, 'rate').sort((left, right) => left - right);
-  const actingRateMedian = median(actingRates);
-  // A WHOLE-WINDOW TREND AGAINST A MEDIAN COMMAND — not a closure rate against
-  // the command that produced it. The regression spans every acting sample, so it
-  // covers a transient and a plateau together, and the command varies across both
-  // because the controller is proportional. Report it, do not conclude from a low
-  // one: see the verdict this feeds for which direction it can be read in.
-  const closureSamples = acting.filter((sample) => Number.isFinite(sample.atMs) && Number.isFinite(sample.estimateMs));
-  let observedClosureRateMsPerSec = null;
-  if (closureSamples.length >= 2) {
-    const meanAtMs = closureSamples.reduce((sum, sample) => sum + sample.atMs, 0) / closureSamples.length;
-    const meanEstimateMs = closureSamples.reduce((sum, sample) => sum + sample.estimateMs, 0) / closureSamples.length;
-    const denominator = closureSamples.reduce((sum, sample) => sum + (sample.atMs - meanAtMs) ** 2, 0);
-    if (denominator > 0) {
-      const numerator = closureSamples.reduce((sum, sample) => sum + (sample.atMs - meanAtMs) * (sample.estimateMs - meanEstimateMs), 0);
-      observedClosureRateMsPerSec = (numerator / denominator) * 1000;
-    }
-  }
-  const commandedClosureRateMsPerSec = Number.isFinite(actingRateMedian)
-    ? (actingRateMedian - 1) * 1000
-    : null;
-  const effectivenessFraction = Number.isFinite(observedClosureRateMsPerSec)
-    && Number.isFinite(commandedClosureRateMsPerSec)
-    && commandedClosureRateMsPerSec !== 0
-    ? observedClosureRateMsPerSec / commandedClosureRateMsPerSec
-    : null;
-  const alternation = alternationStats(convergedRecords);
-  const excursions = [];
-  let current = null;
-  const finishExcursion = () => {
-    if (!current) return;
-    const range = (key) => {
-      const values = current.samples.map((sample) => sample[key]).filter((value) => Number.isFinite(value));
-      return values.length ? { min: Math.min(...values), max: Math.max(...values) } : null;
-    };
-    excursions.push({
-      samples: current.samples.length,
-      lengthMs: current.samples.length * OBSERVE_POLL_MS,
-      controllerPolls: (current.samples.length * OBSERVE_POLL_MS) / EXCURSION_POLL_MS,
-      modes: [...current.modes],
-      reasons: [...current.reasons],
-      windowRecords: range('windowRecords'),
-      controlRecords: range('controlRecords'),
-    });
-    current = null;
-  };
-  const excursionSamples = firstSettledIndex < 0 ? acting : afterSettled;
-  for (const sample of excursionSamples) {
-    if (sample.mode === 'settled') {
-      finishExcursion();
-      continue;
-    }
-    if (!current) current = { samples: [], modes: new Set(), reasons: new Set() };
-    current.samples.push(sample);
-    current.modes.add(sample.mode ?? null);
-    current.reasons.add(sample.reason ?? null);
-  }
-  finishExcursion();
-  const dutyCycle = afterSettled.length ? settled.length / afterSettled.length : 0;
-  return {
-    firstSettledIndex,
-    settledSamples: afterSettled.length,
-    settledCount: settled.length,
-    dutyCycle,
-    population: populationLabel,
-    populationSamples: population.length,
-    spreadMedianMs,
-    spreadMaxMs,
-    medianMovementMs,
-    actingCount: acting.length,
-    actingFraction: state.samples.length ? acting.length / state.samples.length : null,
-    actingRateMedian,
-    observedClosureRateMsPerSec,
-    commandedClosureRateMsPerSec,
-    effectivenessFraction,
-    alternation,
-    histogram: roundedHistogram(convergedRecords),
-    excursions,
-  };
-}
-
-function firstEightMedian(state) {
-  const records = state.firstRecords?.records ?? [];
-  const drifts = records.map((record) => record.driftMs);
-  if (drifts.length < 8 || drifts.some((driftMs) => !Number.isFinite(driftMs))) return null;
-  return median(drifts.sort((left, right) => left - right));
-}
-
 function numberText(value, digits = 1) {
   return Number.isFinite(value) ? value.toFixed(digits) : 'null';
 }
 
-function plantSweepMinimum() {
-  let minimum = null;
-  for (const refreshHz of [60, 180]) {
-    for (let standingError = -320; standingError <= -80; standingError += 20) {
-      const simulation = plant({ refreshHz, standingError, pollEvery: 6 });
-      for (let i = 0; i < 6 * 960; i++) simulation.deliver();
-      const firstSettled = simulation.history.findIndex((state) => state.mode === 'settled');
-      const afterSettled = firstSettled < 0 ? [] : simulation.history.slice(firstSettled);
-      const dutyCycle = afterSettled.length
-        ? afterSettled.filter((state) => state.mode === 'settled').length / afterSettled.length
-        : 0;
-      if (minimum === null || dutyCycle < minimum.dutyCycle) minimum = { dutyCycle, refreshHz, standingError };
-    }
-  }
-  return minimum;
-}
-
 async function measureRefreshRates(tabs) {
   return Promise.all(tabs.map(async ({ label, tab }) => {
-    const rate = await tab.evaluate(RAF_RATE);
-    expect(`3.2 ${label}'s RAF probe returned a finite refresh rate`, rate !== null && typeof rate === 'object' && Number.isFinite(rate.frameCount) && rate.frameCount > 0 && Number.isFinite(rate.refreshRateHz) && rate.refreshRateHz > 0, JSON.stringify(rate));
+    const rate = refreshFrom(await tab.evaluate(RAF_STAMPS));
+    expect(`3.2 ${label}'s RAF probe returned a finite refresh rate`, rate.frameCount > 0 && Number.isFinite(rate.refreshRateHz) && rate.refreshRateHz > 0, JSON.stringify(rate));
     return { label, rate };
   }));
 }
 
+/**
+ * Every rendered reading up to the first that has all three lines populated —
+ * the readings are the evidence, so they are kept rather than the verdict.
+ */
 async function readLines(tab, initial) {
   const readings = [initial];
-  const deadline = Date.now() + LINE_READ_DEADLINE_MS;
   const matches = (probe) => {
     const clock = CLOCK_LINE_RE.test((probe.clockText ?? '').trim());
     const drift = DRIFT_LINE_RE.exec((probe.driftText ?? '').trim());
     const controller = CONTROLLER_LINE_HELD_RE.test((probe.controllerText ?? '').trim()) || CONTROLLER_LINE_ACTING_RE.test((probe.controllerText ?? '').trim());
     return clock && drift !== null && Number(drift[1]) > 0 && controller;
   };
-  while (!matches(readings[readings.length - 1]) && Date.now() < deadline) {
-    await sleep(Math.min(LINE_READ_POLL_MS, Math.max(0, deadline - Date.now())));
-    if (Date.now() >= deadline) break;
-    readings.push(await tab.evaluate(PROBE));
-  }
+  await pollUntil(
+    async () => {
+      const probe = await tab.evaluate(PROBE);
+      readings.push(probe);
+      return probe;
+    },
+    matches,
+    { everyMs: LINE_READ_POLL_MS, deadlineAt: Date.now() + LINE_READ_DEADLINE_MS, first: initial },
+  );
   return readings;
 }
 
@@ -622,10 +474,6 @@ function routeFields(reading) {
   };
 }
 
-function printRouteReading(label, stage, reading) {
-  console.log(`  ${stage} ${label}: ${JSON.stringify(routeFields(reading))}`);
-}
-
 try {
   await cdpHttp('/json/version');
   const windows = await cdpHttp('/json/list');
@@ -654,8 +502,7 @@ try {
   // THE IMPOSED GAP (3.4) — the input to the experiment, not dead time. Read
   // WINDOW_GAP_MS before shortening or removing it.
   console.log(`\n--- 3.4: opening the second window ${WINDOW_GAP_MS / 1000}s late, on purpose ---`);
-  const gapA = await sampleSeams(a, WINDOW_GAP_MS);
-  console.log(`  A sampled ${gapA.readings.length} seam readings during the gap (${gapA.absent} not present)`);
+  await sleep(WINDOW_GAP_MS);
   const b = await attach('B/view', URL_B);
 
   console.log('\n--- T5: waiting for both windows to settle ---');
@@ -669,14 +516,11 @@ try {
     console.log(`  ${state.label}: ${state.absent} seam reading(s) not present; first playback ${state.firstPlayback ? `held ${state.firstPlayback.seam.held}` : 'not seen'}; first 8 records ${state.firstRecords ? 'kept' : 'not seen'}; first clock ${state.firstClock ? `held ${state.firstClock.held}` : 'not seen'}; last no-correction ${state.lastNoCorrection ? 'kept' : 'not seen'}; last no-settling ${state.lastNoSettling ? 'kept' : 'not seen'}`);
     console.log(`  ${state.label}: settlingMs ${controller.settlingMs ?? 'null'}; gap before first correction ${Number.isFinite(gapMs) ? `${gapMs.toFixed(1)}ms` : 'unavailable'} (each endpoint observed at ${SETTLE_POLL_MS}ms, about ±0.25s)`);
     // TWO OF THESE FIVE READ THE FINAL POLL AND THREE DO NOT, and the labels say
-    // which. `settlingMs` and `correctionsApplied` are latched once and never
-    // reset (drift-controller.mjs:309), so they answer "did this window
-    // converge" whatever the controller is doing at the instant the wait ends.
-    // `mode` and `rate` do not: a believed excursion drops the latch and moves
-    // the rate off unity (:285-296), and design.md D4 measures a converged
-    // client outside `settled` for up to 16% of a run. So a red on those two
-    // beside three green ones is an excursion, not a failure to converge — read
-    // them together or the run cannot tell the two apart.
+    // which. `settlingMs` and `correctionsApplied` latch once and never reset
+    // (drift-controller.mjs:309); `mode` and `rate` drop on a believed excursion
+    // (:285-296). So a red on those two beside three green ones is an excursion,
+    // not a failure to converge — read them together or the run cannot tell the
+    // two apart. Change 4c design.md D2.
     expect(`T5 ${state.label} is settled at the end of the wait`, controller.mode === 'settled', `${controller.mode ?? 'null'} · ${controller.reason ?? 'null'}`);
     expect(`T5 ${state.label} recorded a correction`, controller.settlingMs !== null, JSON.stringify(controller.settlingMs));
     expect(`T5 ${state.label} applied a rate write`, controller.correctionsApplied > 0, JSON.stringify(controller.correctionsApplied));
@@ -784,137 +628,26 @@ try {
     const state = observationStates[i];
     const settleState = settleStates[i];
     const converged = i === 0 ? convergedA : convergedB;
-    const stats = observationStats(state, converged.records);
-    const referenceLagMs = i === 0 ? -308 : -104;
-    const firstEightMs = firstEightMedian(settleState);
-    const noCorrectionEstimateMs = settleState.lastNoCorrection?.seam?.controller?.estimateMs;
-    const lagMatches = Number.isFinite(firstEightMs) && Math.abs(firstEightMs - referenceLagMs) <= STANDING_LAG_MATCH_MS;
-    const inMeasuredBand = Number.isFinite(firstEightMs) && Math.abs(firstEightMs) >= 100 && Math.abs(firstEightMs) <= 240;
-    const refresh = refreshRates[i].rate ?? {};
-    const predictedFloorMs = Number.isFinite(refresh.refreshRateHz) && refresh.refreshRateHz > 0
-      ? 1000 / (2 * refresh.refreshRateHz)
-      : null;
-    const floorHeld = Number.isFinite(stats.spreadMedianMs) && Number.isFinite(predictedFloorMs)
-      ? stats.spreadMedianMs <= predictedFloorMs * FLOOR_MULTIPLIER
-      : null;
-    const parkingDistanceMs = Number.isFinite(stats.spreadMedianMs) ? stats.spreadMedianMs * 2 : null;
-    const cadenceVerdict = stats.alternation.fraction === null
-      ? 'not enough nonzero differences'
-      : stats.alternation.fraction >= PERIODICITY_LIKE
-        ? 'period-2-like'
-        : stats.alternation.fraction <= PERIODICITY_NOT_LIKE
-          ? 'not period-2-like'
-          : 'inconclusive (between 0.6 and 0.8)';
-    // THE MOVEMENT TERM IS WITHHELD, NOT FAILED. PLANT_MEDIAN_MOVEMENT_MS is the
-    // largest movement of the median between two CONSECUTIVE 250ms polls (4a: p95
-    // 1.30ms, max 1.32ms, from window parity); `medianMovementMs` is the RANGE of
-    // the estimate across the whole observation. A per-poll step and a 60s range
-    // are not the same quantity, so the comparison was false for any real run and
-    // manufactured the disagreement it reported. Withheld rather than dropped: an
-    // incomparable term cannot support `agree` either. The like-for-like version
-    // is the movement between consecutive controller polls, which needs the 125ms
-    // samples deduplicated by poll — filed under change 5 (design.md D2).
-    const movementComparable = false;
-    const modelVerdict = cadenceVerdict === 'period-2-like' && floorHeld === true && movementComparable
-      ? stats.population === 'settled' ? 'agree' : 'agree on acting figures; no settled hold was observed'
-      : `inconclusive: cadence ${cadenceVerdict}, floor ${floorHeld === true ? 'within prediction' : floorHeld === false ? 'above prediction' : 'unavailable'}, median-movement term withheld (a whole-window range is not the plant's per-poll step)${stats.population === 'settled' ? '' : '; no settled hold was observed'}`;
-    const floorVerdict = floorHeld === null
-      ? `${stats.population} population has no finite spread`
-      : stats.population === 'settled'
-        ? floorHeld ? `held at <=${FLOOR_MULTIPLIER}x predicted` : `not held above ${FLOOR_MULTIPLIER}x predicted`
-        : floorHeld
-          ? `within <=${FLOOR_MULTIPLIER}x predicted while acting; not evidence of a held floor`
-          : `above ${FLOOR_MULTIPLIER}x predicted while acting; not evidence of a held floor`;
-    const excursionVerdict = stats.populationSamples === 0
-      ? 'unavailable (no acting samples)'
-      : stats.firstSettledIndex < 0
-        ? stats.excursions.some((excursion) => excursion.lengthMs > EXCURSION_POLL_MS)
-          ? 'yes, an acting excursion exceeded one controller poll; no settled hold was observed'
-          : 'no, no acting excursion exceeded one controller poll; no settled hold was observed'
-        : stats.excursions.some((excursion) => excursion.lengthMs > EXCURSION_POLL_MS)
-          ? 'yes, an excursion exceeded one controller poll'
-          : 'no, none exceeded one controller poll';
-    const dutyVerdict = Number.isFinite(stats.dutyCycle)
-      ? stats.firstSettledIndex < 0
-        ? `${(stats.dutyCycle * 100).toFixed(1)}% settled (0 settled samples; acting population used for steady-state figures)`
-        : `${(stats.dutyCycle * 100).toFixed(1)}% settled after first settled sample (${stats.settledCount}/${stats.settledSamples} samples)`
-      : 'unavailable';
-    const recommendation = stats.firstSettledIndex < 0
-      ? 'no settled hold observed; keep the simulated 0.8 floor pending hardware hold evidence'
-      : !Number.isFinite(stats.dutyCycle)
-        ? 'no recommendation from this window'
-      : stats.dutyCycle < PLANT_ASSERTED_FLOOR
-        ? 'keep the simulated 0.8 floor; browser duty is below it'
-        : stats.dutyCycle < plantMinimum.dutyCycle
-          ? 'keep the simulated 0.8 floor; browser clears it but not the plant minimum'
-          : 'browser clears the plant minimum; any floor change belongs to a follow-up';
-    // ONE-SIDED, AND THE VERDICT SAYS SO. A high ratio does prove the actuator
-    // moves the clock: an estimate trending at the commanded rate over the whole
-    // window cannot happen without it. A LOW ONE PROVES NOTHING, because a
-    // converged proportional loop reads low here whatever its actuator is doing —
-    // on a plateau the trend is ~0 by definition while the command stays nonzero,
-    // since a residual error is what produces it. The window also spans a
-    // transient and a plateau and the median rate mixes the commands in force
-    // across both. Separating a dead actuator from a held steady-state error
-    // needs the slope over a stretch where the command is STEADY; that
-    // measurement is filed under change 5 (design.md D2).
-    const rateEffectivenessVerdict = !Number.isFinite(stats.effectivenessFraction)
-      ? 'unavailable (insufficient acting samples or zero commanded closure rate)'
-      : stats.effectivenessFraction >= RATE_EFFECTIVE
-        ? `effective (>=${RATE_EFFECTIVE}; the whole-window trend tracks the command, so the rate does move the media clock)`
-        : stats.effectivenessFraction < RATE_INEFFECTIVE
-          ? `low (<${RATE_INEFFECTIVE}); this ratio cannot say whether the actuator is dead or the loop is holding a steady-state error — read the steady-command stretches, not this number`
-          : `low (${RATE_INEFFECTIVE}-${RATE_EFFECTIVE}); same caveat as below ${RATE_INEFFECTIVE} — this ratio does not discriminate`;
-    const finalCounters = state.lastSeam?.counters ?? null;
-    const firstClock = settleState.firstClock;
-    const firstPlayback = settleState.firstPlayback;
+    const stats = observationStats(state.samples, converged.records, OBSERVE_POLL_MS);
+    const refresh = refreshRates[i].rate;
 
     // Every figure here is printed once, in T9's block; collecting them keeps the
-    // run's numbers in one place a person can copy into design.md.
+    // run's numbers in one place a person can copy into design.md. THE GROUPS GO
+    // IN WHOLE — a field-by-field copy of `stats` is a second place for every one
+    // of those names to go stale, and it silently drops the one the copy forgets.
     t7Figures.push({
       label: state.label,
-      firstEightMs,
-      noCorrectionEstimateMs,
-      referenceLagMs,
-      lagMatches,
-      inMeasuredBand,
-      convergedCount: converged.convergedCount,
-      convergedMedianMs: converged.convergedMedianMs,
-      convergedSpreadMs: converged.convergedSpreadMs,
-      wholeMedianMs: (i === 0 ? sa : sb).summary?.medianDriftMs ?? null,
-      alternation: stats.alternation,
-      histogram: stats.histogram,
+      stats,
       refresh,
-      predictedFloorMs,
-      floorHeld,
-      parkingDistanceMs,
-      spreadMedianMs: stats.spreadMedianMs,
-      spreadMaxMs: stats.spreadMaxMs,
-      medianMovementMs: stats.medianMovementMs,
-      population: stats.population,
-      populationSamples: stats.populationSamples,
-      actingCount: stats.actingCount,
-      actingFraction: stats.actingFraction,
-      actingRateMedian: stats.actingRateMedian,
-      observedClosureRateMsPerSec: stats.observedClosureRateMsPerSec,
-      commandedClosureRateMsPerSec: stats.commandedClosureRateMsPerSec,
-      effectivenessFraction: stats.effectivenessFraction,
-      rateEffectivenessVerdict,
-      floorVerdict,
-      cadenceVerdict,
-      firstSettledIndex: stats.firstSettledIndex,
-      dutyCycle: stats.dutyCycle,
-      dutyVerdict,
-      excursions: stats.excursions,
-      excursionVerdict,
-      modelVerdict,
-      movementComparable,
-      recommendation,
-      finalCounters,
-      firstClock,
-      firstPlayback,
+      verdicts: windowVerdicts({ stats, refresh, plantMinimum }),
+      lag: standingLag(settleState.firstRecords?.records, REFERENCE_LAG_MS[i]),
+      noCorrectionEstimateMs: settleState.lastNoCorrection?.seam?.controller?.estimateMs,
+      converged,
+      wholeMedianMs: (i === 0 ? sa : sb).summary?.medianDriftMs ?? null,
+      finalCounters: state.lastSeam?.counters ?? null,
+      firstClock: settleState.firstClock,
+      firstPlayback: settleState.firstPlayback,
       observedSamples: state.samples.length,
-      expectedObservationSamples,
       absent: state.absent,
       plantMinimum,
     });
@@ -1056,94 +789,77 @@ try {
   expect('7.3c the viewer kept playing throughout', !pv4.paused, `t=${pv4.time.toFixed(2)}s`);
 
   console.log('\n--- T8: producing the first seam ---');
-  const routeBeforeV = await readRoute(v);
-  const routeBeforeA3 = await readRoute(a3);
-  printRouteReading('V', 'before', routeBeforeV);
-  printRouteReading('A3', 'before', routeBeforeA3);
+  // THE ROUTE IS READ THROUGH `routeFields` AND NOWHERE ELSE — the fields
+  // printed here are the fields every assertion below is decided on, so a
+  // `before` and an `after` cannot come from two different paths.
+  const before = { V: routeFields(await readRoute(v)), A3: routeFields(await readRoute(a3)) };
+  console.log(`  before V: ${JSON.stringify(before.V)}`);
+  console.log(`  before A3: ${JSON.stringify(before.A3)}`);
 
   const offlineConditions = { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 };
   const onlineConditions = { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 };
   await v.send('Network.enable');
   await v.send('Network.emulateNetworkConditions', offlineConditions);
 
+  // ONE 30s BUDGET, shared by the two waits below rather than restarted between
+  // them: the departure and the offline signature are the same event, and a
+  // second full deadline would let the hold run to a minute.
   const routeOfflineStartedAt = Date.now();
-  let departureProbe = routeBeforeA3.probe;
-  let departureObserved = false;
-  while (!departureObserved && Date.now() - routeOfflineStartedAt < DEPART_DEADLINE_MS) {
-    departureProbe = await a3.evaluate(PROBE);
-    departureObserved = departureProbe.members.length === 1;
-    if (!departureObserved) {
-      const remaining = DEPART_DEADLINE_MS - (Date.now() - routeOfflineStartedAt);
-      if (remaining > 0) await sleep(Math.min(1000, remaining));
-    }
-  }
-  if (!departureObserved) {
-    console.log(`  T8 departure deadline expired after ${DEPART_DEADLINE_MS / 1000}s; A3 roster ${JSON.stringify(departureProbe.members)}`);
-  } else {
-    console.log(`  T8 A3 observed V's departure after ${Date.now() - routeOfflineStartedAt}ms: ${JSON.stringify(departureProbe.members)}`);
-  }
+  const routeOfflineDeadlineAt = routeOfflineStartedAt + DEPART_DEADLINE_MS;
+  const departure = await pollUntil(
+    () => a3.evaluate(PROBE),
+    (probe) => probe.members.length === 1,
+    { everyMs: DEPART_POLL_MS, deadlineAt: routeOfflineDeadlineAt },
+  );
+  const departureObserved = departure.ok;
+  console.log(departureObserved
+    ? `  T8 A3 observed V's departure after ${Date.now() - routeOfflineStartedAt}ms: ${JSON.stringify(departure.value.members)}`
+    : `  T8 departure deadline expired after ${DEPART_DEADLINE_MS / 1000}s; A3 roster ${JSON.stringify(departure.value.members)}`);
 
-  const deltaValue = (after, before) => Number.isFinite(after) && Number.isFinite(before) ? after - before : NaN;
-  const offlineSignatureFor = (before, after) => {
-    const beforeClock = before.seam?.clock ?? {};
-    const afterClock = after.seam?.clock ?? {};
-    const beforePlayback = before.seam?.playback ?? {};
-    const afterPlayback = after.seam?.playback ?? {};
-    return {
-      probesIssued: deltaValue(afterClock.probes?.issued, beforeClock.probes?.issued) >= 3,
-      lost: deltaValue(afterClock.counters?.lost, beforeClock.counters?.lost) >= 3,
-      sampleCountUnchanged: afterClock.sampleCount === beforeClock.sampleCount,
-      halfWidthWidened: Number.isFinite(afterClock.halfWidthMs) && afterClock.halfWidthMs > beforeClock.halfWidthMs,
-      callbacksAdvanced: deltaValue(afterPlayback.callbacks, beforePlayback.callbacks) > 0,
-    };
-  };
+  // Named for the two readings in scope, not shadowing them.
+  const deltaValue = (afterValue, beforeValue) => Number.isFinite(afterValue) && Number.isFinite(beforeValue) ? afterValue - beforeValue : NaN;
+  const offlineSignatureFor = (beforeFields, afterFields) => ({
+    probesIssued: deltaValue(afterFields.probesIssued, beforeFields.probesIssued) >= 3,
+    lost: deltaValue(afterFields.lost, beforeFields.lost) >= 3,
+    sampleCountUnchanged: afterFields.sampleCount === beforeFields.sampleCount,
+    halfWidthWidened: Number.isFinite(afterFields.halfWidthMs) && afterFields.halfWidthMs > beforeFields.halfWidthMs,
+    callbacksAdvanced: deltaValue(afterFields.callbacks, beforeFields.callbacks) > 0,
+  });
 
-  let routeOfflineV = await readRoute(v);
-  let offlineSignature = offlineSignatureFor(routeBeforeV, routeOfflineV);
-  while (departureObserved && !Object.values(offlineSignature).every(Boolean) && Date.now() - routeOfflineStartedAt < DEPART_DEADLINE_MS) {
-    const remaining = DEPART_DEADLINE_MS - (Date.now() - routeOfflineStartedAt);
-    if (remaining <= 0) break;
-    await sleep(Math.min(1000, remaining));
-    routeOfflineV = await readRoute(v);
-    offlineSignature = offlineSignatureFor(routeBeforeV, routeOfflineV);
-  }
-  console.log(`  T8 V offline signature: ${JSON.stringify({ ...offlineSignature, readings: routeFields(routeOfflineV) })}`);
+  const offline = await pollUntil(
+    async () => {
+      const fields = routeFields(await readRoute(v));
+      return { fields, signature: offlineSignatureFor(before.V, fields) };
+    },
+    ({ signature }) => !departureObserved || Object.values(signature).every(Boolean),
+    { everyMs: DEPART_POLL_MS, deadlineAt: routeOfflineDeadlineAt },
+  );
+  const { fields: offlineFields, signature: offlineSignature } = offline.value;
+  console.log(`  T8 V offline signature: ${JSON.stringify({ ...offlineSignature, readings: offlineFields })}`);
   // ONLY `lost` DISCRIMINATES, and the labels below say which clause claims what
-  // (`CONSTRAINTS.md` → *A reading pinned at its cap*). The filter evicts by
-  // count (clock-filter.mjs:167), so `sampleCount` sits pinned at DEFAULT_WINDOW
-  // on every healthy page and *unchanged* is the only value it can take; the
-  // half-width grows on its age term between any two reads, offline or not. Both
-  // passed in 4c's runs while every probe was completing. They stay because they
-  // say the controller kept its estimate across the hold — which is worth
-  // knowing and is not evidence of a disconnection. Do not read them as one.
-  expect('T8 V probes issued advanced by at least 3 while offline', offlineSignature.probesIssued, JSON.stringify(routeFields(routeOfflineV)));
-  expect('T8 V lost exchanges advanced by at least 3 while offline', offlineSignature.lost, JSON.stringify(routeFields(routeOfflineV)));
-  expect('T8 V kept its clock estimate: the filter window stayed full', offlineSignature.sampleCountUnchanged, JSON.stringify(routeFields(routeOfflineV)));
-  expect('T8 V clock half-width grew between the two readings', offlineSignature.halfWidthWidened, JSON.stringify(routeFields(routeOfflineV)));
-  expect('T8 V kept producing callbacks while offline', offlineSignature.callbacksAdvanced, JSON.stringify(routeFields(routeOfflineV)));
-  expect('T8 A3 observed V departure before the deadline', departureObserved, JSON.stringify(departureProbe.members));
+  // (`CONSTRAINTS.md` → *A reading pinned at its cap*). The other two stay
+  // because they say the controller kept its estimate across the hold; both
+  // passed in 4c's runs while every probe was completing, so neither is evidence
+  // of a disconnection and neither may be read as one.
+  expect('T8 V probes issued advanced by at least 3 while offline', offlineSignature.probesIssued, JSON.stringify(offlineFields));
+  expect('T8 V lost exchanges advanced by at least 3 while offline', offlineSignature.lost, JSON.stringify(offlineFields));
+  expect('T8 V kept its clock estimate: the filter window stayed full', offlineSignature.sampleCountUnchanged, JSON.stringify(offlineFields));
+  expect('T8 V clock half-width grew between the two readings', offlineSignature.halfWidthWidened, JSON.stringify(offlineFields));
+  expect('T8 V kept producing callbacks while offline', offlineSignature.callbacksAdvanced, JSON.stringify(offlineFields));
+  expect('T8 A3 observed V departure before the deadline', departureObserved, JSON.stringify(departure.value.members));
 
   await v.send('Network.emulateNetworkConditions', onlineConditions);
   const routeRejoinStartedAt = Date.now();
-  const beforeFreshJoins = routeBeforeV.seam?.timeline?.freshJoins;
-  let routeRejoined = false;
-  let routeAfterV = routeOfflineV;
-  while (!routeRejoined && Date.now() - routeRejoinStartedAt < REJOIN_DEADLINE_MS) {
-    const seam = await v.evaluate(SEAM);
-    const freshJoins = seam.timeline?.freshJoins;
-    if (Number.isFinite(freshJoins) && Number.isFinite(beforeFreshJoins) && freshJoins > beforeFreshJoins) {
-      routeAfterV = { seam, probe: await v.evaluate(PROBE) };
-      routeRejoined = true;
-      break;
-    }
-    const remaining = REJOIN_DEADLINE_MS - (Date.now() - routeRejoinStartedAt);
-    if (remaining > 0) await sleep(Math.min(500, remaining));
-  }
-  if (!routeRejoined) {
-    console.log(`  T8 rejoin deadline expired after ${REJOIN_DEADLINE_MS / 1000}s; V reading ${JSON.stringify(routeFields(routeAfterV))}`);
-  } else {
-    console.log(`  T8 V fresh-joined after ${Date.now() - routeRejoinStartedAt}ms`);
-  }
+  const beforeFreshJoins = before.V.freshJoins;
+  const rejoin = await pollUntil(
+    () => v.evaluate(SEAM),
+    (seam) => Number.isFinite(seam.timeline?.freshJoins) && Number.isFinite(beforeFreshJoins) && seam.timeline.freshJoins > beforeFreshJoins,
+    { everyMs: REJOIN_POLL_MS, deadlineAt: routeRejoinStartedAt + REJOIN_DEADLINE_MS },
+  );
+  const routeRejoined = rejoin.ok;
+  console.log(routeRejoined
+    ? `  T8 V fresh-joined after ${Date.now() - routeRejoinStartedAt}ms`
+    : `  T8 rejoin deadline expired after ${REJOIN_DEADLINE_MS / 1000}s; V reading ${JSON.stringify(offlineFields)}`);
 
   const transientControllerReadings = [];
   if (routeRejoined) {
@@ -1163,58 +879,43 @@ try {
   const transientTooFew = transientControllerReadings.some((reading) => reading.mode === 'waiting' && reading.reason === 'too-few-records');
   console.log(`  T8 transient waiting · too-few-records observed: ${transientTooFew ? 'yes' : 'no'} over ${transientControllerReadings.length} samples at ${OBSERVE_POLL_MS}ms`);
 
-  const routeAfter = {
-    V: await readRoute(v),
-    A3: await readRoute(a3),
-  };
-  printRouteReading('V', 'after', routeAfter.V);
-  printRouteReading('A3', 'after', routeAfter.A3);
+  const routeAfterV = await readRoute(v);
+  const after = { V: routeFields(routeAfterV), A3: routeFields(await readRoute(a3)) };
+  console.log(`  after V: ${JSON.stringify(after.V)}`);
+  console.log(`  after A3: ${JSON.stringify(after.A3)}`);
 
-  const beforeVSeam = routeBeforeV.seam ?? {};
-  const afterVSeam = routeAfter.V.seam ?? {};
-  const beforeA3Seam = routeBeforeA3.seam ?? {};
-  const afterA3Seam = routeAfter.A3.seam ?? {};
-  const beforeVTimeline = beforeVSeam.timeline ?? {};
-  const afterVTimeline = afterVSeam.timeline ?? {};
-  const beforeA3Timeline = beforeA3Seam.timeline ?? {};
-  const afterA3Timeline = afterA3Seam.timeline ?? {};
-  const beforeVPlayback = beforeVSeam.playback ?? {};
-  const afterVPlayback = afterVSeam.playback ?? {};
-  const beforeA3Playback = beforeA3Seam.playback ?? {};
-  const afterA3Playback = afterA3Seam.playback ?? {};
-  const beforeVController = beforeVSeam.controller ?? {};
-  const afterVController = afterVSeam.controller ?? {};
-  const beforeA3Controller = beforeA3Seam.controller ?? {};
-  const afterA3Controller = afterA3Seam.controller ?? {};
-  const freshJoinDelta = deltaValue(afterVTimeline.freshJoins, beforeVTimeline.freshJoins);
-  const epochRevisionDelta = deltaValue(afterVTimeline.epochRevisions, beforeVTimeline.epochRevisions);
-  const reopenDelta = deltaValue(afterVPlayback.reopens, beforeVPlayback.reopens);
-  const openDelta = deltaValue(afterVPlayback.opens, beforeVPlayback.opens);
-  const seamDelta = deltaValue(afterVPlayback.seams?.length, beforeVPlayback.seams?.length);
-  const seamDropDelta = deltaValue(afterVController.counters?.drops?.seam, beforeVController.counters?.drops?.seam);
-  const newVSeam = Array.isArray(afterVPlayback.seams) && Number.isFinite(beforeVPlayback.seams?.length)
-    ? afterVPlayback.seams[beforeVPlayback.seams.length]
+  const delta = (who, field) => deltaValue(after[who][field], before[who][field]);
+  const freshJoinDelta = delta('V', 'freshJoins');
+  const reopenDelta = delta('V', 'reopens');
+  const openDelta = delta('V', 'opens');
+  const seamDelta = delta('V', 'seams');
+  // The two things the route fields cannot carry: the seam LIST rather than its
+  // length, and the controller state that is not part of the route.
+  const afterVPlayback = routeAfterV.seam?.playback ?? {};
+  const afterVController = routeAfterV.seam?.controller ?? {};
+  const newVSeam = Array.isArray(afterVPlayback.seams) && Number.isFinite(before.V.seams)
+    ? afterVPlayback.seams[before.V.seams]
     : null;
 
-  expect('T8 V freshJoins advanced by exactly 1', freshJoinDelta === 1, `before=${beforeVTimeline.freshJoins} after=${afterVTimeline.freshJoins}`);
-  expect('T8 V epochRevisions advanced by 0', epochRevisionDelta === 0, `before=${beforeVTimeline.epochRevisions} after=${afterVTimeline.epochRevisions}`);
-  expect('T8 V timeline epoch moved later', Number.isFinite(afterVTimeline.epochMs) && afterVTimeline.epochMs > beforeVTimeline.epochMs, `before=${beforeVTimeline.epochMs} after=${afterVTimeline.epochMs}`);
-  expect('T8 V reopens advanced by exactly 1', reopenDelta === 1, `before=${beforeVPlayback.reopens} after=${afterVPlayback.reopens}`);
-  expect('T8 V opens advanced by 0', openDelta === 0, `before=${beforeVPlayback.opens} after=${afterVPlayback.opens}`);
-  expect('T8 V seams advanced by exactly 1', seamDelta === 1, `before=${beforeVPlayback.seams?.length} after=${afterVPlayback.seams?.length}`);
+  expect('T8 V freshJoins advanced by exactly 1', freshJoinDelta === 1, `before=${before.V.freshJoins} after=${after.V.freshJoins}`);
+  expect('T8 V epochRevisions advanced by 0', delta('V', 'epochRevisions') === 0, `before=${before.V.epochRevisions} after=${after.V.epochRevisions}`);
+  expect('T8 V timeline epoch moved later', Number.isFinite(after.V.timelineEpochMs) && after.V.timelineEpochMs > before.V.timelineEpochMs, `before=${before.V.timelineEpochMs} after=${after.V.timelineEpochMs}`);
+  expect('T8 V reopens advanced by exactly 1', reopenDelta === 1, `before=${before.V.reopens} after=${after.V.reopens}`);
+  expect('T8 V opens advanced by 0', openDelta === 0, `before=${before.V.opens} after=${after.V.opens}`);
+  expect('T8 V seams advanced by exactly 1', seamDelta === 1, `before=${before.V.seams} after=${after.V.seams}`);
   expect('T8 V new seam has a nonzero afterSeq', Number.isFinite(newVSeam?.afterSeq) && newVSeam.afterSeq > 0, JSON.stringify(newVSeam));
-  expect('T8 V new seam uses the post-event timeline epoch', newVSeam?.epochMs === afterVTimeline.epochMs, JSON.stringify({ seamEpochMs: newVSeam?.epochMs, timelineEpochMs: afterVTimeline.epochMs }));
-  expect('T8 V seam-drop counter advanced by exactly 1', seamDropDelta === 1, `before=${beforeVController.counters?.drops?.seam} after=${afterVController.counters?.drops?.seam}`);
+  expect('T8 V new seam uses the post-event timeline epoch', newVSeam?.epochMs === after.V.timelineEpochMs, JSON.stringify({ seamEpochMs: newVSeam?.epochMs, timelineEpochMs: after.V.timelineEpochMs }));
+  expect('T8 V seam-drop counter advanced by exactly 1', delta('V', 'seamDrops') === 1, `before=${before.V.seamDrops} after=${after.V.seamDrops}`);
   expect("T8 V controller's last drop was a seam", afterVController.lastDrop?.reason === 'seam', JSON.stringify(afterVController.lastDrop));
   expect('T8 V controller returned to the base rate within RATE_EPSILON', Math.abs((afterVController.rate ?? NaN) - 1) <= RATE_EPSILON, JSON.stringify(afterVController.rate));
-  expect("T8 V controller did not re-settle during the 3s post-seam read", afterVController.mode !== 'settled', JSON.stringify({ mode: afterVController.mode, reason: afterVController.reason }));
+  expect("T8 V controller did not re-settle during the 3s post-seam read", after.V.mode !== 'settled', JSON.stringify({ mode: after.V.mode, reason: afterVController.reason }));
   expect('T8 V controller rebuilt a nonempty window', afterVController.windowRecords > 0, JSON.stringify(afterVController.windowRecords));
-  expect('T8 V newest record is after the new seam', Number.isFinite(afterVSeam.latest?.seq) && afterVSeam.latest.seq > newVSeam?.afterSeq, JSON.stringify({ latestSeq: afterVSeam.latest?.seq, afterSeq: newVSeam?.afterSeq }));
-  expect('T8 A3 freshJoins stayed unchanged', deltaValue(afterA3Timeline.freshJoins, beforeA3Timeline.freshJoins) === 0, `before=${beforeA3Timeline.freshJoins} after=${afterA3Timeline.freshJoins}`);
-  expect('T8 A3 epochRevisions stayed unchanged', deltaValue(afterA3Timeline.epochRevisions, beforeA3Timeline.epochRevisions) === 0, `before=${beforeA3Timeline.epochRevisions} after=${afterA3Timeline.epochRevisions}`);
-  expect('T8 A3 reopens stayed unchanged', deltaValue(afterA3Playback.reopens, beforeA3Playback.reopens) === 0, `before=${beforeA3Playback.reopens} after=${afterA3Playback.reopens}`);
-  expect('T8 A3 seam-drop counter stayed unchanged', deltaValue(afterA3Controller.counters?.drops?.seam, beforeA3Controller.counters?.drops?.seam) === 0, `before=${beforeA3Controller.counters?.drops?.seam} after=${afterA3Controller.counters?.drops?.seam}`);
-  expect('T8 A3 timeline epoch stayed unchanged', afterA3Timeline.epochMs === beforeA3Timeline.epochMs, `before=${beforeA3Timeline.epochMs} after=${afterA3Timeline.epochMs}`);
+  expect('T8 V newest record is after the new seam', Number.isFinite(routeAfterV.seam?.latest?.seq) && routeAfterV.seam.latest.seq > newVSeam?.afterSeq, JSON.stringify({ latestSeq: routeAfterV.seam?.latest?.seq, afterSeq: newVSeam?.afterSeq }));
+  expect('T8 A3 freshJoins stayed unchanged', delta('A3', 'freshJoins') === 0, `before=${before.A3.freshJoins} after=${after.A3.freshJoins}`);
+  expect('T8 A3 epochRevisions stayed unchanged', delta('A3', 'epochRevisions') === 0, `before=${before.A3.epochRevisions} after=${after.A3.epochRevisions}`);
+  expect('T8 A3 reopens stayed unchanged', delta('A3', 'reopens') === 0, `before=${before.A3.reopens} after=${after.A3.reopens}`);
+  expect('T8 A3 seam-drop counter stayed unchanged', delta('A3', 'seamDrops') === 0, `before=${before.A3.seamDrops} after=${after.A3.seamDrops}`);
+  expect('T8 A3 timeline epoch stayed unchanged', after.A3.timelineEpochMs === before.A3.timelineEpochMs, `before=${before.A3.timelineEpochMs} after=${after.A3.timelineEpochMs}`);
 
   const networkSignaturePresent = offlineSignature.probesIssued && offlineSignature.lost && offlineSignature.sampleCountUnchanged && offlineSignature.halfWidthWidened;
   if (!offlineSignature.callbacksAdvanced) console.log('  T8 V media stall: playback.callbacks did not advance during the offline hold; this is a stall, not a seam failure.');
@@ -1225,7 +926,7 @@ try {
   else if (reopenDelta !== 1) routeDiagnosis = 'V fresh-joined and did not re-open';
   const routeFired = departureObserved && routeSignaturePresent && freshJoinDelta === 1 && reopenDelta === 1 && openDelta === 0 && seamDelta === 1;
   if (routeDiagnosis !== null || !routeFired) {
-    console.log(`  T8 route diagnosis: ${routeDiagnosis ?? 'V fresh-joined and re-opened, but another route assertion failed'}; offline signature ${JSON.stringify(offlineSignature)}; V before/after ${JSON.stringify({ before: routeFields(routeBeforeV), after: routeFields(routeAfter.V) })}`);
+    console.log(`  T8 route diagnosis: ${routeDiagnosis ?? 'V fresh-joined and re-opened, but another route assertion failed'}; offline signature ${JSON.stringify(offlineSignature)}; V before/after ${JSON.stringify({ before: before.V, after: after.V })}`);
   } else {
     console.log(`  T8 route diagnosis: seam fired; V fresh-joined and re-opened once, A3 remained untouched`);
   }
@@ -1242,20 +943,20 @@ try {
   }
   console.log(`  convergence: ${CONVERGED_WINDOW_MS / 1000}s spans; A median ${numberText(convergedA.convergedMedianMs)}ms over ${convergedA.convergedCount} records; B median ${numberText(convergedB.convergedMedianMs)}ms over ${convergedB.convergedCount} records; separation ${numberText(spread)}ms; whole-run summary medians A ${numberText(sa.summary?.medianDriftMs)}ms and B ${numberText(sb.summary?.medianDriftMs)}ms (ring-held history)`);
   for (const figure of t7Figures) {
-    const refresh = figure.refresh ?? {};
-    const plantMinimumText = figure.plantMinimum === null ? 'null' : `${(figure.plantMinimum.dutyCycle * 100).toFixed(1)}% at ${figure.plantMinimum.refreshHz}Hz/${figure.plantMinimum.standingError}ms`;
-    console.log(`  3.1 ${figure.label}: first 8 drift median ${numberText(figure.firstEightMs)}ms; last estimate with correctionsApplied=0 ${numberText(figure.noCorrectionEstimateMs)}ms; 4a reference ${figure.referenceLagMs}ms; verdict: ${figure.lagMatches ? 'reproduces within one 20ms sweep step' : 'does not reproduce within one 20ms sweep step'}, ${figure.inMeasuredBand ? 'inside' : 'outside'} the 3b 100-240ms band.`);
-    console.log(`  3.2 ${figure.label}: scatter ${numberText(figure.convergedSpreadMs)}ms over ${figure.convergedCount} records; alternation ${numberText(figure.alternation?.fraction, 3)} over ${figure.alternation?.pairs ?? 0} nonzero pairs; rounded drifts ${JSON.stringify(figure.histogram)}; panel refresh ${numberText(refresh.refreshRateHz)}Hz from ${refresh.frameCount ?? 'null'} frames with median delta ${numberText(refresh.medianDeltaMs)}ms; verdict: ${figure.cadenceVerdict}.`);
-    console.log(`  3.3 ${figure.label}: published ${figure.population} spread median ${numberText(figure.spreadMedianMs)}ms, max ${numberText(figure.spreadMaxMs)}ms; predicted half-vsync floor ${numberText(figure.predictedFloorMs)}ms; estimate range over the observation ${numberText(figure.medianMovementMs)}ms; two-client parking ${numberText(figure.parkingDistanceMs)}ms against ${DRIFT_TOLERANCE_MS}ms; verdict: ${figure.floorVerdict}.`);
-    console.log(`  3.4 ${figure.label}: first settled sample index ${figure.firstSettledIndex}; population ${figure.population}; duty ${figure.dutyVerdict}; excursions ${JSON.stringify(figure.excursions)}; verdict: ${figure.excursionVerdict}; plant sweep minimum ${plantMinimumText}; recommendation: ${figure.recommendation}; read over ${figure.observedSamples}/${figure.expectedObservationSamples} samples with ${figure.absent} absent.`);
-    console.log(`  2.11 ${figure.label}: Chrome 10s scatter ${numberText(figure.convergedSpreadMs)}ms vs half-vsync ${numberText(figure.predictedFloorMs)}ms; published ${figure.population} spread ${numberText(figure.spreadMedianMs)}ms; estimate range over the observation ${numberText(figure.medianMovementMs)}ms (NOT comparable to the plant's ${PLANT_MEDIAN_MOVEMENT_MS}ms, which is a per-poll step); verdict: ${figure.modelVerdict}; median applied rate ${numberText(figure.actingRateMedian, 6)} over acting fraction ${numberText(figure.actingFraction, 3)}; observed closure ${numberText(figure.observedClosureRateMsPerSec)}ms/s; commanded closure ${numberText(figure.commandedClosureRateMsPerSec)}ms/s; effectiveness fraction ${numberText(figure.effectivenessFraction, 3)}; rate-effectiveness verdict: ${figure.rateEffectivenessVerdict}.`);
-    console.log(`  3.5 ${figure.label}: final no-clock counters ${JSON.stringify({ noClock: figure.finalCounters?.noClock ?? null, framesOffered: figure.finalCounters?.framesOffered ?? null })}; first clock held ${figure.firstClock?.held ?? 'null'} counters ${JSON.stringify(figure.firstClock?.counters ?? null)}; first playing held ${figure.firstPlayback?.seam?.held ?? 'null'} counters ${JSON.stringify(figure.firstPlayback?.seam?.counters ?? null)}; verdict: direct controller record count is not observable, and this page construction cannot feed the no-clock arm because records require a clock and an established offset does not return to null.`);
+    const { label, stats, verdicts, lag, refresh, converged, plantMinimum: minimum } = figure;
+    const plantMinimumText = minimum === null ? 'null' : `${(minimum.dutyCycle * 100).toFixed(1)}% at ${minimum.refreshHz}Hz/${minimum.standingError}ms`;
+    console.log(`  3.1 ${label}: first 8 drift median ${numberText(lag.firstEightMs)}ms; last estimate with correctionsApplied=0 ${numberText(figure.noCorrectionEstimateMs)}ms; 4a reference ${lag.referenceLagMs}ms; verdict: ${lag.verdict}.`);
+    console.log(`  3.2 ${label}: scatter ${numberText(converged.convergedSpreadMs)}ms over ${converged.convergedCount} records; alternation ${numberText(stats.alternation?.fraction, 3)} over ${stats.alternation?.pairs ?? 0} nonzero pairs; rounded drifts ${JSON.stringify(stats.histogram)}; panel refresh ${numberText(refresh.refreshRateHz)}Hz from ${refresh.frameCount ?? 'null'} frames with median delta ${numberText(refresh.medianDeltaMs)}ms; verdict: ${verdicts.cadenceVerdict}.`);
+    console.log(`  3.3 ${label}: published ${stats.population} spread median ${numberText(stats.spreadMedianMs)}ms, max ${numberText(stats.spreadMaxMs)}ms; predicted half-vsync floor ${numberText(verdicts.predictedFloorMs)}ms; estimate range over the observation ${numberText(stats.medianMovementMs)}ms; two-client parking ${numberText(verdicts.parkingDistanceMs)}ms against ${DRIFT_TOLERANCE_MS}ms; verdict: ${verdicts.floorVerdict}.`);
+    console.log(`  3.4 ${label}: first settled sample index ${stats.firstSettledIndex}; population ${stats.population}; duty ${verdicts.dutyVerdict}; excursions ${JSON.stringify(stats.excursions)}; verdict: ${verdicts.excursionVerdict}; plant sweep minimum ${plantMinimumText}; recommendation: ${verdicts.recommendation}; read over ${figure.observedSamples}/${expectedObservationSamples} samples with ${figure.absent} absent.`);
+    console.log(`  2.11 ${label}: Chrome 10s scatter ${numberText(converged.convergedSpreadMs)}ms vs half-vsync ${numberText(verdicts.predictedFloorMs)}ms; published ${stats.population} spread ${numberText(stats.spreadMedianMs)}ms; estimate range over the observation ${numberText(stats.medianMovementMs)}ms (NOT comparable to the plant's ${PLANT_MEDIAN_MOVEMENT_MS}ms, which is a per-poll step); verdict: ${verdicts.modelVerdict}; median applied rate ${numberText(stats.actingRateMedian, 6)} over acting fraction ${numberText(stats.actingFraction, 3)}; observed closure ${numberText(stats.observedClosureRateMsPerSec)}ms/s; commanded closure ${numberText(stats.commandedClosureRateMsPerSec)}ms/s; effectiveness fraction ${numberText(stats.effectivenessFraction, 3)}; rate-effectiveness verdict: ${verdicts.rateEffectivenessVerdict}.`);
+    console.log(`  3.5 ${label}: final no-clock counters ${JSON.stringify({ noClock: figure.finalCounters?.noClock ?? null, framesOffered: figure.finalCounters?.framesOffered ?? null })}; first clock held ${figure.firstClock?.held ?? 'null'} counters ${JSON.stringify(figure.firstClock?.counters ?? null)}; first playing held ${figure.firstPlayback?.seam?.held ?? 'null'} counters ${JSON.stringify(figure.firstPlayback?.seam?.counters ?? null)}; verdict: direct controller record count is not observable, and this page construction cannot feed the no-clock arm because records require a clock and an established offset does not return to null.`);
   }
   for (const [label, readings] of [['A', linesA], ['B', linesB]]) {
     const distinct = (key) => [...new Set(readings.map((reading) => reading[key] ?? ''))];
     console.log(`  T6b ${label} rendered clock lines ${JSON.stringify(distinct('clockText'))} (asserted against CLOCK_LINE_RE); drift lines ${JSON.stringify(distinct('driftText'))} (asserted against DRIFT_LINE_RE with a positive frame count); controller lines ${JSON.stringify(distinct('controllerText'))} (asserted against CONTROLLER_LINE_ACTING_RE and CONTROLLER_LINE_HELD_RE, with an acting match required).`);
   }
-  console.log(`  T8 seam route counters: V before ${JSON.stringify(routeFields(routeBeforeV))}; V after ${JSON.stringify(routeFields(routeAfter.V))}; A3 before ${JSON.stringify(routeFields(routeBeforeA3))}; A3 after ${JSON.stringify(routeFields(routeAfter.A3))}; diagnosis ${routeDiagnosis ?? 'seam fired'}.`);
+  console.log(`  T8 seam route counters: V before ${JSON.stringify(before.V)}; V after ${JSON.stringify(after.V)}; A3 before ${JSON.stringify(before.A3)}; A3 after ${JSON.stringify(after.A3)}; diagnosis ${routeDiagnosis ?? 'seam fired'}.`);
   console.log(`  whole pass wall-clock length: ${numberText(Date.now() - PASS_STARTED_AT, 0)}ms (${numberText((Date.now() - PASS_STARTED_AT) / 1000, 1)}s), measured from script start.`);
   console.log('--- T9 FIGURES END ---');
 
