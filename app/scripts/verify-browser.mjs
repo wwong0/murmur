@@ -57,26 +57,42 @@
 //    make a live page's connection half-open. It is asserted in
 //    scripts/protocol-check.mjs instead.
 
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep, disposeChrome } from './cdp.mjs';
+import { createRecorder } from './drift-capture.mjs';
 import { DRIFT_LINE_RE } from '../public/lib/drift-readout.mjs';
-import { MIN_RECORDS, RATE_EPSILON } from '../public/lib/drift-controller.mjs';
+import { MAX_RATE_DEVIATION, MIN_RECORDS, RATE_EPSILON } from '../public/lib/drift-controller.mjs';
 import { CLOCK_LINE_RE, CONTROLLER_LINE_HELD_RE, CONTROLLER_LINE_ACTING_RE } from '../public/lib/diagnostics-overlay.mjs';
 // The arithmetic and the verdicts, next door and pure — this file is the
 // sequence of windows, waits and assertions, and nothing else.
 import {
+  DEFAULT_BARS,
+  ENDPOINT_CROSSCHECK_MS,
+  MAX_RESIDUAL_SLOPE_SE_PPM,
+  MAX_STRETCH_SLOPE_SE_PPM,
+  MIN_RESIDUAL_RECORDS,
+  MIN_RESIDUAL_SPAN_MS,
+  MIN_STRETCH_RECORDS,
+  MIN_STRETCH_SPAN_MS,
   MIN_CONVERGED_RECORDS,
   PLANT_MEDIAN_MOVEMENT_MS,
+  RATE_STEADY_TOLERANCE,
+  RESIDUAL_FLOOR_PPM,
+  SLOPE_SIGNIFICANCE_SIGMA,
+  STRETCH_EDGE_EXCLUSION_MS,
   convergedStats,
   observationStats,
   plantSweepMinimum,
+  predictedParkingDistanceMs,
   refreshFrom,
+  steadyCommandStretches,
   standingLag,
+  stretchSlopes,
   windowVerdicts,
 } from './drift-figures.mjs';
 
@@ -86,8 +102,29 @@ const ORIGIN = 'http://127.0.0.1:8100';
 
 const cdpHttp = (pathname) => cdpHttpOn(PORT, pathname);
 
-const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'app-verify-'));
-const BUNDLE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'room.bundle.js');
+const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const BUNDLE_PATH = path.join(APP_DIR, 'public', 'room.bundle.js');
+const RESULTS_DIR = path.join(APP_DIR, 'results');
+const PASS_STARTED_AT_ISO = new Date(PASS_STARTED_AT).toISOString();
+// Do not reuse a run directory: the first pair of captures was lost that way on 2026-09-05.
+const RUN_DIRECTORY_NAME = PASS_STARTED_AT_ISO.replaceAll(':', '-');
+const RUN_DIR = path.join(RESULTS_DIR, RUN_DIRECTORY_NAME);
+const MEDIA_DIR = path.resolve(process.env.APP_MEDIA_DIR ?? path.join(APP_DIR, '..', 'step0', 'content'));
+const WINDOW_STATE = 'visible, non-occluded (Chrome automation flags)';
+const MAX_RETAINED_BYTES = 10 * 1024 * 1024;
+const BAR_UNITS = Object.freeze({
+  RATE_STEADY_TOLERANCE: 'dimensionless rate',
+  STRETCH_EDGE_EXCLUSION_MS: 'ms',
+  MIN_STRETCH_SPAN_MS: 'ms',
+  MIN_STRETCH_RECORDS: 'count',
+  MIN_RESIDUAL_SPAN_MS: 'ms',
+  MIN_RESIDUAL_RECORDS: 'count',
+  MAX_STRETCH_SLOPE_SE_PPM: 'ppm',
+  MAX_RESIDUAL_SLOPE_SE_PPM: 'ppm',
+  SLOPE_SIGNIFICANCE_SIGMA: 'dimensionless',
+  RESIDUAL_FLOOR_PPM: 'ppm',
+  ENDPOINT_CROSSCHECK_MS: 'ms',
+});
 
 /**
  * The gap the run IMPOSES between the two windows (3b design.md D3). Without it
@@ -120,6 +157,8 @@ const DRIFT_TOLERANCE_MS = 40;
 const SETTLE_DEADLINE_MS = 120_000;
 const SETTLING_BUDGET_MS = 75_000;
 const SETTLE_POLL_MS = 250;
+// Recorder cadence: half the controller's 250 ms poll, so every evaluation is observable.
+const CAPTURE_POLL_MS = 125;
 // T6 converged span for tightened tolerances (tasks.md 2.4b).
 const CONVERGED_WINDOW_MS = 10_000;
 // T7 excursion observation (design.md D4). Every threshold the samples are
@@ -141,7 +180,71 @@ const REJOIN_DEADLINE_MS = 30_000;
 const REJOIN_POLL_MS = 500;
 const SEAM_SETTLE_MS = 3_000;
 
-const sha = (text) => crypto.createHash('sha256').update(text).digest('hex').slice(0, 12);
+const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
+const sha = (text) => sha256(text).slice(0, 12);
+
+function prepareRunDirectory() {
+  fs.mkdirSync(RESULTS_DIR, { recursive: true });
+  const relativeRunDir = path.relative(APP_DIR, RUN_DIR);
+  try {
+    const ignoredBy = execFileSync('git', ['check-ignore', '-v', '--', relativeRunDir], {
+      cwd: APP_DIR,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    throw new Error(`run output directory is ignored by ${ignoredBy.trim()}`);
+  } catch (error) {
+    if (error?.status !== 1) throw error;
+  }
+  if (fs.existsSync(RUN_DIR)) {
+    throw new Error(`run output directory already exists: ${RUN_DIR}`);
+  }
+  fs.mkdirSync(RUN_DIR);
+  console.log(`run output directory: ${RUN_DIR}`);
+}
+
+prepareRunDirectory();
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'app-verify-'));
+
+const BAR_DEFINITIONS = Object.freeze({
+  RATE_STEADY_TOLERANCE: { value: RATE_STEADY_TOLERANCE, units: BAR_UNITS.RATE_STEADY_TOLERANCE },
+  STRETCH_EDGE_EXCLUSION_MS: { value: STRETCH_EDGE_EXCLUSION_MS, units: BAR_UNITS.STRETCH_EDGE_EXCLUSION_MS },
+  MIN_STRETCH_SPAN_MS: { value: MIN_STRETCH_SPAN_MS, units: BAR_UNITS.MIN_STRETCH_SPAN_MS },
+  MIN_STRETCH_RECORDS: { value: MIN_STRETCH_RECORDS, units: BAR_UNITS.MIN_STRETCH_RECORDS },
+  MIN_RESIDUAL_SPAN_MS: { value: MIN_RESIDUAL_SPAN_MS, units: BAR_UNITS.MIN_RESIDUAL_SPAN_MS },
+  MIN_RESIDUAL_RECORDS: { value: MIN_RESIDUAL_RECORDS, units: BAR_UNITS.MIN_RESIDUAL_RECORDS },
+  MAX_STRETCH_SLOPE_SE_PPM: { value: MAX_STRETCH_SLOPE_SE_PPM, units: BAR_UNITS.MAX_STRETCH_SLOPE_SE_PPM },
+  MAX_RESIDUAL_SLOPE_SE_PPM: { value: MAX_RESIDUAL_SLOPE_SE_PPM, units: BAR_UNITS.MAX_RESIDUAL_SLOPE_SE_PPM },
+  SLOPE_SIGNIFICANCE_SIGMA: { value: SLOPE_SIGNIFICANCE_SIGMA, units: BAR_UNITS.SLOPE_SIGNIFICANCE_SIGMA },
+  RESIDUAL_FLOOR_PPM: { value: RESIDUAL_FLOOR_PPM, units: BAR_UNITS.RESIDUAL_FLOOR_PPM },
+  ENDPOINT_CROSSCHECK_MS: { value: ENDPOINT_CROSSCHECK_MS, units: BAR_UNITS.ENDPOINT_CROSSCHECK_MS },
+});
+
+// Copied from verify-frames.mjs's readContentFrameRate. That file executes its
+// pass on import and is outside this change's write set, so importing it would
+// run a second Chrome pass; keep this probe aligned manually.
+function readContentFrameRate() {
+  const temporaryPath = path.join(os.tmpdir(), `verify-browser-fps-${Date.now()}.mp4`);
+  const init = fs.readFileSync(path.join(MEDIA_DIR, 'init.mp4'));
+  const segment = fs.readFileSync(path.join(MEDIA_DIR, 'seg-00000.m4s'));
+  fs.writeFileSync(temporaryPath, Buffer.concat([init, segment]));
+  try {
+    const output = execFileSync('ffprobe', [
+      '-v', 'error',
+      '-select_streams', 'v:0',
+      '-show_entries', 'stream=r_frame_rate',
+      '-of', 'default=nw=1:nk=1',
+      temporaryPath,
+    ]).toString().trim();
+    const match = /^(\d+)\/(\d+)$/.exec(output);
+    if (!match) throw new Error(`unparseable content frame rate: ${JSON.stringify(output)}`);
+    const fps = Number(match[1]) / Number(match[2]);
+    if (!Number.isFinite(fps) || fps <= 0) throw new Error(`invalid content frame rate: ${output}`);
+    return fps;
+  } finally {
+    fs.rmSync(temporaryPath, { force: true });
+  }
+}
 
 const URL_A = `${ORIGIN}/room.html?room=demo&role=host&tab=A`;
 const URL_B = `${ORIGIN}/room.html?room=demo&role=viewer&tab=B`;
@@ -294,12 +397,115 @@ async function pollUntil(read, done, { everyMs, deadlineAt, first }) {
   return { value, ok: true };
 }
 
+async function pumpAll(recorders, atMs = Date.now()) {
+  for (const recorder of recorders) {
+    if (recorder) await recorder.pump(atMs);
+  }
+}
+
+async function pumpingWait(recorders, durationMs, everyMs) {
+  const endAt = Date.now() + durationMs;
+  await pumpAll(recorders);
+  while (Date.now() < endAt) {
+    await sleep(Math.min(everyMs, endAt - Date.now()));
+    if (Date.now() < endAt) await pumpAll(recorders);
+  }
+  await pumpAll(recorders);
+}
+
+function readNdjson(filePath) {
+  const text = fs.readFileSync(filePath, 'utf8').trim();
+  if (text === '') return [];
+  return text.split(/\r?\n/).map((line, index) => {
+    try {
+      return JSON.parse(line);
+    } catch (error) {
+      throw new Error(`invalid NDJSON at ${filePath}:${index + 1}: ${error.message}`);
+    }
+  });
+}
+
+function barsFromManifest(manifest) {
+  const bars = Object.fromEntries(Object.entries(manifest.bars ?? {}).map(([name, definition]) => [name, definition.value]));
+  for (const name of Object.keys(DEFAULT_BARS)) {
+    if (!Number.isFinite(bars[name])) throw new Error(`manifest is missing bar ${name}`);
+  }
+  return bars;
+}
+
+function qualifyingFit(fit, minimumRecords, minimumSpanMs, standardErrorPpm) {
+  return !fit.refused
+    && fit.recordCount >= minimumRecords
+    && fit.trimmedSpanMs >= minimumSpanMs
+    && Number.isFinite(fit.media?.standardErrorPpm)
+    && fit.media.standardErrorPpm <= standardErrorPpm
+    && Number.isFinite(fit.drift?.standardErrorPpm)
+    && fit.drift.standardErrorPpm <= standardErrorPpm
+    && fit.endpointCrosscheck?.mediaWithinBar === true
+    && fit.endpointCrosscheck?.driftWithinBar === true;
+}
+
+function evaluateSufficiency(manifestPath) {
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  const bars = barsFromManifest(manifest);
+  const windows = (manifest.windows ?? []).map((window) => {
+    const records = readNdjson(path.join(RUN_DIR, window.files.records));
+    const captures = readNdjson(path.join(RUN_DIR, window.files.captures));
+    const samples = captures.map((capture) => ({ atMs: capture.atMs, ...capture.controller }));
+    const stretches = steadyCommandStretches(samples, bars);
+    const fits = stretchSlopes({ stretches, records, bars });
+    const saturatedFits = fits.filter((fit) => qualifyingFit(
+      fit,
+      bars.MIN_STRETCH_RECORDS,
+      bars.MIN_STRETCH_SPAN_MS,
+      bars.MAX_STRETCH_SLOPE_SE_PPM,
+    ) && Math.abs(fit.medianRate - (1 + MAX_RATE_DEVIATION)) <= bars.RATE_STEADY_TOLERANCE);
+    const plateauFits = fits.filter((fit) => qualifyingFit(
+      fit,
+      bars.MIN_RESIDUAL_RECORDS,
+      bars.MIN_RESIDUAL_SPAN_MS,
+      bars.MAX_RESIDUAL_SLOPE_SE_PPM,
+    ) && fit.medianRate < 1 + MAX_RATE_DEVIATION - bars.RATE_STEADY_TOLERANCE);
+    const recordMinimumMet = records.length >= bars.MIN_RESIDUAL_RECORDS;
+    const spanMinimumMet = plateauFits.length > 0;
+    const missed = window.counts?.missed;
+    const ok = missed === 0 && recordMinimumMet && spanMinimumMet && saturatedFits.length > 0 && plateauFits.length > 0;
+    return {
+      label: window.label,
+      records: records.length,
+      captures: captures.length,
+      missed,
+      stretches: fits.length,
+      qualifyingSaturated: saturatedFits.length,
+      qualifyingPlateau: plateauFits.length,
+      recordMinimumMet,
+      spanMinimumMet,
+      ok,
+    };
+  });
+  return { ok: windows.length === 2 && windows.every((window) => window.ok), windows };
+}
+
+function rederiveConvergedMedian(recordsPath, barSeq, endSeq) {
+  if (!Number.isSafeInteger(barSeq) || !Number.isSafeInteger(endSeq) || endSeq < barSeq) {
+    throw new Error(`invalid retained median bounds ${barSeq}..${endSeq}`);
+  }
+  const records = readNdjson(recordsPath);
+  if (!records.every((record) => record && Number.isSafeInteger(record.seq))) {
+    throw new Error(`retained records in ${recordsPath} do not all have sequence numbers`);
+  }
+  const selected = records.filter((record) => record.seq > barSeq && record.seq <= endSeq);
+  const result = convergedStats({ records: selected }, barSeq);
+  return { medianMs: result.convergedMedianMs, count: result.convergedCount };
+}
+
 async function waitForSettle(tabs) {
   const startedAt = Date.now();
   const capAt = startedAt + SETTLE_DEADLINE_MS + WINDOW_GAP_MS + 60_000;
-  const states = tabs.map(({ label, tab }) => ({
+  const states = tabs.map(({ label, tab, recorder }) => ({
     label,
     tab,
+    recorder,
     last: null,
     absent: 0,
     firstPlaybackAt: null,
@@ -312,34 +518,41 @@ async function waitForSettle(tabs) {
     firstClock: null,
   }));
   let nextProgressAt = startedAt + SETTLE_PROGRESS_MS;
+  let settleTurn = 0;
 
   const readAll = async () => {
+    const readSeam = settleTurn % 2 === 0;
+    settleTurn++;
     for (const state of states) {
-      const seam = await state.tab.evaluate(SEAM);
-      if (!seam.present) {
-        state.absent++;
-        continue;
+      const atMs = Date.now();
+      if (readSeam) {
+        const seam = await state.tab.evaluate(SEAM);
+        if (!seam.present) {
+          state.absent++;
+        } else {
+          const reading = { atMs, seam };
+          state.last = reading;
+          const playback = seam.playback ?? {};
+          const controller = seam.controller ?? {};
+          if (playback.playing === true && state.firstPlaybackAt === null) {
+            state.firstPlaybackAt = reading.atMs;
+            state.firstPlayback = reading;
+          }
+          if (controller.mode === 'settled' && controller.settlingMs !== null && state.firstSettledAt === null) {
+            state.firstSettledAt = reading.atMs;
+            state.firstSettlingMs = controller.settlingMs;
+          }
+          if (controller.correctionsApplied === 0) state.lastNoCorrection = reading;
+          if (controller.settlingMs === null) state.lastNoSettling = reading;
+          if (Array.isArray(seam.records) && seam.records.length >= MIN_RECORDS && state.firstRecords === null) {
+            state.firstRecords = { atMs: reading.atMs, records: seam.records.slice(0, 8) };
+          }
+          if (seam.clock?.offsetMs != null && state.firstClock === null) {
+            state.firstClock = { atMs: reading.atMs, held: seam.held, counters: seam.counters };
+          }
+        }
       }
-      const reading = { atMs: Date.now(), seam };
-      state.last = reading;
-      const playback = seam.playback ?? {};
-      const controller = seam.controller ?? {};
-      if (playback.playing === true && state.firstPlaybackAt === null) {
-        state.firstPlaybackAt = reading.atMs;
-        state.firstPlayback = reading;
-      }
-      if (controller.mode === 'settled' && controller.settlingMs !== null && state.firstSettledAt === null) {
-        state.firstSettledAt = reading.atMs;
-        state.firstSettlingMs = controller.settlingMs;
-      }
-      if (controller.correctionsApplied === 0) state.lastNoCorrection = reading;
-      if (controller.settlingMs === null) state.lastNoSettling = reading;
-      if (Array.isArray(seam.records) && seam.records.length >= MIN_RECORDS && state.firstRecords === null) {
-        state.firstRecords = { atMs: reading.atMs, records: seam.records.slice(0, 8) };
-      }
-      if (seam.clock?.offsetMs != null && state.firstClock === null) {
-        state.firstClock = { atMs: reading.atMs, held: seam.held, counters: seam.counters };
-      }
+      await state.recorder?.pump(atMs);
     }
 
     const now = Date.now();
@@ -358,16 +571,18 @@ async function waitForSettle(tabs) {
   // A window is done when it has settled, or when its OWN playback start is
   // SETTLE_DEADLINE_MS behind — the per-window deadline is the point of the
   // wait, and `capAt` is only the backstop for a window that never played.
+  // Pump-only turns reuse these persisted latches; checking them twice as often
+  // does not require another tab evaluation.
   const settledOrOutOfTime = (state) => state.firstSettledAt !== null
     || (state.firstPlaybackAt !== null && Date.now() >= state.firstPlaybackAt + SETTLE_DEADLINE_MS);
-  await pollUntil(readAll, (all) => all.every(settledOrOutOfTime), { everyMs: SETTLE_POLL_MS, deadlineAt: capAt });
+  await pollUntil(readAll, (all) => all.every(settledOrOutOfTime), { everyMs: CAPTURE_POLL_MS, deadlineAt: capAt });
   return states;
 }
 
 async function observeWindows(tabs, durationMs) {
   const startedAt = Date.now();
   const endAt = startedAt + durationMs;
-  const states = tabs.map(({ label, tab }) => ({ label, tab, samples: [], absent: 0, lastSeam: null }));
+  const states = tabs.map(({ label, tab, recorder }) => ({ label, tab, recorder, samples: [], absent: 0, lastSeam: null }));
   let nextSampleAt = startedAt;
   let nextProgressAt = startedAt + OBSERVE_PROGRESS_MS;
 
@@ -377,6 +592,7 @@ async function observeWindows(tabs, durationMs) {
       const seam = await state.tab.evaluate(SEAM);
       if (!seam.present) {
         state.absent++;
+        await state.recorder?.pump(atMs);
         return;
       }
       state.lastSeam = seam;
@@ -386,12 +602,14 @@ async function observeWindows(tabs, durationMs) {
         mode: controller.mode ?? null,
         reason: controller.reason ?? null,
         rate: controller.rate ?? null,
+        polls: controller.polls ?? null,
         estimateMs: controller.estimateMs ?? null,
         bandMs: controller.bandMs ?? null,
         spreadMs: controller.spreadMs ?? null,
         windowRecords: controller.windowRecords ?? null,
         controlRecords: controller.controlRecords ?? null,
       });
+      await state.recorder?.pump(atMs);
     }));
 
     const now = Date.now();
@@ -474,13 +692,65 @@ function routeFields(reading) {
   };
 }
 
+let recorderA = null;
+let recorderB = null;
+let manifestPath = null;
+let contentFps = null;
+let contentFpsUnavailableReason = null;
+
+function runCheck() {
+  const command = 'npm run check';
+  const executable = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  let result;
+  try {
+    result = spawnSync(executable, ['run', 'check'], {
+      cwd: APP_DIR,
+      shell: process.platform === 'win32',
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (error) {
+    return {
+      command,
+      exitStatus: null,
+      summaryLine: null,
+      output: '',
+      error: error?.message ?? String(error),
+    };
+  }
+  const stdout = result.stdout ?? '';
+  const stderr = result.stderr ?? '';
+  const output = `${stdout}${stderr}`;
+  // THE ASSERTION TALLY, not the first line that happens to start with the
+  // prefix — the check announces its servers on `protocol-check:` lines too, and
+  // a `find` on the prefix alone records the ephemeral port as the run's result.
+  const lines = output.split(/\r?\n/).filter((line) => line.startsWith('protocol-check: '));
+  const summaryLine = lines.findLast((line) => line.includes('assertions')) ?? lines.at(-1) ?? null;
+  return {
+    command,
+    exitStatus: result.status,
+    summaryLine,
+    output: result.status === 0 && !result.error ? null : output,
+    ...(result.error ? { error: result.error.message } : {}),
+  };
+}
+
 try {
-  await cdpHttp('/json/version');
+  const chromeInfo = await cdpHttp('/json/version');
+  const gitHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: APP_DIR, encoding: 'utf8' }).trim();
+  try {
+    contentFps = readContentFrameRate();
+    console.log(`content frame rate (ffprobe, init.mp4 + seg-00000.m4s): ${contentFps} fps`);
+  } catch (error) {
+    contentFpsUnavailableReason = error?.message ?? String(error);
+    console.log(`content frame rate unavailable: ${contentFpsUnavailableReason}`);
+  }
   const windows = await cdpHttp('/json/list');
   console.log(`(chrome opened ${windows.filter((t) => t.type === 'page').length} page target(s))`);
 
   console.log('\n--- 7.1 / 7.2: two windows, one room ---');
   const a = await attach('A/host', URL_A, true);
+  recorderA = createRecorder({ label: 'A', tab: a, dir: RUN_DIR });
 
   console.log('\n--- 3.1: which build is this run talking to? ---');
   // A 200 on /room.html proves something is answering, not what it is
@@ -502,11 +772,13 @@ try {
   // THE IMPOSED GAP (3.4) — the input to the experiment, not dead time. Read
   // WINDOW_GAP_MS before shortening or removing it.
   console.log(`\n--- 3.4: opening the second window ${WINDOW_GAP_MS / 1000}s late, on purpose ---`);
-  await sleep(WINDOW_GAP_MS);
+  await pumpingWait([recorderA], WINDOW_GAP_MS, CAPTURE_POLL_MS);
   const b = await attach('B/view', URL_B);
+  recorderB = createRecorder({ label: 'B', tab: b, dir: RUN_DIR });
 
   console.log('\n--- T5: waiting for both windows to settle ---');
-  const settleStates = await waitForSettle([{ label: 'A', tab: a }, { label: 'B', tab: b }]);
+  const recorders = [recorderA, recorderB];
+  const settleStates = await waitForSettle([{ label: 'A', tab: a, recorder: recorderA }, { label: 'B', tab: b, recorder: recorderB }]);
   for (const state of settleStates) {
     const seam = state.last?.seam;
     const controller = seam?.controller ?? {};
@@ -542,18 +814,19 @@ try {
   // the whole ring clears MIN_CONVERGED_RECORDS by an order of magnitude.
   expect('T6 A anchored its converged span on a real record', Number.isFinite(barSeqA) && barSeqA > 0, `barSeq ${barSeqA}`);
   expect('T6 B anchored its converged span on a real record', Number.isFinite(barSeqB) && barSeqB > 0, `barSeq ${barSeqB}`);
-  await sleep(CONVERGED_WINDOW_MS / 2);
+  await pumpingWait(recorders, CONVERGED_WINDOW_MS / 2, CAPTURE_POLL_MS);
   console.log(`  converged span in progress: ${CONVERGED_WINDOW_MS / 1000}s total, ${CONVERGED_WINDOW_MS / 2000}s elapsed`);
-  await sleep(CONVERGED_WINDOW_MS / 2);
+  await pumpingWait(recorders, CONVERGED_WINDOW_MS / 2, CAPTURE_POLL_MS);
   const sa = await a.evaluate(SEAM);
   const pa = await a.evaluate(PROBE);
   const sb = await b.evaluate(SEAM);
   const pb = await b.evaluate(PROBE);
+  await pumpAll(recorders);
   const convergedA = convergedStats(sa, barSeqA);
   const convergedB = convergedStats(sb, barSeqB);
   for (const [label, seam, stats] of [['A', sa, convergedA], ['B', sb, convergedB]]) {
     const whole = seam.summary ?? {};
-    console.log(`  ${label}: converged span ${CONVERGED_WINDOW_MS / 1000}s, ${stats.convergedCount} records, ${stats.convergedCount < MIN_CONVERGED_RECORDS ? 'not enough records; ' : ''}median ${stats.convergedMedianMs ?? 'null'}ms, p95-p5 ${stats.convergedSpreadMs ?? 'null'}ms; whole run (ring, up to 3600 records): median ${whole.medianDriftMs ?? 'null'}ms, framesHeld ${whole.framesHeld ?? 'null'}, p99DriftMs ${whole.p99DriftMs ?? 'null'}ms`);
+    console.log(`  ${label}: converged span ${CONVERGED_WINDOW_MS / 1000}s, ${stats.convergedCount} records, ${stats.convergedCount < MIN_CONVERGED_RECORDS ? 'not enough records; ' : ''}median ${stats.convergedMedianMs ?? 'null'}ms, interpolated p95-p5 ${stats.convergedSpreadMs ?? 'null'}ms; whole run (ring, up to 3600 records): median ${whole.medianDriftMs ?? 'null'}ms, framesHeld ${whole.framesHeld ?? 'null'}, p99DriftMs ${whole.p99DriftMs ?? 'null'}ms`);
     expect(`3.6 ${label} converged span has at least ${MIN_CONVERGED_RECORDS} records`, stats.convergedCount >= MIN_CONVERGED_RECORDS, `${stats.convergedCount} records`);
     expect(`3.6 ${label} converged records have finite drift`, stats.records.every((record) => Number.isFinite(record.driftMs)), `${stats.records.length} records`);
   }
@@ -577,8 +850,11 @@ try {
   );
 
   console.log('\n--- T6b: reading the three rendered lines ---');
+  await pumpAll(recorders);
   const linesA = await readLines(a, pa);
+  await pumpAll(recorders);
   const linesB = await readLines(b, pb);
+  await pumpAll(recorders);
   for (const [label, readings, seam] of [['A', linesA, sa], ['B', linesB, sb]]) {
     const distinct = (key) => [...new Set(readings.map((reading) => reading[key] ?? ''))];
     console.log(`  ${label} clock line readings: ${JSON.stringify(distinct('clockText'))}`);
@@ -619,7 +895,7 @@ try {
   expect('7.1 rosters agree', JSON.stringify(pa.members.slice().sort()) === JSON.stringify(pb.members.slice().sort()));
 
   console.log('\n--- T7: model check and hardware questions ---');
-  const observationStates = await observeWindows([{ label: 'A', tab: a }, { label: 'B', tab: b }], OBSERVE_MS);
+  const observationStates = await observeWindows([{ label: 'A', tab: a, recorder: recorderA }, { label: 'B', tab: b, recorder: recorderB }], OBSERVE_MS);
   const refreshRates = await measureRefreshRates([{ label: 'A', tab: a }, { label: 'B', tab: b }]);
   const plantMinimum = plantSweepMinimum();
   const expectedObservationSamples = Math.ceil(OBSERVE_MS / OBSERVE_POLL_MS);
@@ -652,6 +928,79 @@ try {
       plantMinimum,
     });
   }
+
+  console.log('\n--- T10: flushing retained records and evaluating sufficiency ---');
+  // This is before the next block closes B; anything still in B's ring is lost
+  // once that close is issued, so both recorders are closed here after one last pump.
+  await pumpAll(recorders);
+  const countsA = recorderA.finish();
+  const countsB = recorderB.finish();
+  const retainedBytes = [recorderA.recordsPath, recorderA.capturesPath, recorderB.recordsPath, recorderB.capturesPath]
+    .reduce((total, filePath) => total + fs.statSync(filePath).size, 0);
+  if (retainedBytes > MAX_RETAINED_BYTES) {
+    throw new Error(`retained capture volume ${retainedBytes} bytes exceeds the ${MAX_RETAINED_BYTES}-byte STOP limit`);
+  }
+  manifestPath = path.join(RUN_DIR, 'manifest.json');
+  const manifest = {
+    schemaVersion: 1,
+    runDirectory: RUN_DIRECTORY_NAME,
+    gitHead,
+    build: {
+      pageBuildId: seamEarly.buildId ?? null,
+      servedBundleSha256: sha256(served),
+      onDiskBundleSha256: sha256(onDisk),
+    },
+    chrome: {
+      version: chromeInfo.Browser ?? null,
+      userAgent: chromeInfo['User-Agent'] ?? null,
+    },
+    platform: {
+      platform: process.platform,
+      osRelease: os.release(),
+    },
+    regime: {
+      windowState: WINDOW_STATE,
+      contentFps,
+      contentFpsUnavailableReason,
+      mediaDir: MEDIA_DIR,
+      appMediaDir: process.env.APP_MEDIA_DIR ?? MEDIA_DIR,
+    },
+    timing: {
+      passStartedAt: PASS_STARTED_AT_ISO,
+      passEndedAt: new Date().toISOString(),
+    },
+    bars: BAR_DEFINITIONS,
+    check: runCheck(),
+    windows: t7Figures.map((figure, index) => ({
+      label: figure.label,
+      panel: refreshRates[index].rate,
+      files: {
+        records: `${figure.label}.records.ndjson`,
+        captures: `${figure.label}.captures.ndjson`,
+      },
+      counts: index === 0 ? countsA : countsB,
+      observedSamples: figure.observedSamples,
+      absentSamples: figure.absent,
+    })),
+  };
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  const sufficiency = evaluateSufficiency(manifestPath);
+  manifest.sufficiency = sufficiency;
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  for (const window of sufficiency.windows) {
+    console.log(`  ${window.label}: missed ${window.missed}; ${window.records} retained records and ${window.captures} captures; ${window.qualifyingSaturated} qualifying saturated stretch(es), ${window.qualifyingPlateau} qualifying plateau stretch(es); record minimum ${window.recordMinimumMet ? 'met' : 'not met'}, span minimum ${window.spanMinimumMet ? 'met' : 'not met'}`);
+  }
+  expect('T10 both windows retain a sufficient, gap-free capture', sufficiency.ok, JSON.stringify(sufficiency));
+
+  const rederivedA = rederiveConvergedMedian(path.join(RUN_DIR, 'A.records.ndjson'), barSeqA, sa.latest?.seq);
+  const rederivedB = rederiveConvergedMedian(path.join(RUN_DIR, 'B.records.ndjson'), barSeqB, sb.latest?.seq);
+  expect('T10 A converged median re-derives from retained NDJSON', rederivedA.medianMs === convergedA.convergedMedianMs && rederivedA.count === convergedA.convergedCount, `retained ${rederivedA.medianMs}ms/${rederivedA.count}; printed ${convergedA.convergedMedianMs}ms/${convergedA.convergedCount}`);
+  expect('T10 B converged median re-derives from retained NDJSON', rederivedB.medianMs === convergedB.convergedMedianMs && rederivedB.count === convergedB.convergedCount, `retained ${rederivedB.medianMs}ms/${rederivedB.count}; printed ${convergedB.convergedMedianMs}ms/${convergedB.convergedCount}`);
+
+  const predictedParkingMs = predictedParkingDistanceMs(
+    t7Figures[0]?.stats.bandMedianMs,
+    t7Figures[1]?.stats.bandMedianMs,
+  );
 
   const pa2 = await a.evaluate(PROBE);
   const pb2 = await b.evaluate(PROBE);
@@ -942,14 +1291,15 @@ try {
     console.log(`  settling ${state.label}: settlingMs ${numberText(controller.settlingMs)}ms; gap before first correction ${numberText(gapMs)}ms (observed at ${SETTLE_POLL_MS}ms endpoints, ±0.25s granularity); applied rate ${numberText(controller.rate, 9)}; correctionsApplied ${controller.correctionsApplied ?? 'null'}`);
   }
   console.log(`  convergence: ${CONVERGED_WINDOW_MS / 1000}s spans; A median ${numberText(convergedA.convergedMedianMs)}ms over ${convergedA.convergedCount} records; B median ${numberText(convergedB.convergedMedianMs)}ms over ${convergedB.convergedCount} records; separation ${numberText(spread)}ms; whole-run summary medians A ${numberText(sa.summary?.medianDriftMs)}ms and B ${numberText(sb.summary?.medianDriftMs)}ms (ring-held history)`);
+  console.log(`  3.3 two-client parking prediction: ${numberText(predictedParkingMs)}ms from A published ${t7Figures[0]?.stats.population} band median ${numberText(t7Figures[0]?.stats.bandMedianMs)}ms + B published ${t7Figures[1]?.stats.population} band median ${numberText(t7Figures[1]?.stats.bandMedianMs)}ms; predicted worst-case separation, not an observed distance.`);
   for (const figure of t7Figures) {
     const { label, stats, verdicts, lag, refresh, converged, plantMinimum: minimum } = figure;
-    const plantMinimumText = minimum === null ? 'null' : `${(minimum.dutyCycle * 100).toFixed(1)}% at ${minimum.refreshHz}Hz/${minimum.standingError}ms`;
+    const plantMinimumText = minimum === null ? 'null' : `${(minimum.dutyCycle * 100).toFixed(1)}% at ${minimum.refreshHz}Hz/${minimum.standingError}ms over ${minimum.population}`;
     console.log(`  3.1 ${label}: first 8 drift median ${numberText(lag.firstEightMs)}ms; last estimate with correctionsApplied=0 ${numberText(figure.noCorrectionEstimateMs)}ms; 4a reference ${lag.referenceLagMs}ms; verdict: ${lag.verdict}.`);
-    console.log(`  3.2 ${label}: scatter ${numberText(converged.convergedSpreadMs)}ms over ${converged.convergedCount} records; alternation ${numberText(stats.alternation?.fraction, 3)} over ${stats.alternation?.pairs ?? 0} nonzero pairs; rounded drifts ${JSON.stringify(stats.histogram)}; panel refresh ${numberText(refresh.refreshRateHz)}Hz from ${refresh.frameCount ?? 'null'} frames with median delta ${numberText(refresh.medianDeltaMs)}ms; verdict: ${verdicts.cadenceVerdict}.`);
-    console.log(`  3.3 ${label}: published ${stats.population} spread median ${numberText(stats.spreadMedianMs)}ms, max ${numberText(stats.spreadMaxMs)}ms; predicted half-vsync floor ${numberText(verdicts.predictedFloorMs)}ms; estimate range over the observation ${numberText(stats.medianMovementMs)}ms; two-client parking ${numberText(verdicts.parkingDistanceMs)}ms against ${DRIFT_TOLERANCE_MS}ms; verdict: ${verdicts.floorVerdict}.`);
+    console.log(`  3.2 ${label}: interpolated span scatter ${numberText(converged.convergedSpreadMs)}ms over ${converged.convergedCount} records; alternation ${numberText(stats.alternation?.fraction, 3)} over ${stats.alternation?.nonzeroPairs ?? 0} nonzero pairs, ${stats.alternation?.zeroPairs ?? 0} zero pairs, ${stats.alternation?.totalPairs ?? 0} total pairs; rounded drifts ${JSON.stringify(stats.histogram)}; panel refresh ${numberText(refresh.refreshRateHz)}Hz from ${refresh.frameCount ?? 'null'} frames with median delta ${numberText(refresh.medianDeltaMs)}ms; verdict: ${verdicts.cadenceVerdict}.`);
+    console.log(`  3.3 ${label}: published ${stats.population} spread median ${numberText(stats.spreadMedianMs)}ms, max ${numberText(stats.spreadMaxMs)}ms; predicted half-vsync floor ${numberText(verdicts.predictedFloorMs)}ms; estimate range over the observation ${numberText(stats.estimateRangeMs)}ms; verdict: ${verdicts.floorVerdict}.`);
     console.log(`  3.4 ${label}: first settled sample index ${stats.firstSettledIndex}; population ${stats.population}; duty ${verdicts.dutyVerdict}; excursions ${JSON.stringify(stats.excursions)}; verdict: ${verdicts.excursionVerdict}; plant sweep minimum ${plantMinimumText}; recommendation: ${verdicts.recommendation}; read over ${figure.observedSamples}/${expectedObservationSamples} samples with ${figure.absent} absent.`);
-    console.log(`  2.11 ${label}: Chrome 10s scatter ${numberText(converged.convergedSpreadMs)}ms vs half-vsync ${numberText(verdicts.predictedFloorMs)}ms; published ${stats.population} spread ${numberText(stats.spreadMedianMs)}ms; estimate range over the observation ${numberText(stats.medianMovementMs)}ms (NOT comparable to the plant's ${PLANT_MEDIAN_MOVEMENT_MS}ms, which is a per-poll step); verdict: ${verdicts.modelVerdict}; median applied rate ${numberText(stats.actingRateMedian, 6)} over acting fraction ${numberText(stats.actingFraction, 3)}; observed closure ${numberText(stats.observedClosureRateMsPerSec)}ms/s; commanded closure ${numberText(stats.commandedClosureRateMsPerSec)}ms/s; effectiveness fraction ${numberText(stats.effectivenessFraction, 3)}; rate-effectiveness verdict: ${verdicts.rateEffectivenessVerdict}.`);
+    console.log(`  2.11 ${label}: Chrome 10s interpolated scatter ${numberText(converged.convergedSpreadMs)}ms vs half-vsync ${numberText(verdicts.predictedFloorMs)}ms; published ${stats.population} spread ${numberText(stats.spreadMedianMs)}ms; estimate range over the observation ${numberText(stats.estimateRangeMs)}ms; max per-poll estimate movement ${numberText(stats.maxPerPollMovementMs)}ms over ${stats.perPollPairsUsed} adjacent pairs, ${stats.perPollPairsSkippedForGap} skipped for poll gaps (comparable to the plant's ${PLANT_MEDIAN_MOVEMENT_MS}ms largest per-poll movement, not a median); verdict: ${verdicts.modelVerdict}; median applied rate ${numberText(stats.actingRateMedian, 6)} over acting fraction ${numberText(stats.actingFraction, 3)}; observed closure ${numberText(stats.observedClosureRateMsPerSec)}ms/s; commanded closure ${numberText(stats.commandedClosureRateMsPerSec)}ms/s; effectiveness fraction ${numberText(stats.effectivenessFraction, 3)}; rate-effectiveness verdict: ${verdicts.rateEffectivenessVerdict}.`);
     console.log(`  3.5 ${label}: final no-clock counters ${JSON.stringify({ noClock: figure.finalCounters?.noClock ?? null, framesOffered: figure.finalCounters?.framesOffered ?? null })}; first clock held ${figure.firstClock?.held ?? 'null'} counters ${JSON.stringify(figure.firstClock?.counters ?? null)}; first playing held ${figure.firstPlayback?.seam?.held ?? 'null'} counters ${JSON.stringify(figure.firstPlayback?.seam?.counters ?? null)}; verdict: direct controller record count is not observable, and this page construction cannot feed the no-clock arm because records require a clock and an established offset does not return to null.`);
   }
   for (const [label, readings] of [['A', linesA], ['B', linesB]]) {
@@ -964,6 +1314,24 @@ try {
   console.log('ERROR:', err.message);
   failures.push(err.message);
 } finally {
+  for (const recorder of [recorderA, recorderB]) {
+    if (!recorder) continue;
+    try {
+      recorder.finish();
+    } catch (error) {
+      failures.push(error?.message ?? String(error));
+    }
+  }
+  if (manifestPath && fs.existsSync(manifestPath)) {
+    try {
+      const finalManifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      finalManifest.timing.passEndedAt = new Date().toISOString();
+      finalManifest.outcome = failures.length === 0 ? 'pass' : 'failed';
+      fs.writeFileSync(manifestPath, `${JSON.stringify(finalManifest, null, 2)}\n`);
+    } catch (error) {
+      failures.push(`manifest finalization failed: ${error?.message ?? error}`);
+    }
+  }
   console.log(`\n${failures.length === 0 ? 'ALL PASS' : `${failures.length} FAILURE(S): ${failures.join('; ')}`}`);
   await disposeChrome(chrome, profile);
   process.exit(failures.length === 0 ? 0 : 1);

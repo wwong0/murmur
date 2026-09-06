@@ -10,39 +10,72 @@
 // statistics inside it left neither half readable, and put the arithmetic behind
 // a five-minute browser run that cannot be asked to re-verify it.
 //
-// Exports are what verify-browser.mjs calls. Everything else is internal on
-// purpose — a figure with no caller is a figure nobody is reading.
+// Exports are the figures and pure helpers used by verify-browser.mjs and its
+// check suite; keeping them here makes the diagnosis arithmetic independently testable.
 //
 // TEST MACHINERY. Nothing in the product imports this.
 
-import { median, percentile } from '../public/lib/frame-drift.mjs';
+import { median } from '../public/lib/frame-drift.mjs';
+import { quantile } from '../public/lib/drift-controller.mjs';
 import { plant } from './check/drift-plant.mjs';
 
-/** The converged span T6 anchors: below this many records the span reports nothing. */
+/** The converged span T6 anchors: below this many records the span reports nothing (count). */
 export const MIN_CONVERGED_RECORDS = 120;
-/** room.entry.js's controller poll — the unit an excursion is measured in. */
+/** room.entry.js's controller poll interval; excursions report observed runs, not this conversion (ms). */
 const EXCURSION_POLL_MS = 250;
+/** Fraction at or above which finite, nonzero difference pairs are period-2-like. */
 const PERIODICITY_LIKE = 0.8;
+/** Fraction at or below which finite, nonzero difference pairs are not period-2-like. */
 const PERIODICITY_NOT_LIKE = 0.6;
+/** Dimensionless multiplier applied to the predicted half-vsync floor. */
 const FLOOR_MULTIPLIER = 1.5;
-/** The duty cycle the simulated plant asserts, which a browser run either clears or does not. */
+/** The duty cycle the simulated plant asserts, which a browser run either clears or does not (fraction). */
 const PLANT_ASSERTED_FLOOR = 0.8;
+/** Fraction at or above which the whole-window rate trend is called effective. */
 const RATE_EFFECTIVE = 0.5;
+/** Fraction below which the whole-window rate trend cannot discriminate a held error. */
 const RATE_INEFFECTIVE = 0.1;
 /** One sweep step of 4a's standing-error sweep — the resolution its reference figures have. */
 const STANDING_LAG_MATCH_MS = 20;
-/** 3b's measured standing lag, as a band rather than a point. */
+/** 3b's measured standing lag, as a band rather than a point (ms). */
 const MEASURED_BAND_MIN_MS = 100;
 const MEASURED_BAND_MAX_MS = 240;
-/** 4a's largest movement of the median between two consecutive controller polls. */
+/** 4a's largest movement of the median between two consecutive controller polls (ms). */
 export const PLANT_MEDIAN_MOVEMENT_MS = 1.32;
+
+// T4's diagnosis bars. They are exported so the browser pass can carry the
+// exact regime it judged into its retained figures, while every fit still
+// receives its bars explicitly and remains useful with constructed values.
+export const RATE_STEADY_TOLERANCE = 2e-5;
+export const STRETCH_EDGE_EXCLUSION_MS = 1500;
+export const MIN_STRETCH_SPAN_MS = 5000;
+export const MIN_STRETCH_RECORDS = 120;
+export const MIN_RESIDUAL_SPAN_MS = 20000;
+export const MIN_RESIDUAL_RECORDS = 480;
+export const MAX_STRETCH_SLOPE_SE_PPM = 1000;
+export const MAX_RESIDUAL_SLOPE_SE_PPM = 100;
+export const SLOPE_SIGNIFICANCE_SIGMA = 3;
+export const RESIDUAL_FLOOR_PPM = 50;
+export const ENDPOINT_CROSSCHECK_MS = 48;
+
+export const DEFAULT_BARS = Object.freeze({
+  RATE_STEADY_TOLERANCE,
+  STRETCH_EDGE_EXCLUSION_MS,
+  MIN_STRETCH_SPAN_MS,
+  MIN_STRETCH_RECORDS,
+  MIN_RESIDUAL_SPAN_MS,
+  MIN_RESIDUAL_RECORDS,
+  MAX_STRETCH_SLOPE_SE_PPM,
+  MAX_RESIDUAL_SLOPE_SE_PPM,
+  SLOPE_SIGNIFICANCE_SIGMA,
+  RESIDUAL_FLOOR_PPM,
+  ENDPOINT_CROSSCHECK_MS,
+});
 
 // THE CANONICAL PAIR from frame-drift.mjs, never a local definition of the
 // middle of an even set. The only thing added is the empty case: these figures
 // are printed, and `null` is what the run prints for a quantity it does not have.
 const middleOf = (sorted) => (sorted.length === 0 ? null : median(sorted));
-const rankOf = (sorted, fraction) => (sorted.length === 0 ? null : percentile(sorted, fraction));
-
 const ascending = (left, right) => left - right;
 
 /**
@@ -54,7 +87,8 @@ export function refreshFrom(stamps) {
   const deltas = [];
   for (let i = 1; i < (stamps?.length ?? 0); i++) deltas.push(stamps[i] - stamps[i - 1]);
   deltas.sort(ascending);
-  const medianDeltaMs = middleOf(deltas);
+  const medianDelta = middleOf(deltas);
+  const medianDeltaMs = Number.isFinite(medianDelta) && medianDelta > 0 ? medianDelta : null;
   return {
     frameCount: stamps?.length ?? 0,
     medianDeltaMs,
@@ -68,29 +102,44 @@ export function refreshFrom(stamps) {
  * `null` rather than a median of eleven frames.
  */
 export function convergedStats(seam, barSeq) {
-  const records = (seam.records ?? []).filter((record) => record.seq > barSeq);
+  const records = (seam?.records ?? []).filter((record) => record.seq > barSeq);
   const drifts = records.map((record) => record.driftMs).sort(ascending);
   const enough = records.length >= MIN_CONVERGED_RECORDS && records.every((record) => Number.isFinite(record.driftMs));
   return {
     records,
     convergedCount: records.length,
     convergedMedianMs: enough ? middleOf(drifts) : null,
-    convergedSpreadMs: enough ? rankOf(drifts, 0.95) - rankOf(drifts, 0.05) : null,
+    convergedSpreadMs: enough ? quantile(drifts, 0.95) - quantile(drifts, 0.05) : null,
   };
 }
 
 /** How often consecutive differences change sign — a period-2 cadence alternates almost always. */
-function alternationStats(records) {
-  let pairs = 0;
+export function alternationStats(records) {
+  let totalPairs = 0;
+  let nonzeroPairs = 0;
+  let zeroPairs = 0;
   let alternating = 0;
   for (let i = 1; i < records.length - 1; i++) {
+    if (!Number.isFinite(records[i - 1].driftMs)
+      || !Number.isFinite(records[i].driftMs)
+      || !Number.isFinite(records[i + 1].driftMs)) continue;
     const previous = records[i].driftMs - records[i - 1].driftMs;
     const next = records[i + 1].driftMs - records[i].driftMs;
-    if (!Number.isFinite(previous) || !Number.isFinite(next) || previous === 0 || next === 0) continue;
-    pairs++;
+    if (!Number.isFinite(previous) || !Number.isFinite(next)) continue;
+    totalPairs++;
+    if (previous === 0 || next === 0) {
+      zeroPairs++;
+      continue;
+    }
+    nonzeroPairs++;
     if (Math.sign(previous) !== Math.sign(next)) alternating++;
   }
-  return { pairs, fraction: pairs === 0 ? null : alternating / pairs };
+  return {
+    totalPairs,
+    nonzeroPairs,
+    zeroPairs,
+    fraction: nonzeroPairs === 0 ? null : alternating / nonzeroPairs,
+  };
 }
 
 /** The ten most populated half-millisecond bins, so a cadence is visible as bins rather than inferred. */
@@ -110,6 +159,44 @@ function roundedHistogram(records) {
 
 function finiteValues(samples, key) {
   return samples.map((sample) => sample[key]).filter((value) => Number.isFinite(value));
+}
+
+function perPollMovement(samples) {
+  const groups = new Map();
+  for (const sample of samples) {
+    if (!Number.isFinite(sample?.polls)) continue;
+    const polls = sample.polls;
+    const group = groups.get(polls) ?? { polls, estimates: [] };
+    if (Number.isFinite(sample.estimateMs)) group.estimates.push(sample.estimateMs);
+    groups.set(polls, group);
+  }
+  const ordered = [...groups.values()].sort((left, right) => left.polls - right.polls);
+  let maxPerPollMovementMs = null;
+  let perPollPairsUsed = 0;
+  let perPollPairsSkippedForGap = 0;
+  for (let index = 1; index < ordered.length; index++) {
+    const previous = ordered[index - 1];
+    const current = ordered[index];
+    const gap = current.polls - previous.polls;
+    if (gap !== 1) {
+      if (gap > 1) perPollPairsSkippedForGap++;
+      continue;
+    }
+    const previousEstimate = previous.estimates.at(-1);
+    const currentEstimate = current.estimates.at(-1);
+    if (!Number.isFinite(previousEstimate) || !Number.isFinite(currentEstimate)) continue;
+    perPollPairsUsed++;
+    const movementMs = Math.abs(currentEstimate - previousEstimate);
+    if (maxPerPollMovementMs === null || movementMs > maxPerPollMovementMs) {
+      maxPerPollMovementMs = movementMs;
+    }
+  }
+  return {
+    maxPerPollMovementMs,
+    perPollEvaluations: ordered.length,
+    perPollPairsUsed,
+    perPollPairsSkippedForGap,
+  };
 }
 
 /**
@@ -142,10 +229,15 @@ function excursionsOf(samples, pollEveryMs) {
       const values = current.samples.map((sample) => sample[key]).filter((value) => Number.isFinite(value));
       return values.length ? { min: Math.min(...values), max: Math.max(...values) } : null;
     };
+    const pollValues = current.samples.map((sample) => sample.polls);
+    const observedPolls = pollValues.every((polls) => Number.isFinite(polls))
+      ? new Set(pollValues).size
+      : null;
     excursions.push({
       samples: current.samples.length,
       lengthMs: current.samples.length * pollEveryMs,
-      controllerPolls: (current.samples.length * pollEveryMs) / EXCURSION_POLL_MS,
+      controllerPolls: observedPolls,
+      controllerPollsLabel: observedPolls === null ? 'unavailable' : `${observedPolls} distinct polls`,
       modes: [...current.modes],
       reasons: [...current.reasons],
       windowRecords: range('windowRecords'),
@@ -184,22 +276,41 @@ export function observationStats(samples, convergedRecords, pollEveryMs) {
   const acting = samples.filter((sample) => sample.reason === null);
   const population = settled.length > 0 ? settled : acting;
   const spreadValues = finiteValues(population, 'spreadMs').sort(ascending);
+  const bandValues = finiteValues(population, 'bandMs').sort(ascending);
   const estimateValues = finiteValues(population, 'estimateMs');
   const actingRateMedian = middleOf(finiteValues(acting, 'rate').sort(ascending));
   const observedClosureRateMsPerSec = closureRate(acting);
   const commandedClosureRateMsPerSec = Number.isFinite(actingRateMedian) ? (actingRateMedian - 1) * 1000 : null;
+  const pollStates = new Map();
+  for (const sample of afterSettled) {
+    if (!Number.isFinite(sample.polls)) continue;
+    const current = pollStates.get(sample.polls) ?? { settled: false };
+    current.settled ||= sample.mode === 'settled';
+    pollStates.set(sample.polls, current);
+  }
+  const allDutySamplesHavePolls = afterSettled.every((sample) => Number.isFinite(sample.polls));
+  const dutyPolls = allDutySamplesHavePolls ? [...pollStates.values()] : [];
+  const settledPolls = allDutySamplesHavePolls ? dutyPolls.filter((poll) => poll.settled).length : null;
+  const dutyCycle = firstSettledIndex < 0 || !allDutySamplesHavePolls || dutyPolls.length === 0
+    ? null
+    : settledPolls / dutyPolls.length;
   return {
     firstSettledIndex,
     settledSamples: afterSettled.length,
     settledCount: settled.length,
-    dutyCycle: afterSettled.length ? settled.length / afterSettled.length : 0,
+    dutyCycle,
+    dutyPopulation: 'distinct controller polls from 125ms observation samples',
+    dutyPopulationPolls: allDutySamplesHavePolls ? dutyPolls.length : null,
+    settledPolls,
     population: settled.length > 0 ? 'settled' : 'acting',
     populationSamples: population.length,
     spreadMedianMs: middleOf(spreadValues),
+    bandMedianMs: middleOf(bandValues),
     spreadMaxMs: spreadValues.length ? Math.max(...spreadValues) : null,
-    // THE RANGE ACROSS THE WHOLE OBSERVATION, which is why the model check below
-    // withholds it rather than comparing it to the plant's per-poll step.
-    medianMovementMs: estimateValues.length ? Math.max(...estimateValues) - Math.min(...estimateValues) : null,
+    // THE RANGE ACROSS THE WHOLE OBSERVATION, distinct from the adjacent-poll
+    // maximum below and never compared to the plant's per-poll step.
+    estimateRangeMs: estimateValues.length ? Math.max(...estimateValues) - Math.min(...estimateValues) : null,
+    ...perPollMovement(population),
     actingCount: acting.length,
     actingFraction: samples.length ? acting.length / samples.length : null,
     actingRateMedian,
@@ -216,13 +327,257 @@ export function observationStats(samples, convergedRecords, pollEveryMs) {
   };
 }
 
+const bar = (bars, name, fallback) => Number.isFinite(bars?.[name]) ? bars[name] : fallback;
+
+function dropsSignature(sample) {
+  return JSON.stringify(sample?.counters?.drops ?? sample?.drops ?? null);
+}
+
+function localDisplayMs(record) {
+  return record?.displaySharedMs - record?.clock?.offsetMs;
+}
+
+function allWithin(values, centre, tolerance) {
+  return values.every((value) => Math.abs(value - centre) <= tolerance);
+}
+
+/** Maximal stable command runs, grouped so two reads of one published poll do not break a run. */
+export function steadyCommandStretches(samples, bars = DEFAULT_BARS) {
+  const tolerance = bar(bars, 'RATE_STEADY_TOLERANCE', RATE_STEADY_TOLERANCE);
+  const evaluations = [];
+  for (const sample of samples ?? []) {
+    const previous = evaluations.at(-1);
+    if (previous && previous.polls === sample?.polls && Number.isFinite(sample?.polls)) {
+      previous.samples.push(sample);
+      continue;
+    }
+    evaluations.push({ polls: sample?.polls, samples: [sample] });
+  }
+
+  const usable = (evaluation) => Number.isFinite(evaluation.polls)
+    && evaluation.samples.every((sample) => sample?.reason === null
+      && Number.isFinite(sample.rate)
+      && Number.isFinite(sample.atMs));
+  const rateValues = (run) => run.flatMap((evaluation) => evaluation.samples.map((sample) => sample.rate));
+  const stretches = [];
+  let current = [];
+  const finish = () => {
+    if (current.length === 0) return;
+    const rates = rateValues(current).sort(ascending);
+    const observations = current.flatMap((evaluation) => evaluation.samples);
+    const signatures = current.flatMap((evaluation) => evaluation.samples.map(dropsSignature));
+    stretches.push({
+      firstAtMs: Math.min(...observations.map((sample) => sample.atMs)),
+      lastAtMs: Math.max(...observations.map((sample) => sample.atMs)),
+      medianRate: middleOf(rates),
+      firstPolls: current[0].polls,
+      lastPolls: current.at(-1).polls,
+      sampleCount: current.length,
+      observationCount: observations.length,
+      samples: observations,
+      dropSignatures: signatures,
+      dropsChanged: new Set(signatures).size > 1,
+    });
+    current = [];
+  };
+
+  for (const evaluation of evaluations) {
+    if (!usable(evaluation)) {
+      finish();
+      continue;
+    }
+    const contiguous = current.length === 0 || evaluation.polls === current.at(-1).polls + 1;
+    const proposed = rateValues([...current, evaluation]).sort(ascending);
+    const proposedMedian = middleOf(proposed);
+    if (!contiguous || !allWithin(proposed, proposedMedian, tolerance)) finish();
+    current.push(evaluation);
+  }
+  finish();
+  return stretches;
+}
+
+/** Least-squares slope and its fitted standard error, both in native units. */
+export function slopeOf(points) {
+  const usable = (points ?? []).filter((point) => Number.isFinite(point?.x) && Number.isFinite(point?.y));
+  const n = usable.length;
+  if (n < 3) return null;
+  const meanX = usable.reduce((sum, point) => sum + point.x, 0) / n;
+  const meanY = usable.reduce((sum, point) => sum + point.y, 0) / n;
+  const spanX = Math.max(...usable.map((point) => point.x)) - Math.min(...usable.map((point) => point.x));
+  const denominator = usable.reduce((sum, point) => sum + (point.x - meanX) ** 2, 0);
+  if (!(denominator > 0)) return null;
+  const numerator = usable.reduce((sum, point) => sum + (point.x - meanX) * (point.y - meanY), 0);
+  const slope = numerator / denominator;
+  const intercept = meanY - slope * meanX;
+  const residualSum = usable.reduce((sum, point) => sum + (point.y - (slope * point.x + intercept)) ** 2, 0);
+  return {
+    slope,
+    standardError: Math.sqrt(Math.max(0, residualSum) / (n - 2) / denominator),
+    n,
+    spanX,
+    intercept,
+  };
+}
+
+/** Media position against the local display instant; the clock offset cancels in x. */
+export function mediaAgainstLocal(records) {
+  return (records ?? []).map((record) => ({ x: localDisplayMs(record), y: record?.mediaMs }));
+}
+
+/** Drift restated to one offset before fitting against the local display instant. */
+export function driftAgainstLocal(records, offsetRefMs) {
+  return (records ?? []).map((record) => ({
+    x: localDisplayMs(record),
+    y: record?.driftMs + record?.clock?.offsetMs - offsetRefMs,
+  }));
+}
+
+function slopeReport(fit) {
+  if (!fit) return null;
+  return {
+    ...fit,
+    slopePpm: fit.slope * 1e6,
+    standardErrorPpm: fit.standardError * 1e6,
+  };
+}
+
+export function endpointCrosscheck(points, fit) {
+  const usable = (points ?? []).filter((point) => Number.isFinite(point?.x) && Number.isFinite(point?.y))
+    .sort((left, right) => left.x - right.x);
+  if (!fit || usable.length < 2) return null;
+  const first = usable[0];
+  const last = usable.at(-1);
+  const actualDeltaMs = last.y - first.y;
+  const predictedDeltaMs = fit.slope * (last.x - first.x);
+  return {
+    errorMs: Math.abs(actualDeltaMs - predictedDeltaMs),
+    actualDeltaMs,
+    predictedDeltaMs,
+  };
+}
+
+/** Fit both record views inside each verified, edge-trimmed command run. */
+export function stretchSlopes({ stretches = [], records = [], bars = DEFAULT_BARS } = {}) {
+  const edgeExclusionMs = bar(bars, 'STRETCH_EDGE_EXCLUSION_MS', STRETCH_EDGE_EXCLUSION_MS);
+  const minimumSpanMs = bar(bars, 'MIN_STRETCH_SPAN_MS', MIN_STRETCH_SPAN_MS);
+  const minimumRecords = bar(bars, 'MIN_STRETCH_RECORDS', MIN_STRETCH_RECORDS);
+  const endpointBarMs = bar(bars, 'ENDPOINT_CROSSCHECK_MS', ENDPOINT_CROSSCHECK_MS);
+  return (stretches ?? []).map((stretch) => {
+    const firstAtMs = stretch?.firstAtMs;
+    const lastAtMs = stretch?.lastAtMs;
+    const trimmedStartMs = Number.isFinite(firstAtMs) ? firstAtMs + edgeExclusionMs : null;
+    const trimmedEndMs = Number.isFinite(lastAtMs) ? lastAtMs - edgeExclusionMs : null;
+    const reasons = [];
+    if (!Number.isFinite(trimmedStartMs) || !Number.isFinite(trimmedEndMs)) reasons.push('missing-stretch-boundaries');
+    if (Number.isFinite(trimmedStartMs) && trimmedEndMs <= trimmedStartMs) reasons.push('stretch-shorter-than-edge-exclusion');
+
+    const inside = (record) => {
+      const local = localDisplayMs(record);
+      if (Number.isFinite(local)) return local >= trimmedStartMs && local <= trimmedEndMs;
+      return Number.isFinite(record?.displaySharedMs)
+        && record.displaySharedMs >= trimmedStartMs && record.displaySharedMs <= trimmedEndMs;
+    };
+    const selected = Number.isFinite(trimmedStartMs) && Number.isFinite(trimmedEndMs)
+      ? (records ?? []).filter(inside)
+      : [];
+    const usable = selected.filter((record) => Number.isFinite(record?.mediaMs)
+      && Number.isFinite(record?.displaySharedMs)
+      && Number.isFinite(record?.clock?.offsetMs));
+    const excludedNonFiniteRecords = selected.length - usable.length;
+    const mediaPoints = mediaAgainstLocal(usable);
+    const localValues = mediaPoints.map((point) => point.x).filter(Number.isFinite);
+    const trimmedSpanMs = localValues.length ? Math.max(...localValues) - Math.min(...localValues) : 0;
+    const epochValues = [...new Set(usable.map((record) => record.epochMs).filter(Number.isFinite))];
+    const offsets = usable.map((record) => record.clock.offsetMs);
+    const distinctOffsetCount = new Set(offsets).size;
+    const offsetMovementMs = offsets.length ? Math.max(...offsets) - Math.min(...offsets) : null;
+    if (trimmedSpanMs < minimumSpanMs) reasons.push('trimmed-span-below-bar');
+    if (usable.length < minimumRecords) reasons.push('record-count-below-bar');
+    if (epochValues.length > 1) reasons.push('epoch-revision');
+    const sampleDropSignatures = (stretch?.samples ?? []).map(dropsSignature);
+    const dropSignatures = [...(stretch?.dropSignatures ?? []), ...sampleDropSignatures];
+    if (stretch?.dropsChanged || new Set(dropSignatures).size > 1) reasons.push('control-drop');
+
+    const mediaFit = slopeOf(mediaPoints);
+    const offsetRefMs = offsets.length ? offsets[0] : NaN;
+    const driftPoints = driftAgainstLocal(usable, offsetRefMs);
+    const driftFit = slopeOf(driftPoints);
+    if (!mediaFit || !driftFit) reasons.push('slope-unavailable');
+    const mediaEndpoint = endpointCrosscheck(mediaPoints, mediaFit);
+    const driftEndpoint = endpointCrosscheck(driftPoints, driftFit);
+    const refused = reasons.length > 0;
+    const media = slopeReport(mediaFit);
+    const drift = slopeReport(driftFit);
+    return {
+      ...stretch,
+      firstAtMs,
+      lastAtMs,
+      trimmedStartMs,
+      trimmedEndMs,
+      trimmedSpanMs,
+      records: usable,
+      recordCount: usable.length,
+      excludedNonFiniteRecords,
+      epochValues,
+      distinctOffsetCount,
+      offsetMovementMs,
+      media,
+      drift,
+      endpointCrosscheck: {
+        mediaMs: mediaEndpoint?.errorMs ?? null,
+        driftMs: driftEndpoint?.errorMs ?? null,
+        barMs: endpointBarMs,
+        mediaWithinBar: mediaEndpoint === null ? null : mediaEndpoint.errorMs <= endpointBarMs,
+        driftWithinBar: driftEndpoint === null ? null : driftEndpoint.errorMs <= endpointBarMs,
+      },
+      refused,
+      reason: reasons[0] ?? null,
+      reasons,
+    };
+  });
+}
+
+/** Compare the first two qualifying command stretches without treating one as its own control. */
+export function compareStretchSlopes(results = []) {
+  const qualifying = results.filter((result) => !result.refused && Number.isFinite(result.media?.slope));
+  if (qualifying.length < 2) {
+    return { available: false, reason: 'fewer-than-two-qualifying-stretches', differencePpm: null };
+  }
+  const [first, second] = qualifying;
+  const standardError = Math.sqrt((first.media.standardError ?? 0) ** 2 + (second.media.standardError ?? 0) ** 2);
+  return {
+    available: true,
+    reason: null,
+    first,
+    second,
+    difference: second.media.slope - first.media.slope,
+    differencePpm: (second.media.slope - first.media.slope) * 1e6,
+    standardError,
+    standardErrorPpm: standardError * 1e6,
+    commandDifferencePpm: (second.medianRate - first.medianRate) * 1e6,
+  };
+}
+
+/** Residual rate relative to a commanded rate, with the fitted error propagated to ppm. */
+export function residualPpm(slope, commandedRate) {
+  const slopeValue = Number.isFinite(slope) ? slope : slope?.slope;
+  const standardError = Number.isFinite(slope?.standardError) ? slope.standardError : null;
+  if (!Number.isFinite(slopeValue) || !Number.isFinite(commandedRate) || commandedRate === 0) return null;
+  const value = (slopeValue / commandedRate - 1) * 1e6;
+  const error = standardError === null ? null : Math.abs(standardError / commandedRate) * 1e6;
+  return {
+    residualPpm: value,
+    standardErrorPpm: error,
+  };
+}
+
 /**
  * The standing lag this window opened with, against the figure 4a's sweep
  * produced for it. Read from the first eight records — the controller's own
  * minimum — so it describes the client before any correction was applied.
  */
 export function standingLag(firstRecords, referenceLagMs) {
-  const drifts = (firstRecords ?? []).map((record) => record.driftMs);
+  const drifts = (firstRecords ?? []).slice(0, 8).map((record) => record.driftMs);
   const firstEightMs = drifts.length < 8 || drifts.some((driftMs) => !Number.isFinite(driftMs))
     ? null
     : middleOf(drifts.sort(ascending));
@@ -230,13 +585,18 @@ export function standingLag(firstRecords, referenceLagMs) {
   const inMeasuredBand = Number.isFinite(firstEightMs)
     && Math.abs(firstEightMs) >= MEASURED_BAND_MIN_MS
     && Math.abs(firstEightMs) <= MEASURED_BAND_MAX_MS;
+  const verdict = !Number.isFinite(firstEightMs)
+    ? 'unavailable (the first eight records population was not finite)'
+    : `${lagMatches ? 'reproduces' : 'does not reproduce'} within one ${STANDING_LAG_MATCH_MS}ms sweep step, ${inMeasuredBand ? 'inside' : 'outside'} the 3b ${MEASURED_BAND_MIN_MS}-${MEASURED_BAND_MAX_MS}ms band`;
   return {
     firstEightMs,
     referenceLagMs,
     lagMatches,
     inMeasuredBand,
+    population: 'first eight records the window ever produced',
+    units: 'ms',
     // The prose names both thresholds, so it is built beside them.
-    verdict: `${lagMatches ? 'reproduces' : 'does not reproduce'} within one ${STANDING_LAG_MATCH_MS}ms sweep step, ${inMeasuredBand ? 'inside' : 'outside'} the 3b ${MEASURED_BAND_MIN_MS}-${MEASURED_BAND_MAX_MS}ms band`,
+    verdict,
   };
 }
 
@@ -256,20 +616,46 @@ export function plantSweepMinimum() {
       const dutyCycle = afterSettled.length
         ? afterSettled.filter((state) => state.mode === 'settled').length / afterSettled.length
         : 0;
-      if (minimum === null || dutyCycle < minimum.dutyCycle) minimum = { dutyCycle, refreshHz, standingError };
+      if (minimum === null || dutyCycle < minimum.dutyCycle) {
+        minimum = {
+          dutyCycle,
+          refreshHz,
+          standingError,
+          population: 'simulated controller polls over 240 simulated seconds',
+        };
+      }
     }
   }
   return minimum;
 }
 
 function cadenceOf(alternation) {
-  if (alternation.fraction === null) return 'not enough nonzero differences';
-  if (alternation.fraction >= PERIODICITY_LIKE) return 'period-2-like';
-  if (alternation.fraction <= PERIODICITY_NOT_LIKE) return 'not period-2-like';
-  return `inconclusive (between ${PERIODICITY_NOT_LIKE} and ${PERIODICITY_LIKE})`;
+  const population = {
+    nonzeroPairs: alternation.nonzeroPairs,
+    totalPairs: alternation.totalPairs,
+    zeroPairs: alternation.zeroPairs,
+  };
+  const populationText = `${population.nonzeroPairs} nonzero pairs over ${population.totalPairs} total pairs (${population.zeroPairs} zero pairs)`;
+  if (alternation.fraction === null) {
+    return { ...population, period2Like: false, text: `not enough nonzero differences (${populationText})` };
+  }
+  if (alternation.fraction >= PERIODICITY_LIKE) {
+    return { ...population, period2Like: true, text: `period-2-like (${populationText})` };
+  }
+  if (alternation.fraction <= PERIODICITY_NOT_LIKE) {
+    return { ...population, period2Like: false, text: `not period-2-like (${populationText})` };
+  }
+  return {
+    ...population,
+    period2Like: false,
+    text: `inconclusive (between ${PERIODICITY_NOT_LIKE} and ${PERIODICITY_LIKE}; ${populationText})`,
+  };
 }
 
-function floorVerdictOf(floorHeld, population) {
+function floorVerdictOf(floorHeld, population, cadence) {
+  if (!cadence.period2Like) {
+    return `inapplicable: half-vsync prediction assumes period-2-like cadence; ${cadence.text}`;
+  }
   if (floorHeld === null) return `${population} population has no finite spread`;
   if (population === 'settled') {
     return floorHeld ? `held at <=${FLOOR_MULTIPLIER}x predicted` : `not held above ${FLOOR_MULTIPLIER}x predicted`;
@@ -279,20 +665,25 @@ function floorVerdictOf(floorHeld, population) {
     : `above ${FLOOR_MULTIPLIER}x predicted while acting; not evidence of a held floor`;
 }
 
-// THE THIRD TERM OF THE MODEL CHECK. `movementComparable` at its call site is
-// false, so the `agree` arm is unreachable — DO NOT DELETE IT AS DEAD CODE. It is
-// the shape the check returns to when the term is repaired, and a review session
-// has already removed it once. The term is withheld rather than dropped because
-// `medianMovementMs` (a whole-window range) and PLANT_MEDIAN_MOVEMENT_MS (4a's
-// per-poll step) are not the same quantity, and an incomparable term cannot
-// support `agree` either: 4c design.md D2, repair filed under change 5.
-function modelVerdictOf(cadenceVerdict, floorHeld, population, movementComparable) {
-  if (cadenceVerdict === 'period-2-like' && floorHeld === true && movementComparable) {
+/** The sum of two published controller bands is a predicted worst-case separation (ms). */
+export function predictedParkingDistanceMs(firstBandMs, secondBandMs) {
+  return Number.isFinite(firstBandMs) && Number.isFinite(secondBandMs)
+    ? firstBandMs + secondBandMs
+    : null;
+}
+
+// THE THIRD TERM is live only when two published controller polls supplied a
+// like-for-like movement; a whole-window range is not the plant's per-poll step.
+function modelVerdictOf(cadence, floorHeld, population, movementComparable, movementReason) {
+  if (cadence.period2Like && floorHeld === true && movementComparable) {
     return population === 'settled' ? 'agree' : 'agree on acting figures; no settled hold was observed';
   }
   const floorText = floorHeld === true ? 'within prediction' : floorHeld === false ? 'above prediction' : 'unavailable';
   const hold = population === 'settled' ? '' : '; no settled hold was observed';
-  return `inconclusive: cadence ${cadenceVerdict}, floor ${floorText}, median-movement term withheld (a whole-window range is not the plant's per-poll step)${hold}`;
+  const movementText = movementComparable
+    ? 'max-per-poll movement term available'
+    : `max-per-poll movement term withheld (${movementReason})`;
+  return `inconclusive: cadence ${cadence.text}, floor ${floorText}, ${movementText}${hold}`;
 }
 
 function excursionVerdictOf(stats) {
@@ -307,17 +698,17 @@ function excursionVerdictOf(stats) {
 }
 
 function dutyVerdictOf(stats) {
-  if (!Number.isFinite(stats.dutyCycle)) return 'unavailable';
+  if (stats.firstSettledIndex < 0) return `unavailable (no settled sample; browser population is ${stats.dutyPopulation})`;
+  if (!Number.isFinite(stats.dutyCycle)) return `unavailable (${stats.dutyPopulation} is incomplete)`;
   const percent = (stats.dutyCycle * 100).toFixed(1);
-  return stats.firstSettledIndex < 0
-    ? `${percent}% settled (0 settled samples; acting population used for steady-state figures)`
-    : `${percent}% settled after first settled sample (${stats.settledCount}/${stats.settledSamples} samples)`;
+  return `${percent}% settled over ${stats.settledPolls}/${stats.dutyPopulationPolls} ${stats.dutyPopulation}`;
 }
 
 function recommendationOf(stats, plantMinimum) {
   if (stats.firstSettledIndex < 0) return `no settled hold observed; keep the simulated ${PLANT_ASSERTED_FLOOR} floor pending hardware hold evidence`;
   if (!Number.isFinite(stats.dutyCycle)) return 'no recommendation from this window';
   if (stats.dutyCycle < PLANT_ASSERTED_FLOOR) return `keep the simulated ${PLANT_ASSERTED_FLOOR} floor; browser duty is below it`;
+  if (!Number.isFinite(plantMinimum?.dutyCycle)) return 'no recommendation from this window';
   if (stats.dutyCycle < plantMinimum.dutyCycle) return `keep the simulated ${PLANT_ASSERTED_FLOOR} floor; browser clears it but not the plant minimum`;
   return 'browser clears the plant minimum; any floor change belongs to a follow-up';
 }
@@ -344,24 +735,30 @@ export function windowVerdicts({ stats, refresh, plantMinimum }) {
   const predictedFloorMs = Number.isFinite(refresh.refreshRateHz) && refresh.refreshRateHz > 0
     ? 1000 / (2 * refresh.refreshRateHz)
     : null;
+  const cadence = cadenceOf(stats.alternation);
+  const cadenceVerdict = cadence.text;
   const floorHeld = Number.isFinite(stats.spreadMedianMs) && Number.isFinite(predictedFloorMs)
+    && cadence.period2Like
     ? stats.spreadMedianMs <= predictedFloorMs * FLOOR_MULTIPLIER
     : null;
-  const cadenceVerdict = cadenceOf(stats.alternation);
-  // WITHHELD, NOT FAILED, and false is a decision rather than a placeholder: see
-  // `modelVerdictOf`. It is returned as well as used so the run carries the reason
-  // its model check cannot conclude, not only the conclusion.
-  const movementComparable = false;
+  const floorApplicable = cadence.period2Like;
+  const movementComparable = Number.isFinite(stats.maxPerPollMovementMs);
+  const movementReason = stats.perPollPairsSkippedForGap > 0 && stats.perPollPairsUsed === 0
+    ? 'all observed pairs had a poll gap'
+    : stats.perPollPairsUsed === 0
+      ? 'no consecutive published poll pair was observed'
+      : 'no finite movement was observed';
   return {
     movementComparable,
+    maxPerPollMovementMs: stats.maxPerPollMovementMs,
+    movementReason,
     predictedFloorMs,
     floorHeld,
-    // Two clients can each sit anywhere in their own scatter, so the distance
-    // between them is the spread doubled.
-    parkingDistanceMs: Number.isFinite(stats.spreadMedianMs) ? stats.spreadMedianMs * 2 : null,
+    floorApplicable,
     cadenceVerdict,
-    modelVerdict: modelVerdictOf(cadenceVerdict, floorHeld, stats.population, movementComparable),
-    floorVerdict: floorVerdictOf(floorHeld, stats.population),
+    cadencePeriod2Like: cadence.period2Like,
+    modelVerdict: modelVerdictOf(cadence, floorHeld, stats.population, movementComparable, movementReason),
+    floorVerdict: floorVerdictOf(floorHeld, stats.population, cadence),
     excursionVerdict: excursionVerdictOf(stats),
     dutyVerdict: dutyVerdictOf(stats),
     recommendation: recommendationOf(stats, plantMinimum),

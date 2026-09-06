@@ -16,6 +16,10 @@
 //  - `state().rate` is the last value handed to `apply`, not the value computed
 //    this poll; settled must describe what the media element actually received.
 //  - The half-width comes from a fresh `clock.read()` at poll time, never records.
+//  - `snapshot().polls` is the monotonic evaluation count; `poll()` advances it
+//    before every branch, including no-clock and hold outcomes.
+//  - Records accumulate in one post-clock site and are trimmed in one place
+//    (design.md D4), so a no-clock poll leaves the log cursor untouched.
 //  - There is no integral term and no position input: this module can only adjust
 //    playback rate, never seek.
 //
@@ -50,7 +54,7 @@ function median(sorted) {
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-function quantile(sorted, p) {
+export function quantile(sorted, p) {
   const position = (sorted.length - 1) * p;
   const below = Math.floor(position);
   const above = Math.ceil(position);
@@ -103,6 +107,7 @@ export function createDriftController({ log, clock, apply, settings: overrides =
   let lastDrop = null;
   let rate = BASE_RATE;
   let correctionsApplied = 0;
+  let polls = 0;
   let settlingMs = null;
   const seams = [];
   const drops = { seam: 0, reanchor: 0, stale: 0 };
@@ -160,6 +165,7 @@ export function createDriftController({ log, clock, apply, settings: overrides =
       reason,
       settings,
       correctionsApplied,
+      polls,
       settlingMs,
       fastestCloseMs,
       counters: { drops: { ...drops }, restatements },
@@ -168,10 +174,10 @@ export function createDriftController({ log, clock, apply, settings: overrides =
   }
 
   function poll() {
+    polls += 1;
     const atMs = now();
     const estimate = clock.read();
     const offsetMs = estimate.offsetMs;
-    const beforeReadSeq = cursor;
 
     const reanchors = estimate.counters?.reanchors;
     if (lastReanchors === null) lastReanchors = reanchors ?? 0;
@@ -188,28 +194,6 @@ export function createDriftController({ log, clock, apply, settings: overrides =
     for (const seam of pendingSeams) drop('seam', atMs, seam.afterSeq);
     pendingSeams = [];
 
-    const read = log.read({ afterSeq: cursor });
-    cursor = read.latestSeq;
-    const incoming = read.records;
-    for (const record of incoming) {
-      records.push(record);
-      if (record.seq > dropCutoffSeq) recordsSinceDrop += 1;
-    }
-    // WHEN THE NEWEST FRAME WAS SHOWN, not when this poll ran. A backlog read
-    // late is old feedback: stamping it `now` hands the correction another
-    // STALE_AFTER_MS over frames nobody is producing any more. The null case is
-    // the first poll seeding itself — after it, `lastSeenAt` is always a number.
-    if (incoming.length > 0) {
-      lastSeenAt = displayLocalOf(incoming.at(-1));
-      staleHold = false;
-    } else if (lastSeenAt === null) {
-      lastSeenAt = atMs;
-    }
-
-    if (offsetMs !== null && atMs - lastSeenAt >= settings.STALE_AFTER_MS && !staleHold) {
-      drop('stale', atMs, cursor);
-    }
-
     if (offsetMs === null) {
       // The one hold that also erases the measurement: with no offset there is
       // no window to have counted and no floor to have computed, and a stale
@@ -223,6 +207,30 @@ export function createDriftController({ log, clock, apply, settings: overrides =
       fastestCloseMs = null;
       hold(atMs, 'waiting', 'no-clock');
       return snapshot();
+    }
+
+    const beforeReadSeq = cursor;
+    const read = log.read({ afterSeq: cursor });
+    cursor = read.latestSeq;
+    const incoming = read.records;
+    for (const record of incoming) {
+      records.push(record);
+      if (record.seq > dropCutoffSeq) recordsSinceDrop += 1;
+    }
+    // WHEN THE NEWEST FRAME WAS SHOWN, not when this poll ran. A backlog read
+    // late is old feedback: stamping it `now` hands the correction another
+    // STALE_AFTER_MS over frames nobody is producing any more. The null case is
+    // the first clock-bearing poll seeding itself — after it, `lastSeenAt` is
+    // always a number.
+    if (incoming.length > 0) {
+      lastSeenAt = displayLocalOf(incoming.at(-1));
+      staleHold = false;
+    } else if (lastSeenAt === null) {
+      lastSeenAt = atMs;
+    }
+
+    if (atMs - lastSeenAt >= settings.STALE_AFTER_MS && !staleHold) {
+      drop('stale', atMs, cursor);
     }
 
     halfWidthMs = Number.isFinite(estimate.halfWidthMs) ? estimate.halfWidthMs : null;

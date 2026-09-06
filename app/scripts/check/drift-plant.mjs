@@ -23,6 +23,7 @@ export function plant({
   clockPresent = true,
   settings = {},
   pollEvery = 1,
+  rateLoadPpm = 0,
 } = {}) {
   const epochMs = TIME_ORIGIN_MS + 60_000;
   const intervalMs = 1000 / fps;
@@ -59,7 +60,12 @@ export function plant({
 
   function deliver({ repeat = false } = {}) {
     if (!repeat) mediaMs += intervalMs;
-    simulatedNowMs += intervalMs / controllerRate;
+    // POSITIVE ppm MAKES MEDIA ADVANCE FASTER THAN THE ROOM at unity command.
+    // The load is a physical media/reference rate mismatch, so it belongs on the
+    // wall advance and not on the media advance or the commanded rate: put it on
+    // either of those and the controller cancels it in one poll (design.md D2).
+    const effectiveRate = controllerRate * (1 + rateLoadPpm / 1e6);
+    simulatedNowMs += intervalMs / effectiveRate;
     const displaySharedMs = quantisedDisplay();
     const displayLocalMs = displaySharedMs - offsetMs;
     const metadata = {
@@ -85,6 +91,7 @@ export function plant({
     log,
     applied,
     history,
+    rateLoadPpm,
     controller,
     get now() { return simulatedNowMs; },
     get rate() { return controllerRate; },

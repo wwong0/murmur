@@ -9,6 +9,8 @@
 
 import { check, assert, assertEqual, assertNear } from '../harness.mjs';
 import { plant, recordRig, runUntil } from '../drift-plant.mjs';
+import { createClockFilter } from '../../../public/lib/clock-filter.mjs';
+import { createDriftLog, deriveDriftRecord } from '../../../public/lib/frame-drift.mjs';
 import { createDriftController } from '../../../public/lib/drift-controller.mjs';
 
 const MILLISECONDS_TOLERANCE = 0.05;
@@ -76,6 +78,102 @@ export default async function driftControllerSuite() {
     assertEqual(state.reason, 'no-clock', 'null is not treated as a zero offset');
     assertEqual(state.halfWidthMs, null, 'there is no clock width without an estimate');
     assertEqual(sim.applied.length, 0, 'no correction was handed to the player');
+    assertEqual(state.polls, 12, 'every no-clock evaluation advances the published count');
+    assertEqual(state.windowRecords, 0, 'the controller holds no records without a clock');
+    assertEqual(sim.log.read().records.length, 0, 'the controller holds no records while the producer has no clock');
+    assertEqual(sim.log.counters.noClock, 12, 'the producer names every refused no-clock frame');
+  });
+
+  await check('drift-controller: the real producer stays empty until its clock publishes', async () => {
+    const filter = createClockFilter();
+    const log = createDriftLog({ capacity: 8 });
+    const epochMs = 0;
+    const timeline = { epochMs, mediaMsAt: (sharedMs) => sharedMs - epochMs };
+    const clock = { read: (atMs) => filter.read(atMs) };
+    let localNowMs = 1000;
+
+    function offerFrame() {
+      const displayLocalMs = localNowMs;
+      log.add(deriveDriftRecord({
+        metadata: {
+          mediaTime: displayLocalMs / 1000,
+          expectedDisplayTime: displayLocalMs,
+          presentedFrames: 1,
+        },
+        timeOriginMs: 0,
+        localNowMs: displayLocalMs,
+        clock,
+        timeline,
+      }));
+      localNowMs += 20;
+    }
+
+    for (let i = 0; i < 5; i++) offerFrame();
+    const noClockRead = filter.read(localNowMs);
+    assert(noClockRead && Object.hasOwn(noClockRead, 'offsetMs'), 'the no-clock read publishes its shape');
+    assertEqual(noClockRead.offsetMs, null, 'the real filter has no offset before samples');
+    assertEqual(log.read().records.length, 0, 'the real producer holds no records without an offset');
+    assertEqual(log.counters.noClock, 5, 'the real producer counts every refused frame');
+
+    filter.add({ t1: 90, t2: 95, t3: 95, t4: 100 });
+    const firstPublished = filter.read(localNowMs);
+    assert(firstPublished && Object.hasOwn(firstPublished, 'offsetMs'), 'the first published read keeps its shape');
+    assert(Number.isFinite(firstPublished.offsetMs), 'the first published offset is finite');
+    assert(firstPublished.sampleCount < 8, 'the turnover run starts below the filter window cap');
+
+    const sampleCounts = [];
+    for (let i = 0; i < 24; i++) {
+      offerFrame();
+      const atMs = localNowMs;
+      filter.add({ t1: atMs - 10, t2: atMs - 5, t3: atMs - 5, t4: atMs });
+      const published = filter.read(localNowMs);
+      assert(published && Object.hasOwn(published, 'offsetMs'), 'the published read keeps its shape');
+      assert(Number.isFinite(published.offsetMs), 'the published offset stays finite through window turnover');
+      sampleCounts.push(published.sampleCount);
+    }
+    const firstAtCap = sampleCounts.findIndex((sampleCount) => sampleCount === 8);
+    assert(firstAtCap > 0, 'the filter sample count rises to its window cap');
+    assert(sampleCounts.slice(firstAtCap).every((sampleCount) => sampleCount === 8), 'the filter sample count stays pinned after count eviction');
+    assertEqual(log.read().records.length, 8, 'the producer log evicts older records after its capacity');
+  });
+
+  await check('drift-controller: no-clock time does not seed staleness before its first record', async () => {
+    const sim = plant({ clockPresent: false });
+    const { STALE_AFTER_MS } = sim.controller.state().settings;
+    for (let i = 0; i < 3; i++) {
+      sim.deliver();
+      sim.advance(STALE_AFTER_MS + 1);
+    }
+    assertEqual(sim.log.read().records.length, 0, 'the no-clock period leaves the log empty');
+    sim.clock.state.present = true;
+    const firstClockBearingPoll = sim.controller.poll();
+    assertEqual(sim.log.read().records.length, 0, 'the first clock-bearing poll still reads no record');
+    assertEqual(firstClockBearingPoll.mode, 'waiting', 'the first clock-bearing empty poll waits');
+    assertEqual(firstClockBearingPoll.reason, 'too-few-records', 'the first clock-bearing empty poll reports too few records');
+    assertEqual(firstClockBearingPoll.counters.drops.stale, 0, 'no-clock time never creates a stale drop');
+  });
+
+  await check('drift-controller: polls distinguish evaluations from rate writes', async () => {
+    const quiet = recordRig({ halfWidthMs: 200 });
+    for (let i = 0; i < 8; i++) quiet.add(80);
+    const first = quiet.controller.poll();
+    const beforeHold = quiet.controller.state();
+    const second = quiet.controller.poll();
+    assertEqual(beforeHold.polls, first.polls, 'reading state does not add an evaluation');
+    assertEqual(second.polls, first.polls + 1, 'a second evaluation increments the count exactly once');
+    assertEqual(second.estimateMs, first.estimateMs, 'the repeated evaluation has the same estimate');
+    assertEqual(second.rate, first.rate, 'the repeated evaluation has the same applied rate');
+    assertEqual(second.correctionsApplied, first.correctionsApplied, 'a held evaluation does not count a rate write');
+
+    const stale = recordRig({ halfWidthMs: 200, settings: { STALE_AFTER_MS: 500 } });
+    for (let i = 0; i < 8; i++) stale.add(80);
+    const declining = stale.controller.poll();
+    stale.advance(501);
+    const staleState = stale.controller.poll();
+    assertEqual(declining.mode, 'declining', 'the wide band makes the first evaluation a hold');
+    assertEqual(staleState.mode, 'stale', 'the later evaluation enters stale without correction');
+    assertEqual(staleState.polls, declining.polls + 1, 'the stale evaluation increments the count');
+    assertEqual(staleState.correctionsApplied, declining.correctionsApplied, 'the stale hold does not count a rate write');
   });
 
   await check('drift-controller: startup waits for MIN_RECORDS', async () => {
