@@ -16,8 +16,54 @@
 // TEST MACHINERY. Nothing in the product imports this.
 
 import { median } from '../public/lib/frame-drift.mjs';
-import { quantile } from '../public/lib/drift-controller.mjs';
+import { DECLINING_REASONS, quantile } from '../public/lib/drift-controller.mjs';
 import { plant } from './check/drift-plant.mjs';
+
+/**
+ * DID THIS POLL ACT ON A VALID MEASUREMENT? Not "is its reason null": declining
+ * inside the threshold now names which limit held it, and reading the absence of
+ * a reason as the whole valid-input population would drop every quiet stretch
+ * out of the figures the moment the controller started explaining itself.
+ *
+ * An allow-list, so an input hold, a resolution-budget refusal and any reason a
+ * later branch invents are excluded without this file being edited again. 4d
+ * evidence predates the declining reasons and carries `null` for the same
+ * states, which is why the old value stays in the list rather than beside it.
+ */
+export function actedOnMeasurement(sample) {
+  return sample?.reason === null || DECLINING_REASONS.includes(sample?.reason);
+}
+
+// Current snapshots carry all additive fields. An older 4d capture carries
+// none and may use bandMs as S; a partial current snapshot is malformed.
+const THRESHOLD_FIELDS = Object.freeze([
+  'actuatorAllowanceMs',
+  'requiredStoppingThresholdMs',
+  'stoppingThresholdMs',
+  'thresholdUsable',
+  'measurementLimit',
+]);
+
+export function thresholdContractOf(sample) {
+  const object = sample !== null && typeof sample === 'object' ? sample : {};
+  const hasAnyCurrentField = THRESHOLD_FIELDS.some((field) => Object.hasOwn(object, field));
+  if (!hasAnyCurrentField) {
+    const stoppingThresholdMs = Number.isFinite(object.bandMs) ? object.bandMs : null;
+    return { schema: 'legacy-4d', usable: stoppingThresholdMs !== null, stoppingThresholdMs };
+  }
+  const complete = THRESHOLD_FIELDS.every((field) => Object.hasOwn(object, field));
+  const usable = complete && object.thresholdUsable === true && Number.isFinite(object.stoppingThresholdMs);
+  return {
+    schema: complete ? 'current' : 'malformed-new',
+    usable,
+    stoppingThresholdMs: usable ? object.stoppingThresholdMs : null,
+  };
+}
+
+export function acceptedStoppingThresholdMs(sample) {
+  const contract = thresholdContractOf(sample);
+  return contract.usable ? contract.stoppingThresholdMs : null;
+}
 
 /** The converged span T6 anchors: below this many records the span reports nothing (count). */
 export const MIN_CONVERGED_RECORDS = 120;
@@ -270,13 +316,21 @@ function excursionsOf(samples, pollEveryMs) {
  * measured while the controller is still acting is not evidence of a held floor.
  */
 export function observationStats(samples, convergedRecords, pollEveryMs) {
-  const firstSettledIndex = samples.findIndex((sample) => sample.mode === 'settled');
+  const firstSettledIndex = samples.findIndex((sample) => sample.mode === 'settled'
+    && acceptedStoppingThresholdMs(sample) !== null);
   const afterSettled = firstSettledIndex < 0 ? [] : samples.slice(firstSettledIndex);
-  const settled = afterSettled.filter((sample) => sample.mode === 'settled');
-  const acting = samples.filter((sample) => sample.reason === null);
+  const settled = afterSettled.filter((sample) => sample.mode === 'settled'
+    && acceptedStoppingThresholdMs(sample) !== null);
+  const acting = samples.filter((sample) => actedOnMeasurement(sample)
+    && acceptedStoppingThresholdMs(sample) !== null);
   const population = settled.length > 0 ? settled : acting;
+  const populationName = settled.length > 0 ? 'settled' : 'acting';
   const spreadValues = finiteValues(population, 'spreadMs').sort(ascending);
   const bandValues = finiteValues(population, 'bandMs').sort(ascending);
+  const stoppingThresholdValues = population.map(acceptedStoppingThresholdMs).filter(Number.isFinite).sort(ascending);
+  const allowanceValues = finiteValues(population, 'actuatorAllowanceMs').sort(ascending);
+  const thresholdSchemas = [...new Set(population.map((sample) => thresholdContractOf(sample).schema))];
+  const thresholdUsableCount = population.filter((sample) => acceptedStoppingThresholdMs(sample) !== null).length;
   const estimateValues = finiteValues(population, 'estimateMs');
   const actingRateMedian = middleOf(finiteValues(acting, 'rate').sort(ascending));
   const observedClosureRateMsPerSec = closureRate(acting);
@@ -302,8 +356,17 @@ export function observationStats(samples, convergedRecords, pollEveryMs) {
     dutyPopulation: 'distinct controller polls from 125ms observation samples',
     dutyPopulationPolls: allDutySamplesHavePolls ? dutyPolls.length : null,
     settledPolls,
-    population: settled.length > 0 ? 'settled' : 'acting',
+    population: populationName,
     populationSamples: population.length,
+    thresholdPopulation: populationName,
+    thresholdPopulationSamples: population.length,
+    thresholdSchemas,
+    thresholdUsableCount,
+    thresholdUsableFraction: population.length ? thresholdUsableCount / population.length : null,
+    stoppingThresholdMedianMs: middleOf(stoppingThresholdValues),
+    stoppingThresholdMaxMs: stoppingThresholdValues.length ? Math.max(...stoppingThresholdValues) : null,
+    actuatorAllowanceMedianMs: middleOf(allowanceValues),
+    actuatorAllowanceMaxMs: allowanceValues.length ? Math.max(...allowanceValues) : null,
     spreadMedianMs: middleOf(spreadValues),
     bandMedianMs: middleOf(bandValues),
     spreadMaxMs: spreadValues.length ? Math.max(...spreadValues) : null,
@@ -355,7 +418,8 @@ export function steadyCommandStretches(samples, bars = DEFAULT_BARS) {
   }
 
   const usable = (evaluation) => Number.isFinite(evaluation.polls)
-    && evaluation.samples.every((sample) => sample?.reason === null
+    && evaluation.samples.every((sample) => actedOnMeasurement(sample)
+      && acceptedStoppingThresholdMs(sample) !== null
       && Number.isFinite(sample.rate)
       && Number.isFinite(sample.atMs));
   const rateValues = (run) => run.flatMap((evaluation) => evaluation.samples.map((sample) => sample.rate));
@@ -375,6 +439,8 @@ export function steadyCommandStretches(samples, bars = DEFAULT_BARS) {
       sampleCount: current.length,
       observationCount: observations.length,
       samples: observations,
+      commandSource: 'last-applied-rate',
+      thresholdSchemas: [...new Set(observations.map((sample) => thresholdContractOf(sample).schema))],
       dropSignatures: signatures,
       dropsChanged: new Set(signatures).size > 1,
     });

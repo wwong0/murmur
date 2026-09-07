@@ -131,6 +131,8 @@ export default async function driftLoadSuite() {
           history: result.history,
           tail,
           meanRate: mean(tail.map((state) => state.rate)),
+          // This is the legacy load-only excess diagnostic: it stays U/bandMs,
+          // not the accepted stopping threshold used by convergence consumers.
           meanExcessMs: mean(tail.map((state) => Math.abs(state.estimateMs) - state.bandMs)),
         });
       }
@@ -167,6 +169,8 @@ export default async function driftLoadSuite() {
     }
 
     for (const { standingError, tail } of alternating60) {
+      // Load stress measures excess beyond the measurement band U. It does not
+      // claim convergence eligibility or a distance-to-stop figure.
       const excesses = tail.map((state) => Math.abs(state.estimateMs) - state.bandMs);
       assert(tail.some((state) => state.mode === 'correcting')
         && tail.some((state) => state.mode === 'declining'),

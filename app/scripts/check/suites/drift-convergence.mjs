@@ -18,6 +18,7 @@
 
 import { check, assert, assertEqual } from '../harness.mjs';
 import { plant, runUntil } from '../drift-plant.mjs';
+import { acceptedStoppingThresholdMs } from '../../drift-figures.mjs';
 
 const POLL_EVERY_FRAMES = 6;          // 250ms at 24fps — room.entry.js's interval
 const RUN_FRAMES = POLL_EVERY_FRAMES * 960;   // 240 simulated seconds
@@ -140,14 +141,17 @@ export default async function driftConvergenceSuite() {
       for (const { standingError, history } of sweep(refreshHz)) {
         for (let i = 1; i < history.length - 1; i++) {
           const [before, state, next] = [history[i - 1], history[i], history[i + 1]];
-          if (before.mode !== 'settled' || state.bandMs === null) continue;
-          const isolated = Math.abs(state.estimateMs) > state.bandMs
-            && Math.abs(before.estimateMs) <= before.bandMs
-            && Math.abs(next.estimateMs) <= next.bandMs;
+          const beforeThreshold = acceptedStoppingThresholdMs(before);
+          const threshold = acceptedStoppingThresholdMs(state);
+          const nextThreshold = acceptedStoppingThresholdMs(next);
+          if (before.mode !== 'settled' || threshold === null || beforeThreshold === null || nextThreshold === null) continue;
+          const isolated = Math.abs(state.estimateMs) > threshold
+            && Math.abs(before.estimateMs) <= beforeThreshold
+            && Math.abs(next.estimateMs) <= nextThreshold;
           if (!isolated) continue;
           excursions += 1;
           assertEqual(state.mode, 'settled',
-            `${refreshHz}Hz from ${standingError}ms: an isolated excursion to ${state.estimateMs.toFixed(2)}ms against a ${state.bandMs.toFixed(2)}ms band left settled`);
+            `${refreshHz}Hz from ${standingError}ms: an isolated excursion to ${state.estimateMs.toFixed(2)}ms against a ${threshold.toFixed(2)}ms accepted stopping threshold left settled`);
           assert(Math.abs(state.rate - 1) <= state.settings.RATE_EPSILON,
             `${refreshHz}Hz from ${standingError}ms: an isolated excursion moved the applied rate to ${state.rate}`);
         }

@@ -45,6 +45,7 @@ import driftControllerSuite from './check/suites/drift-controller.mjs';
 import driftLoadSuite from './check/suites/drift-load.mjs';
 import driftFiguresSuite from './check/suites/drift-figures.mjs';
 import driftConvergenceSuite from './check/suites/drift-convergence.mjs';
+import driftReportingSuite from './check/suites/drift-reporting.mjs';
 import playbackStartSuite from './check/suites/playback-start.mjs';
 import driftReadoutSuite from './check/suites/drift-readout.mjs';
 import diagnosticsOverlaySuite from './check/suites/diagnostics-overlay.mjs';
@@ -72,6 +73,7 @@ for (const suite of [
   driftLoadSuite,
   driftFiguresSuite,
   driftConvergenceSuite,
+  driftReportingSuite,
   playbackStartSuite,
   driftReadoutSuite,
   diagnosticsOverlaySuite,

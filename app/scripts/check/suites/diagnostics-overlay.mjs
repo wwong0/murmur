@@ -14,12 +14,18 @@
 // (CONSTRAINTS.md → *Verification*).
 
 import { assert, assertEqual, check } from '../harness.mjs';
+import { recordRig } from '../drift-plant.mjs';
 import { createDriftLog } from '../../../public/lib/frame-drift.mjs';
 import { DRIFT_LINE_RE } from '../../../public/lib/drift-readout.mjs';
 import {
   CLOCK_LINE_NO_ESTIMATE,
   CLOCK_LINE_RE,
+  CONTROLLER_LINE_BEYOND_RE,
+  CONTROLLER_LINE_BEYOND_UNAVAILABLE_RE,
+  CONTROLLER_LINE_CORRECTING_RE,
   CONTROLLER_LINE_ACTING_RE,
+  CONTROLLER_LINE_MEASUREMENT_LIMIT_RE,
+  CONTROLLER_LINE_SETTLED_RE,
   CONTROLLER_LINE_HELD_RE,
   createDiagnosticsOverlay,
 } from '../../../public/lib/diagnostics-overlay.mjs';
@@ -34,22 +40,43 @@ const fakeState = (state) => ({ state: () => state });
  * excess, which closes in 390ms at the 0.01 rate authority and asks for a
  * correction of 3.9/4000 on the 4s time constant.
  */
-const makeControllerState = (overrides = {}) => ({
+const makeControllerState = ({ bandMs = 8.4, ...overrides } = {}) => ({
   rate: 1.000975,
   estimateMs: -12.3,
-  bandMs: 8.4,
+  bandMs,
+  spreadMs: 2.1,
+  halfWidthMs: bandMs,
+  measurementLimit: 'clock',
+  // f IS ZERO ON THIS BRANCH, so S is U and the accepted threshold is the band
+  // itself — derived here from the case's own input rather than read back out of
+  // the controller, which is what makes these expectations independent of it.
+  actuatorAllowanceMs: 0,
+  requiredStoppingThresholdMs: bandMs,
+  stoppingThresholdMs: bandMs,
+  thresholdUsable: true,
   fastestCloseMs: 390,
+  settings: { CLOSE_BUDGET_MS: 60000, MAX_STOPPING_THRESHOLD_MS: 20 },
   windowRecords: 24,
   mode: 'correcting',
   reason: null,
   ...overrides,
 });
 
-/** Every non-acting exit runs through `hold()`, which names a reason and acts on nothing. */
+/**
+ * Every non-acting exit runs through `hold()`, which names a reason and acts on
+ * nothing. A hold publishes no accepted threshold and no close: those are
+ * answers about an error this poll would act on, and it acted on none.
+ */
 const makeHeldState = (overrides = {}) => makeControllerState({
   rate: 1,
   estimateMs: null,
   bandMs: null,
+  spreadMs: null,
+  halfWidthMs: null,
+  measurementLimit: null,
+  requiredStoppingThresholdMs: null,
+  stoppingThresholdMs: null,
+  thresholdUsable: false,
   fastestCloseMs: null,
   ...overrides,
 });
@@ -69,6 +96,15 @@ function makeOverlay({
   return { log, overlay };
 }
 
+/** Build the no-finite-close fixture through the shipped controller. At zero
+ * rate authority, eight real records at -200ms qualify a usable 4ms threshold,
+ * but the shortest close is unavailable rather than an invented infinity. */
+const makeZeroAuthorityState = () => {
+  const rig = recordRig({ halfWidthMs: 4, settings: { MAX_RATE_DEVIATION: 0 } });
+  for (let i = 0; i < 8; i++) rig.add(-200);
+  return rig.controller.poll();
+};
+
 /** RESTATED HERE, never imported from the module under check — an expectation built
  *  by the code it is checking passes whatever that code decides a number looks like. */
 const signed = (ms) => `${ms >= 0 ? '+' : ''}${ms.toFixed(1)}ms`;
@@ -82,11 +118,11 @@ const controllerCases = [
     shape: CONTROLLER_LINE_HELD_RE,
   },
   {
-    // `fastestCloseMs` SURVIVES THIS HOLD and the other two null it, which is
-    // why the line may not read it: beside a stale mode it is a live-looking
-    // figure from an earlier second (design.md D1).
+    // The stale cutoff empties the control window, so this hold has no estimate
+    // to have counted while its older records still fill the rolling one — the
+    // frame count is the only figure it can carry.
     name: 'diagnostics overlay: stale with no records names its reason',
-    state: makeHeldState({ mode: 'stale', reason: 'no-records', fastestCloseMs: 30000, windowRecords: 24 }),
+    state: makeHeldState({ mode: 'stale', reason: 'no-records', windowRecords: 24 }),
     expected: 'controller: rate 1.000000 · stale · no-records over 24 frames',
     shape: CONTROLLER_LINE_HELD_RE,
   },
@@ -115,14 +151,23 @@ const controllerCases = [
       fastestCloseMs: 68790,
       windowRecords: 20,
     }),
-    expected: 'controller: rate 0.990000 · beyond-rate-authority · estimate +700.2ms, deadband 12.3ms, closes in 68.8s over 20 frames',
-    shape: CONTROLLER_LINE_ACTING_RE,
+    expected: 'controller: rate 0.990000 · beyond-rate-authority · error +700.2ms · U 12.3ms · actuator allowance 0.0ms · stopping threshold 12.3ms · close lower bound 68.8s (close budget 60.0s) over 20 frames',
+    shape: CONTROLLER_LINE_BEYOND_RE,
+  },
+  {
+    // This state is produced by a real f=0 controller, not by combining fields
+    // in a renderer fixture: an error outside U with no rate authority has no
+    // finite close lower bound to print.
+    name: 'diagnostics overlay: zero rate authority publishes an unavailable close bound',
+    state: makeZeroAuthorityState(),
+    expected: 'controller: rate 1.000000 \u00b7 beyond-rate-authority \u00b7 error -200.0ms \u00b7 U 4.0ms \u00b7 actuator allowance 0.0ms \u00b7 stopping threshold 4.0ms \u00b7 close lower bound unavailable (close budget 60.0s) over 8 frames',
+    shape: CONTROLLER_LINE_BEYOND_UNAVAILABLE_RE,
   },
   {
     name: 'diagnostics overlay: correcting reports its estimate and close',
     state: makeControllerState(),
-    expected: 'controller: rate 1.000975 · correcting · estimate -12.3ms, deadband 8.4ms, closes in 0.4s over 24 frames',
-    shape: CONTROLLER_LINE_ACTING_RE,
+    expected: 'controller: rate 1.000975 · correcting · error -12.3ms · U 8.4ms · actuator allowance 0.0ms · stopping threshold 8.4ms · close lower bound 0.4s (close budget 60.0s) over 24 frames',
+    shape: CONTROLLER_LINE_CORRECTING_RE,
   },
   {
     // INSIDE THE BAND THERE IS NO EXCESS, so the close is 0.0s rather than
@@ -131,14 +176,17 @@ const controllerCases = [
     // arm cannot produce.
     name: 'diagnostics overlay: settled remains distinguishable',
     state: makeControllerState({ rate: 1, mode: 'settled', estimateMs: 0, fastestCloseMs: 0, windowRecords: 16 }),
-    expected: 'controller: rate 1.000000 · settled · estimate +0.0ms, deadband 8.4ms, closes in 0.0s over 16 frames',
-    shape: CONTROLLER_LINE_ACTING_RE,
+    expected: 'controller: rate 1.000000 · settled · error +0.0ms · U 8.4ms · actuator allowance 0.0ms · stopping threshold 8.4ms · applied rate 1.000000 over 16 frames',
+    shape: CONTROLLER_LINE_SETTLED_RE,
   },
   {
+    // THE CASE THAT TELLS THE TWO RENDERERS APART. Declining now names the limit
+    // that held it, so a line built as `reason ?? figures` prints
+    // `· measurement-limit` here and drops the estimate the page exists to show.
     name: 'diagnostics overlay: declining reports the estimate it declined to act on',
-    state: makeControllerState({ rate: 1, mode: 'declining', estimateMs: 1.2, bandMs: 9.7, fastestCloseMs: 0, windowRecords: 8 }),
-    expected: 'controller: rate 1.000000 · declining · estimate +1.2ms, deadband 9.7ms, closes in 0.0s over 8 frames',
-    shape: CONTROLLER_LINE_ACTING_RE,
+    state: makeControllerState({ rate: 1, mode: 'declining', reason: 'measurement-limit', estimateMs: 1.2, bandMs: 9.7, fastestCloseMs: 0, windowRecords: 8 }),
+    expected: 'controller: rate 1.000000 · declining · measurement-limit · measurement arm clock · error +1.2ms · U 9.7ms · actuator allowance 0.0ms · stopping threshold 9.7ms over 8 frames',
+    shape: CONTROLLER_LINE_MEASUREMENT_LIMIT_RE,
   },
 ];
 
@@ -172,6 +220,9 @@ export default async function diagnosticsOverlaySuite() {
       const line = controllerLines[index];
       assertEqual(line, testCase.expected, 'controller line has the exact constructed shape');
       assert(testCase.shape.test(line), 'controller line matches the shape its own arm publishes');
+      if (testCase.shape === CONTROLLER_LINE_BEYOND_UNAVAILABLE_RE) {
+        assert(CONTROLLER_LINE_ACTING_RE.test(line), 'the unavailable-close beyond-authority line is classified by the acting union');
+      }
       // THE TWO SHAPES MUST REFUSE EACH OTHER, or publishing two bought nothing:
       // a consumer asking "is this client acting on a measurement" would be
       // satisfied by a page that has held since it loaded.
@@ -179,12 +230,13 @@ export default async function diagnosticsOverlaySuite() {
     });
   }
 
-  await check('diagnostics overlay: a hold does not render figures from an acting poll', async () => {
-    // THE ONE HOLD THAT REACHES THE LINE WITH LIVE FIGURES. `no-clock` and
-    // `stale` both leave the controller with no estimate to have counted, so
-    // for those the renderer would print nothing whether it read the reason or
-    // not; too few records inside a NON-EMPTY window is the state that tells a
-    // builder branching on the reason from one that does not.
+  await check('diagnostics overlay: a hold does not render the components it did not act on', async () => {
+    // THE ONE HOLD THAT REACHES THE LINE WITH MEASUREMENT COMPONENTS. Too few
+    // records inside a NON-EMPTY window still computes an estimate, a dispersion
+    // arm and the U and required S over them — it is only the ACCEPTANCE the
+    // hold withholds, so `thresholdUsable` is false and there is no close. That
+    // makes it the state that tells a renderer keyed on usability from one that
+    // prints whatever figures it finds.
     const line = makeOverlay({
       controllerState: makeControllerState({
         rate: 1,
@@ -192,11 +244,16 @@ export default async function diagnosticsOverlaySuite() {
         reason: 'too-few-records',
         estimateMs: -45,
         bandMs: 15,
-        fastestCloseMs: 3000,
+        spreadMs: 15,
+        measurementLimit: 'clock-and-dispersion',
+        stoppingThresholdMs: null,
+        thresholdUsable: false,
+        fastestCloseMs: null,
         windowRecords: 6,
       }),
     }).overlay.lines().controller;
     assertEqual(line, 'controller: rate 1.000000 · waiting · too-few-records over 6 frames', 'a hold reports its reason instead of figures it did not act on');
+    assert(!line.includes('-45.0ms') && !line.includes('15.0ms'), 'the provisional components a hold retains do not reach the line');
     assert(CONTROLLER_LINE_HELD_RE.test(line), 'held controller line matches the published held shape');
     assert(!CONTROLLER_LINE_ACTING_RE.test(line), 'a hold is refused by the acting shape');
   });

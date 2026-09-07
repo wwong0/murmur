@@ -561,7 +561,7 @@ async function waitForSettle(tabs) {
         const seam = state.last?.seam;
         const controller = seam?.controller ?? {};
         const elapsed = state.firstPlaybackAt === null ? 'n/a' : `${((now - state.firstPlaybackAt) / 1000).toFixed(1)}s`;
-        console.log(`  ${state.label}: elapsed ${elapsed} · mode ${controller.mode ?? 'null'} · reason ${controller.reason ?? 'null'} · rate ${controller.rate ?? 'null'} · estimateMs ${controller.estimateMs ?? 'null'} · bandMs ${controller.bandMs ?? 'null'} · windowRecords ${controller.windowRecords ?? 'null'} · correctionsApplied ${controller.correctionsApplied ?? 'null'}`);
+        console.log(`  ${state.label}: elapsed ${elapsed} · mode ${controller.mode ?? 'null'} · reason ${controller.reason ?? 'null'} · rate ${controller.rate ?? 'null'} · estimateMs ${controller.estimateMs ?? 'null'} · U/bandMs ${controller.bandMs ?? 'null'} · L/allowanceMs ${controller.actuatorAllowanceMs ?? 'null'} · requiredS ${controller.requiredStoppingThresholdMs ?? 'null'} · acceptedS ${controller.stoppingThresholdMs ?? 'null'} · usable ${controller.thresholdUsable ?? 'null'} · windowRecords ${controller.windowRecords ?? 'null'} · correctionsApplied ${controller.correctionsApplied ?? 'null'}`);
       }
       nextProgressAt = now + SETTLE_PROGRESS_MS;
     }
@@ -606,6 +606,12 @@ async function observeWindows(tabs, durationMs) {
         estimateMs: controller.estimateMs ?? null,
         bandMs: controller.bandMs ?? null,
         spreadMs: controller.spreadMs ?? null,
+        halfWidthMs: controller.halfWidthMs ?? null,
+        measurementLimit: controller.measurementLimit ?? null,
+        actuatorAllowanceMs: controller.actuatorAllowanceMs ?? null,
+        requiredStoppingThresholdMs: controller.requiredStoppingThresholdMs ?? null,
+        stoppingThresholdMs: controller.stoppingThresholdMs ?? null,
+        thresholdUsable: controller.thresholdUsable ?? false,
         windowRecords: controller.windowRecords ?? null,
         controlRecords: controller.controlRecords ?? null,
       });
@@ -879,7 +885,7 @@ try {
       const text = (reading.driftText ?? '').trim();
       const match = DRIFT_LINE_RE.exec(text);
       if (match === null || Number(match[1]) <= 0) console.log(`  ${label} drift line non-match (${reading.paused ? 'not playing' : 'no new records'}): ${JSON.stringify(reading.driftText)}`);
-      console.log(`  ${label} controller line beside seam state: ${JSON.stringify({ line: reading.controllerText, mode: seam.controller?.mode, reason: seam.controller?.reason, rate: seam.controller?.rate, estimateMs: seam.controller?.estimateMs, bandMs: seam.controller?.bandMs, fastestCloseMs: seam.controller?.fastestCloseMs, windowRecords: seam.controller?.windowRecords })}`);
+      console.log(`  ${label} controller line beside seam state: ${JSON.stringify({ line: reading.controllerText, mode: seam.controller?.mode, reason: seam.controller?.reason, rate: seam.controller?.rate, estimateMs: seam.controller?.estimateMs, bandMs: seam.controller?.bandMs, spreadMs: seam.controller?.spreadMs, halfWidthMs: seam.controller?.halfWidthMs, measurementLimit: seam.controller?.measurementLimit, actuatorAllowanceMs: seam.controller?.actuatorAllowanceMs, requiredStoppingThresholdMs: seam.controller?.requiredStoppingThresholdMs, stoppingThresholdMs: seam.controller?.stoppingThresholdMs, thresholdUsable: seam.controller?.thresholdUsable, fastestCloseMs: seam.controller?.fastestCloseMs, windowRecords: seam.controller?.windowRecords })}`);
     }
     expect(`3.8 ${label}'s controller line uses the acting shape`, actingMatches.length > 0, JSON.stringify(distinct('controllerText')));
     expect(`3.8 ${label}'s controller line uses a published shape`, controllerMatches.length === readings.length, JSON.stringify(distinct('controllerText')));
@@ -925,6 +931,7 @@ try {
       firstPlayback: settleState.firstPlayback,
       observedSamples: state.samples.length,
       absent: state.absent,
+      observations: state.samples,
       plantMinimum,
     });
   }
@@ -942,7 +949,7 @@ try {
   }
   manifestPath = path.join(RUN_DIR, 'manifest.json');
   const manifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runDirectory: RUN_DIRECTORY_NAME,
     gitHead,
     build: {
@@ -981,6 +988,18 @@ try {
       counts: index === 0 ? countsA : countsB,
       observedSamples: figure.observedSamples,
       absentSamples: figure.absent,
+      observations: figure.observations,
+      thresholdSummary: {
+        population: figure.stats.thresholdPopulation,
+        samples: figure.stats.thresholdPopulationSamples,
+        schemas: figure.stats.thresholdSchemas,
+        usableCount: figure.stats.thresholdUsableCount,
+        usableFraction: figure.stats.thresholdUsableFraction,
+        stoppingThresholdMedianMs: figure.stats.stoppingThresholdMedianMs,
+        stoppingThresholdMaxMs: figure.stats.stoppingThresholdMaxMs,
+        actuatorAllowanceMedianMs: figure.stats.actuatorAllowanceMedianMs,
+        actuatorAllowanceMaxMs: figure.stats.actuatorAllowanceMaxMs,
+      },
     })),
   };
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -997,10 +1016,15 @@ try {
   expect('T10 A converged median re-derives from retained NDJSON', rederivedA.medianMs === convergedA.convergedMedianMs && rederivedA.count === convergedA.convergedCount, `retained ${rederivedA.medianMs}ms/${rederivedA.count}; printed ${convergedA.convergedMedianMs}ms/${convergedA.convergedCount}`);
   expect('T10 B converged median re-derives from retained NDJSON', rederivedB.medianMs === convergedB.convergedMedianMs && rederivedB.count === convergedB.convergedCount, `retained ${rederivedB.medianMs}ms/${rederivedB.count}; printed ${convergedB.convergedMedianMs}ms/${convergedB.convergedCount}`);
 
-  const predictedParkingMs = predictedParkingDistanceMs(
-    t7Figures[0]?.stats.bandMedianMs,
-    t7Figures[1]?.stats.bandMedianMs,
-  );
+  const parkingThresholdsUsable = t7Figures.length === 2 && t7Figures.every((figure) =>
+    figure.stats.thresholdUsableFraction === 1
+    && Number.isFinite(figure.stats.stoppingThresholdMedianMs));
+  const predictedParkingMs = parkingThresholdsUsable
+    ? predictedParkingDistanceMs(
+      t7Figures[0].stats.stoppingThresholdMedianMs,
+      t7Figures[1].stats.stoppingThresholdMedianMs,
+    )
+    : null;
 
   const pa2 = await a.evaluate(PROBE);
   const pb2 = await b.evaluate(PROBE);
@@ -1291,20 +1315,20 @@ try {
     console.log(`  settling ${state.label}: settlingMs ${numberText(controller.settlingMs)}ms; gap before first correction ${numberText(gapMs)}ms (observed at ${SETTLE_POLL_MS}ms endpoints, ±0.25s granularity); applied rate ${numberText(controller.rate, 9)}; correctionsApplied ${controller.correctionsApplied ?? 'null'}`);
   }
   console.log(`  convergence: ${CONVERGED_WINDOW_MS / 1000}s spans; A median ${numberText(convergedA.convergedMedianMs)}ms over ${convergedA.convergedCount} records; B median ${numberText(convergedB.convergedMedianMs)}ms over ${convergedB.convergedCount} records; separation ${numberText(spread)}ms; whole-run summary medians A ${numberText(sa.summary?.medianDriftMs)}ms and B ${numberText(sb.summary?.medianDriftMs)}ms (ring-held history)`);
-  console.log(`  3.3 two-client parking prediction: ${numberText(predictedParkingMs)}ms from A published ${t7Figures[0]?.stats.population} band median ${numberText(t7Figures[0]?.stats.bandMedianMs)}ms + B published ${t7Figures[1]?.stats.population} band median ${numberText(t7Figures[1]?.stats.bandMedianMs)}ms; predicted worst-case separation, not an observed distance.`);
+  console.log(`  3.3 two-client parking prediction: ${numberText(predictedParkingMs)}ms from accepted S medians A ${numberText(t7Figures[0]?.stats.stoppingThresholdMedianMs)}ms + B ${numberText(t7Figures[1]?.stats.stoppingThresholdMedianMs)}ms (${parkingThresholdsUsable ? 'usable threshold populations' : 'threshold unavailable'}); U medians remain A ${numberText(t7Figures[0]?.stats.bandMedianMs)}ms + B ${numberText(t7Figures[1]?.stats.bandMedianMs)}ms; predicted worst-case separation, not an observed distance.`);
   for (const figure of t7Figures) {
     const { label, stats, verdicts, lag, refresh, converged, plantMinimum: minimum } = figure;
     const plantMinimumText = minimum === null ? 'null' : `${(minimum.dutyCycle * 100).toFixed(1)}% at ${minimum.refreshHz}Hz/${minimum.standingError}ms over ${minimum.population}`;
     console.log(`  3.1 ${label}: first 8 drift median ${numberText(lag.firstEightMs)}ms; last estimate with correctionsApplied=0 ${numberText(figure.noCorrectionEstimateMs)}ms; 4a reference ${lag.referenceLagMs}ms; verdict: ${lag.verdict}.`);
     console.log(`  3.2 ${label}: interpolated span scatter ${numberText(converged.convergedSpreadMs)}ms over ${converged.convergedCount} records; alternation ${numberText(stats.alternation?.fraction, 3)} over ${stats.alternation?.nonzeroPairs ?? 0} nonzero pairs, ${stats.alternation?.zeroPairs ?? 0} zero pairs, ${stats.alternation?.totalPairs ?? 0} total pairs; rounded drifts ${JSON.stringify(stats.histogram)}; panel refresh ${numberText(refresh.refreshRateHz)}Hz from ${refresh.frameCount ?? 'null'} frames with median delta ${numberText(refresh.medianDeltaMs)}ms; verdict: ${verdicts.cadenceVerdict}.`);
-    console.log(`  3.3 ${label}: published ${stats.population} spread median ${numberText(stats.spreadMedianMs)}ms, max ${numberText(stats.spreadMaxMs)}ms; predicted half-vsync floor ${numberText(verdicts.predictedFloorMs)}ms; estimate range over the observation ${numberText(stats.estimateRangeMs)}ms; verdict: ${verdicts.floorVerdict}.`);
+    console.log(`  3.3 ${label}: published ${stats.population} U/band median ${numberText(stats.bandMedianMs)}ms (spread median ${numberText(stats.spreadMedianMs)}ms, max ${numberText(stats.spreadMaxMs)}ms); L/allowance median ${numberText(stats.actuatorAllowanceMedianMs)}ms; accepted S median ${numberText(stats.stoppingThresholdMedianMs)}ms, max ${numberText(stats.stoppingThresholdMaxMs)}ms; threshold usability ${stats.thresholdUsableCount}/${stats.thresholdPopulationSamples} (${numberText(stats.thresholdUsableFraction, 3)}), schemas ${JSON.stringify(stats.thresholdSchemas)}; predicted half-vsync floor ${numberText(verdicts.predictedFloorMs)}ms; estimate range over the observation ${numberText(stats.estimateRangeMs)}ms; verdict: ${verdicts.floorVerdict}.`);
     console.log(`  3.4 ${label}: first settled sample index ${stats.firstSettledIndex}; population ${stats.population}; duty ${verdicts.dutyVerdict}; excursions ${JSON.stringify(stats.excursions)}; verdict: ${verdicts.excursionVerdict}; plant sweep minimum ${plantMinimumText}; recommendation: ${verdicts.recommendation}; read over ${figure.observedSamples}/${expectedObservationSamples} samples with ${figure.absent} absent.`);
-    console.log(`  2.11 ${label}: Chrome 10s interpolated scatter ${numberText(converged.convergedSpreadMs)}ms vs half-vsync ${numberText(verdicts.predictedFloorMs)}ms; published ${stats.population} spread ${numberText(stats.spreadMedianMs)}ms; estimate range over the observation ${numberText(stats.estimateRangeMs)}ms; max per-poll estimate movement ${numberText(stats.maxPerPollMovementMs)}ms over ${stats.perPollPairsUsed} adjacent pairs, ${stats.perPollPairsSkippedForGap} skipped for poll gaps (comparable to the plant's ${PLANT_MEDIAN_MOVEMENT_MS}ms largest per-poll movement, not a median); verdict: ${verdicts.modelVerdict}; median applied rate ${numberText(stats.actingRateMedian, 6)} over acting fraction ${numberText(stats.actingFraction, 3)}; observed closure ${numberText(stats.observedClosureRateMsPerSec)}ms/s; commanded closure ${numberText(stats.commandedClosureRateMsPerSec)}ms/s; effectiveness fraction ${numberText(stats.effectivenessFraction, 3)}; rate-effectiveness verdict: ${verdicts.rateEffectivenessVerdict}.`);
+    console.log(`  2.11 ${label}: Chrome 10s interpolated scatter ${numberText(converged.convergedSpreadMs)}ms vs half-vsync ${numberText(verdicts.predictedFloorMs)}ms; published ${stats.population} U ${numberText(stats.bandMedianMs)}ms, L ${numberText(stats.actuatorAllowanceMedianMs)}ms, accepted S ${numberText(stats.stoppingThresholdMedianMs)}ms with usability ${numberText(stats.thresholdUsableFraction, 3)}; spread ${numberText(stats.spreadMedianMs)}ms; estimate range over the observation ${numberText(stats.estimateRangeMs)}ms; max per-poll estimate movement ${numberText(stats.maxPerPollMovementMs)}ms over ${stats.perPollPairsUsed} adjacent pairs, ${stats.perPollPairsSkippedForGap} skipped for poll gaps (comparable to the plant's ${PLANT_MEDIAN_MOVEMENT_MS}ms largest per-poll movement, not a median); verdict: ${verdicts.modelVerdict}; median applied rate ${numberText(stats.actingRateMedian, 6)} over acting fraction ${numberText(stats.actingFraction, 3)}; observed closure ${numberText(stats.observedClosureRateMsPerSec)}ms/s; commanded closure ${numberText(stats.commandedClosureRateMsPerSec)}ms/s; effectiveness fraction ${numberText(stats.effectivenessFraction, 3)}; rate-effectiveness verdict: ${verdicts.rateEffectivenessVerdict}.`);
     console.log(`  3.5 ${label}: final no-clock counters ${JSON.stringify({ noClock: figure.finalCounters?.noClock ?? null, framesOffered: figure.finalCounters?.framesOffered ?? null })}; first clock held ${figure.firstClock?.held ?? 'null'} counters ${JSON.stringify(figure.firstClock?.counters ?? null)}; first playing held ${figure.firstPlayback?.seam?.held ?? 'null'} counters ${JSON.stringify(figure.firstPlayback?.seam?.counters ?? null)}; verdict: direct controller record count is not observable, and this page construction cannot feed the no-clock arm because records require a clock and an established offset does not return to null.`);
   }
   for (const [label, readings] of [['A', linesA], ['B', linesB]]) {
     const distinct = (key) => [...new Set(readings.map((reading) => reading[key] ?? ''))];
-    console.log(`  T6b ${label} rendered clock lines ${JSON.stringify(distinct('clockText'))} (asserted against CLOCK_LINE_RE); drift lines ${JSON.stringify(distinct('driftText'))} (asserted against DRIFT_LINE_RE with a positive frame count); controller lines ${JSON.stringify(distinct('controllerText'))} (asserted against CONTROLLER_LINE_ACTING_RE and CONTROLLER_LINE_HELD_RE, with an acting match required).`);
+    console.log(`  T6b ${label} rendered clock lines ${JSON.stringify(distinct('clockText'))} (asserted against CLOCK_LINE_RE); drift lines ${JSON.stringify(distinct('driftText'))} (asserted against DRIFT_LINE_RE with a positive frame count); controller lines ${JSON.stringify(distinct('controllerText'))} (asserted against branch-specific controller shapes, with an acting match required).`);
   }
   console.log(`  T8 seam route counters: V before ${JSON.stringify(before.V)}; V after ${JSON.stringify(after.V)}; A3 before ${JSON.stringify(before.A3)}; A3 after ${JSON.stringify(after.A3)}; diagnosis ${routeDiagnosis ?? 'seam fired'}.`);
   console.log(`  whole pass wall-clock length: ${numberText(Date.now() - PASS_STARTED_AT, 0)}ms (${numberText((Date.now() - PASS_STARTED_AT) / 1000, 1)}s), measured from script start.`);

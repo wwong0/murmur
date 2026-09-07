@@ -13,6 +13,9 @@
 //  - That arm is a range between quantiles and must never become a distance from
 //    the centre — a MAD or a standard deviation collapses on a cadence at exactly
 //    the poll where the estimate is furthest out. `spread` below says why.
+//  - U (`bandMs`) is the measurement band AND the origin the correction is
+//    measured from; S (`stoppingThresholdMs`) is only where the client may stop.
+//    An absent measurement is published as absent, never as zero.
 //  - `state().rate` is the last value handed to `apply`, not the value computed
 //    this poll; settled must describe what the media element actually received.
 //  - The half-width comes from a fresh `clock.read()` at poll time, never records.
@@ -33,6 +36,16 @@ export const MIN_RECORDS = 8;
 export const SETTLED_FOR_MS = 5000;
 export const CLOSE_BUDGET_MS = 60000;
 export const RATE_EPSILON = 1e-6;
+/**
+ * f — the smallest command deviation worth writing. ZERO, AND NOT A PLACEHOLDER:
+ * the open-loop sweep returned F3, the two channels disagree at 2000 ppm and no
+ * floor was calibrated, so no positive value is authorised (design.md D7).
+ * Construction refuses f > 0 rather than publish a threshold nothing implements.
+ */
+export const MIN_COMMAND_DEVIATION = 0;
+/** The owner-approved ceiling on an accepted stopping threshold. Fixed: an
+ *  override may not raise it, and may not lower it either (ms). */
+export const MAX_STOPPING_THRESHOLD_MS = 20;
 
 const BASE_RATE = 1;
 const DEFAULT_SETTINGS = Object.freeze({
@@ -44,6 +57,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   SETTLED_FOR_MS,
   CLOSE_BUDGET_MS,
   RATE_EPSILON,
+  MIN_COMMAND_DEVIATION,
+  MAX_STOPPING_THRESHOLD_MS,
 });
 
 // Both statistics take a SORTED array, as frame-drift.mjs's pair next door do.
@@ -79,8 +94,90 @@ function displayLocalOf(record) {
   return record.displaySharedMs - record.clock.offsetMs;
 }
 
+/**
+ * L — the error the smallest worthwhile command closes in one time constant.
+ * The mapping reuses TIME_CONSTANT_MS rather than a second tunable, so a change
+ * to the correction's speed cannot silently move the allowance under it.
+ */
+export function actuatorAllowanceMs(floorRate, timeConstantMs) {
+  return floorRate * timeConstantMs;
+}
+
+/**
+ * The threshold set a poll publishes, from inputs that do not require a
+ * controller to supply. U is the larger measurement arm and stays the origin
+ * the correction is measured from; S = U + L is the region the client must be
+ * inside to stop. `measurementLimit` names the arm that set U, and says
+ * `clock-and-dispersion` only on exact equality — a tie needs no tolerance
+ * constant, because there is nothing between two numbers that are the same one.
+ * With no dispersion there is no window, so U and everything above it is
+ * absent rather than zero.
+ */
+export function thresholdComponents({ halfWidthMs, spreadMs, allowanceMs }) {
+  const clockArm = Number.isFinite(halfWidthMs) ? halfWidthMs : null;
+  const dispersionArm = Number.isFinite(spreadMs) ? spreadMs : null;
+  if (dispersionArm === null) return { bandMs: null, measurementLimit: null, requiredStoppingThresholdMs: null };
+  const bandMs = Math.max(clockArm ?? 0, dispersionArm);
+  let measurementLimit = 'dispersion';
+  if (clockArm !== null && clockArm > dispersionArm) measurementLimit = 'clock';
+  else if (clockArm !== null && clockArm === dispersionArm) measurementLimit = 'clock-and-dispersion';
+  return { bandMs, measurementLimit, requiredStoppingThresholdMs: bandMs + allowanceMs };
+}
+
+/**
+ * The shortest time the rate authority could need to reach the stopping
+ * threshold — a lower bound on closing, never a predicted settling time.
+ * A zero authority closes nothing it is not already inside: that is 0 ms when
+ * there is no excess and NO FIGURE AT ALL when there is, rather than the
+ * Infinity or NaN the division produces and JSON would flatten to `null`
+ * anyway, indistinguishable from a value that was never computed.
+ */
+export function shortestCloseMs(estimateMs, thresholdMs, maxRateDeviation) {
+  const excess = Math.max(0, Math.abs(estimateMs) - thresholdMs);
+  if (excess === 0) return 0;
+  const close = excess / maxRateDeviation;
+  return Number.isFinite(close) ? close : null;
+}
+
+/**
+ * Which limit is holding a client that declined to correct. The caller has
+ * already established the error is inside S; inside U as well, it is the
+ * measurement that cannot resolve the error, and beyond U it is the allowance
+ * added on top of it. At f = 0 the two thresholds coincide and only the first
+ * arm is reachable — see the branch note above MIN_COMMAND_DEVIATION.
+ */
+export const DECLINING_REASONS = Object.freeze(['measurement-limit', 'actuator-limit']);
+export function decliningReason(estimateMs, bandMs) {
+  return Math.abs(estimateMs) <= bandMs ? DECLINING_REASONS[0] : DECLINING_REASONS[1];
+}
+
+/**
+ * The construction contract, checked before `apply` can be handed anything, so
+ * a settings mistake is a throw at startup rather than a rate at the player.
+ */
+function validateSettings(settings) {
+  const floor = settings.MIN_COMMAND_DEVIATION;
+  const refuse = (message) => { throw new RangeError(`drift-controller: ${message}`); };
+  const finite = ['MIN_COMMAND_DEVIATION', 'TIME_CONSTANT_MS', 'MAX_RATE_DEVIATION', 'RATE_EPSILON'];
+  for (const name of finite) if (!Number.isFinite(settings[name])) refuse(`${name} must be a finite number, got ${settings[name]}`);
+  if (floor < 0) refuse(`MIN_COMMAND_DEVIATION must not be negative, got ${floor}`);
+  // NOT "unsupported yet": the experiment that would license a positive floor
+  // ran and did not qualify one (design.md D7). Accepting the setting would
+  // publish a usable threshold with no implementation under it.
+  if (floor > 0) refuse(`MIN_COMMAND_DEVIATION ${floor} is refused: no floor was calibrated, so only 0 is implemented`);
+  if (settings.TIME_CONSTANT_MS <= 0) refuse(`TIME_CONSTANT_MS must be positive, got ${settings.TIME_CONSTANT_MS}`);
+  if (settings.MAX_RATE_DEVIATION < 0 || settings.MAX_RATE_DEVIATION >= 1) refuse(`MAX_RATE_DEVIATION must be in [0, 1), got ${settings.MAX_RATE_DEVIATION}`);
+  if (settings.RATE_EPSILON < 0) refuse(`RATE_EPSILON must not be negative, got ${settings.RATE_EPSILON}`);
+  if (settings.MAX_STOPPING_THRESHOLD_MS !== MAX_STOPPING_THRESHOLD_MS) refuse(`MAX_STOPPING_THRESHOLD_MS is fixed at ${MAX_STOPPING_THRESHOLD_MS}, got ${settings.MAX_STOPPING_THRESHOLD_MS}`);
+}
+
 export function createDriftController({ log, clock, apply, settings: overrides = {}, now }) {
   const settings = Object.freeze({ ...DEFAULT_SETTINGS, ...overrides });
+  validateSettings(settings);
+  // Known from the settings alone, so it is published before the first poll and
+  // survives every hold: nothing about a missing clock changes what the actuator
+  // is allowed to ignore.
+  const allowanceMs = actuatorAllowanceMs(settings.MIN_COMMAND_DEVIATION, settings.TIME_CONSTANT_MS);
   let cursor = 0;
   let records = [];
   let lastReanchors = null;
@@ -99,6 +196,10 @@ export function createDriftController({ log, clock, apply, settings: overrides =
   let bandMs = null;
   let spreadMs = null;
   let halfWidthMs = null;
+  let measurementLimit = null;
+  let requiredStoppingThresholdMs = null;
+  let stoppingThresholdMs = null;
+  let thresholdUsable = false;
   let windowRecords = 0;
   let controlRecords = 0;
   let fastestCloseMs = null;
@@ -140,6 +241,13 @@ export function createDriftController({ log, clock, apply, settings: overrides =
   function hold(atMs, nextMode, nextReason) {
     applyRate(BASE_RATE, atMs);
     unlatch();
+    // NO HOLD PUBLISHES AN ACCEPTED THRESHOLD OR A LIVE CLOSE. Measurement
+    // components describe what was measured and a hold may keep them; an
+    // accepted S and a close figure are answers about the error this poll would
+    // act on, and a poll that acted on nothing has none (design.md D3).
+    stoppingThresholdMs = null;
+    thresholdUsable = false;
+    fastestCloseMs = null;
     mode = nextMode;
     reason = nextReason;
   }
@@ -159,6 +267,11 @@ export function createDriftController({ log, clock, apply, settings: overrides =
       bandMs,
       spreadMs,
       halfWidthMs,
+      measurementLimit,
+      actuatorAllowanceMs: allowanceMs,
+      requiredStoppingThresholdMs,
+      stoppingThresholdMs,
+      thresholdUsable,
       windowRecords,
       controlRecords,
       mode,
@@ -202,9 +315,10 @@ export function createDriftController({ log, clock, apply, settings: overrides =
       bandMs = null;
       spreadMs = null;
       halfWidthMs = null;
+      measurementLimit = null;
+      requiredStoppingThresholdMs = null;
       windowRecords = 0;
       controlRecords = 0;
-      fastestCloseMs = null;
       hold(atMs, 'waiting', 'no-clock');
       return snapshot();
     }
@@ -262,12 +376,13 @@ export function createDriftController({ log, clock, apply, settings: overrides =
         .sort((a, b) => a - b);
       estimateMs = median(values);
       spreadMs = spread(values);
-      bandMs = Math.max(halfWidthMs ?? 0, spreadMs);
     } else {
       estimateMs = null;
       spreadMs = null;
-      bandMs = null;
     }
+    // Provisional until a branch below accepts them: these three say what was
+    // measured, not what may be stopped inside.
+    ({ bandMs, measurementLimit, requiredStoppingThresholdMs } = thresholdComponents({ halfWidthMs, spreadMs, allowanceMs }));
 
     // `staleHold` alone: a poll can now READ a backlog and still be stale,
     // because staleness is the newest frame's age rather than this poll's luck.
@@ -280,10 +395,16 @@ export function createDriftController({ log, clock, apply, settings: overrides =
       // shortage counted from the two ends, and it reports one reason.
       hold(atMs, 'waiting', 'too-few-records');
     } else {
+      // The one branch that acts on the measurement, so the one that accepts a
+      // threshold. THE CORRECTION IS STILL MEASURED FROM U: S is where the
+      // client may stop, not where the error is counted from, and at f = 0 the
+      // two are the same number anyway (design.md D3).
+      stoppingThresholdMs = requiredStoppingThresholdMs;
+      thresholdUsable = true;
       const excess = Math.sign(estimateMs) * Math.max(0, Math.abs(estimateMs) - bandMs);
-      fastestCloseMs = Math.abs(excess) / settings.MAX_RATE_DEVIATION;
+      fastestCloseMs = shortestCloseMs(estimateMs, stoppingThresholdMs, settings.MAX_RATE_DEVIATION);
       const correction = Math.max(-settings.MAX_RATE_DEVIATION, Math.min(settings.MAX_RATE_DEVIATION, -excess / settings.TIME_CONSTANT_MS));
-      const inside = Math.abs(estimateMs) <= bandMs;
+      const inside = Math.abs(estimateMs) <= stoppingThresholdMs;
       // ONE POLL DOES NOT UNLATCH `settled`. The window's composition is
       // occasionally unrepresentative for a single poll, so an excursion is
       // neither acted on nor believed until it has outlived one
@@ -300,24 +421,26 @@ export function createDriftController({ log, clock, apply, settings: overrides =
       if (believed) {
         insideBandAt = null;
         settledLatched = false;
-        mode = fastestCloseMs > settings.CLOSE_BUDGET_MS ? 'beyond-rate-authority' : 'correcting';
+        // NO FINITE CLOSE IS BEYOND THE BUDGET TOO, and the budget is compared
+        // against nothing else: `null > budget` and `Infinity > budget` are the
+        // two ways this line has to be able to say "not closable from here".
+        mode = fastestCloseMs === null || fastestCloseMs > settings.CLOSE_BUDGET_MS ? 'beyond-rate-authority' : 'correcting';
         reason = null;
       } else {
         if (insideBandAt === null) insideBandAt = atMs;
-        // Every conjunct below has failed on its own (design.md D3).
-        // A CLIENT THAT NEVER CORRECTED HAS NOT CONVERGED — its band merely
+        // A CLIENT THAT NEVER CORRECTED HAS NOT CONVERGED — its threshold merely
         // covers its error, which is `declining`; settling is measured from the
-        // first applied correction, so without one there is no time to report.
-        // And THE SAME EPSILON ON BOTH SIDES OF THE SAME QUESTION: `applyRate`
-        // refuses to write within RATE_EPSILON of the last rate, so a client
-        // parked just off unity never writes exact 1.0 again and `=== BASE_RATE`
-        // holds it in `declining` forever.
-        if (Math.abs(rate - BASE_RATE) <= settings.RATE_EPSILON && firstCorrectionAt !== null && atMs - insideBandAt >= settings.SETTLED_FOR_MS) {
+        // first applied NON-UNITY write, so without one there is no time to
+        // report. `correctionsApplied` counts returns to unity as well and is
+        // not that event. The applied rate is no longer a conjunct here: it is
+        // published beside the claim instead, and every path into this branch
+        // has already asked for exactly normal speed (design.md D3).
+        if (firstCorrectionAt !== null && atMs - insideBandAt >= settings.SETTLED_FOR_MS) {
           settledLatched = true;
           if (settlingMs === null) settlingMs = atMs - firstCorrectionAt;
         }
         mode = settledLatched ? 'settled' : 'declining';
-        reason = null;
+        reason = settledLatched ? null : decliningReason(estimateMs, bandMs);
       }
     }
 

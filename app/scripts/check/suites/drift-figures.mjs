@@ -14,6 +14,7 @@ import {
   MIN_STRETCH_SPAN_MS,
   RATE_STEADY_TOLERANCE,
   alternationStats,
+  acceptedStoppingThresholdMs,
   compareStretchSlopes,
   convergedStats,
   driftAgainstLocal,
@@ -26,6 +27,7 @@ import {
   standingLag,
   steadyCommandStretches,
   stretchSlopes,
+  thresholdContractOf,
   windowVerdicts,
 } from '../../drift-figures.mjs';
 
@@ -40,6 +42,13 @@ const sample = (overrides = {}) => ({
   estimateMs: 2,
   bandMs: 2,
   spreadMs: 1,
+  halfWidthMs: 2,
+  measurementLimit: 'clock',
+  actuatorAllowanceMs: 0,
+  requiredStoppingThresholdMs: 2,
+  stoppingThresholdMs: 2,
+  thresholdUsable: true,
+  fastestCloseMs: 0,
   windowRecords: 8,
   controlRecords: 8,
   ...overrides,
@@ -212,7 +221,7 @@ export default async function driftFiguresSuite() {
     assertEqual(bandStats.bandMedianMs, 6, 'published bands 4ms and 8ms are expected to have a 6ms median');
     assertEqual(bandStats.spreadMedianMs, 2, 'published spreads 1ms and 3ms are expected to have a 2ms median');
     assertEqual(spreadStats.bandMedianMs, 2, 'replacing the bands with the same spreads is expected to produce a 2ms band median');
-    assert(/predictedParkingDistanceMs\(\s*t7Figures\[0\]\?\.stats\.bandMedianMs,\s*t7Figures\[1\]\?\.stats\.bandMedianMs,/.test(verifyBrowserSource), 'the browser parking call site is expected to feed both published band medians');
+    assert(/predictedParkingDistanceMs\(\s*t7Figures\[0\]\.stats\.stoppingThresholdMedianMs,\s*t7Figures\[1\]\.stats\.stoppingThresholdMedianMs,/.test(verifyBrowserSource), 'the browser parking call site is expected to feed both accepted stopping-threshold medians');
     for (const field of [
       'firstSettledIndex',
       'settledSamples',
@@ -223,6 +232,15 @@ export default async function driftFiguresSuite() {
       'settledPolls',
       'population',
       'populationSamples',
+      'thresholdPopulation',
+      'thresholdPopulationSamples',
+      'thresholdSchemas',
+      'thresholdUsableCount',
+      'thresholdUsableFraction',
+      'stoppingThresholdMedianMs',
+      'stoppingThresholdMaxMs',
+      'actuatorAllowanceMedianMs',
+      'actuatorAllowanceMaxMs',
       'spreadMedianMs',
       'spreadMaxMs',
       'estimateRangeMs',
@@ -242,6 +260,27 @@ export default async function driftFiguresSuite() {
     ]) {
       assertEqual(JSON.stringify(bandStats[field]), JSON.stringify(spreadStats[field]), `${field} is expected to agree when only bandMs differs`);
     }
+  });
+
+  await check('drift-figures: accepted thresholds require the current contract or identified legacy evidence', async () => {
+    const legacy = sample();
+    for (const field of ['actuatorAllowanceMs', 'requiredStoppingThresholdMs', 'stoppingThresholdMs', 'thresholdUsable', 'measurementLimit']) delete legacy[field];
+    assertEqual(thresholdContractOf(legacy).schema, 'legacy-4d', 'a snapshot with no additive fields is identified as legacy 4d');
+    assertEqual(acceptedStoppingThresholdMs(legacy), legacy.bandMs, 'legacy 4d uses bandMs as S explicitly');
+    const legacyStats = observationStats([legacy], [], 125);
+    assertEqual(legacyStats.thresholdSchemas[0], 'legacy-4d', 'legacy population retains its schema identity');
+    assertEqual(legacyStats.stoppingThresholdMedianMs, legacy.bandMs, 'legacy population reports its stopping threshold as U');
+
+    const malformed = sample();
+    delete malformed.stoppingThresholdMs;
+    assertEqual(thresholdContractOf(malformed).schema, 'malformed-new', 'a partial additive snapshot is identified as malformed new data');
+    assertEqual(acceptedStoppingThresholdMs(malformed), null, 'malformed new data never infers an accepted threshold');
+    assertEqual(observationStats([malformed], [], 125).populationSamples, 0, 'malformed new data is excluded from the acting population');
+    assertEqual(steadyCommandStretches([malformed], DEFAULT_BARS).length, 0, 'malformed new data starts no steady command stretch');
+
+    const refused = sample({ thresholdUsable: false, stoppingThresholdMs: null });
+    assertEqual(acceptedStoppingThresholdMs(refused), null, 'an explicit refusal never becomes usable through a finite band');
+    assertEqual(observationStats([refused], [], 125).populationSamples, 0, 'an explicit refusal is excluded from distance-to-stop populations');
   });
 
   await check('drift-figures: regression and residuals carry measured uncertainty', async () => {

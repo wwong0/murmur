@@ -49,6 +49,18 @@ spike-host-origin/.tmp/
 #     output. They are the evidence behind FINDINGS.md and RESULT.md.
 #   package-lock.json — the hls.js version is load-bearing (PLAN.md, change 7a).
 
+# Derived D7 analysis, regenerable from the raw channels beside it. One full
+# sweep writes ~130MB of these against ~25MB of irreplaceable capture, and
+# `node scripts/verify-rate-response.mjs --reanalyze <dir>` rebuilds every one of
+# them offline from frames/captures/commands — which is why the mode exists. The
+# raw channels, manifest.json, scheduled.json, executed.json and the re-analysis
+# provenance stay tracked; those cannot be recomputed from anything.
+# Short shakedown runs committed before this rule keep their copies: git does not
+# untrack a file because a pattern later matches it.
+app/results/4e-response-*/analysis.json
+app/results/4e-response-*/analysis-reanalyzed-*.json
+app/results/4e-response-*/console.log
+
 # Chrome/crashpad debris. Written into the repo root by the browser dev aids
 # and by tooling that launches them.
 debug.log
