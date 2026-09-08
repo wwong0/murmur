@@ -738,16 +738,13 @@ export function predictedParkingDistanceMs(firstBandMs, secondBandMs) {
     : null;
 }
 
-// THE THIRD TERM is live only when two published controller polls supplied a
-// like-for-like movement; a whole-window range is not the plant's per-poll step.
+// THE THIRD TERM reports movement availability, not agreement; a whole-window
+// range is not the plant's per-poll step.
 function modelVerdictOf(cadence, floorHeld, population, movementComparable, movementReason) {
-  if (cadence.period2Like && floorHeld === true && movementComparable) {
-    return population === 'settled' ? 'agree' : 'agree on acting figures; no settled hold was observed';
-  }
   const floorText = floorHeld === true ? 'within prediction' : floorHeld === false ? 'above prediction' : 'unavailable';
   const hold = population === 'settled' ? '' : '; no settled hold was observed';
   const movementText = movementComparable
-    ? 'max-per-poll movement term available'
+    ? 'max-per-poll movement term available; movement agreement criterion undefined'
     : `max-per-poll movement term withheld (${movementReason})`;
   return `inconclusive: cadence ${cadence.text}, floor ${floorText}, ${movementText}${hold}`;
 }

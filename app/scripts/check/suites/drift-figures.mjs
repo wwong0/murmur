@@ -364,7 +364,20 @@ export default async function driftFiguresSuite() {
       plantMinimum: { dutyCycle: 0.8 },
     });
     assertEqual(live.movementComparable, true, 'a finite adjacent-poll movement is expected to make the model term comparable');
-    assert(live.modelVerdict.startsWith('agree'), 'period-2 cadence, floor and movement are expected to reach the live agree arm');
+    for (const population of ['acting', 'settled']) {
+      for (const movement of [0, 1.32, 1000000]) {
+        const verdict = windowVerdicts({
+          stats: { ...identityStats, population, maxPerPollMovementMs: movement,
+            spreadMedianMs: 1, alternation: observationStats([], recordSeries([0, 1, 0, 1]), 125).alternation },
+          refresh: { refreshRateHz: 100 }, plantMinimum: { dutyCycle: 0.8 },
+        });
+        assertEqual(verdict.cadencePeriod2Like, true, 'the fixture must reach the otherwise affirmative cadence arm');
+        assertEqual(verdict.floorHeld, true, 'the fixture must reach the otherwise affirmative floor arm');
+        assertEqual(verdict.maxPerPollMovementMs, movement, 'the measured movement must stay available');
+        assert(verdict.modelVerdict.startsWith('inconclusive:'), 'available movement cannot imply model agreement');
+        assert(verdict.modelVerdict.includes('movement agreement criterion undefined'), 'the missing criterion must be named');
+      }
+    }
     const gappedStats = observationStats([sample({ polls: 1, estimateMs: 4 }), sample({ polls: 3, estimateMs: 7 })], [], 125);
     assertEqual(gappedStats.maxPerPollMovementMs, null, 'a poll gap is expected not to produce a movement');
     assertEqual(gappedStats.perPollPairsUsed, 0, 'a poll gap is expected to use no adjacent pair');

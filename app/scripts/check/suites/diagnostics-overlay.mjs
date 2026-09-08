@@ -220,6 +220,11 @@ export default async function diagnosticsOverlaySuite() {
       const line = controllerLines[index];
       assertEqual(line, testCase.expected, 'controller line has the exact constructed shape');
       assert(testCase.shape.test(line), 'controller line matches the shape its own arm publishes');
+      const publishedShape = testCase.shape === CONTROLLER_LINE_HELD_RE
+        ? CONTROLLER_LINE_HELD_RE : CONTROLLER_LINE_ACTING_RE;
+      assert(publishedShape.test(line), 'the browser consumer accepts the complete controller line');
+      assert(!publishedShape.test(`BROKEN ${line}`), 'the browser consumer refuses a prefixed line');
+      assert(!publishedShape.test(`${line} NaN`), 'the browser consumer refuses trailing corrupt output');
       if (testCase.shape === CONTROLLER_LINE_BEYOND_UNAVAILABLE_RE) {
         assert(CONTROLLER_LINE_ACTING_RE.test(line), 'the unavailable-close beyond-authority line is classified by the acting union');
       }

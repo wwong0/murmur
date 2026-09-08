@@ -54,13 +54,13 @@ export const CONTROLLER_LINE_BEYOND_UNAVAILABLE_RE = new RegExp(
 );
 /** Compatibility union for consumers that only need to know that a published acting shape matched. */
 export const CONTROLLER_LINE_ACTING_RE = new RegExp([
-  CONTROLLER_LINE_MEASUREMENT_LIMIT_RE.source.slice(1, -1),
-  CONTROLLER_LINE_ACTUATOR_LIMIT_RE.source.slice(1, -1),
-  CONTROLLER_LINE_BUDGET_RE.source.slice(1, -1),
-  CONTROLLER_LINE_SETTLED_RE.source.slice(1, -1),
-  CONTROLLER_LINE_CORRECTING_RE.source.slice(1, -1),
-  CONTROLLER_LINE_BEYOND_RE.source.slice(1, -1),
-  CONTROLLER_LINE_BEYOND_UNAVAILABLE_RE.source.slice(1, -1),
+  CONTROLLER_LINE_MEASUREMENT_LIMIT_RE.source,
+  CONTROLLER_LINE_ACTUATOR_LIMIT_RE.source,
+  CONTROLLER_LINE_BUDGET_RE.source,
+  CONTROLLER_LINE_SETTLED_RE.source,
+  CONTROLLER_LINE_CORRECTING_RE.source,
+  CONTROLLER_LINE_BEYOND_RE.source,
+  CONTROLLER_LINE_BEYOND_UNAVAILABLE_RE.source,
 ].join('|'));
 
 function clockText({ offsetMs, halfWidthMs, sampleCount }) {
