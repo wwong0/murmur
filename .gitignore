@@ -60,6 +60,9 @@ spike-host-origin/.tmp/
 app/results/4e-response-*/analysis.json
 app/results/4e-response-*/analysis-reanalyzed-*.json
 app/results/4e-response-*/console.log
+app/results/4e-duration-*/analysis.json
+app/results/4e-duration-*/analysis-reanalyzed-*.json
+app/results/4e-duration-*/console.log
 
 # Chrome/crashpad debris. Written into the repo root by the browser dev aids
 # and by tooling that launches them.
