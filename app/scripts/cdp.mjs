@@ -91,14 +91,21 @@ export async function cdpHttp(port, pathname) {
  * host-origin spike was found that way. Without a label it stays quiet.
  */
 export class Tab {
-  constructor(target, { label = null } = {}) {
+  constructor(target, { label = null, onListenerError = () => {} } = {}) {
     this.label = label;
+    this.onListenerError = onListenerError;
     this.id = 0;
     this.pending = new Map();
+    this.listeners = new Map();
+    this.closed = false;
     this.targetId = target.id;
     this.ws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
     this.ready = new Promise((resolve) => this.ws.once('open', resolve));
     this.ws.on('error', () => {});
+    this.ws.once('close', () => {
+      this.closed = true;
+      this.listeners.clear();
+    });
     this.ws.on('message', (raw) => {
       const msg = JSON.parse(raw.toString());
       if (msg.id && this.pending.has(msg.id)) {
@@ -106,6 +113,17 @@ export class Tab {
         this.pending.delete(msg.id);
         resolve(msg.result);
         return;
+      }
+      const listeners = this.listeners.get(msg.method);
+      if (listeners) {
+        for (const { handler } of [...listeners]) {
+          try {
+            const result = handler(msg.params);
+            Promise.resolve(result).catch((error) => this.onListenerError(error, msg.method));
+          } catch (error) {
+            this.onListenerError(error, msg.method);
+          }
+        }
       }
       if (!label) return;
       if (msg.method === 'Runtime.consoleAPICalled') {
@@ -116,6 +134,28 @@ export class Tab {
         console.log(`  [${label}] EXCEPTION ${msg.params.exceptionDetails.text}`);
       }
     });
+  }
+
+  on(method, handler) {
+    if (this.closed) return () => {};
+    const registration = { handler };
+    const listeners = this.listeners.get(method) ?? [];
+    listeners.push(registration);
+    this.listeners.set(method, listeners);
+    return () => {
+      const current = this.listeners.get(method);
+      if (!current) return;
+      const index = current.indexOf(registration);
+      if (index === -1) return;
+      current.splice(index, 1);
+      if (current.length === 0) this.listeners.delete(method);
+    };
+  }
+
+  get listenerCount() {
+    let count = 0;
+    for (const listeners of this.listeners.values()) count += listeners.length;
+    return count;
   }
 
   send(method, params = {}) {

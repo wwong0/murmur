@@ -84,8 +84,14 @@ const priorityOf = (kind) => EVENT_ORDER.indexOf(kind);
  * the player — or `{ kind: 'open-loop', rateAt(elapsedMs) }`, which is D7's rig:
  * the controller still polls and still publishes, and its writes are recorded
  * and discarded, so the loop is open at the actuator and nowhere else.
+ *
+ * `createController` is a SECOND PARAMETER and not a config field, so it cannot
+ * reach `spec` and cannot be serialised into a result: a recorded case says what
+ * was configured, and which controller ran it is stated by the caller that chose
+ * it. It defaults to the real controller, so every existing call site — and
+ * every existing check — keeps the product loop it already had.
  */
-export function runMechanismCase(config) {
+export function runMechanismCase(config, { createController = createDriftController } = {}) {
   const {
     caseId = 'unnamed',
     durationMs,
@@ -135,7 +141,7 @@ export function runMechanismCase(config) {
   let elapsedMs = 0;
   let requestedRate = 1;
   const applied = [];
-  const controller = createDriftController({
+  const controller = createController({
     log,
     clock,
     apply: (rate) => {
