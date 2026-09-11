@@ -37,6 +37,7 @@ export const NECESSARY_CONDITIONS = Object.freeze([
   'collector-healthy',
   'polls-inside-the-window',
   'poll-snapshots-typed',
+  'polls-report-the-declared-floor',
   'stopping-threshold-ceiling',
   'callback-join-complete',
   'frame-coverage-denominator',
@@ -86,6 +87,7 @@ export function necessaryConditions({
   capturePollCount = 0,
   acknowledgedThrough = null,
   analysedThroughEventId = null,
+  observes = null,
 }) {
   const rows = [];
 
@@ -162,17 +164,46 @@ export function necessaryConditions({
     ? met('poll-snapshots-typed', { polls: polls.rows.length })
     : failed('poll-snapshots-typed', { polls: polls.rows.length }, polls.snapshotFailures.join(', ')));
 
+  // WHICH CONTROLLER WAS IN AUTHORITY, judged against what the run declared
+  // before it opened a browser. The ceiling exception below turns on the floor,
+  // so a snapshot free to name its own floor is free to award itself the
+  // exception; this row is where that claim is confronted.
+  const misdeclared = ceiling.misdeclaredFloors ?? [];
+  const floorPopulation = {
+    snapshots: ceiling.snapshots ?? 0, withPublishedFloor: ceiling.withPublishedFloor ?? 0,
+    confirmed: ceiling.confirmed ?? 0, declaredFloor: ceiling.declaredFloor ?? null,
+    declaredFactory: ceiling.declaredFactory ?? null, misdeclared: misdeclared.length,
+  };
+  if (ceiling.declaredFloor === null || ceiling.declaredFloor === undefined) {
+    rows.push(refused('polls-report-the-declared-floor', floorPopulation,
+      'no floor was predeclared for this arm, so a poll reporting its own floor confirms nothing'));
+  } else if (misdeclared.length > 0) {
+    rows.push(failed('polls-report-the-declared-floor', floorPopulation,
+      `${misdeclared.length} poll(s) published a floor of ${misdeclared[0].published} where this arm was declared to run ${ceiling.declaredFloor}`));
+  } else if (floorPopulation.withPublishedFloor === 0) {
+    rows.push(refused('polls-report-the-declared-floor', floorPopulation,
+      'no poll published the floor it ran under, so the declared floor is unconfirmed by the evidence'));
+  } else if (floorPopulation.withPublishedFloor < floorPopulation.snapshots) {
+    rows.push(failed('polls-report-the-declared-floor', floorPopulation,
+      'some polls published the floor they ran under and some did not'));
+  } else {
+    rows.push(met('polls-report-the-declared-floor', floorPopulation));
+  }
+
   // At f = 0 an accepted threshold above the ceiling is not a refused contract
   // (`executor-spec.md` C1.3 states the hold for f > 0 only), so it is carried
   // as an observation on a met row instead of counted as a failure.
   const zeroFloorAbove = ceiling.aboveCeilingAtZeroFloor?.length ?? 0;
-  const ceilingPopulation = { polls: ceiling.inspected, ceilingMs: ceiling.ceilingMs, aboveCeilingAtZeroFloor: zeroFloorAbove };
+  const ceilingPopulation = {
+    polls: ceiling.inspected, ceilingMs: ceiling.ceilingMs, aboveCeilingAtZeroFloor: zeroFloorAbove,
+    declaredFloor: ceiling.declaredFloor ?? null,
+  };
   if (ceiling.violations.length > 0) {
     rows.push(failed('stopping-threshold-ceiling', ceilingPopulation,
-      `${ceiling.violations.length} poll(s) accepted a floor and a stopping threshold above the ceiling`));
+      `${ceiling.violations.length} poll(s) accepted a stopping threshold above the ceiling at the declared floor`));
   } else if ((ceiling.undecidable?.length ?? 0) > 0) {
     rows.push(refused('stopping-threshold-ceiling', ceilingPopulation,
-      `${ceiling.undecidable.length} poll(s) accepted a threshold above the ceiling without publishing the floor it was accepted under`));
+      `${ceiling.undecidable.length} poll(s) accepted a threshold above the ceiling and ${ceiling.undecidable[0].why ?? 'the floor could not be established'}`));
   } else {
     rows.push(met('stopping-threshold-ceiling', ceilingPopulation, zeroFloorAbove === 0
       ? null
@@ -233,16 +264,34 @@ export function necessaryConditions({
 
   // A capture taken by a build that did not wrap the sampler's clock, timeline
   // and `now` reads carries a NARROWER provenance claim. That is unavailable
-  // evidence, named as such — not a failure of the capture that has it.
-  const provenance = callbacks.samplerProvenance ?? { callbacks: 0, withReads: 0, complete: false, inputs: [] };
+  // evidence, named as such — but ONLY where the build never claimed to record
+  // them. A build whose own `info()` declares it observes the stream and then
+  // delivers none is broken, and an empty read array is a malformed observation
+  // rather than a complete derivation.
+  const provenance = callbacks.samplerProvenance ?? { callbacks: 0, withReads: 0, validated: 0, malformed: [], complete: false, inputs: [] };
+  const declared = Array.isArray(observes) ? observes.includes('sampler-input') : null;
+  const provenancePopulation = {
+    callbacks: provenance.callbacks, withReads: provenance.withReads,
+    validated: provenance.validated, malformed: provenance.malformed.length,
+    declaredByTheBuild: declared, inputs: provenance.inputs,
+  };
   if (provenance.complete) {
-    rows.push(met('sampler-input-provenance', { callbacks: provenance.callbacks, inputs: provenance.inputs }));
-  } else if (provenance.withReads === 0) {
-    rows.push(unavailable('sampler-input-provenance', { callbacks: provenance.callbacks, withReads: 0 },
-      'this build did not observe the sampler\'s own clock, timeline and now() reads'));
+    rows.push(met('sampler-input-provenance', provenancePopulation));
+  } else if (provenance.malformed.length > 0) {
+    rows.push(failed('sampler-input-provenance', provenancePopulation,
+      provenance.malformed.slice(0, 3).map((item) => `callback ${item.callbackId}: ${item.reason}`).join('; ')));
+  } else if (provenance.withReads > 0) {
+    rows.push(failed('sampler-input-provenance', provenancePopulation,
+      'some callbacks recorded the sampler reads and some did not'));
+  } else if (declared === true) {
+    rows.push(failed('sampler-input-provenance', provenancePopulation,
+      'this build declares it observes sampler-input and recorded none'));
+  } else if (declared === null) {
+    rows.push(unavailable('sampler-input-provenance', provenancePopulation,
+      'legacy capture: the build published no instrumentation declaration, and observed none of the sampler own clock, timeline and now() reads'));
   } else {
-    rows.push(failed('sampler-input-provenance', { callbacks: provenance.callbacks, withReads: provenance.withReads },
-      'some callbacks recorded the sampler\'s reads and some did not'));
+    rows.push(unavailable('sampler-input-provenance', provenancePopulation,
+      'this build does not observe the sampler own clock, timeline and now() reads'));
   }
 
   rows.push(...deliveryConditions({ arm, buildId, identity }));
@@ -315,15 +364,18 @@ export function seamProofsOf(conditions) {
   };
   return {
     buildDelivery: all(['build-delivery', 'client-markers-agree', 'event-markers-agree']),
-    singleAuthority: all(['single-authority', 'polls-inside-the-window', 'poll-snapshots-typed']),
+    singleAuthority: all(['single-authority', 'polls-inside-the-window', 'poll-snapshots-typed', 'polls-report-the-declared-floor']),
     nativeNonUnityWrite: status('native-non-unity-write') === 'unavailable'
       ? 'unavailable'
       : all(['native-non-unity-write', 'native-write-readback']),
+    // The sampler's own input population belongs HERE. Left out of it, a capture
+    // missing the stream entirely could still call its observation complete.
     completeObservation: all([
       'event-stream-integrity', 'producer-frontier-accounted', 'acknowledgement-covers-the-analysed-events',
       'controller-intake-complete', 'recorder-intake-complete', 'collector-healthy',
       'callback-join-complete', 'frame-coverage-denominator', 'callback-qualification',
       'playback-continuity', 'stopping-threshold-ceiling', 'record-offer-agreement',
+      'sampler-input-provenance',
     ]),
   };
 }

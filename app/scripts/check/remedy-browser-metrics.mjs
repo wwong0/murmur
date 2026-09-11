@@ -298,28 +298,52 @@ export function joinPolls(events, { timeOriginMs = 0 } = {}) {
  * cannot count toward a dwell — which `dwellEligibility()` already says —
  * rather than a broken contract. Counting it as one here would manufacture a
  * failure out of the approved design, so those polls are reported separately
- * and by name. A poll that publishes neither floor is undecidable, not clean.
+ * and by name.
+ *
+ * WHICH FLOOR IS A FACT ABOUT THE ARM, NOT A FIELD IN THE SNAPSHOT. The
+ * exception above is exactly what a research controller over the ceiling would
+ * want a snapshot saying `MIN_COMMAND_DEVIATION: 0` to buy it, and reading the
+ * operand out of the evidence being judged let it. The operand comes from the
+ * arm predeclared before the run; each poll's own report is CHECKED against it
+ * and is otherwise not consulted. A floor nobody declared, and a poll that
+ * publishes none to confirm, are both undecidable rather than clean.
  */
-export function stoppingCeilingAudit(rows, { ceilingMs = MAX_STOPPING_THRESHOLD_MS } = {}) {
+export function stoppingCeilingAudit(rows, { ceilingMs = MAX_STOPPING_THRESHOLD_MS, policy = null } = {}) {
   const violations = [];
   const aboveCeilingAtZeroFloor = [];
   const undecidable = [];
+  const misdeclaredFloors = [];
+  const declaredFloor = finiteField(policy ?? {}, 'minCommandDeviation');
+  let snapshots = 0;
+  let withPublishedFloor = 0;
   let inspected = 0;
   for (const row of rows) {
-    if (!isObject(row.snapshot) || row.snapshot.thresholdUsable !== true) continue;
-    inspected += 1;
+    if (!isObject(row.snapshot)) continue;
+    snapshots += 1;
     const threshold = finiteField(row.snapshot, 'stoppingThresholdMs');
+    const published = finiteField(row.snapshot.settings ?? {}, 'MIN_COMMAND_DEVIATION');
     const where = { pollId: row.pollId, stoppingThresholdMs: threshold, atMs: row.atMs };
+    if (published !== null) {
+      withPublishedFloor += 1;
+      if (declaredFloor !== null && published !== declaredFloor) misdeclaredFloors.push({ ...where, published, declared: declaredFloor });
+    }
+    if (row.snapshot.thresholdUsable !== true) continue;
+    inspected += 1;
     // A usable threshold that is not a number is a defect at any floor: nothing
     // downstream can compare an estimate against it.
     if (threshold === null) { violations.push(where); continue; }
     if (threshold <= ceilingMs) continue;
-    const floor = finiteField(row.snapshot.settings ?? {}, 'MIN_COMMAND_DEVIATION');
-    if (floor === null) undecidable.push(where);
-    else if (floor > 0) violations.push({ ...where, floor });
+    if (declaredFloor === null) { undecidable.push({ ...where, why: 'no floor was predeclared for this arm' }); continue; }
+    if (published === null) { undecidable.push({ ...where, why: 'the poll published no floor to confirm the declared one against' }); continue; }
+    if (published !== declaredFloor) { violations.push({ ...where, published, declared: declaredFloor }); continue; }
+    if (declaredFloor > 0) violations.push({ ...where, floor: declaredFloor });
     else aboveCeilingAtZeroFloor.push(where);
   }
-  return { inspected, ceilingMs, violations, aboveCeilingAtZeroFloor, undecidable };
+  return {
+    inspected, ceilingMs, declaredFloor, declaredFactory: policy?.factory ?? null,
+    snapshots, withPublishedFloor, confirmed: withPublishedFloor - misdeclaredFloors.length,
+    violations, aboveCeilingAtZeroFloor, undecidable, misdeclaredFloors,
+  };
 }
 
 /**
@@ -330,16 +354,29 @@ export function stoppingCeilingAudit(rows, { ceilingMs = MAX_STOPPING_THRESHOLD_
  * every id is still there, just later than its slot. Contiguity says nothing
  * about the far end, which is why the producer's own count is required.
  */
-export function accountForProducedIds({ events, produced }) {
+export function accountForProducedIds({ events, produced, readerTakesItsOwnSeam = false }) {
   const seen = new Set(events.map((event) => event.eventId));
   const missing = [];
   for (let id = 1; id <= produced; id += 1) if (!seen.has(id)) missing.push(id);
+  // The frontier is frozen BEFORE the tail drain, and every drain takes a seam
+  // sample of its own, so a tail that needs a pass delivers one id past the
+  // frontier it was draining toward. That is the reader's own footprint, not a
+  // hole, and it is admitted only when the caller says its reader works that
+  // way and only for events that really are seam samples -- anything else past
+  // the frontier still fails, as does any id the frontier named and no drain
+  // brought back.
+  const beyond = events.filter((event) => event.eventId > produced);
+  const beyondIsTheReadersOwnSeam = beyond.every((event) => event.kind === 'seam-sample');
   return {
     produced,
     delivered: seen.size,
     missing: missing.slice(0, 16),
     missingCount: missing.length,
-    complete: missing.length === 0 && seen.size === produced,
+    beyondFrontier: beyond.map((event) => event.eventId).slice(0, 16),
+    beyondFrontierCount: beyond.length,
+    complete: missing.length === 0 && (readerTakesItsOwnSeam
+      ? beyondIsTheReadersOwnSeam
+      : seen.size === produced),
   };
 }
 
@@ -422,21 +459,77 @@ export function joinCallbacks(events) {
   }
   for (const callbackId of offers.keys()) if (!seen.has(callbackId)) push(failures, 'derivation-outside-any-callback');
   for (const callbackId of samplerReads.keys()) if (!seen.has(callbackId)) push(failures, 'sampler-input-outside-any-callback');
-  const withReads = rows.filter((row) => Array.isArray(row.samplerReads)).length;
   return {
     rows,
     complete: failures.length === 0,
     failures,
-    samplerProvenance: {
-      callbacks: rows.length,
-      withReads,
-      // Three reads produce one drift record: the sampler's own clock, the clock
-      // estimate and the timeline position. Fewer means the derivation of that
-      // record cannot be reconstructed from the retained events.
-      complete: rows.length > 0 && withReads === rows.length,
-      inputs: [...new Set(rows.flatMap((row) => (row.samplerReads ?? []).map((read) => read.input)))],
-    },
+    samplerProvenance: samplerProvenance(rows),
   };
+}
+
+/**
+ * The reads each derivation path actually reaches, in order (`frame-drift.mjs`).
+ *
+ * `now()` is handed in and is read on every path. `clock.read` is reached only
+ * once the frame's own metadata is finite and not foreign; the timeline only
+ * once the clock returned a finite offset. REQUIRING THREE READS OF EVERY
+ * CALLBACK WOULD FAIL A LEGITIMATE EARLY REFUSAL for reads its path never made.
+ */
+export const SAMPLER_READS_BY_PATH = Object.freeze({
+  accepted: ['now', 'clock.read', 'timeline.mediaMsAt'],
+  mediaTimeNotFinite: ['now'],
+  displayTimeNotFinite: ['now'],
+  displayTimeForeign: ['now'],
+  noClock: ['now', 'clock.read'],
+  noEpoch: ['now', 'clock.read', 'timeline.mediaMsAt'],
+});
+
+/**
+ * Whether the retained sampler reads are an observation of the derivation.
+ *
+ * PRESENCE OF THE ARRAY IS NOT THE OBSERVATION. `samplerReads: []` passes every
+ * test that asks whether the reads were recorded and carries nothing, so each
+ * array is checked against the path its own outcome took: the named inputs in
+ * order, each with the arguments it was called with and the result it returned.
+ */
+export function samplerProvenance(rows) {
+  const malformed = [];
+  let withReads = 0;
+  let validated = 0;
+  for (const row of rows) {
+    if (!Array.isArray(row.samplerReads)) continue;
+    withReads += 1;
+    const expected = SAMPLER_READS_BY_PATH[row.accepted ? 'accepted' : row.refusalReason] ?? null;
+    if (expected === null) {
+      malformed.push({ callbackId: row.callbackId, reason: `no read path is declared for ${row.refusalReason ?? 'this outcome'}` });
+      continue;
+    }
+    const reason = readsDisagree(row.samplerReads, expected);
+    if (reason === null) validated += 1;
+    else malformed.push({ callbackId: row.callbackId, reason });
+  }
+  return {
+    callbacks: rows.length,
+    withReads,
+    validated,
+    malformed,
+    complete: rows.length > 0 && validated === rows.length,
+    inputs: [...new Set(rows.flatMap((row) => (Array.isArray(row.samplerReads) ? row.samplerReads : []).map((read) => read?.input)))],
+  };
+}
+
+/** Why one callback's reads are not the derivation its outcome required, or
+ *  null where they are. The first disagreement is the one reported. */
+function readsDisagree(reads, expected) {
+  if (reads.length === 0) return 'the reads array is empty';
+  if (reads.length !== expected.length) return `${reads.length} read(s) recorded where this path takes ${expected.length}`;
+  for (const [index, read] of reads.entries()) {
+    if (!isObject(read)) return `read ${index} is not an observation`;
+    if (read.input !== expected[index]) return `read ${index} is ${read.input ?? 'unnamed'} where this path reads ${expected[index]}`;
+    if (!Array.isArray(read.args)) return `read ${index} (${expected[index]}) recorded no argument list`;
+    if (!Object.hasOwn(read, 'result')) return `read ${index} (${expected[index]}) recorded no result`;
+  }
+  return null;
 }
 
 const refusalOf = (offer) => {
@@ -529,14 +622,36 @@ export function frameCoverage({ callbacks, ratePoints, startMs, endMs, fixtureFp
  * drain landed in it, and a second drain in the same slot covers nothing extra.
  * An uncovered slot is a drain that was late, which loses no event.
  */
-export function drainSlotCoverage({ drainTimesMs, startMs, endMs, slotMs = DRAIN_INTERVAL_MS }) {
+export function drainSlotCoverage({ drainTimesMs, startMs, endMs, slotMs = DRAIN_INTERVAL_MS, slots = null }) {
   const expected = Math.max(0, Math.ceil((endMs - startMs) / slotMs));
   const covered = new Set();
+  // BINNING READ TIMES DERIVES A SECOND GRID. It is anchored at the window
+  // start, while the schedule is anchored where the schedule was created, and
+  // the two are offset by whatever phase separates them. A recorder serving
+  // every slot on time then lands a few ms from a boundary, and ordinary jitter
+  // puts two reads in one bin and none in the next -- a run that served 1921
+  // distinct slots with a worst lateness of 17 ms measured 92%. Where the
+  // recorder retained the index of the slot it was serving, that index is the
+  // answer, and a drain later than the slot is wide is not counted for it.
+  if (Array.isArray(slots)) {
+    for (const slot of slots) {
+      if (!Number.isInteger(slot?.slotIndex)) continue;
+      if (!Number.isFinite(slot.atMs) || slot.atMs < startMs || slot.atMs >= endMs) continue;
+      if (!Number.isFinite(slot.latenessMs) || slot.latenessMs >= slotMs) continue;
+      covered.add(slot.slotIndex);
+    }
+    return {
+      expectedSlots: expected,
+      coveredSlots: covered.size,
+      coverage: expected > 0 ? covered.size / expected : null,
+      countedBy: 'retained-slot-index',
+    };
+  }
   for (const atMs of drainTimesMs ?? []) {
     if (!Number.isFinite(atMs) || atMs < startMs || atMs >= endMs) continue;
     covered.add(Math.floor((atMs - startMs) / slotMs));
   }
-  return { expectedSlots: expected, coveredSlots: covered.size, coverage: expected > 0 ? covered.size / expected : null };
+  return { expectedSlots: expected, coveredSlots: covered.size, coverage: expected > 0 ? covered.size / expected : null, countedBy: 'read-time' };
 }
 
 /**
@@ -685,7 +800,7 @@ export function freshDwellAudit({ rows, settledForMs = SETTLED_FOR_MS, evidenceC
  * `ratechange` event is asynchronous and one event does not mean one new write,
  * so it is correlated with the retained writes rather than counted against them.
  */
-export function nativeWriteAgreement({ rows, events }) {
+export function nativeWriteAgreement({ rows, events, rateBeforeWindow = 1 }) {
   const failures = [];
   const writes = [];
   for (const row of rows) {
@@ -697,8 +812,14 @@ export function nativeWriteAgreement({ rows, events }) {
   }
   // An unexplained change is the element at a rate no retained write asked for,
   // seen at the top of a poll that has not yet written anything.
+  //
+  // `rateBeforeWindow` is what the retained writes BEFORE this window left the
+  // element at, and it defaults to unity -- a stage-A window opens at the
+  // client's own playback start, so nothing can have written to the element
+  // yet. A window that opens later has to be told, or the writes it did not
+  // contain are read as the browser moving on its own.
   let expected = writes.length > 0 ? null : 1;
-  let lastWritten = 1;
+  let lastWritten = rateBeforeWindow;
   for (const row of rows) {
     expected = lastWritten;
     if (row.rateBefore !== null && row.rateBefore !== expected) push(failures, 'unexplained-native-rate-change');
@@ -768,6 +889,12 @@ export function analyseArm({
   buildId,
   events,
   drainReadTimesMs = [],
+  // `{ slotIndex, atMs, latenessMs }` where the recorder retained which slot
+  // each drain was serving. Null keeps stage A binning its read times.
+  drainSlots = null,
+  // Stage A's recorder is judged as if nothing may follow the frozen frontier;
+  // see `accountForProducedIds`.
+  readerTakesItsOwnSeam = false,
   window,
   fixtureFps,
   conflictingDuplicates = [],
@@ -782,6 +909,12 @@ export function analyseArm({
   acknowledgedThrough = null,
   records = null,
   identity = null,
+  // What this arm was DECLARED to run, taken from the manifest written before
+  // the browser opened. The ceiling audit needs a floor no snapshot can revise.
+  armPolicy = null,
+  // Unity unless the caller retained writes from before the window; see
+  // `nativeWriteAgreement`. Stage A does not pass it and does not change.
+  rateBeforeWindow = 1,
 }) {
   const stream = checkEventStream(events, { arm, buildId, conflictingDuplicates });
   const polls = joinPolls(events, { timeOriginMs });
@@ -807,15 +940,15 @@ export function analyseArm({
   if (collectorState?.fatal) push(failures, `collector-${collectorState.fatal.reason}`);
   if (collectorState !== null && collectorState.lost > 0) push(failures, 'collector-events-lost');
 
-  const frontier = producedThrough === null ? null : accountForProducedIds({ events, produced: producedThrough });
+  const frontier = producedThrough === null ? null : accountForProducedIds({ events, produced: producedThrough, readerTakesItsOwnSeam });
   if (frontier === null) push(failures, 'producer-frontier-not-declared');
   else if (!frontier.complete) push(failures, 'events-missing-against-the-producer-frontier');
 
   const coverage = frameCoverage({ callbacks: callbacks.rows, ratePoints, ...window, fixtureFps });
   const qualification = callbackQualification({ callbacks: callbacks.rows, ...window, fixtureFps });
   const continuity = playbackContinuity({ events, ...window });
-  const writes = nativeWriteAgreement({ rows: capturePolls, events });
-  const ceiling = stoppingCeilingAudit(capturePolls);
+  const writes = nativeWriteAgreement({ rows: capturePolls, events, rateBeforeWindow });
+  const ceiling = stoppingCeilingAudit(capturePolls, { policy: armPolicy });
   const agreement = records === null ? null : recordAgreement({ records, callbacks: callbacks.rows });
   const constructions = events.filter((event) => event.kind === 'construction');
   const factories = {};
@@ -832,6 +965,9 @@ export function analyseArm({
     ceiling, frontier, recordAgreement: agreement, identity, factories, collectorState,
     controllerMissed, recorderMissed, capturePollCount: capturePolls.length,
     acknowledgedThrough, analysedThroughEventId,
+    // The build's own declaration of what it instruments, so an absent
+    // observation can be told from one this build never made.
+    observes: identity?.observes ?? null,
   });
 
   return {
@@ -876,7 +1012,7 @@ export function analyseArm({
       ? { measured: false, note: 'no passive requestAnimationFrame series was taken; display cadence is unmeasured, not 60 Hz' }
       : { measured: true, note: 'passive requestAnimationFrame series — browser scheduling cadence, not hardware refresh certainty', ...schedulingCadence },
     coverage,
-    drainCoverage: drainSlotCoverage({ drainTimesMs: drainReadTimesMs, ...window }),
+    drainCoverage: drainSlotCoverage({ drainTimesMs: drainReadTimesMs, slots: drainSlots, ...window }),
     qualification,
     continuity,
     writes,

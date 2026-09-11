@@ -333,7 +333,12 @@ export function createCollector({
   }
 
   return {
-    info: () => ({ schemaVersion: SCHEMA_VERSION, arm, buildId, collectorId, timeOriginMs, capacities: state().capacities }),
+    // `observes` is this build's DECLARED instrumentation, published by the page
+    // rather than inferred from what happened to arrive. A build that says it
+    // records the sampler's reads and delivers none is broken; a build that
+    // never claimed to is narrower evidence. Nothing downstream can tell those
+    // apart from an empty stream alone.
+    info: () => ({ schemaVersion: SCHEMA_VERSION, arm, buildId, collectorId, timeOriginMs, observes: EVENT_KINDS, capacities: state().capacities }),
     record,
     read,
     acknowledge,
