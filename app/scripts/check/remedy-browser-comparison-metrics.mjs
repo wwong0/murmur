@@ -7,6 +7,7 @@ import {
   SETTLED_FOR_MS,
 } from '../../public/lib/drift-controller.mjs';
 import { DEFAULT_CAPACITY } from '../../public/lib/frame-drift.mjs';
+import { classifyField } from '../remedy-browser-page.mjs';
 import {
   MIN_CONVERGED_RECORDS,
   acceptedStoppingThresholdMs,
@@ -21,12 +22,15 @@ import {
 } from './remedy-browser-metrics.mjs';
 import {
   BUDGET_HOLD_MODE,
+  UNCERTIFIED_EVIDENCE_GAPS,
   freshDwellAudit,
   holdEpisodes,
   holdSafetyViolations,
   summariseHolds,
   thresholdCeilingViolations,
+  uncertifiedCorrectionViolations,
 } from './d8-recoverable-holds.mjs';
+import { D8_REFUSAL_MODES, D8_UNCERTIFIED_MODE } from './d8-research-controller.mjs';
 
 const LEGACY_T5_DEADLINE_MS = 120000;
 const LEGACY_T5_SETTLING_BUDGET_MS = 75000;
@@ -62,6 +66,14 @@ const T5_WARNING = 'mode and rate can drop on a believed excursion while settlin
 const T6_NOTE = 'comparison of two medians, not instantaneous pairwise error, and not change 6\'s group bar';
 const T7_NOTE = 'no approved error budget exists; model agreement is inconclusive';
 const HOLD_MODE = BUDGET_HOLD_MODE;
+/** `hold-after-first-settling` keeps its published name and now counts BOTH
+ *  refusal modes; the split's own poll has a clause of its own. */
+export const HOLD_CLAUSE_NAMES = Object.freeze([
+  'hold-safety-unity-and-no-accepted-threshold',
+  'hold-fresh-dwell-5000ms',
+  'hold-after-first-settling',
+  'uncertified-correction-follows-the-law-and-certifies-nothing',
+]);
 
 const has = (object, field) => object !== null && typeof object === 'object' && Object.hasOwn(object, field);
 const finite = (value) => Number.isFinite(value);
@@ -416,19 +428,50 @@ export function t7Observation({ samples, convergedRecords, t6, t6EndMs, captureW
   };
 }
 
-function requestedRateFor(row) {
-  if (!Array.isArray(row?.rateCalls) || row.rateCalls.length === 0) return { value: undefined, complete: false };
-  const calls = row.rateCalls;
-  const call = calls.at(-1);
-  return { value: has(call, 'requestedRate') ? call.requestedRate : undefined, complete: has(call, 'requestedRate') && finite(call.requestedRate) };
+/**
+ * The rate STANDING at each poll, which is what clause 4 reads.
+ *
+ * The offline driver holds `requestedRate` as one variable seeded at unity,
+ * updates it only when the controller commands a new rate, and publishes it on
+ * every history row (`mechanism-driver.mjs`) -- so an offline hold poll reports
+ * the rate the last write left, not nothing. The real browser controller also
+ * writes only when the rate changes, so most polls carry no call at all: the
+ * first candidate trial retained 1007 polls against 438 `rate-call` events.
+ * Reading a poll that wrote nothing as an absent field refuses the hold audit on
+ * precisely the polls it exists to judge, and it refuses them for a reason the
+ * evidence contradicts -- the stream states positively that no write occurred.
+ *
+ * A RETAINED CALL WITHOUT A FINITE `requestedRate` IS STILL AN EVIDENCE GAP, and
+ * so is a poll standing on one. The absence carried through here is the absence
+ * of a write; it is not the absence of a field on a write that happened, and the
+ * two must not become each other. Carrying forward also keeps the clause sharp:
+ * a hold that follows a non-unity write without returning the element to unity
+ * still stands on 1.01 and still fails.
+ */
+function standingRequestedRates(polls) {
+  const standing = [];
+  let value = 1;
+  let complete = true;
+  for (const poll of polls) {
+    const calls = Array.isArray(poll?.rateCalls) ? poll.rateCalls : [];
+    if (calls.length > 0) {
+      const call = calls.at(-1);
+      complete = has(call, 'requestedRate') && finite(call.requestedRate);
+      value = complete ? call.requestedRate : undefined;
+    }
+    standing.push({ value, complete });
+  }
+  return standing;
 }
 
 export function browserHoldRows(capturePolls) {
   const incomplete = [];
   const rows = [];
-  for (const poll of Array.isArray(capturePolls) ? capturePolls : []) {
+  const polls = Array.isArray(capturePolls) ? capturePolls : [];
+  const standing = standingRequestedRates(polls);
+  for (const [index, poll] of polls.entries()) {
     const snapshot = rowSnapshot(poll);
-    const requested = requestedRateFor(poll);
+    const requested = standing[index];
     const required = ['pollId', 'atMs'];
     for (const field of required) if (!has(poll, field)) incomplete.push({ pollId: poll?.pollId, field });
     const snapshotFields = ['mode', 'reason', 'estimateMs', 'bandMs', 'stoppingThresholdMs', 'requiredStoppingThresholdMs', 'thresholdUsable', 'fastestCloseMs', 'actuatorAllowanceMs', 'rate'];
@@ -449,6 +492,9 @@ export function browserHoldRows(capturePolls) {
       fastestCloseMs: snapshot?.fastestCloseMs,
       actuatorAllowanceMs: snapshot?.actuatorAllowanceMs,
       rate: snapshot?.rate,
+      // Read only by the refusal split's clause, which refuses a row without
+      // them rather than assume the product's numbers.
+      settings: snapshot?.settings ?? null,
       requestedRate: requested.value,
       incomplete: !requested.complete || snapshot === null || snapshotFields.some((field) => !has(snapshot, field)),
       incompleteFields: [],
@@ -463,6 +509,10 @@ export function browserHoldRows(capturePolls) {
   return rows;
 }
 
+const rollUpHoldClauses = (clauses) => (clauses.some((item) => item.status === 'refused') ? 'refused'
+  : clauses.some((item) => item.status === 'failed') ? 'failed'
+    : clauses.some((item) => item.status === 'unavailable') ? 'unavailable' : 'met');
+
 function holdClause(name, status, observed, detail = null, row = null) {
   return clause(name, status, observed, detail, row === null ? null : { ...row, pollId: row.polls, file: row.file });
 }
@@ -471,14 +521,14 @@ export function holdPolicyAudit({ rows, arm = null, horizonMs, evidenceComplete 
   const inputRows = Array.isArray(rows) ? rows : [];
   const isBaseline = arm === 'B';
   if (isBaseline) {
-    const clauses = ['hold-safety-unity-and-no-accepted-threshold', 'hold-fresh-dwell-5000ms', 'hold-after-first-settling']
+    const clauses = HOLD_CLAUSE_NAMES
       .map((name) => ({ name, status: 'not-applicable', observed: null }));
     return { status: 'not-applicable', criteria: 'not-applicable', arm, clauses, episodes: [], summary: summariseHolds([]), postFirstSettleHold: false, dutyNumerator: null, dutyDenominator: null, dutyCycle: null, followUpMs: null };
   }
   const incomplete = inputRows.flatMap((row) => row.incompleteFields ?? []);
   if (!evidenceComplete || incomplete.length > 0) {
     const reason = !evidenceComplete ? 'hold-poll-evidence-incomplete' : `missing-required-field:${unique(incomplete).join(',')}`;
-    const clauses = ['hold-safety-unity-and-no-accepted-threshold', 'hold-fresh-dwell-5000ms', 'hold-after-first-settling']
+    const clauses = HOLD_CLAUSE_NAMES
       .map((name) => ({ name, status: 'refused', observed: null, detail: reason }));
     return { status: 'refused', criteria: 'refused', arm, clauses, refusal: reason, incompleteFields: unique(incomplete), episodes: [], summary: summariseHolds([]), postFirstSettleHold: null, dutyNumerator: null, dutyDenominator: null, dutyCycle: null, followUpMs: null };
   }
@@ -489,10 +539,18 @@ export function holdPolicyAudit({ rows, arm = null, horizonMs, evidenceComplete 
   const safetyFailures = inputRows.filter((row) => row.mode === HOLD_MODE)
     .map((row) => ({ polls: row.polls, atMs: row.atMs, violations: holdSafetyViolations(row, { maxStoppingThresholdMs: COMPARISON_CRITERIA.ceilingMs }), file: row.file }));
   const ceilingFailures = thresholdCeilingViolations(inputRows, { maxStoppingThresholdMs: COMPARISON_CRITERIA.ceilingMs });
+  // EXACT UNITY IS THE HOLD'S RULE ALONE; EVERY OTHER REFUSAL RULE IS BOTH
+  // MODES'. The split's poll is a refused threshold that keeps correcting, so
+  // it is judged by its own clause for what the rate does, and counted with
+  // the hold for what a refusal forbids: it interrupts a fresh dwell, and one
+  // at or after first settling is a failure exactly as a hold there is.
+  const uncertifiedFailures = inputRows.filter((row) => row.mode === D8_UNCERTIFIED_MODE)
+    .map((row) => ({ polls: row.polls, atMs: row.atMs, violations: uncertifiedCorrectionViolations(row, { maxStoppingThresholdMs: COMPARISON_CRITERIA.ceilingMs }), file: row.file }));
+  const isRefusal = (row) => D8_REFUSAL_MODES.includes(row.mode);
   const firstSettledIndex = inputRows.findIndex((row) => row.mode === 'settled');
   const firstSettledAtMs = firstSettledIndex < 0 ? null : inputRows[firstSettledIndex].atMs;
-  const preHolds = firstSettledAtMs === null ? inputRows.filter((row) => row.mode === HOLD_MODE) : inputRows.filter((row) => row.mode === HOLD_MODE && row.atMs < firstSettledAtMs);
-  const lastPreSettleHoldAtMs = preHolds.length > 0 ? preHolds.at(-1).atMs : null;
+  const preRefusals = inputRows.filter((row) => isRefusal(row) && (firstSettledAtMs === null || row.atMs < firstSettledAtMs));
+  const lastPreSettleHoldAtMs = preRefusals.length > 0 ? preRefusals.at(-1).atMs : null;
   const dwell = freshDwellAudit(inputRows, {
     firstSettledIndex,
     lastPreSettleHoldAtMs,
@@ -500,7 +558,7 @@ export function holdPolicyAudit({ rows, arm = null, horizonMs, evidenceComplete 
     maxStoppingThresholdMs: COMPARISON_CRITERIA.ceilingMs,
     evidenceComplete: true,
   });
-  const postFirstSettleHold = firstSettledAtMs !== null && inputRows.some((row) => row.mode === HOLD_MODE && row.atMs >= firstSettledAtMs);
+  const postFirstSettleHold = firstSettledAtMs !== null && inputRows.some((row) => isRefusal(row) && row.atMs >= firstSettledAtMs);
   const followUpMs = firstSettledAtMs === null ? null : inferredHorizon - firstSettledAtMs;
   const dutyRows = firstSettledIndex < 0 ? [] : inputRows.slice(firstSettledIndex);
   const dutyNumerator = dutyRows.length > 0 ? dutyRows.filter((row) => row.mode === 'settled').length : null;
@@ -508,6 +566,7 @@ export function holdPolicyAudit({ rows, arm = null, horizonMs, evidenceComplete 
   const dutyCycle = dutyNumerator === null ? null : dutyNumerator / dutyDenominator;
   const observation = {
     holdPollCount: inputRows.filter((row) => row.mode === HOLD_MODE).length,
+    uncertifiedPollCount: uncertifiedFailures.length,
     episodes,
     episodeCount: episodes.length,
     neverSettledInHorizon: firstSettledIndex < 0,
@@ -533,9 +592,19 @@ export function holdPolicyAudit({ rows, arm = null, horizonMs, evidenceComplete 
       null,
       safetyFailures.length > 0 ? safetyFailures[0] : null,
     ),
+    // THE OFFLINE AUDIT REPORTS ONE `unavailable` FOR TWO DIFFERENT THINGS: a
+    // run that never settled, and evidence too incomplete to say. The D8 study
+    // never exercised the first, because its candidate always settled. Both
+    // facts are known separately here -- incomplete evidence returned above, and
+    // `firstSettledIndex` is computed from the same rows -- so the never-settled
+    // case is named for what it is. It is an observation, not an absence: there
+    // is no settling claim for a fresh dwell to back, and T5 already fails the
+    // run for not settling. Its own clause must not also call that a refusal.
     holdClause(
       'hold-fresh-dwell-5000ms',
-      preHolds.length === 0 ? 'not-applicable' : dwell.status === 'passed' ? 'met' : dwell.status === 'failed' ? 'failed' : 'refused',
+      preRefusals.length === 0 ? 'not-applicable'
+        : firstSettledIndex < 0 ? 'unavailable'
+          : dwell.status === 'passed' ? 'met' : dwell.status === 'failed' ? 'failed' : 'refused',
       dwell,
       null,
       firstSettledIndex >= 0 ? inputRows[firstSettledIndex] : null,
@@ -545,18 +614,31 @@ export function holdPolicyAudit({ rows, arm = null, horizonMs, evidenceComplete 
       postFirstSettleHold ? 'failed' : 'met',
       { postFirstSettleHold, firstSettledAtMs },
       null,
-      postFirstSettleHold ? inputRows.find((row) => row.mode === HOLD_MODE && row.atMs >= firstSettledAtMs) : null,
+      postFirstSettleHold ? inputRows.find((row) => isRefusal(row) && row.atMs >= firstSettledAtMs) : null,
+    ),
+    // A row the clause cannot judge refuses; one it judges wrong fails.
+    holdClause(
+      'uncertified-correction-follows-the-law-and-certifies-nothing',
+      uncertifiedFailures.some((item) => item.violations.some((violation) => UNCERTIFIED_EVIDENCE_GAPS.includes(violation))) ? 'refused'
+        : uncertifiedFailures.some((item) => item.violations.length > 0) ? 'failed' : 'met',
+      { uncertifiedPolls: uncertifiedFailures.length, uncertifiedFailures: uncertifiedFailures.filter((item) => item.violations.length > 0) },
+      null,
+      uncertifiedFailures.find((item) => item.violations.length > 0) ?? null,
     ),
   ];
   return {
-    status: clauses.some((item) => item.status === 'refused') ? 'refused' : clauses.some((item) => item.status === 'failed') ? 'failed' : 'met',
-    criteria: clauses.some((item) => item.status === 'refused') ? 'refused' : clauses.some((item) => item.status === 'failed') ? 'failed' : 'met',
+    // A summary that reported `met` while one clause was unavailable would be
+    // claiming the clause ran. Only the clause statuses decide the client
+    // (`classifyClient`); this is the line a reader sees, so it says so too.
+    status: rollUpHoldClauses(clauses),
+    criteria: rollUpHoldClauses(clauses),
     arm,
     firstSettledAtMs,
     lastPreSettleHoldAtMs,
     postFirstSettleHold,
     episodes,
     safetyFailures,
+    uncertifiedFailures,
     thresholdCeilingFailures: ceilingFailures,
     freshDwellAudit: dwell,
     dutyNumerator,
@@ -699,11 +781,15 @@ function violationFrom(failing, source, fallbackFile) {
   };
 }
 
-export function classifyClient({ arm, evidence, t5, t6, holds, captureComplete, captured, fullWindow, files = {}, observedStartMs = null, controllerEvents = [], events = [], timeOriginMs = 0 } = {}) {
+export function classifyClient({ arm, evidence, t5, t6, holds, treatment, captureComplete, captured, fullWindow, files = {}, observedStartMs = null, controllerEvents = [], events = [], timeOriginMs = 0 } = {}) {
   const gate = clientEvidenceResult(evidence);
   const qualified = gate?.status === 'qualified' || gate?.qualified === true;
   const full = captureComplete === true || captured === true || fullWindow === true;
-  const values = [t5, t6, holds];
+  // THE TREATMENT DECIDES WHETHER THE CLIENT MAY BE CLAIMED AT ALL. An audit
+  // that is absent is not a treatment that held, so it refuses like one that
+  // did not; it can refuse a client and never fail one.
+  const treatmentValue = treatment ?? { clauses: [clause('treatment-as-declared', 'refused', null, 'treatment-audit-absent')] };
+  const values = [t5, t6, holds, treatmentValue];
   const refusals = values.flatMap((value) => criterionClauses(value).filter((item) => item.status === 'refused').map((item) => item.name));
   const failures = values.flatMap((value) => criterionClauses(value).filter((item) => item.status === 'failed').map((item) => item.name));
   const criteria = !qualified || !full || refusals.length > 0 ? 'refused' : failures.length > 0 ? 'failed' : 'met';
@@ -727,6 +813,7 @@ export function classifyClient({ arm, evidence, t5, t6, holds, captureComplete, 
     t5,
     t6,
     holds,
+    treatment: treatmentValue,
     failures,
     refusals,
     earliestViolation,
@@ -829,5 +916,100 @@ export function projectRetainedBytes({ eventSizes, clients, captureSeconds, rate
     inputs: { eventSizes: sizeMap, clients: clientCount, captureSeconds, ratesPerSecond: rateMap, fixedOverheadBytes, allowance },
     byKind,
     invalidInputs: unique(invalid),
+  };
+}
+
+/**
+ * The pitch flag the element actually ran under, across the whole retained
+ * stream, against the flag the arm declared.
+ *
+ * REPORTED, NEVER DECIDING. It qualifies no client and fails no clause: what it
+ * answers is whether the treatment the manifest names is the treatment the
+ * capture is evidence about. A candidate that converged under a flag that
+ * silently reverted would otherwise be read as a result about the flag.
+ *
+ * A baseline declares `null` — it writes nothing — so what is checked there is
+ * that nothing moved, not that a particular value stood.
+ */
+const booleanOf = (container, key) => {
+  const field = classifyField(container, key);
+  return field.presence === 'value' && typeof field.value === 'boolean' ? field.value : null;
+};
+
+export function pitchAudit({ events, declared }) {
+  const rows = Array.isArray(events) ? events : [];
+  const seen = new Set();
+  let readable = 0;
+  let unreadable = 0;
+  for (const event of rows) {
+    if (event?.kind !== 'seam-sample') continue;
+    const field = classifyField(event.media ?? null, 'preservesPitch');
+    if (field.presence === 'value' && typeof field.value === 'boolean') { seen.add(field.value); readable += 1; } else unreadable += 1;
+  }
+  const setters = rows.filter((event) => event?.kind === 'construction' && event.factory === 'preservesPitch');
+  const setter = setters[0] ?? null;
+  const observed = [...seen];
+  const set = setter === null ? null : {
+    requested: booleanOf(setter, 'requested'),
+    readback: booleanOf(setter, 'readback'),
+    propertySupported: booleanOf(setter, 'propertySupported'),
+    beforePlayback: booleanOf(setter, 'beforePlayback'),
+  };
+  // DECISION-BEARING. `null` declares "written by no one", which the element
+  // must show as the browser's own `true`; a boolean declares one write before
+  // playback, taken, and standing on every sample. Missing evidence refuses.
+  const failures = [];
+  if (declared !== null && typeof declared !== 'boolean') failures.push('pitch-declaration-absent');
+  if (readable === 0) failures.push('no-readable-pitch-sample');
+  if (unreadable > 0) failures.push('unreadable-pitch-samples');
+  if (observed.length > 1) failures.push('pitch-changed-during-capture');
+  const expected = declared === null ? true : declared;
+  if (observed.length === 1 && typeof expected === 'boolean' && observed[0] !== expected) failures.push('pitch-not-as-declared');
+  if (declared === null && setters.length > 0) failures.push('pitch-written-by-an-arm-that-declares-none');
+  if (typeof declared === 'boolean') {
+    if (setters.length !== 1) failures.push(setters.length === 0 ? 'pitch-write-not-recorded' : 'pitch-written-more-than-once');
+    else {
+      if (set.requested !== declared || set.readback !== declared) failures.push('pitch-write-not-taken');
+      if (set.propertySupported !== true) failures.push('pitch-property-unsupported');
+      if (set.beforePlayback !== true) failures.push('pitch-written-after-playback');
+    }
+  }
+  return {
+    declared: declared === undefined ? null : declared,
+    observed,
+    readableSamples: readable,
+    unreadableSamples: unreadable,
+    set,
+    held: readable > 0 && observed.length === 1 && (declared === null || observed[0] === declared),
+    status: failures.length === 0 ? 'met' : 'refused',
+    failures,
+  };
+}
+
+/**
+ * Whether the arm ran the treatment its manifest entry declares: the pitch
+ * flag, and the refusal policy the controller was constructed with. Each is a
+ * clause that can only be `met` or `refused` -- a treatment that did not hold
+ * makes the client unclaimable, not a candidate failure.
+ */
+export function treatmentAudit({ events, armPolicy }) {
+  const rows = Array.isArray(events) ? events : [];
+  const pitch = pitchAudit({ events: rows, declared: has(armPolicy, 'preservesPitch') ? armPolicy.preservesPitch : undefined });
+  const declaredPolicy = has(armPolicy, 'refusalPolicy') ? armPolicy.refusalPolicy : undefined;
+  const constructions = rows.filter((event) => event?.kind === 'construction' && event.factory === 'createDriftController');
+  const observedPolicy = constructions.length === 1 && has(constructions[0], 'refusalPolicy') ? constructions[0].refusalPolicy : null;
+  const policyFailures = [];
+  if (declaredPolicy === undefined) policyFailures.push('refusal-policy-declaration-absent');
+  if (constructions.length !== 1) policyFailures.push('controller-construction-not-unique');
+  else if (declaredPolicy !== undefined && observedPolicy !== declaredPolicy) policyFailures.push('refusal-policy-not-as-declared');
+  const clauses = [
+    clause('pitch-treatment-as-declared', pitch.status, { declared: pitch.declared, observed: pitch.observed, readableSamples: pitch.readableSamples, unreadableSamples: pitch.unreadableSamples, set: pitch.set }, pitch.failures.length === 0 ? null : pitch.failures.join(',')),
+    clause('refusal-policy-as-declared', policyFailures.length === 0 ? 'met' : 'refused', { declared: declaredPolicy ?? null, observed: observedPolicy }, policyFailures.length === 0 ? null : policyFailures.join(',')),
+  ];
+  return {
+    status: clauses.every((item) => item.status === 'met') ? 'met' : 'refused',
+    clauses,
+    pitch,
+    refusalPolicy: { declared: declaredPolicy ?? null, observed: observedPolicy, failures: policyFailures },
   };
 }

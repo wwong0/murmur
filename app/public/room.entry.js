@@ -15,6 +15,7 @@ import { createClockSync, websocketProbe } from './lib/clock-sync.mjs';
 import { createRoomTimeline } from './lib/room-timeline.mjs';
 import { createDriftLog } from './lib/frame-drift.mjs';
 import { createDriftController } from './lib/drift-controller.mjs';
+import { initializePlaybackTreatment } from './lib/playback-treatment.mjs';
 import { createFrameSampler } from './lib/frame-sampler.mjs';
 import { createPlaybackStart } from './lib/playback-start.mjs';
 import { createDiagnosticsOverlay } from './lib/diagnostics-overlay.mjs';
@@ -184,6 +185,19 @@ player.onError((detail) => {
   addNotice(`player error: ${detail.type ?? 'unknown'} ${detail.details ?? ''}`, { warn: true });
 });
 
+// THE PITCH TREATMENT, BEFORE THE SAMPLER, THE CONTROLLER AND ANY OPEN: the
+// adopted floor is only licensed by a pre-playback `preservesPitch = false`
+// that read back false, and this is the one place that write happens. The
+// verifier opts in to the treatment's event history with treatmentEvidence=1.
+const pageNow = () => performance.timeOrigin + performance.now();
+const treatment = initializePlaybackTreatment({
+  video,
+  opened: false,
+  now: pageNow,
+  notify: addNotice,
+  evidence: params.get('treatmentEvidence') === '1',
+});
+
 const timeline = createRoomTimeline();
 const driftLog = createDriftLog();
 // The video element carries its own `requestVideoFrameCallback`; the sampler's
@@ -193,9 +207,13 @@ const sampler = createFrameSampler({ video, timeline, clock: clockSync, log: dri
 const controller = createDriftController({
   log: driftLog,
   clock: clockSync,
-  apply: (rate) => { video.playbackRate = rate; },
-  now: () => performance.timeOrigin + performance.now(),
+  apply: (rate) => treatment.applyRate(rate),
+  settings: treatment.settings,
+  now: treatment.controllerNow,
 });
+// What every consumer reads: the kernel snapshot, or once the treatment has
+// faulted, a view that says so and carries the kernel's as historical.
+const controllerView = () => treatment.view(controller.state());
 
 const playback = createPlaybackStart({
   timeline,
@@ -204,11 +222,11 @@ const playback = createPlaybackStart({
     const seconds = (positionMs / 1000).toFixed(2);
     if (reopen) {
       sampler.stop();
-      player.reopen({ startPositionMs: positionMs });
+      treatment.open(() => player.reopen({ startPositionMs: positionMs }), 'reopen');
       controller.markSeam({ afterSeq: driftLog.latestSeq, epochMs, positionMs });
       addNotice(`timeline reference revised — re-opened at ${seconds}s`, { warn: true });
     } else {
-      player.load({ startPositionMs: positionMs });
+      treatment.open(() => player.load({ startPositionMs: positionMs }), 'load');
       addNotice(`playback opened at ${seconds}s`);
     }
     sampler.start();
@@ -219,7 +237,7 @@ const playback = createPlaybackStart({
 // The diagnostics overlay
 // ---------------------------------------------------------------------------
 
-const overlay = createDiagnosticsOverlay({ clock: clockSync, controller, log: driftLog, playback });
+const overlay = createDiagnosticsOverlay({ clock: clockSync, controller: { state: controllerView }, log: driftLog, playback });
 
 // ON THE TICK, NOT ON A CLOCK EVENT: the half-width widens with age between
 // samples, so a repaint tied to new samples alone freezes a growing number.
@@ -254,7 +272,7 @@ function tickPlayback() {
     addNotice(`the player did not open: ${err?.message ?? err}`, { warn: true });
   }
   try {
-    controller.poll();
+    treatment.pollController(() => controller.poll());
   } catch (err) {
     addNotice(`the drift controller did not poll: ${err?.message ?? err}`, { warn: true });
   }
@@ -292,7 +310,9 @@ window.__app = {
   // BESIDE `clock` AND `drift`, not inside `playback()`. The seam below spreads
   // `playback.state()`, so a key of the same name there would be silently
   // overwritten by this one rather than colliding visibly.
-  controller: () => controller.state(),
+  controller: controllerView,
+  pitch: () => treatment.pitch(),
+  treatmentEvidence: (maxEvents) => treatment.drainEvidence(maxEvents),
   playback: () => ({ ...playback.state(), callbacks: sampler.callbacks, sampling: sampler.running, seams: controller.seams }),
   timeline: () => ({ epochMs: timeline.epochMs, ...timeline.counters }),
 };

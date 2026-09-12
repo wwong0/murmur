@@ -49,6 +49,9 @@ import driftReportingSuite from './check/suites/drift-reporting.mjs';
 import playbackStartSuite from './check/suites/playback-start.mjs';
 import driftReadoutSuite from './check/suites/drift-readout.mjs';
 import diagnosticsOverlaySuite from './check/suites/diagnostics-overlay.mjs';
+import d8ProductIntegrationSuite from './check/suites/d8-product-integration.mjs';
+import playbackTreatmentSuite from './check/suites/playback-treatment.mjs';
+import playbackTreatmentEntrySuite from './check/suites/playback-treatment-entry.mjs';
 
 console.log(describeFixtures());
 
@@ -77,6 +80,9 @@ for (const suite of [
   playbackStartSuite,
   driftReadoutSuite,
   diagnosticsOverlaySuite,
+  d8ProductIntegrationSuite,
+  playbackTreatmentSuite,
+  playbackTreatmentEntrySuite,
 ]) {
   await suite();
 }

@@ -9,12 +9,12 @@
 // converged span and the observation window; the length is the price of a bar
 // the controller can fail (4c design.md D2).
 //
-// IT EXITS NON-ZERO ON THIS TREE, and that is change 4c's result rather than a
-// defect in the pass: 20 failures, four T5 clauses per window because neither
-// window ever reaches `settled`, and the whole T8 block because CDP's offline
-// emulation leaves the websocket up so the seam route never fires. A run
-// producing a different count, or the same count from different assertions, is
-// new information. Change 5 owns both, in `docs/plan/05-*.md`.
+// IT EXITS NON-ZERO ON THIS TREE. The four runs of 2026-09-05 failed 18 to 22
+// assertions: T5 and T10 because the pre-D8 controller never settled, and
+// twelve T8 labels because CDP's offline emulation leaves the websocket up so
+// the seam route never fires. With D8 adopted, verify-product-integration.mjs
+// judges a run against the frozen T8 list in product-integration-evidence.mjs;
+// any other failure is new information. Change 5 owns T8, in `docs/plan/05-*.md`.
 //
 // It exists because CLAUDE.md records that every defect in the host-origin
 // spike was found by attaching over CDP and reading the console, and because
@@ -64,9 +64,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep, disposeChrome } from './cdp.mjs';
-import { createRecorder } from './drift-capture.mjs';
+import { INTEGRATION_SCHEMA, createRecorder, pitchReference } from './drift-capture.mjs';
+import { auditClient, integrationSummary, readClientEvidence } from './product-integration-evidence.mjs';
 import { DRIFT_LINE_RE } from '../public/lib/drift-readout.mjs';
-import { MAX_RATE_DEVIATION, MIN_RECORDS, RATE_EPSILON } from '../public/lib/drift-controller.mjs';
+import { D8_COMMAND_THRESHOLD, MAX_RATE_DEVIATION, MIN_RECORDS, RATE_EPSILON } from '../public/lib/drift-controller.mjs';
 import { CLOCK_LINE_RE, CONTROLLER_LINE_HELD_RE, CONTROLLER_LINE_ACTING_RE } from '../public/lib/diagnostics-overlay.mjs';
 // The arithmetic and the verdicts, next door and pure — this file is the
 // sequence of windows, waits and assertions, and nothing else.
@@ -80,13 +81,17 @@ import {
   MIN_STRETCH_RECORDS,
   MIN_STRETCH_SPAN_MS,
   MIN_CONVERGED_RECORDS,
-  PLANT_MEDIAN_MOVEMENT_MS,
+  PLANT_MOVEMENT_POPULATION,
   RATE_STEADY_TOLERANCE,
   RESIDUAL_FLOOR_PPM,
   SLOPE_SIGNIFICANCE_SIGMA,
+  POST_SEAM_UNVERIFIED,
   STRETCH_EDGE_EXCLUSION_MS,
+  T8_GATED_ASSERTIONS,
   convergedStats,
   observationStats,
+  postSeamSettlingOutcome,
+  plantMaxPerPollMovementMs,
   plantSweepMinimum,
   predictedParkingDistanceMs,
   refreshFrom,
@@ -107,8 +112,15 @@ const BUNDLE_PATH = path.join(APP_DIR, 'public', 'room.bundle.js');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
 const PASS_STARTED_AT_ISO = new Date(PASS_STARTED_AT).toISOString();
 // Do not reuse a run directory: the first pair of captures was lost that way on 2026-09-05.
-const RUN_DIRECTORY_NAME = PASS_STARTED_AT_ISO.replaceAll(':', '-');
-const RUN_DIR = path.join(RESULTS_DIR, RUN_DIRECTORY_NAME);
+// `--run-dir=` is the integration supervisor's seam: a new directory under app/results only.
+const RUN_DIR_ARGUMENT = process.argv.find((arg) => arg.startsWith('--run-dir='))?.slice('--run-dir='.length) ?? null;
+const RUN_DIR = RUN_DIR_ARGUMENT === null
+  ? path.join(RESULTS_DIR, PASS_STARTED_AT_ISO.replaceAll(':', '-'))
+  : path.resolve(APP_DIR, RUN_DIR_ARGUMENT);
+const RUN_DIRECTORY_NAME = path.relative(RESULTS_DIR, RUN_DIR).split(path.sep).join('/');
+if (RUN_DIRECTORY_NAME === '' || RUN_DIRECTORY_NAME.startsWith('..') || path.isAbsolute(RUN_DIRECTORY_NAME)) {
+  throw new Error(`run output directory must be inside ${RESULTS_DIR}: ${RUN_DIR}`);
+}
 const MEDIA_DIR = path.resolve(process.env.APP_MEDIA_DIR ?? path.join(APP_DIR, '..', 'step0', 'content'));
 const WINDOW_STATE = 'visible, non-occluded (Chrome automation flags)';
 const MAX_RETAINED_BYTES = 10 * 1024 * 1024;
@@ -184,7 +196,7 @@ const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
 const sha = (text) => sha256(text).slice(0, 12);
 
 function prepareRunDirectory() {
-  fs.mkdirSync(RESULTS_DIR, { recursive: true });
+  fs.mkdirSync(path.dirname(RUN_DIR), { recursive: true });
   const relativeRunDir = path.relative(APP_DIR, RUN_DIR);
   try {
     const ignoredBy = execFileSync('git', ['check-ignore', '-v', '--', relativeRunDir], {
@@ -249,11 +261,15 @@ function readContentFrameRate() {
 const URL_A = `${ORIGIN}/room.html?room=demo&role=host&tab=A`;
 const URL_B = `${ORIGIN}/room.html?room=demo&role=viewer&tab=B`;
 const URL_V = `${ORIGIN}/room.html?room=demo&role=viewer&tab=V`;
+// The treatment's event history, on the two measured windows only; the later
+// route windows keep the normal page.
+const URL_A_MEASURED = `${URL_A}&treatmentEvidence=1`;
+const URL_B_MEASURED = `${URL_B}&treatmentEvidence=1`;
 
 // The first window IS page A — no about:blank bootstrap window.
 const chrome = spawn(
   CHROME,
-  [...FLAGS, `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`, '--window-size=700,500', '--window-position=0,0', URL_A],
+  [...FLAGS, `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`, '--window-size=700,500', '--window-position=0,0', URL_A_MEASURED],
   { stdio: 'ignore' }
 );
 
@@ -327,6 +343,7 @@ const SEAM = `(() => {
     clock: app.clock(),
     playback: app.playback(),
     controller: app.controller(),
+    pitch: app.pitch ? app.pitch() : null,
     timeline: app.timeline(),
     counters: drift.counters,
     held: drift.records.length,
@@ -368,9 +385,21 @@ function advancedMs(seam, probe) {
 }
 
 const failures = [];
+// A THIRD OUTCOME. An assertion whose precondition never occurred has not
+// passed and has not failed — it made no claim. Kept out of `failures` so the
+// command's status stays honest, and out of PASS so nothing unearned is banked.
+// Each entry carries what its absence leaves unverified.
+const notExercised = [];
 function expect(label, cond, detail) {
   console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
   if (!cond) failures.push(label);
+}
+function expectWhen(label, exercised, cond, detail, qualifier) {
+  if (exercised) return expect(label, cond, detail);
+  if (!T8_GATED_ASSERTIONS.includes(label)) throw new Error(`assertion is not approved for gating: ${label}`);
+  console.log(`NOT EXERCISED  ${label}${detail ? ` — ${detail}` : ''}`);
+  console.log(`  ${qualifier}`);
+  notExercised.push({ label, qualifier });
 }
 
 /**
@@ -516,6 +545,7 @@ async function waitForSettle(tabs) {
     lastNoSettling: null,
     firstRecords: null,
     firstClock: null,
+    reads: [],
   }));
   let nextProgressAt = startedAt + SETTLE_PROGRESS_MS;
   let settleTurn = 0;
@@ -532,6 +562,7 @@ async function waitForSettle(tabs) {
         } else {
           const reading = { atMs, seam };
           state.last = reading;
+          state.reads.push({ atMs, schema: INTEGRATION_SCHEMA, controller: seam.controller ?? null, pitch: pitchReference(seam.pitch), playback: seam.playback ?? null });
           const playback = seam.playback ?? {};
           const controller = seam.controller ?? {};
           if (playback.playing === true && state.firstPlaybackAt === null) {
@@ -614,6 +645,7 @@ async function observeWindows(tabs, durationMs) {
         thresholdUsable: controller.thresholdUsable ?? false,
         windowRecords: controller.windowRecords ?? null,
         controlRecords: controller.controlRecords ?? null,
+        pitch: pitchReference(seam.pitch),
       });
       await state.recorder?.pump(atMs);
     }));
@@ -701,6 +733,7 @@ function routeFields(reading) {
 let recorderA = null;
 let recorderB = null;
 let manifestPath = null;
+let t8Route = null;
 let contentFps = null;
 let contentFpsUnavailableReason = null;
 
@@ -755,8 +788,8 @@ try {
   console.log(`(chrome opened ${windows.filter((t) => t.type === 'page').length} page target(s))`);
 
   console.log('\n--- 7.1 / 7.2: two windows, one room ---');
-  const a = await attach('A/host', URL_A, true);
-  recorderA = createRecorder({ label: 'A', tab: a, dir: RUN_DIR });
+  const a = await attach('A/host', URL_A_MEASURED, true);
+  recorderA = createRecorder({ label: 'A', tab: a, dir: RUN_DIR, treatment: true });
 
   console.log('\n--- 3.1: which build is this run talking to? ---');
   // A 200 on /room.html proves something is answering, not what it is
@@ -779,12 +812,16 @@ try {
   // WINDOW_GAP_MS before shortening or removing it.
   console.log(`\n--- 3.4: opening the second window ${WINDOW_GAP_MS / 1000}s late, on purpose ---`);
   await pumpingWait([recorderA], WINDOW_GAP_MS, CAPTURE_POLL_MS);
-  const b = await attach('B/view', URL_B);
-  recorderB = createRecorder({ label: 'B', tab: b, dir: RUN_DIR });
+  const b = await attach('B/view', URL_B_MEASURED);
+  recorderB = createRecorder({ label: 'B', tab: b, dir: RUN_DIR, treatment: true });
 
   console.log('\n--- T5: waiting for both windows to settle ---');
   const recorders = [recorderA, recorderB];
   const settleStates = await waitForSettle([{ label: 'A', tab: a, recorder: recorderA }, { label: 'B', tab: b, recorder: recorderB }]);
+  // EVERY T5 seam read, not the first and last: the treatment audit reads each one.
+  for (const state of settleStates) {
+    fs.writeFileSync(path.join(RUN_DIR, `${state.label}.settle.ndjson`), state.reads.map((read) => `${JSON.stringify(read)}\n`).join(''));
+  }
   for (const state of settleStates) {
     const seam = state.last?.seam;
     const controller = seam?.controller ?? {};
@@ -950,6 +987,7 @@ try {
   manifestPath = path.join(RUN_DIR, 'manifest.json');
   const manifest = {
     schemaVersion: 2,
+    integrationSchema: INTEGRATION_SCHEMA,
     runDirectory: RUN_DIRECTORY_NAME,
     gitHead,
     build: {
@@ -984,6 +1022,8 @@ try {
       files: {
         records: `${figure.label}.records.ndjson`,
         captures: `${figure.label}.captures.ndjson`,
+        treatment: `${figure.label}.treatment.ndjson`,
+        settle: `${figure.label}.settle.ndjson`,
       },
       counts: index === 0 ? countsA : countsB,
       observedSamples: figure.observedSamples,
@@ -1015,6 +1055,24 @@ try {
   const rederivedB = rederiveConvergedMedian(path.join(RUN_DIR, 'B.records.ndjson'), barSeqB, sb.latest?.seq);
   expect('T10 A converged median re-derives from retained NDJSON', rederivedA.medianMs === convergedA.convergedMedianMs && rederivedA.count === convergedA.convergedCount, `retained ${rederivedA.medianMs}ms/${rederivedA.count}; printed ${convergedA.convergedMedianMs}ms/${convergedA.convergedCount}`);
   expect('T10 B converged median re-derives from retained NDJSON', rederivedB.medianMs === convergedB.convergedMedianMs && rederivedB.count === convergedB.convergedCount, `retained ${rederivedB.medianMs}ms/${rederivedB.count}; printed ${convergedB.convergedMedianMs}ms/${convergedB.convergedCount}`);
+
+  console.log('\n--- INT: the adopted treatment and refusal/dwell policy, from the retained streams ---');
+  // From each client's first retained poll through this flush: the settle wait,
+  // T6 and T7 whole, before any deliberate disruption.
+  const integrationClients = [['A', countsA], ['B', countsB]].map(([label, counts]) => auditClient({
+    label,
+    ...readClientEvidence(RUN_DIR, label),
+    stream: counts.treatment,
+    expectedF: D8_COMMAND_THRESHOLD,
+  }));
+  manifest.integration = { schema: INTEGRATION_SCHEMA, expectedF: D8_COMMAND_THRESHOLD, clients: integrationClients, summary: integrationSummary(integrationClients) };
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  for (const client of integrationClients) {
+    const { treatment, refusalDwell } = client;
+    console.log(`  ${client.label}: treatment ${treatment.status} over ${treatment.observed.samples} samples (startup ${treatment.observed.outcome}); refusal/dwell ${refusalDwell.status} over polls ${refusalDwell.firstPollId}..${refusalDwell.lastPollId}; settled entries ${JSON.stringify(refusalDwell.settledEntries.map((entry) => entry.elapsedMs))}`);
+    expect(`INT ${client.label} held the adopted pitch treatment on every retained sample`, treatment.status === 'met', JSON.stringify(treatment.failures));
+    expect(`INT ${client.label} followed the adopted refusal and dwell policy`, refusalDwell.status === 'met', JSON.stringify(refusalDwell.failures));
+  }
 
   const parkingThresholdsUsable = t7Figures.length === 2 && t7Figures.every((figure) =>
     figure.stats.thresholdUsableFraction === 1
@@ -1281,7 +1339,23 @@ try {
   expect('T8 V seam-drop counter advanced by exactly 1', delta('V', 'seamDrops') === 1, `before=${before.V.seamDrops} after=${after.V.seamDrops}`);
   expect("T8 V controller's last drop was a seam", afterVController.lastDrop?.reason === 'seam', JSON.stringify(afterVController.lastDrop));
   expect('T8 V controller returned to the base rate within RATE_EPSILON', Math.abs((afterVController.rate ?? NaN) - 1) <= RATE_EPSILON, JSON.stringify(afterVController.rate));
-  expect("T8 V controller did not re-settle during the 3s post-seam read", after.V.mode !== 'settled', JSON.stringify({ mode: after.V.mode, reason: afterVController.reason }));
+  // The assertion below reads the controller AFTER a seam it assumes occurred.
+  // It is evaluated only once that seam is proven; otherwise it claims nothing
+  // rather than reporting a dwell failure about an event that never happened.
+  const postSeam = postSeamSettlingOutcome({
+    before: before.V,
+    after: after.V,
+    newSeam: newVSeam,
+    seamDropDelta: delta('V', 'seamDrops'),
+    mode: after.V.mode,
+  });
+  expectWhen(
+    "T8 V controller did not re-settle during the 3s post-seam read",
+    postSeam.outcome !== 'not-exercised',
+    after.V.mode !== 'settled',
+    JSON.stringify({ mode: after.V.mode, reason: afterVController.reason, seamMissing: postSeam.proof.missing }),
+    POST_SEAM_UNVERIFIED,
+  );
   expect('T8 V controller rebuilt a nonempty window', afterVController.windowRecords > 0, JSON.stringify(afterVController.windowRecords));
   expect('T8 V newest record is after the new seam', Number.isFinite(routeAfterV.seam?.latest?.seq) && routeAfterV.seam.latest.seq > newVSeam?.afterSeq, JSON.stringify({ latestSeq: routeAfterV.seam?.latest?.seq, afterSeq: newVSeam?.afterSeq }));
   expect('T8 A3 freshJoins stayed unchanged', delta('A3', 'freshJoins') === 0, `before=${before.A3.freshJoins} after=${after.A3.freshJoins}`);
@@ -1303,6 +1377,18 @@ try {
   } else {
     console.log(`  T8 route diagnosis: seam fired; V fresh-joined and re-opened once, A3 remained untouched`);
   }
+  // Recorded for the integration classifier's signature match; it decides nothing here.
+  t8Route = {
+    diagnosis: routeDiagnosis ?? (routeFired ? 'seam fired' : 'V fresh-joined and re-opened, but another route assertion failed'),
+    departureObserved,
+    offlineSignature,
+    deltas: { freshJoins: freshJoinDelta, reopens: reopenDelta, opens: openDelta, seams: seamDelta, seamDrops: delta('V', 'seamDrops'), epochRevisions: delta('V', 'epochRevisions') },
+    vMode: { before: before.V.mode, after: after.V.mode },
+    routeFired,
+    postSeamSettling: postSeam.outcome,
+    postSeamMissing: postSeam.proof.missing,
+    postSeamUnverified: postSeam.outcome === 'not-exercised' ? POST_SEAM_UNVERIFIED : null,
+  };
 
   console.log('\n--- T9: figures ---');
   console.log('--- T9 FIGURES BEGIN ---');
@@ -1323,7 +1409,7 @@ try {
     console.log(`  3.2 ${label}: interpolated span scatter ${numberText(converged.convergedSpreadMs)}ms over ${converged.convergedCount} records; alternation ${numberText(stats.alternation?.fraction, 3)} over ${stats.alternation?.nonzeroPairs ?? 0} nonzero pairs, ${stats.alternation?.zeroPairs ?? 0} zero pairs, ${stats.alternation?.totalPairs ?? 0} total pairs; rounded drifts ${JSON.stringify(stats.histogram)}; panel refresh ${numberText(refresh.refreshRateHz)}Hz from ${refresh.frameCount ?? 'null'} frames with median delta ${numberText(refresh.medianDeltaMs)}ms; verdict: ${verdicts.cadenceVerdict}.`);
     console.log(`  3.3 ${label}: published ${stats.population} U/band median ${numberText(stats.bandMedianMs)}ms (spread median ${numberText(stats.spreadMedianMs)}ms, max ${numberText(stats.spreadMaxMs)}ms); L/allowance median ${numberText(stats.actuatorAllowanceMedianMs)}ms; accepted S median ${numberText(stats.stoppingThresholdMedianMs)}ms, max ${numberText(stats.stoppingThresholdMaxMs)}ms; threshold usability ${stats.thresholdUsableCount}/${stats.thresholdPopulationSamples} (${numberText(stats.thresholdUsableFraction, 3)}), schemas ${JSON.stringify(stats.thresholdSchemas)}; predicted half-vsync floor ${numberText(verdicts.predictedFloorMs)}ms; estimate range over the observation ${numberText(stats.estimateRangeMs)}ms; verdict: ${verdicts.floorVerdict}.`);
     console.log(`  3.4 ${label}: first settled sample index ${stats.firstSettledIndex}; population ${stats.population}; duty ${verdicts.dutyVerdict}; excursions ${JSON.stringify(stats.excursions)}; verdict: ${verdicts.excursionVerdict}; plant sweep minimum ${plantMinimumText}; recommendation: ${verdicts.recommendation}; read over ${figure.observedSamples}/${expectedObservationSamples} samples with ${figure.absent} absent.`);
-    console.log(`  2.11 ${label}: Chrome 10s interpolated scatter ${numberText(converged.convergedSpreadMs)}ms vs half-vsync ${numberText(verdicts.predictedFloorMs)}ms; published ${stats.population} U ${numberText(stats.bandMedianMs)}ms, L ${numberText(stats.actuatorAllowanceMedianMs)}ms, accepted S ${numberText(stats.stoppingThresholdMedianMs)}ms with usability ${numberText(stats.thresholdUsableFraction, 3)}; spread ${numberText(stats.spreadMedianMs)}ms; estimate range over the observation ${numberText(stats.estimateRangeMs)}ms; max per-poll estimate movement ${numberText(stats.maxPerPollMovementMs)}ms over ${stats.perPollPairsUsed} adjacent pairs, ${stats.perPollPairsSkippedForGap} skipped for poll gaps (comparable to the plant's ${PLANT_MEDIAN_MOVEMENT_MS}ms largest per-poll movement, not a median); verdict: ${verdicts.modelVerdict}; median applied rate ${numberText(stats.actingRateMedian, 6)} over acting fraction ${numberText(stats.actingFraction, 3)}; observed closure ${numberText(stats.observedClosureRateMsPerSec)}ms/s; commanded closure ${numberText(stats.commandedClosureRateMsPerSec)}ms/s; effectiveness fraction ${numberText(stats.effectivenessFraction, 3)}; rate-effectiveness verdict: ${verdicts.rateEffectivenessVerdict}.`);
+    console.log(`  2.11 ${label}: Chrome 10s interpolated scatter ${numberText(converged.convergedSpreadMs)}ms vs half-vsync ${numberText(verdicts.predictedFloorMs)}ms; published ${stats.population} U ${numberText(stats.bandMedianMs)}ms, L ${numberText(stats.actuatorAllowanceMedianMs)}ms, accepted S ${numberText(stats.stoppingThresholdMedianMs)}ms with usability ${numberText(stats.thresholdUsableFraction, 3)}; spread ${numberText(stats.spreadMedianMs)}ms; estimate range over the observation ${numberText(stats.estimateRangeMs)}ms; max per-poll estimate movement ${numberText(stats.maxPerPollMovementMs)}ms over ${stats.perPollPairsUsed} adjacent pairs, ${stats.perPollPairsSkippedForGap} skipped for poll gaps (against the simulated plant's ${numberText(plantMaxPerPollMovementMs(refresh.refreshRateHz))}ms largest per-poll movement over ${PLANT_MOVEMENT_POPULATION}; 4a's 1.32ms is a Chrome task-0 figure, not the plant's, and the two populations are unmatched, so neither supports agreement); verdict: ${verdicts.modelVerdict}; median applied rate ${numberText(stats.actingRateMedian, 6)} over acting fraction ${numberText(stats.actingFraction, 3)}; observed closure ${numberText(stats.observedClosureRateMsPerSec)}ms/s; commanded closure ${numberText(stats.commandedClosureRateMsPerSec)}ms/s; effectiveness fraction ${numberText(stats.effectivenessFraction, 3)}; rate-effectiveness verdict: ${verdicts.rateEffectivenessVerdict}.`);
     console.log(`  3.5 ${label}: final no-clock counters ${JSON.stringify({ noClock: figure.finalCounters?.noClock ?? null, framesOffered: figure.finalCounters?.framesOffered ?? null })}; first clock held ${figure.firstClock?.held ?? 'null'} counters ${JSON.stringify(figure.firstClock?.counters ?? null)}; first playing held ${figure.firstPlayback?.seam?.held ?? 'null'} counters ${JSON.stringify(figure.firstPlayback?.seam?.counters ?? null)}; verdict: direct controller record count is not observable, and this page construction cannot feed the no-clock arm because records require a clock and an established offset does not return to null.`);
   }
   for (const [label, readings] of [['A', linesA], ['B', linesB]]) {
@@ -1351,12 +1437,18 @@ try {
       const finalManifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
       finalManifest.timing.passEndedAt = new Date().toISOString();
       finalManifest.outcome = failures.length === 0 ? 'pass' : 'failed';
+      finalManifest.failures = failures.slice();
+      finalManifest.notExercised = notExercised.slice();
+      finalManifest.t8Route = t8Route;
       fs.writeFileSync(manifestPath, `${JSON.stringify(finalManifest, null, 2)}\n`);
     } catch (error) {
       failures.push(`manifest finalization failed: ${error?.message ?? error}`);
     }
   }
-  console.log(`\n${failures.length === 0 ? 'ALL PASS' : `${failures.length} FAILURE(S): ${failures.join('; ')}`}`);
+  const unexercisedText = notExercised.length === 0
+    ? ''
+    : `\n${notExercised.length} NOT EXERCISED: ${notExercised.map((entry) => `${entry.label} — ${entry.qualifier}`).join('; ')}`;
+  console.log(`\n${failures.length === 0 ? 'ALL PASS' : `${failures.length} FAILURE(S): ${failures.join('; ')}`}${unexercisedText}`);
   await disposeChrome(chrome, profile);
   process.exit(failures.length === 0 ? 0 : 1);
 }

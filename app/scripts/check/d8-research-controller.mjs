@@ -29,6 +29,20 @@
 //  5. At f = 0 every one of the above is inert, so the f = 0 copy must produce
 //     byte-identical applied streams and poll histories to the product.
 //
+// One further difference is SELECTED AT CONSTRUCTION and off by default
+// (`remedy-pitch-preserving-amendment.md`, owner-approved research only):
+//
+//  6. `refusalPolicy: 'split-outside-required-threshold'` splits the refusal in
+//     2. A refused poll whose |estimate| is at or inside the REQUIRED S still
+//     holds exact unity. One outside it keeps the unchanged command law —
+//     measured from U, clamped at the authority, through the unchanged write
+//     filter — under its own mode, with no accepted threshold, no close figure
+//     and the dwell and latch cleared exactly as a hold clears them. It never
+//     settles. This is a research relaxation of compulsory unity, not a proof
+//     that the correction cannot overshoot: U is a spread, not a certified
+//     bound on the rolling median's bias, and poll spacing is not guaranteed.
+//     The default policy is the unity hold every earlier run used.
+//
 // TEST MACHINERY — under scripts/. No DOM, no timers, no clock read of its own.
 
 import {
@@ -56,6 +70,14 @@ export const D8_MODEL_SAMPLE_RATES = Object.freeze([44100, 48000, 96000]);
 export const D8_THRESHOLD_HEADROOM = 0.000001;
 export const D8_HOLD_MODE = 'resolution-budget-hold';
 export const D8_HOLD_REASON = 'stopping-threshold-over-budget';
+/** The refused poll that keeps correcting. Same reason as the hold: the
+ *  threshold was refused either way; only what the rate does differs. */
+export const D8_UNCERTIFIED_MODE = 'uncertified-correction';
+export const D8_REFUSAL_POLICIES = Object.freeze({
+  unityHold: 'unity-hold',
+  split: 'split-outside-required-threshold',
+});
+export const D8_REFUSAL_MODES = Object.freeze([D8_HOLD_MODE, D8_UNCERTIFIED_MODE]);
 /** The only slack allowed when checking an applied rate, and it is IEEE-754
  *  arithmetic slack near 1.0 — never a ppm acceptance allowance. */
 export const COMMAND_TOLERANCE = 8 * Number.EPSILON;
@@ -122,9 +144,13 @@ function validateSettings(settings) {
   if (settings.MAX_STOPPING_THRESHOLD_MS !== MAX_STOPPING_THRESHOLD_MS) refuse(`MAX_STOPPING_THRESHOLD_MS is fixed at ${MAX_STOPPING_THRESHOLD_MS}, got ${settings.MAX_STOPPING_THRESHOLD_MS}`);
 }
 
-export function createD8ResearchController({ log, clock, apply, settings: overrides = {}, now }) {
+export function createD8ResearchController({ log, clock, apply, settings: overrides = {}, now, refusalPolicy = D8_REFUSAL_POLICIES.unityHold }) {
   const settings = Object.freeze({ ...DEFAULT_SETTINGS, ...overrides });
   validateSettings(settings);
+  if (!Object.values(D8_REFUSAL_POLICIES).includes(refusalPolicy)) {
+    throw new RangeError(`d8-research-controller: refusalPolicy must be one of ${Object.values(D8_REFUSAL_POLICIES).join(', ')}, got ${refusalPolicy}`);
+  }
+  const splitRefusal = refusalPolicy === D8_REFUSAL_POLICIES.split;
   const allowanceMs = actuatorAllowanceMs(settings.MIN_COMMAND_DEVIATION, settings.TIME_CONSTANT_MS);
   const floorRate = settings.MIN_COMMAND_DEVIATION;
   const positiveFloor = floorRate > 0;
@@ -214,6 +240,14 @@ export function createD8ResearchController({ log, clock, apply, settings: overri
     if (deviation === 0) return;
     if (deviation < floorRate - COMMAND_TOLERANCE) throw new RangeError(`d8-research-controller: applied deviation ${deviation} is below the command threshold ${floorRate}`);
     if (deviation > settings.MAX_RATE_DEVIATION + COMMAND_TOLERANCE) throw new RangeError(`d8-research-controller: applied deviation ${deviation} exceeds the rate authority ${settings.MAX_RATE_DEVIATION}`);
+  }
+
+  /** The one command law, shared by the accepted branch and the split so the
+   *  two cannot drift apart: the excess over U, never over S, clamped at the
+   *  authority. */
+  function correctionFor(estimate, band) {
+    const excess = Math.sign(estimate) * Math.max(0, Math.abs(estimate) - band);
+    return Math.max(-settings.MAX_RATE_DEVIATION, Math.min(settings.MAX_RATE_DEVIATION, -excess / settings.TIME_CONSTANT_MS));
   }
 
   function applyRate(nextRate, atMs) {
@@ -338,13 +372,27 @@ export function createD8ResearchController({ log, clock, apply, settings: overri
       // `requiredStoppingThresholdMs` stays published, because what the poll
       // needed is the whole finding; `settlingMs` stays because it is history.
       budgetRefusals += 1;
-      hold(atMs, D8_HOLD_MODE, D8_HOLD_REASON);
+      if (splitRefusal && Math.abs(estimateMs) > requiredStoppingThresholdMs) {
+        // THE SPLIT (difference 6). Outside the required S no stopping
+        // question is open, so the unchanged law keeps running. Everything a
+        // refusal withholds is still withheld: no accepted S, no close figure,
+        // and the latch cleared, so no poll of this mode can settle or carry a
+        // dwell into the next one.
+        applyRate(BASE_RATE + correctionFor(estimateMs, bandMs), atMs);
+        unlatch();
+        stoppingThresholdMs = null;
+        thresholdUsable = false;
+        fastestCloseMs = null;
+        mode = D8_UNCERTIFIED_MODE;
+        reason = D8_HOLD_REASON;
+      } else {
+        hold(atMs, D8_HOLD_MODE, D8_HOLD_REASON);
+      }
     } else {
       stoppingThresholdMs = requiredStoppingThresholdMs;
       thresholdUsable = true;
-      const excess = Math.sign(estimateMs) * Math.max(0, Math.abs(estimateMs) - bandMs);
       fastestCloseMs = shortestCloseMs(estimateMs, stoppingThresholdMs, settings.MAX_RATE_DEVIATION);
-      const correction = Math.max(-settings.MAX_RATE_DEVIATION, Math.min(settings.MAX_RATE_DEVIATION, -excess / settings.TIME_CONSTANT_MS));
+      const correction = correctionFor(estimateMs, bandMs);
       const inside = Math.abs(estimateMs) <= stoppingThresholdMs;
       if (inside) excursionAt = null;
       else if (settledLatched && excursionAt === null) excursionAt = atMs;
@@ -380,6 +428,9 @@ export function createD8ResearchController({ log, clock, apply, settings: overri
     poll,
     state: snapshot,
     markSeam,
+    // Beside the snapshot, not in it: the f = 0 equivalence compares snapshots
+    // with the product field by field, and the product has no such policy.
+    refusalPolicy,
     get seams() {
       return seams.map((seam) => ({ ...seam }));
     },

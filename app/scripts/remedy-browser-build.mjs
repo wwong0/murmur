@@ -40,13 +40,16 @@ export const PRODUCT_BUNDLE = OUT_FILE;
 export const PRODUCT_MAP = `${OUT_FILE}.map`;
 export const RESEARCH_ENTRY = ENTRY_POINT;
 
-/** The three imports the research build redirects, exactly as the entry point
+/** The four imports the research build redirects, exactly as the entry point
  *  writes them. A specifier that stops matching is a build that silently keeps
  *  the product module, so the resolver counts its hits and the caller checks. */
 export const REDIRECTED_SPECIFIERS = Object.freeze({
   './lib/drift-controller.mjs': 'controller',
   './lib/frame-sampler.mjs': 'sampler',
   './lib/frame-drift.mjs': 'log',
+  // The product's pitch treatment would write pitch and pick f behind the
+  // research wrappers; its stand-in does neither (integration spec 3.4).
+  './lib/playback-treatment.mjs': 'treatment',
 });
 
 /** Modules that would make the page its own plant. `mechanism-audio.mjs` is
@@ -117,6 +120,45 @@ export function assertOutputsInside(root, options) {
 }
 
 /**
+ * The pitch flag each arm runs under, stated in ONE place so the manifest, the
+ * bundle and the audit cannot disagree.
+ *
+ * `null` is "the arm writes nothing", which is the baseline and the product.
+ * `false` on C is the candidate's only new treatment: the measured actuation
+ * cost of repeated rate switching was pitch-dependent, so the controller is
+ * given an element that is not time-stretching. It is set once before playback
+ * and never toggled per correction.
+ */
+export const DEFAULT_TREATMENT = 'pitch-disabled';
+
+/**
+ * The candidate treatments, by name. Each names the whole of what arm C runs
+ * under beyond the frozen D8 controller; B is the product in every one.
+ *
+ *  - `pitch-disabled` is the treatment `c5231da` ran and passed, kept as the
+ *    default so the command that produced it still produces it.
+ *  - `refusal-split` leaves pitch preservation where the browser put it and
+ *    selects the controller's refusal split instead
+ *    (`remedy-pitch-preserving-amendment.md`). It is not folded into the
+ *    first: that combination was never what passed.
+ */
+export const TREATMENTS = Object.freeze({
+  'pitch-disabled': Object.freeze({ preservesPitch: false, refusalPolicy: 'unity-hold' }),
+  'refusal-split': Object.freeze({ preservesPitch: null, refusalPolicy: 'split-outside-required-threshold' }),
+});
+
+export function treatmentOf(treatment = DEFAULT_TREATMENT) {
+  const found = TREATMENTS[treatment];
+  if (found === undefined) throw new Error(`remedy-browser-build: unknown treatment ${treatment} (known: ${Object.keys(TREATMENTS).join(', ')})`);
+  return found;
+}
+
+export const armPreservesPitch = (arm, treatment = DEFAULT_TREATMENT) => (arm === 'C' ? treatmentOf(treatment).preservesPitch : null);
+
+/** `null` on the baseline: the product controller has no refusal policy. */
+export const armRefusalPolicy = (arm, treatment = DEFAULT_TREATMENT) => (arm === 'C' ? treatmentOf(treatment).refusalPolicy : null);
+
+/**
  * The three wrapper modules, written into the research root as real files.
  *
  * Real files rather than virtual modules so esbuild's metafile names them, the
@@ -164,6 +206,7 @@ export function writeWrapperModules({ root, arm, io = nodeBuildIo() }) {
       '  collector,',
       '  createController: createD8ResearchController,',
       '  settings: { MIN_COMMAND_DEVIATION: f },',
+      '  options: { refusalPolicy: __RESEARCH_REFUSAL_POLICY__ },',
       '});',
       '',
     ].join('\n')
@@ -178,12 +221,20 @@ export function writeWrapperModules({ root, arm, io = nodeBuildIo() }) {
       '',
     ].join('\n');
 
+  // The pitch flag is the arm's ONE touch of the element, and it is chosen here
+  // beside the controller: `null` on the baseline leaves the browser default
+  // exactly where the product leaves it. The sampler is the seam because the
+  // entry constructs it before it opens playback.
   const samplerShim = [
     `import { collector } from './research-collector.mjs';`,
     `import { createFrameSampler as createProductSampler } from '${sampler}';`,
     `import { wrapFrameSampler } from '${page}';`,
     '',
-    'export const createFrameSampler = wrapFrameSampler({ collector, createFrameSampler: createProductSampler });',
+    'export const createFrameSampler = wrapFrameSampler({',
+    '  collector,',
+    '  createFrameSampler: createProductSampler,',
+    '  preservesPitch: __RESEARCH_PRESERVES_PITCH__,',
+    '});',
     '',
   ].join('\n');
 
@@ -200,22 +251,47 @@ export function writeWrapperModules({ root, arm, io = nodeBuildIo() }) {
     '',
   ].join('\n');
 
+  // The product treatment, bypassed: f = 0 unless the controller wrapper sets
+  // it, no pitch write, native rate writes and no interlock. The research
+  // wrappers above stay the only authority for pitch and controller selection.
+  const treatmentShim = [
+    'export function initializePlaybackTreatment({ video, now }) {',
+    '  return {',
+    '    settings: Object.freeze({ MIN_COMMAND_DEVIATION: 0 }),',
+    "    treatment: 'research-bypass',",
+    '    startup: null,',
+    '    guard: () => true,',
+    '    applyRate: (rate) => { video.playbackRate = rate; },',
+    '    controllerNow: now,',
+    '    pollController: (poll) => poll(),',
+    '    open: (action) => action(),',
+    '    view: (snapshot) => snapshot,',
+    '    pitch: () => null,',
+    '    drainEvidence: () => null,',
+    '    faulted: false,',
+    '  };',
+    '}',
+    '',
+  ].join('\n');
+
   io.mkdir(root);
   const files = {
     shared: path.join(root, 'research-collector.mjs'),
     controller: path.join(root, 'research-controller.mjs'),
     sampler: path.join(root, 'research-sampler.mjs'),
     log: path.join(root, 'research-log.mjs'),
+    treatment: path.join(root, 'research-treatment.mjs'),
   };
   io.writeFile(files.shared, shared);
   io.writeFile(files.controller, controller);
   io.writeFile(files.sampler, samplerShim);
   io.writeFile(files.log, logShim);
+  io.writeFile(files.treatment, treatmentShim);
   return files;
 }
 
 /**
- * The resolver. It fires only for the three specifiers, and only when the
+ * The resolver. It fires only for the four specifiers, and only when the
  * importer is the exact entry file; every other resolution of those same
  * specifiers — the sampler's own import of the log, the research controller's
  * import of the product arithmetic — is left alone.
@@ -226,7 +302,7 @@ export function writeWrapperModules({ root, arm, io = nodeBuildIo() }) {
  */
 export function researchResolver({ entryPath, wrappers, hits }) {
   const entry = path.resolve(entryPath);
-  const target = { controller: wrappers.controller, sampler: wrappers.sampler, log: wrappers.log };
+  const target = { controller: wrappers.controller, sampler: wrappers.sampler, log: wrappers.log, treatment: wrappers.treatment };
   return {
     name: 'remedy-browser-research-resolver',
     setup(build) {
@@ -278,8 +354,10 @@ export async function buildResearchBundle({
   io = nodeBuildIo(),
   esbuildImpl = esbuild,
   wrappers = null,
+  treatment = DEFAULT_TREATMENT,
 }) {
   if (arm !== 'B' && arm !== 'C') throw new Error(`remedy-browser-build: unknown arm ${arm}`);
+  treatmentOf(treatment);
   const before = productArtifacts(io);
   const files = wrappers ?? writeWrapperModules({ root, arm, io });
   const outfile = path.join(root, `room.research.${arm}.js`);
@@ -295,6 +373,8 @@ export async function buildResearchBundle({
       __RESEARCH_BUILD__: JSON.stringify(buildId),
       __RESEARCH_COLLECTOR__: JSON.stringify(collectorId),
       __RESEARCH_THRESHOLD__: JSON.stringify(threshold ?? 0),
+      __RESEARCH_PRESERVES_PITCH__: JSON.stringify(armPreservesPitch(arm, treatment)),
+      __RESEARCH_REFUSAL_POLICY__: JSON.stringify(armRefusalPolicy(arm, treatment)),
     },
   };
   assertOutputsInside(root, options);

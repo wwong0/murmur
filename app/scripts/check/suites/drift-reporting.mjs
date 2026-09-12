@@ -4,11 +4,11 @@
 // consumer built on that snapshot is entitled to (design.md D3).
 //
 // The threshold arithmetic is exercised at U=3, L=12, S=15 through the exported
-// pure functions, with every expected value computed here from the inputs. The
-// SHIPPED controller runs at f=0, where L is 0 and S is U, because the D7 sweep
-// returned F3 and calibrated no floor — so the additive case cannot be reached
-// through a constructed controller, and asking for it is refused at
-// construction rather than served by a test-only hook in product code.
+// pure functions, with every expected value computed here from the inputs. A
+// default-constructed controller runs at f=0, where L is 0 and S is U. A
+// positive f is the owner-adopted D8 value, passed in by the page only once the
+// pitch treatment holds (D7 still returned F3); its behaviour is in
+// d8-product-integration.mjs, and this file checks only what construction takes.
 //
 // Traps worth preserving:
 //  - `recordRig` owns its simulated clock and does not publish it, so `timed`
@@ -23,6 +23,7 @@ import { plant, recordRig } from '../drift-plant.mjs';
 import { createDriftLog } from '../../../public/lib/frame-drift.mjs';
 import { createDiagnosticsOverlay } from '../../../public/lib/diagnostics-overlay.mjs';
 import {
+  D8_COMMAND_THRESHOLD,
   DECLINING_REASONS,
   MAX_STOPPING_THRESHOLD_MS,
   actuatorAllowanceMs,
@@ -193,17 +194,18 @@ export default async function driftReportingSuite() {
     assertEqual(decliningReason(-HAND_S_MS, HAND_U_MS), 'actuator-limit', 'the limit is judged on the magnitude');
   });
 
-  await check('drift-reporting: the construction contract refuses a remedy it does not implement', async () => {
+  await check('drift-reporting: the construction contract takes a floor up to the rate authority and refuses the rest', async () => {
     const shipped = recordRig().controller.state().settings;
-    assertEqual(shipped.MIN_COMMAND_DEVIATION, 0, 'the shipped floor is zero');
+    assertEqual(shipped.MIN_COMMAND_DEVIATION, 0, 'the default floor is zero');
     assertEqual(shipped.MAX_STOPPING_THRESHOLD_MS, MAX_STOPPING_THRESHOLD_MS, 'the settings in force publish the fixed ceiling');
     assertEqual(shipped.MAX_STOPPING_THRESHOLD_MS, 20, 'and the ceiling is 20ms');
 
-    for (const overrides of [{}, { MIN_COMMAND_DEVIATION: 0 }, { MAX_RATE_DEVIATION: 0 }, { RATE_EPSILON: 0.02 }, { MAX_STOPPING_THRESHOLD_MS: 20 }, { TIME_CONSTANT_MS: 1 }]) {
+    for (const overrides of [{}, { MIN_COMMAND_DEVIATION: 0 }, { MAX_RATE_DEVIATION: 0 }, { RATE_EPSILON: 0.02 }, { MAX_STOPPING_THRESHOLD_MS: 20 }, { TIME_CONSTANT_MS: 1 },
+      { MIN_COMMAND_DEVIATION: HAND_FLOOR }, { MIN_COMMAND_DEVIATION: D8_COMMAND_THRESHOLD }, { MIN_COMMAND_DEVIATION: MAX_RATE_DEVIATION }]) {
       assertEqual(refused(overrides).error, null, `${JSON.stringify(overrides)} is a settings set the controller accepts`);
     }
     const invalid = [
-      { MIN_COMMAND_DEVIATION: HAND_FLOOR }, { MIN_COMMAND_DEVIATION: -1 }, { MIN_COMMAND_DEVIATION: Number.NaN },
+      { MIN_COMMAND_DEVIATION: MAX_RATE_DEVIATION + 1e-9 }, { MIN_COMMAND_DEVIATION: -1 }, { MIN_COMMAND_DEVIATION: Number.NaN },
       { MIN_COMMAND_DEVIATION: Number.POSITIVE_INFINITY }, { TIME_CONSTANT_MS: 0 }, { TIME_CONSTANT_MS: -1 },
       { TIME_CONSTANT_MS: Number.NaN }, { MAX_RATE_DEVIATION: -0.1 }, { MAX_RATE_DEVIATION: 1 },
       { MAX_RATE_DEVIATION: Number.NaN }, { RATE_EPSILON: -1 }, { RATE_EPSILON: Number.NaN },
@@ -216,8 +218,14 @@ export default async function driftReportingSuite() {
       // must not reach the media element as a rate first.
       assertEqual(applied.length, 0, `${JSON.stringify(overrides)} handed nothing to the player before refusing`);
     }
-    assert(refused({ MIN_COMMAND_DEVIATION: HAND_FLOOR }).error.message.includes('calibrated'),
-      'the positive-floor refusal says a floor was never calibrated, not that the value is out of range');
+    // The authority is the bound, whatever it is set to: the same floor is
+    // accepted at 0.01 above and refused once the authority drops below it.
+    assertEqual(refused({ MIN_COMMAND_DEVIATION: HAND_FLOOR, MAX_RATE_DEVIATION: HAND_FLOOR }).error, null, 'a floor equal to its authority constructs');
+    for (const overrides of [{ MIN_COMMAND_DEVIATION: MAX_RATE_DEVIATION + 1e-9 }, { MIN_COMMAND_DEVIATION: HAND_FLOOR, MAX_RATE_DEVIATION: 0.002 }]) {
+      const { error } = refused(overrides);
+      assert(error instanceof RangeError && error.message.includes('exceeds the rate authority'),
+        `${JSON.stringify(overrides)} is refused because it exceeds the rate authority, got ${error?.message}`);
+    }
   });
 
   await check('drift-reporting: the unavailable-value ladder distinguishes what was measured from what was accepted', async () => {

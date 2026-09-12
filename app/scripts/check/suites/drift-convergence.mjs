@@ -19,6 +19,7 @@
 import { check, assert, assertEqual } from '../harness.mjs';
 import { plant, runUntil } from '../drift-plant.mjs';
 import { acceptedStoppingThresholdMs } from '../../drift-figures.mjs';
+import { D8_COMMAND_THRESHOLD } from '../../../public/lib/drift-controller.mjs';
 
 const POLL_EVERY_FRAMES = 6;          // 250ms at 24fps — room.entry.js's interval
 const RUN_FRAMES = POLL_EVERY_FRAMES * 960;   // 240 simulated seconds
@@ -26,6 +27,8 @@ const FIRST_ERROR_MS = -320;
 const LAST_ERROR_MS = -80;
 const ERROR_STEP_MS = 20;
 const REFRESH_RATES = [60, 180];
+/** The owner-adopted floor, swept against the same bars as f = 0 (remedy-product-integration-spec.md 4.3). */
+const ADOPTED = Object.freeze({ MIN_COMMAND_DEVIATION: D8_COMMAND_THRESHOLD });
 
 /**
  * ONE EXPERIMENT, READ SIX TIMES. Every check below asserts a different property
@@ -35,15 +38,16 @@ const REFRESH_RATES = [60, 180];
  * and discarded inside `runSweep`, and nothing downstream writes to a history.
  */
 const sweeps = new Map();
-function sweep(refreshHz) {
-  if (!sweeps.has(refreshHz)) sweeps.set(refreshHz, runSweep(refreshHz));
-  return sweeps.get(refreshHz);
+function sweep(refreshHz, settings = {}) {
+  const key = `${refreshHz}:${settings.MIN_COMMAND_DEVIATION ?? 0}`;
+  if (!sweeps.has(key)) sweeps.set(key, runSweep(refreshHz, settings));
+  return sweeps.get(key);
 }
 
-function runSweep(refreshHz) {
+function runSweep(refreshHz, settings) {
   const cases = [];
   for (let standingError = FIRST_ERROR_MS; standingError <= LAST_ERROR_MS; standingError += ERROR_STEP_MS) {
-    const sim = plant({ refreshHz, standingError, pollEvery: POLL_EVERY_FRAMES });
+    const sim = plant({ refreshHz, standingError, pollEvery: POLL_EVERY_FRAMES, settings });
     for (let i = 0; i < RUN_FRAMES; i++) sim.deliver();
     const history = sim.history;
     const firstSettled = history.findIndex((state) => state.mode === 'settled');
@@ -174,32 +178,55 @@ export default async function driftConvergenceSuite() {
     // reversal at all is the failure D1 names — an integral term winding through
     // the correction — and 0.05 of one produces exactly one reversal here, which
     // a bound of 2 would have let through.
-    for (const stepMs of [-200, -80, 80, 200]) {
-      for (const refreshHz of REFRESH_RATES) {
-        const sim = plant({ refreshHz, standingError: -240, pollEvery: POLL_EVERY_FRAMES });
-        for (let i = 0; i < 24; i++) sim.deliver();
-        runUntil(sim, (state) => state.mode === 'settled', 120_000);
-        assertEqual(sim.controller.state().mode, 'settled',
-          `${refreshHz}Hz never settled before the ${stepMs}ms step, so the step proves nothing`);
+    closeSteps({}, '');
+  });
 
-        const before = sim.history.length;
-        sim.advance(stepMs);
-        for (let i = 0; i < POLL_EVERY_FRAMES * 400; i++) sim.deliver();
-
-        const after = sim.history.slice(before);
-        const written = [];
-        for (let i = 1; i < after.length; i++) {
-          if (after[i].correctionsApplied !== after[i - 1].correctionsApplied) written.push(after[i].rate);
-        }
-        const signs = written.map((rate) => Math.sign(rate - 1)).filter(Boolean);
-        assert(signs.length >= 5,
-          `${refreshHz}Hz: a ${stepMs}ms step drew only ${signs.length} signed corrections, too few for a reversal to be visible`);
-        let reversals = 0;
-        for (let i = 1; i < signs.length; i++) if (signs[i] !== signs[i - 1]) reversals += 1;
-        assertEqual(reversals, 0,
-          `${refreshHz}Hz: closing a ${stepMs}ms step reversed the correction ${reversals} time(s) across ${signs.length} writes`);
-        assertEqual(after.at(-1).mode, 'settled', `${refreshHz}Hz did not re-settle after a ${stepMs}ms step`);
+  await check('drift-convergence: at the adopted f every standing offset converges and holds settled for most of the run', async () => {
+    for (const refreshHz of REFRESH_RATES) {
+      for (const { standingError, settlingMs, dutyCycle } of sweep(refreshHz, ADOPTED)) {
+        assert(settlingMs !== null && settlingMs > 0,
+          `f: ${refreshHz}Hz from ${standingError}ms never reached settled in ${RUN_FRAMES / POLL_EVERY_FRAMES / 4}s`);
+        assert(dutyCycle >= 0.8,
+          `f: ${refreshHz}Hz from ${standingError}ms held settled for only ${(dutyCycle * 100).toFixed(0)}% of the run after first reaching it`);
       }
     }
   });
+
+  await check('drift-convergence: at the adopted f, closing a step after settling never reverses the correction', async () => {
+    // The isolated-excursion sweep is not repeated here: at f this sweep
+    // produces none, so that check could not fail. Its fixture at f is in
+    // d8-product-integration.mjs.
+    closeSteps(ADOPTED, 'f: ');
+  });
+}
+
+/** Task 2.4's step fixture, run at a given floor. */
+function closeSteps(settings, label) {
+  for (const stepMs of [-200, -80, 80, 200]) {
+    for (const refreshHz of REFRESH_RATES) {
+      const sim = plant({ refreshHz, standingError: -240, pollEvery: POLL_EVERY_FRAMES, settings });
+      for (let i = 0; i < 24; i++) sim.deliver();
+      runUntil(sim, (state) => state.mode === 'settled', 120_000);
+      assertEqual(sim.controller.state().mode, 'settled',
+        `${label}${refreshHz}Hz never settled before the ${stepMs}ms step, so the step proves nothing`);
+
+      const before = sim.history.length;
+      sim.advance(stepMs);
+      for (let i = 0; i < POLL_EVERY_FRAMES * 400; i++) sim.deliver();
+
+      const after = sim.history.slice(before);
+      const written = [];
+      for (let i = 1; i < after.length; i++) {
+        if (after[i].correctionsApplied !== after[i - 1].correctionsApplied) written.push(after[i].rate);
+      }
+      const signs = written.map((rate) => Math.sign(rate - 1)).filter(Boolean);
+      assert(signs.length >= 5,
+        `${label}${refreshHz}Hz: a ${stepMs}ms step drew only ${signs.length} signed corrections, too few for a reversal to be visible`);
+      let reversals = 0;
+      for (let i = 1; i < signs.length; i++) if (signs[i] !== signs[i - 1]) reversals += 1;
+      assertEqual(reversals, 0,
+        `${label}${refreshHz}Hz: closing a ${stepMs}ms step reversed the correction ${reversals} time(s) across ${signs.length} writes`);
+      assertEqual(after.at(-1).mode, 'settled', `${label}${refreshHz}Hz did not re-settle after a ${stepMs}ms step`);
+    }
+  }
 }

@@ -49,7 +49,7 @@
 
 import { BUDGET_HOLD_MODE, PLATEAU_BREAKING_MODES, nearestRankP95 } from './d8-comparison-metrics.mjs';
 import { POLL_INTERVAL_MS } from './mechanism-driver.mjs';
-import { D8_HOLD_REASON } from './d8-research-controller.mjs';
+import { D8_HOLD_REASON, D8_UNCERTIFIED_MODE } from './d8-research-controller.mjs';
 
 export { BUDGET_HOLD_MODE };
 /** The legacy rule, as published before this amendment, under an explicit name. */
@@ -264,6 +264,52 @@ export function holdSafetyViolations(row, { maxStoppingThresholdMs }) {
  * being applied to it (V2). An observation incapable of establishing the
  * identity has not established it.
  */
+/** Violations that say the row cannot be judged, as opposed to judged wrong. */
+export const UNCERTIFIED_EVIDENCE_GAPS = Object.freeze(['command-settings-absent', 'estimate-or-band-not-finite']);
+
+/**
+ * The refusal split's poll (`remedy-pitch-preserving-amendment.md`). Everything
+ * a refusal withholds must still be withheld, and the rate must be what the
+ * UNCHANGED law and the UNCHANGED write filter leave standing.
+ *
+ * The filter is audited, not removed. The law's newly computed rate either
+ * reached the element exactly, or the filter kept the previous non-unity rate
+ * because the change was within RATE_EPSILON, on the same side of unity and in
+ * the same direction — the only case in which the controller skips a write.
+ * Demanding exact equality to every computed rate would reject legitimate
+ * evidence, and accepting any nearby rate would stop auditing the law.
+ *
+ * This checks the command law was followed. It is not a claim that the command
+ * could not overshoot: U is a spread, not a certified bound on the median.
+ */
+export function uncertifiedCorrectionViolations(row, { maxStoppingThresholdMs }) {
+  const violations = [];
+  if (row.reason !== D8_HOLD_REASON) violations.push('uncertified-reason-not-budget-refusal');
+  if (!Number.isFinite(row.requiredStoppingThresholdMs)) violations.push('required-threshold-not-finite');
+  else if (!(row.requiredStoppingThresholdMs > maxStoppingThresholdMs)) violations.push('required-threshold-not-over-ceiling');
+  if (row.thresholdUsable !== false) violations.push('threshold-usable-during-refusal');
+  if (row.acceptedStoppingThresholdMs !== null) violations.push('accepted-threshold-during-refusal');
+  if (row.fastestCloseMs !== null) violations.push('close-figure-during-refusal');
+  if (row.requestedRate !== row.rate) violations.push('requested-rate-not-the-applied-rate');
+  const settings = row.settings ?? null;
+  const timeConstantMs = settings?.TIME_CONSTANT_MS;
+  const authority = settings?.MAX_RATE_DEVIATION;
+  const epsilon = settings?.RATE_EPSILON;
+  if (![timeConstantMs, authority, epsilon].every(Number.isFinite)) return [...violations, 'command-settings-absent'];
+  if (!Number.isFinite(row.estimateMs) || !Number.isFinite(row.bandMs)) return [...violations, 'estimate-or-band-not-finite'];
+  if (Number.isFinite(row.requiredStoppingThresholdMs) && !(Math.abs(row.estimateMs) > row.requiredStoppingThresholdMs)) {
+    violations.push('estimate-not-outside-required-threshold');
+  }
+  const excess = Math.sign(row.estimateMs) * Math.max(0, Math.abs(row.estimateMs) - row.bandMs);
+  const commanded = 1 + Math.max(-authority, Math.min(authority, -excess / timeConstantMs));
+  const written = row.rate === commanded;
+  const filtered = Number.isFinite(row.rate) && row.rate !== 1 && commanded !== 1
+    && Math.sign(row.rate - 1) === Math.sign(commanded - 1)
+    && Math.abs(row.rate - commanded) <= epsilon;
+  if (!written && !filtered) violations.push('applied-rate-not-the-law-or-its-filtered-predecessor');
+  return violations;
+}
+
 export function thresholdCeilingViolations(rows, { maxStoppingThresholdMs }) {
   const violations = [];
   for (const row of rows) {
@@ -289,6 +335,7 @@ export function thresholdCeilingViolations(rows, { maxStoppingThresholdMs }) {
 function dwellEligible(row, { maxStoppingThresholdMs }) {
   if (PLATEAU_BREAKING_MODES.includes(row.mode)) return false;
   if (row.mode === BUDGET_HOLD_MODE) return false;
+  if (row.mode === D8_UNCERTIFIED_MODE) return false;
   if (!Number.isFinite(row.estimateMs)) return false;
   if (!Number.isFinite(row.acceptedStoppingThresholdMs)) return false;
   if (row.thresholdUsable !== true) return false;

@@ -52,6 +52,10 @@ export const CONTROLLER_LINE_BEYOND_RE = new RegExp(CONTROLLER_CLOSING_RE.source
 export const CONTROLLER_LINE_BEYOND_UNAVAILABLE_RE = new RegExp(
   `^controller: rate ${CONTROLLER_RATE} ${CONTROLLER_SEPARATOR} beyond-rate-authority ${CONTROLLER_SEPARATOR} error ${CONTROLLER_NUM}ms ${CONTROLLER_SEPARATOR} U ${CONTROLLER_NUM}ms ${CONTROLLER_SEPARATOR} actuator allowance ${CONTROLLER_NUM}ms ${CONTROLLER_SEPARATOR} stopping threshold ${CONTROLLER_NUM}ms ${CONTROLLER_SEPARATOR} close lower bound unavailable \\(close budget ${CONTROLLER_NUM}s\\) ${CONTROLLER_TAIL}$`,
 );
+/** The integration adapter's latched fault (playback-treatment.mjs). Not in the
+ *  acting union: a suspended controller is acting on nothing. */
+export const CONTROLLER_LINE_TREATMENT_FAULT_RE =
+  /^controller: rate (?:\d+\.\d{6}|unknown) · treatment-fault · (?:pitch-lost|pitch-missing|pitch-unreadable) · unity (?:restored|restore-failed) · synchronization suspended until reload$/;
 /** Compatibility union for consumers that only need to know that a published acting shape matched. */
 export const CONTROLLER_LINE_ACTING_RE = new RegExp([
   CONTROLLER_LINE_MEASUREMENT_LIMIT_RE.source,
@@ -84,6 +88,11 @@ function controllerFigures(state) {
  * fields their consumers need, so no regex arm can admit a missing figure.
  */
 function controllerText(state) {
+  if (state.mode === 'treatment-fault') {
+    const rate = Number.isFinite(state.rate) ? state.rate.toFixed(6) : 'unknown';
+    const unity = state.unity === 'restored' ? 'restored' : 'restore-failed';
+    return `controller: rate ${rate} · treatment-fault · ${state.reason} · unity ${unity} · synchronization suspended until reload`;
+  }
   const head = `controller: rate ${state.rate.toFixed(6)} · ${state.mode}`;
   const tail = `over ${state.windowRecords} frames`;
   if (state.thresholdUsable !== true) {

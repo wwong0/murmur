@@ -27,6 +27,7 @@ import {
   CONTROLLER_LINE_MEASUREMENT_LIMIT_RE,
   CONTROLLER_LINE_SETTLED_RE,
   CONTROLLER_LINE_HELD_RE,
+  CONTROLLER_LINE_TREATMENT_FAULT_RE,
   createDiagnosticsOverlay,
 } from '../../../public/lib/diagnostics-overlay.mjs';
 
@@ -235,6 +236,25 @@ export default async function diagnosticsOverlaySuite() {
     });
   }
 
+  await check('diagnostics overlay: a latched treatment fault has its own line and presents nothing as current', async () => {
+    // The adapter view that replaces a settled kernel snapshot once the pitch
+    // treatment is lost (playback-treatment.mjs). The settled state rides along
+    // as `historical`, and the line must not read it.
+    const historical = makeControllerState({ rate: 1, mode: 'settled', estimateMs: 0, fastestCloseMs: 0, windowRecords: 16 });
+    const faulted = (overrides) => ({ mode: 'treatment-fault', reason: 'pitch-lost', unity: 'restored', rate: 1, thresholdUsable: false, stoppingThresholdMs: null, fastestCloseMs: null, controllerActive: false, settings: historical.settings, polls: 40, historical, ...overrides });
+    const restored = makeOverlay({ controllerState: faulted() }).overlay.lines().controller;
+    assertEqual(restored, 'controller: rate 1.000000 · treatment-fault · pitch-lost · unity restored · synchronization suspended until reload', 'the exact fault line');
+    const failed = makeOverlay({ controllerState: faulted({ reason: 'pitch-unreadable', unity: 'unity-restore-failed', rate: null }) }).overlay.lines().controller;
+    assertEqual(failed, 'controller: rate unknown · treatment-fault · pitch-unreadable · unity restore-failed · synchronization suspended until reload', 'a failed restore says so and invents no rate');
+    for (const line of [restored, failed]) {
+      assert(CONTROLLER_LINE_TREATMENT_FAULT_RE.test(line), 'the fault shape accepts it');
+      assert(!CONTROLLER_LINE_ACTING_RE.test(line) && !CONTROLLER_LINE_HELD_RE.test(line), 'neither existing shape does');
+      assert(!line.includes('settled'), 'the historical settled mode is not presented as current');
+      assert(!CONTROLLER_LINE_TREATMENT_FAULT_RE.test(`BROKEN ${line}`) && !CONTROLLER_LINE_TREATMENT_FAULT_RE.test(`${line} NaN`), 'prefixed or trailing corruption is refused');
+    }
+    assert(!CONTROLLER_LINE_TREATMENT_FAULT_RE.test('controller: rate 1.000000 · treatment-fault · anything · unity restored · synchronization suspended until reload'), 'an unnamed reason is refused');
+    for (const line of controllerLines) assert(!CONTROLLER_LINE_TREATMENT_FAULT_RE.test(line), 'no existing branch matches the fault shape');
+  });
   await check('diagnostics overlay: a hold does not render the components it did not act on', async () => {
     // THE ONE HOLD THAT REACHES THE LINE WITH MEASUREMENT COMPONENTS. Too few
     // records inside a NON-EMPTY window still computes an estimate, a dispersion

@@ -125,6 +125,10 @@ export function createCollector({
   maxBytes = MAX_QUEUED_BYTES,
   drainMaxEvents = DRAIN_MAX_EVENTS,
   drainMaxBytes = DRAIN_MAX_BYTES,
+  // A build that records a different set of kinds declares that set instead.
+  // The default is unchanged, so the two remedy-browser arms publish exactly
+  // what they always have.
+  observes = EVENT_KINDS,
 } = {}) {
   const queue = [];
   let queuedBytes = 0;
@@ -338,7 +342,7 @@ export function createCollector({
     // records the sampler's reads and delivers none is broken; a build that
     // never claimed to is narrower evidence. Nothing downstream can tell those
     // apart from an empty stream alone.
-    info: () => ({ schemaVersion: SCHEMA_VERSION, arm, buildId, collectorId, timeOriginMs, observes: EVENT_KINDS, capacities: state().capacities }),
+    info: () => ({ schemaVersion: SCHEMA_VERSION, arm, buildId, collectorId, timeOriginMs, observes, capacities: state().capacities }),
     record,
     read,
     acknowledge,
@@ -397,10 +401,26 @@ export function wrapDriftLog({ collector, createDriftLog }) {
  * not use it (`frame-sampler.mjs`), and substituting it here would replace the
  * client's own clock reading with one from the metadata's domain.
  */
-export function wrapFrameSampler({ collector, createFrameSampler }) {
+export function wrapFrameSampler({ collector, createFrameSampler, preservesPitch = null }) {
   return function createObservedFrameSampler(config) {
     const { video, requestFrame, clock, timeline, now } = config;
     collector.attachMedia(video);
+    // THE ONE PLACE AN ARM MAY TOUCH THE ELEMENT. `null` leaves the flag where
+    // the browser default put it, which is what the product does; a boolean is
+    // written once, here, and never again. The sampler is constructed before
+    // the entry opens playback, so a flag set here stands from the first frame
+    // — and because nothing writes it a second time, whether it HELD is a
+    // question the retained media samples answer rather than an assumption.
+    if (typeof preservesPitch === 'boolean') {
+      video.preservesPitch = preservesPitch;
+      collector.record('construction', {
+        factory: 'preservesPitch',
+        requested: preservesPitch,
+        readback: video.preservesPitch,
+        propertySupported: 'preservesPitch' in video,
+        beforePlayback: video.paused !== false,
+      });
+    }
     const base = requestFrame ?? ((callback) => video.requestVideoFrameCallback(callback));
 
     // THE SAMPLER'S OWN INPUT POPULATION. The controller's `now` and `clock`
@@ -490,7 +510,7 @@ function metadataOf(metadata) {
  * quantity. `settings` is the arm's, and the only one either arm changes is
  * `MIN_COMMAND_DEVIATION`.
  */
-export function wrapDriftController({ collector, createController, settings = null }) {
+export function wrapDriftController({ collector, createController, settings = null, options = null }) {
   return function createObservedDriftController(config) {
     const { log, clock, apply, now } = config;
     let pollId = 0;
@@ -561,11 +581,15 @@ export function wrapDriftController({ collector, createController, settings = nu
       apply: observedApply,
       now: observedNow,
       ...(settings === null ? {} : { settings }),
+      ...(options === null ? {} : options),
     });
     collector.countConstruction();
+    // The refusal policy is recorded only by a controller that has one, so the
+    // baseline's construction record keeps exactly the shape it always had.
     collector.record('construction', {
       factory: 'createDriftController',
       settings: controller.state().settings,
+      ...(controller.refusalPolicy === undefined ? {} : { refusalPolicy: controller.refusalPolicy }),
       media: collector.mediaState(),
     });
 

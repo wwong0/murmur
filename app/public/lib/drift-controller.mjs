@@ -37,12 +37,21 @@ export const SETTLED_FOR_MS = 5000;
 export const CLOSE_BUDGET_MS = 60000;
 export const RATE_EPSILON = 1e-6;
 /**
- * f — the smallest command deviation worth writing. ZERO, AND NOT A PLACEHOLDER:
- * the open-loop sweep returned F3, the two channels disagree at 2000 ppm and no
- * floor was calibrated, so no positive value is authorised (design.md D7).
- * Construction refuses f > 0 rather than publish a threshold nothing implements.
+ * f — the smallest command deviation the controller may write. The DEFAULT is
+ * zero, which disables the floor. A positive f is not a calibration (D7 stays
+ * F3): it is the owner-adopted D8 value below, and the page passes it in only
+ * after the pitch treatment has been established (design.md D8).
  */
 export const MIN_COMMAND_DEVIATION = 0;
+/**
+ * The adopted f: 1/881 + 1e-6, the widest modelled copy region in
+ * {44.1, 48, 96} kHz plus one ppm of headroom. A frozen literal, because the
+ * formula (`commandThresholdFor`) lives in test machinery a product module may
+ * not import; the d8-product-integration suite proves the two are one number.
+ */
+export const D8_COMMAND_THRESHOLD = 0.0011360737797956866;
+/** Floating-point slack near 1.0 for the command-range check. Never a ppm allowance. */
+export const COMMAND_TOLERANCE = 8 * Number.EPSILON;
 /** The owner-approved ceiling on an accepted stopping threshold. Fixed: an
  *  override may not raise it, and may not lower it either (ms). */
 export const MAX_STOPPING_THRESHOLD_MS = 20;
@@ -161,12 +170,10 @@ function validateSettings(settings) {
   const finite = ['MIN_COMMAND_DEVIATION', 'TIME_CONSTANT_MS', 'MAX_RATE_DEVIATION', 'RATE_EPSILON'];
   for (const name of finite) if (!Number.isFinite(settings[name])) refuse(`${name} must be a finite number, got ${settings[name]}`);
   if (floor < 0) refuse(`MIN_COMMAND_DEVIATION must not be negative, got ${floor}`);
-  // NOT "unsupported yet": the experiment that would license a positive floor
-  // ran and did not qualify one (design.md D7). Accepting the setting would
-  // publish a usable threshold with no implementation under it.
-  if (floor > 0) refuse(`MIN_COMMAND_DEVIATION ${floor} is refused: no floor was calibrated, so only 0 is implemented`);
   if (settings.TIME_CONSTANT_MS <= 0) refuse(`TIME_CONSTANT_MS must be positive, got ${settings.TIME_CONSTANT_MS}`);
   if (settings.MAX_RATE_DEVIATION < 0 || settings.MAX_RATE_DEVIATION >= 1) refuse(`MAX_RATE_DEVIATION must be in [0, 1), got ${settings.MAX_RATE_DEVIATION}`);
+  // A floor past the authority names a command the loop can never write.
+  if (floor > settings.MAX_RATE_DEVIATION) refuse(`MIN_COMMAND_DEVIATION ${floor} exceeds the rate authority ${settings.MAX_RATE_DEVIATION}`);
   if (settings.RATE_EPSILON < 0) refuse(`RATE_EPSILON must not be negative, got ${settings.RATE_EPSILON}`);
   if (settings.MAX_STOPPING_THRESHOLD_MS !== MAX_STOPPING_THRESHOLD_MS) refuse(`MAX_STOPPING_THRESHOLD_MS is fixed at ${MAX_STOPPING_THRESHOLD_MS}, got ${settings.MAX_STOPPING_THRESHOLD_MS}`);
 }
@@ -178,6 +185,8 @@ export function createDriftController({ log, clock, apply, settings: overrides =
   // survives every hold: nothing about a missing clock changes what the actuator
   // is allowed to ignore.
   const allowanceMs = actuatorAllowanceMs(settings.MIN_COMMAND_DEVIATION, settings.TIME_CONSTANT_MS);
+  const floorRate = settings.MIN_COMMAND_DEVIATION;
+  const positiveFloor = floorRate > 0;
   let cursor = 0;
   let records = [];
   let lastReanchors = null;
@@ -210,6 +219,7 @@ export function createDriftController({ log, clock, apply, settings: overrides =
   let correctionsApplied = 0;
   let polls = 0;
   let settlingMs = null;
+  let budgetRefusals = 0;
   const seams = [];
   const drops = { seam: 0, reanchor: 0, stale: 0 };
   /**
@@ -252,8 +262,33 @@ export function createDriftController({ log, clock, apply, settings: overrides =
     reason = nextReason;
   }
 
+  /**
+   * Writes the RATE_EPSILON filter may not swallow once f is positive: entering
+   * or leaving exact unity, and a change of direction. With the filter wider
+   * than 2f either would otherwise leave the element commanded wrongly. Inert
+   * at f = 0, where the filter is exactly the zero-floor one.
+   */
+  function transitionRequiresWrite(nextRate) {
+    if (!positiveFloor || nextRate === rate) return false;
+    if ((nextRate === BASE_RATE) !== (rate === BASE_RATE)) return true;
+    return Math.sign(nextRate - BASE_RATE) !== Math.sign(rate - BASE_RATE);
+  }
+
+  /**
+   * A CHECK, NOT A CLAMP. Just outside S the excess over U is at least L = f·T,
+   * so the law already yields at least f; a failure here is a defect upstream,
+   * never a value to round into range.
+   */
+  function assertCommandInRange(nextRate) {
+    const deviation = Math.abs(nextRate - BASE_RATE);
+    if (deviation === 0) return;
+    if (deviation < floorRate - COMMAND_TOLERANCE) throw new RangeError(`drift-controller: applied deviation ${deviation} is below the command threshold ${floorRate}`);
+    if (deviation > settings.MAX_RATE_DEVIATION + COMMAND_TOLERANCE) throw new RangeError(`drift-controller: applied deviation ${deviation} exceeds the rate authority ${settings.MAX_RATE_DEVIATION}`);
+  }
+
   function applyRate(nextRate, atMs) {
-    if (Math.abs(nextRate - rate) <= settings.RATE_EPSILON) return;
+    if (Math.abs(nextRate - rate) <= settings.RATE_EPSILON && !transitionRequiresWrite(nextRate)) return;
+    assertCommandInRange(nextRate);
     apply(nextRate);
     rate = nextRate;
     correctionsApplied += 1;
@@ -281,7 +316,7 @@ export function createDriftController({ log, clock, apply, settings: overrides =
       polls,
       settlingMs,
       fastestCloseMs,
-      counters: { drops: { ...drops }, restatements },
+      counters: { drops: { ...drops }, restatements, budgetRefusals },
       lastDrop: lastDrop ? { ...lastDrop } : null,
     };
   }
@@ -394,6 +429,14 @@ export function createDriftController({ log, clock, apply, settings: overrides =
       // Too few since the last drop, or too few inside the window: the same
       // shortage counted from the two ends, and it reports one reason.
       hold(atMs, 'waiting', 'too-few-records');
+    } else if (positiveFloor && requiredStoppingThresholdMs > settings.MAX_STOPPING_THRESHOLD_MS) {
+      // THE INPUT WAS VALID AND THE ANSWER IS A REFUSAL: measurement plus
+      // allowance needs more room than the ceiling allows, so there is no S to
+      // stop inside. `hold` publishes exact unity, no accepted S and no close,
+      // and clears the dwell; the required S stays published and `settlingMs`
+      // stays as history (design.md D8).
+      budgetRefusals += 1;
+      hold(atMs, 'resolution-budget-hold', 'stopping-threshold-over-budget');
     } else {
       // The one branch that acts on the measurement, so the one that accepts a
       // threshold. THE CORRECTION IS STILL MEASURED FROM U: S is where the

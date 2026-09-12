@@ -86,8 +86,30 @@ const STANDING_LAG_MATCH_MS = 20;
 /** 3b's measured standing lag, as a band rather than a point (ms). */
 const MEASURED_BAND_MIN_MS = 100;
 const MEASURED_BAND_MAX_MS = 240;
-/** 4a's largest movement of the median between two consecutive controller polls (ms). */
-export const PLANT_MEDIAN_MOVEMENT_MS = 1.32;
+/**
+ * 4a's largest movement of the median between two consecutive 250ms polls (ms).
+ * IT IS A BROWSER FIGURE, and the old name `PLANT_MEDIAN_MOVEMENT_MS` said the
+ * opposite: 4a measured it in Chrome at task 0 — 1080 records over 45.0s from
+ * window A on the 180Hz development panel — and that capture was never retained.
+ * 4a derives no per-poll movement from the simulated plant at all, so comparing a
+ * browser maximum against this one was browser against browser, and could never
+ * have been the model check 4d D5 asks for (4d design.md D5, 2026-09-12).
+ */
+export const TASK0_BROWSER_MOVEMENT_MS = 1.32;
+/** The population behind the browser figure above, carried so it is never printed bare. */
+export const TASK0_BROWSER_MOVEMENT_POPULATION = '1080 records over 45.0s, one Chrome window, 180Hz panel, capture not retained';
+/** The population the plant's maximum below is taken over. */
+export const PLANT_MOVEMENT_POPULATION = '959 adjacent pairs per case over 960 simulated polls, 13 standing errors';
+/**
+ * The simulated plant's largest adjacent-poll movement of the median (ms), which
+ * is half a vsync period: the plant's estimate is the median of a two-level
+ * cadence sawtooth, so window parity moves it by the sawtooth's half-period and
+ * nothing else does. Measured against the sweep's own constants it is exactly
+ * this — 2.7778ms at 180Hz and 8.3333ms at 60Hz — not the 1.32ms above.
+ */
+export function plantMaxPerPollMovementMs(refreshRateHz) {
+  return Number.isFinite(refreshRateHz) && refreshRateHz > 0 ? 1000 / (2 * refreshRateHz) : null;
+}
 
 // T4's diagnosis bars. They are exported so the browser pass can carry the
 // exact regime it judged into its retained figures, while every fit still
@@ -744,7 +766,7 @@ function modelVerdictOf(cadence, floorHeld, population, movementComparable, move
   const floorText = floorHeld === true ? 'within prediction' : floorHeld === false ? 'above prediction' : 'unavailable';
   const hold = population === 'settled' ? '' : '; no settled hold was observed';
   const movementText = movementComparable
-    ? 'max-per-poll movement term available; movement agreement criterion undefined'
+    ? 'max-per-poll movement term available; movement agreement criterion undefined (browser and plant populations are unmatched)'
     : `max-per-poll movement term withheld (${movementReason})`;
   return `inconclusive: cadence ${cadence.text}, floor ${floorText}, ${movementText}${hold}`;
 }
@@ -827,4 +849,60 @@ export function windowVerdicts({ stats, refresh, plantMinimum }) {
     recommendation: recommendationOf(stats, plantMinimum),
     rateEffectivenessVerdict: rateEffectivenessOf(stats.effectivenessFraction),
   };
+}
+
+/**
+ * DID THE SEAM THE ASSERTION IS ABOUT ACTUALLY HAPPEN? T8 reads the controller
+ * after a seam it assumes occurred. On 2026-09-12 the seam never fired — V
+ * never went offline, every route delta was zero — and the post-seam settling
+ * assertion ran anyway, so a controller that had simply stayed settled the whole
+ * time was reported as having "re-settled" after an event that did not exist.
+ * That is a false statement about a seam, not evidence about dwell.
+ *
+ * The proof is the conjunction of the playback-side event and the controller-side
+ * one, because either alone can be true without the dwell having been disturbed:
+ * the seam list grew by exactly one, that entry carries a real record boundary
+ * and the post-event epoch, the timeline epoch moved later, and the controller's
+ * own seam-drop counter advanced. Only a run holding all five had its window
+ * dropped and its dwell restarted, which is the single state in which "did not
+ * re-settle" is a claim about anything.
+ *
+ * This is a GATE, not an excuse: it decides whether the assertion is evaluated,
+ * never whether a failure counts. The T8 allowlist is untouched by it.
+ */
+/**
+ * THE ONE ASSERTION APPROVED FOR GATING, owner decision of 2026-09-12. The
+ * third outcome is a scope-limited permission, not a general facility: a
+ * `not-exercised` that could be applied to any check is a way to retire a
+ * failing test by declaring it irrelevant. Gating anything else is a scope
+ * violation, and the pass refuses it rather than treating it as a judgement.
+ */
+export const T8_GATED_ASSERTIONS = Object.freeze([
+  'T8 V controller did not re-settle during the 3s post-seam read',
+]);
+
+/** What an unexercised post-seam read leaves unknown. Retained verbatim beside the outcome. */
+export const POST_SEAM_UNVERIFIED = 'post-seam dwell and native reopen behavior remain unverified when no seam occurs';
+
+export function seamProven({ before = {}, after = {}, newSeam = null, seamDropDelta = NaN } = {}) {
+  const advance = (field) => (Number.isFinite(after[field]) && Number.isFinite(before[field]) ? after[field] - before[field] : NaN);
+  const missing = [];
+  if (advance('seams') !== 1) missing.push('seam-list-did-not-advance-by-one');
+  if (!(Number.isFinite(newSeam?.afterSeq) && newSeam.afterSeq > 0)) missing.push('new-seam-has-no-record-boundary');
+  if (!(Number.isFinite(newSeam?.epochMs) && newSeam.epochMs === after.timelineEpochMs)) missing.push('new-seam-is-not-on-the-post-event-epoch');
+  if (!(advance('timelineEpochMs') > 0)) missing.push('timeline-epoch-did-not-move-later');
+  if (seamDropDelta !== 1) missing.push('controller-did-not-drop-its-window-at-a-seam');
+  return { proven: missing.length === 0, missing };
+}
+
+/**
+ * The three outcomes T8's post-seam settling assertion can have. `not-exercised`
+ * is neither a pass nor a failure: nothing is claimed, and the run says so in its
+ * own output rather than banking an unearned pass. The route assertions that
+ * detected the absent seam keep failing on their own.
+ */
+export function postSeamSettlingOutcome({ before, after, newSeam, seamDropDelta, mode } = {}) {
+  const proof = seamProven({ before, after, newSeam, seamDropDelta });
+  if (!proof.proven) return { outcome: 'not-exercised', proof };
+  return { outcome: mode === 'settled' ? 'fail' : 'pass', proof };
 }
