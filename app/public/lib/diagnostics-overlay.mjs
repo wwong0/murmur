@@ -24,33 +24,43 @@ export const CLOCK_LINE_RE =
  */
 export const CONTROLLER_LINE_HELD_RE =
   /^controller: rate \d+\.\d{6} · (?:(?:waiting · (?:no-clock|too-few-records))|(?:stale · no-records)) over \d+ frames$/;
-const CONTROLLER_NUM = '[+-]?\\d+\\.\\d+';
+// TWO NUMBER SHAPES, BECAUSE THE CONTROLLER PUBLISHES TWO KINDS OF FIGURE.
+// `error` is the only signed one, and `signed()` always writes a `+` or a `-`, so
+// the sign is required rather than optional. EVERY OTHER FIGURE IN THESE LINES IS
+// NON-NEGATIVE BY CONSTRUCTION: `bandMs` is a `Math.max` of non-negative arms,
+// `actuatorAllowanceMs` is f*T with f >= 0 and T > 0, S = U + L, `shortestCloseMs`
+// divides a `Math.max(0, ...)`, and the close budget is a positive setting. One
+// signed token spanning both admitted `U -3.0ms` — the shape of a page whose
+// controller has come apart — which is the rule 4b's D1 bought: a pattern
+// spanning a healthy state and a broken one is satisfied by the broken one.
+const CONTROLLER_NUM = '[+-]\\d+\\.\\d+';
+const CONTROLLER_MAGNITUDE = '\\d+\\.\\d+';
 const CONTROLLER_RATE = '\\d+\\.\\d{6}';
 const CONTROLLER_TAIL = 'over \\d+ frames';
 const CONTROLLER_SEPARATOR = '\\xB7';
 
 /** One shape per reachable acting branch; every branch-specific figure is required. */
 export const CONTROLLER_LINE_MEASUREMENT_LIMIT_RE = new RegExp(
-  `^controller: rate ${CONTROLLER_RATE} · declining · measurement-limit · measurement arm (?:clock|dispersion|clock-and-dispersion) · error ${CONTROLLER_NUM}ms · U ${CONTROLLER_NUM}ms · actuator allowance ${CONTROLLER_NUM}ms · stopping threshold ${CONTROLLER_NUM}ms ${CONTROLLER_TAIL}$`,
+  `^controller: rate ${CONTROLLER_RATE} · declining · measurement-limit · measurement arm (?:clock|dispersion|clock-and-dispersion) · error ${CONTROLLER_NUM}ms · U ${CONTROLLER_MAGNITUDE}ms · actuator allowance ${CONTROLLER_MAGNITUDE}ms · stopping threshold ${CONTROLLER_MAGNITUDE}ms ${CONTROLLER_TAIL}$`,
 );
 export const CONTROLLER_LINE_ACTUATOR_LIMIT_RE = new RegExp(
-  `^controller: rate ${CONTROLLER_RATE} · declining · actuator-limit · error ${CONTROLLER_NUM}ms · U ${CONTROLLER_NUM}ms · actuator allowance ${CONTROLLER_NUM}ms · stopping threshold ${CONTROLLER_NUM}ms ${CONTROLLER_TAIL}$`,
+  `^controller: rate ${CONTROLLER_RATE} · declining · actuator-limit · error ${CONTROLLER_NUM}ms · U ${CONTROLLER_MAGNITUDE}ms · actuator allowance ${CONTROLLER_MAGNITUDE}ms · stopping threshold ${CONTROLLER_MAGNITUDE}ms ${CONTROLLER_TAIL}$`,
 );
 export const CONTROLLER_LINE_BUDGET_RE = new RegExp(
-  `^controller: rate ${CONTROLLER_RATE} · resolution-budget-hold · stopping-threshold-over-budget · required S ${CONTROLLER_NUM}ms · ceiling 20\\.0ms refused ${CONTROLLER_TAIL}$`,
+  `^controller: rate ${CONTROLLER_RATE} · resolution-budget-hold · stopping-threshold-over-budget · required S ${CONTROLLER_MAGNITUDE}ms · ceiling 20\\.0ms refused ${CONTROLLER_TAIL}$`,
 );
 export const CONTROLLER_LINE_SETTLED_RE = new RegExp(
-  `^controller: rate ${CONTROLLER_RATE} · settled · error ${CONTROLLER_NUM}ms · U ${CONTROLLER_NUM}ms · actuator allowance ${CONTROLLER_NUM}ms · stopping threshold ${CONTROLLER_NUM}ms · applied rate ${CONTROLLER_RATE} ${CONTROLLER_TAIL}$`,
+  `^controller: rate ${CONTROLLER_RATE} · settled · error ${CONTROLLER_NUM}ms · U ${CONTROLLER_MAGNITUDE}ms · actuator allowance ${CONTROLLER_MAGNITUDE}ms · stopping threshold ${CONTROLLER_MAGNITUDE}ms · applied rate ${CONTROLLER_RATE} ${CONTROLLER_TAIL}$`,
 );
 const CONTROLLER_CLOSING_RE = new RegExp(
-  `^controller: rate ${CONTROLLER_RATE} · (?:correcting|beyond-rate-authority) · error ${CONTROLLER_NUM}ms · U ${CONTROLLER_NUM}ms · actuator allowance ${CONTROLLER_NUM}ms · stopping threshold ${CONTROLLER_NUM}ms · close lower bound ${CONTROLLER_NUM}s \\(close budget ${CONTROLLER_NUM}s\\) ${CONTROLLER_TAIL}$`,
+  `^controller: rate ${CONTROLLER_RATE} · (?:correcting|beyond-rate-authority) · error ${CONTROLLER_NUM}ms · U ${CONTROLLER_MAGNITUDE}ms · actuator allowance ${CONTROLLER_MAGNITUDE}ms · stopping threshold ${CONTROLLER_MAGNITUDE}ms · close lower bound ${CONTROLLER_MAGNITUDE}s \\(close budget ${CONTROLLER_MAGNITUDE}s\\) ${CONTROLLER_TAIL}$`,
 );
 export const CONTROLLER_LINE_CORRECTING_RE = new RegExp(CONTROLLER_CLOSING_RE.source.replace('(?:correcting|beyond-rate-authority)', 'correcting'));
 export const CONTROLLER_LINE_BEYOND_RE = new RegExp(CONTROLLER_CLOSING_RE.source.replace('(?:correcting|beyond-rate-authority)', 'beyond-rate-authority'));
 /** The zero-authority arm has no finite close projection; the literal token keeps
  * that absence explicit while requiring every other beyond-authority figure. */
 export const CONTROLLER_LINE_BEYOND_UNAVAILABLE_RE = new RegExp(
-  `^controller: rate ${CONTROLLER_RATE} ${CONTROLLER_SEPARATOR} beyond-rate-authority ${CONTROLLER_SEPARATOR} error ${CONTROLLER_NUM}ms ${CONTROLLER_SEPARATOR} U ${CONTROLLER_NUM}ms ${CONTROLLER_SEPARATOR} actuator allowance ${CONTROLLER_NUM}ms ${CONTROLLER_SEPARATOR} stopping threshold ${CONTROLLER_NUM}ms ${CONTROLLER_SEPARATOR} close lower bound unavailable \\(close budget ${CONTROLLER_NUM}s\\) ${CONTROLLER_TAIL}$`,
+  `^controller: rate ${CONTROLLER_RATE} ${CONTROLLER_SEPARATOR} beyond-rate-authority ${CONTROLLER_SEPARATOR} error ${CONTROLLER_NUM}ms ${CONTROLLER_SEPARATOR} U ${CONTROLLER_MAGNITUDE}ms ${CONTROLLER_SEPARATOR} actuator allowance ${CONTROLLER_MAGNITUDE}ms ${CONTROLLER_SEPARATOR} stopping threshold ${CONTROLLER_MAGNITUDE}ms ${CONTROLLER_SEPARATOR} close lower bound unavailable \\(close budget ${CONTROLLER_MAGNITUDE}s\\) ${CONTROLLER_TAIL}$`,
 );
 /** The integration adapter's latched fault (playback-treatment.mjs). Not in the
  *  acting union: a suspended controller is acting on nothing. */

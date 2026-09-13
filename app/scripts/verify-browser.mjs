@@ -67,39 +67,27 @@ import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep, dispose
 import { INTEGRATION_SCHEMA, createRecorder, pitchReference } from './drift-capture.mjs';
 import { auditClient, integrationSummary, readClientEvidence } from './product-integration-evidence.mjs';
 import { DRIFT_LINE_RE } from '../public/lib/drift-readout.mjs';
-import { D8_COMMAND_THRESHOLD, MAX_RATE_DEVIATION, MIN_RECORDS, RATE_EPSILON } from '../public/lib/drift-controller.mjs';
+import { D8_COMMAND_THRESHOLD, MIN_RECORDS, RATE_EPSILON } from '../public/lib/drift-controller.mjs';
 import { CLOCK_LINE_RE, CONTROLLER_LINE_HELD_RE, CONTROLLER_LINE_ACTING_RE } from '../public/lib/diagnostics-overlay.mjs';
 // The arithmetic and the verdicts, next door and pure — this file is the
 // sequence of windows, waits and assertions, and nothing else.
 import {
-  DEFAULT_BARS,
-  ENDPOINT_CROSSCHECK_MS,
-  MAX_RESIDUAL_SLOPE_SE_PPM,
-  MAX_STRETCH_SLOPE_SE_PPM,
-  MIN_RESIDUAL_RECORDS,
-  MIN_RESIDUAL_SPAN_MS,
-  MIN_STRETCH_RECORDS,
-  MIN_STRETCH_SPAN_MS,
   MIN_CONVERGED_RECORDS,
-  PLANT_MOVEMENT_POPULATION,
-  RATE_STEADY_TOLERANCE,
-  RESIDUAL_FLOOR_PPM,
-  SLOPE_SIGNIFICANCE_SIGMA,
   POST_SEAM_UNVERIFIED,
-  STRETCH_EDGE_EXCLUSION_MS,
   T8_GATED_ASSERTIONS,
   convergedStats,
   observationStats,
   postSeamSettlingOutcome,
-  plantMaxPerPollMovementMs,
   plantSweepMinimum,
   predictedParkingDistanceMs,
   refreshFrom,
-  steadyCommandStretches,
   standingLag,
-  stretchSlopes,
   windowVerdicts,
 } from './drift-figures.mjs';
+// The retained-evidence round trip and the T9 block. Both are importable without
+// Chrome, which is what this file is not; see each module's header.
+import { BAR_DEFINITIONS, evaluateSufficiency, rederiveConvergedMedian } from './drift-browser-evidence.mjs';
+import { t9FigureLines } from './drift-browser-report.mjs';
 
 const PASS_STARTED_AT = Date.now();
 const PORT = 9223;
@@ -124,20 +112,6 @@ if (RUN_DIRECTORY_NAME === '' || RUN_DIRECTORY_NAME.startsWith('..') || path.isA
 const MEDIA_DIR = path.resolve(process.env.APP_MEDIA_DIR ?? path.join(APP_DIR, '..', 'step0', 'content'));
 const WINDOW_STATE = 'visible, non-occluded (Chrome automation flags)';
 const MAX_RETAINED_BYTES = 10 * 1024 * 1024;
-const BAR_UNITS = Object.freeze({
-  RATE_STEADY_TOLERANCE: 'dimensionless rate',
-  STRETCH_EDGE_EXCLUSION_MS: 'ms',
-  MIN_STRETCH_SPAN_MS: 'ms',
-  MIN_STRETCH_RECORDS: 'count',
-  MIN_RESIDUAL_SPAN_MS: 'ms',
-  MIN_RESIDUAL_RECORDS: 'count',
-  MAX_STRETCH_SLOPE_SE_PPM: 'ppm',
-  MAX_RESIDUAL_SLOPE_SE_PPM: 'ppm',
-  SLOPE_SIGNIFICANCE_SIGMA: 'dimensionless',
-  RESIDUAL_FLOOR_PPM: 'ppm',
-  ENDPOINT_CROSSCHECK_MS: 'ms',
-});
-
 /**
  * The gap the run IMPOSES between the two windows (3b design.md D3). Without it
  * the assertion below cannot fail: open both at the same instant and a working
@@ -217,20 +191,6 @@ function prepareRunDirectory() {
 
 prepareRunDirectory();
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'app-verify-'));
-
-const BAR_DEFINITIONS = Object.freeze({
-  RATE_STEADY_TOLERANCE: { value: RATE_STEADY_TOLERANCE, units: BAR_UNITS.RATE_STEADY_TOLERANCE },
-  STRETCH_EDGE_EXCLUSION_MS: { value: STRETCH_EDGE_EXCLUSION_MS, units: BAR_UNITS.STRETCH_EDGE_EXCLUSION_MS },
-  MIN_STRETCH_SPAN_MS: { value: MIN_STRETCH_SPAN_MS, units: BAR_UNITS.MIN_STRETCH_SPAN_MS },
-  MIN_STRETCH_RECORDS: { value: MIN_STRETCH_RECORDS, units: BAR_UNITS.MIN_STRETCH_RECORDS },
-  MIN_RESIDUAL_SPAN_MS: { value: MIN_RESIDUAL_SPAN_MS, units: BAR_UNITS.MIN_RESIDUAL_SPAN_MS },
-  MIN_RESIDUAL_RECORDS: { value: MIN_RESIDUAL_RECORDS, units: BAR_UNITS.MIN_RESIDUAL_RECORDS },
-  MAX_STRETCH_SLOPE_SE_PPM: { value: MAX_STRETCH_SLOPE_SE_PPM, units: BAR_UNITS.MAX_STRETCH_SLOPE_SE_PPM },
-  MAX_RESIDUAL_SLOPE_SE_PPM: { value: MAX_RESIDUAL_SLOPE_SE_PPM, units: BAR_UNITS.MAX_RESIDUAL_SLOPE_SE_PPM },
-  SLOPE_SIGNIFICANCE_SIGMA: { value: SLOPE_SIGNIFICANCE_SIGMA, units: BAR_UNITS.SLOPE_SIGNIFICANCE_SIGMA },
-  RESIDUAL_FLOOR_PPM: { value: RESIDUAL_FLOOR_PPM, units: BAR_UNITS.RESIDUAL_FLOOR_PPM },
-  ENDPOINT_CROSSCHECK_MS: { value: ENDPOINT_CROSSCHECK_MS, units: BAR_UNITS.ENDPOINT_CROSSCHECK_MS },
-});
 
 // Copied from verify-frames.mjs's readContentFrameRate. That file executes its
 // pass on import and is outside this change's write set, so importing it would
@@ -442,92 +402,6 @@ async function pumpingWait(recorders, durationMs, everyMs) {
   await pumpAll(recorders);
 }
 
-function readNdjson(filePath) {
-  const text = fs.readFileSync(filePath, 'utf8').trim();
-  if (text === '') return [];
-  return text.split(/\r?\n/).map((line, index) => {
-    try {
-      return JSON.parse(line);
-    } catch (error) {
-      throw new Error(`invalid NDJSON at ${filePath}:${index + 1}: ${error.message}`);
-    }
-  });
-}
-
-function barsFromManifest(manifest) {
-  const bars = Object.fromEntries(Object.entries(manifest.bars ?? {}).map(([name, definition]) => [name, definition.value]));
-  for (const name of Object.keys(DEFAULT_BARS)) {
-    if (!Number.isFinite(bars[name])) throw new Error(`manifest is missing bar ${name}`);
-  }
-  return bars;
-}
-
-function qualifyingFit(fit, minimumRecords, minimumSpanMs, standardErrorPpm) {
-  return !fit.refused
-    && fit.recordCount >= minimumRecords
-    && fit.trimmedSpanMs >= minimumSpanMs
-    && Number.isFinite(fit.media?.standardErrorPpm)
-    && fit.media.standardErrorPpm <= standardErrorPpm
-    && Number.isFinite(fit.drift?.standardErrorPpm)
-    && fit.drift.standardErrorPpm <= standardErrorPpm
-    && fit.endpointCrosscheck?.mediaWithinBar === true
-    && fit.endpointCrosscheck?.driftWithinBar === true;
-}
-
-function evaluateSufficiency(manifestPath) {
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  const bars = barsFromManifest(manifest);
-  const windows = (manifest.windows ?? []).map((window) => {
-    const records = readNdjson(path.join(RUN_DIR, window.files.records));
-    const captures = readNdjson(path.join(RUN_DIR, window.files.captures));
-    const samples = captures.map((capture) => ({ atMs: capture.atMs, ...capture.controller }));
-    const stretches = steadyCommandStretches(samples, bars);
-    const fits = stretchSlopes({ stretches, records, bars });
-    const saturatedFits = fits.filter((fit) => qualifyingFit(
-      fit,
-      bars.MIN_STRETCH_RECORDS,
-      bars.MIN_STRETCH_SPAN_MS,
-      bars.MAX_STRETCH_SLOPE_SE_PPM,
-    ) && Math.abs(fit.medianRate - (1 + MAX_RATE_DEVIATION)) <= bars.RATE_STEADY_TOLERANCE);
-    const plateauFits = fits.filter((fit) => qualifyingFit(
-      fit,
-      bars.MIN_RESIDUAL_RECORDS,
-      bars.MIN_RESIDUAL_SPAN_MS,
-      bars.MAX_RESIDUAL_SLOPE_SE_PPM,
-    ) && fit.medianRate < 1 + MAX_RATE_DEVIATION - bars.RATE_STEADY_TOLERANCE);
-    const recordMinimumMet = records.length >= bars.MIN_RESIDUAL_RECORDS;
-    const spanMinimumMet = plateauFits.length > 0;
-    const missed = window.counts?.missed;
-    const ok = missed === 0 && recordMinimumMet && spanMinimumMet && saturatedFits.length > 0 && plateauFits.length > 0;
-    return {
-      label: window.label,
-      records: records.length,
-      captures: captures.length,
-      missed,
-      stretches: fits.length,
-      qualifyingSaturated: saturatedFits.length,
-      qualifyingPlateau: plateauFits.length,
-      recordMinimumMet,
-      spanMinimumMet,
-      ok,
-    };
-  });
-  return { ok: windows.length === 2 && windows.every((window) => window.ok), windows };
-}
-
-function rederiveConvergedMedian(recordsPath, barSeq, endSeq) {
-  if (!Number.isSafeInteger(barSeq) || !Number.isSafeInteger(endSeq) || endSeq < barSeq) {
-    throw new Error(`invalid retained median bounds ${barSeq}..${endSeq}`);
-  }
-  const records = readNdjson(recordsPath);
-  if (!records.every((record) => record && Number.isSafeInteger(record.seq))) {
-    throw new Error(`retained records in ${recordsPath} do not all have sequence numbers`);
-  }
-  const selected = records.filter((record) => record.seq > barSeq && record.seq <= endSeq);
-  const result = convergedStats({ records: selected }, barSeq);
-  return { medianMs: result.convergedMedianMs, count: result.convergedCount };
-}
-
 async function waitForSettle(tabs) {
   const startedAt = Date.now();
   const capAt = startedAt + SETTLE_DEADLINE_MS + WINDOW_GAP_MS + 60_000;
@@ -662,10 +536,6 @@ async function observeWindows(tabs, durationMs) {
     if (remaining > 0) await sleep(remaining);
   }
   return states;
-}
-
-function numberText(value, digits = 1) {
-  return Number.isFinite(value) ? value.toFixed(digits) : 'null';
 }
 
 async function measureRefreshRates(tabs) {
@@ -1043,7 +913,7 @@ try {
     })),
   };
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  const sufficiency = evaluateSufficiency(manifestPath);
+  const sufficiency = evaluateSufficiency(manifestPath, RUN_DIR);
   manifest.sufficiency = sufficiency;
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   for (const window of sufficiency.windows) {
@@ -1391,34 +1261,22 @@ try {
   };
 
   console.log('\n--- T9: figures ---');
-  console.log('--- T9 FIGURES BEGIN ---');
-  for (const state of settleStates) {
-    const seam = state.last?.seam;
-    const controller = seam?.controller ?? {};
-    const gapMs = state.firstPlaybackAt === null || state.firstSettledAt === null || state.firstSettlingMs === null
-      ? NaN
-      : state.firstSettledAt - state.firstPlaybackAt - state.firstSettlingMs;
-    console.log(`  settling ${state.label}: settlingMs ${numberText(controller.settlingMs)}ms; gap before first correction ${numberText(gapMs)}ms (observed at ${SETTLE_POLL_MS}ms endpoints, ±0.25s granularity); applied rate ${numberText(controller.rate, 9)}; correctionsApplied ${controller.correctionsApplied ?? 'null'}`);
-  }
-  console.log(`  convergence: ${CONVERGED_WINDOW_MS / 1000}s spans; A median ${numberText(convergedA.convergedMedianMs)}ms over ${convergedA.convergedCount} records; B median ${numberText(convergedB.convergedMedianMs)}ms over ${convergedB.convergedCount} records; separation ${numberText(spread)}ms; whole-run summary medians A ${numberText(sa.summary?.medianDriftMs)}ms and B ${numberText(sb.summary?.medianDriftMs)}ms (ring-held history)`);
-  console.log(`  3.3 two-client parking prediction: ${numberText(predictedParkingMs)}ms from accepted S medians A ${numberText(t7Figures[0]?.stats.stoppingThresholdMedianMs)}ms + B ${numberText(t7Figures[1]?.stats.stoppingThresholdMedianMs)}ms (${parkingThresholdsUsable ? 'usable threshold populations' : 'threshold unavailable'}); U medians remain A ${numberText(t7Figures[0]?.stats.bandMedianMs)}ms + B ${numberText(t7Figures[1]?.stats.bandMedianMs)}ms; predicted worst-case separation, not an observed distance.`);
-  for (const figure of t7Figures) {
-    const { label, stats, verdicts, lag, refresh, converged, plantMinimum: minimum } = figure;
-    const plantMinimumText = minimum === null ? 'null' : `${(minimum.dutyCycle * 100).toFixed(1)}% at ${minimum.refreshHz}Hz/${minimum.standingError}ms over ${minimum.population}`;
-    console.log(`  3.1 ${label}: first 8 drift median ${numberText(lag.firstEightMs)}ms; last estimate with correctionsApplied=0 ${numberText(figure.noCorrectionEstimateMs)}ms; 4a reference ${lag.referenceLagMs}ms; verdict: ${lag.verdict}.`);
-    console.log(`  3.2 ${label}: interpolated span scatter ${numberText(converged.convergedSpreadMs)}ms over ${converged.convergedCount} records; alternation ${numberText(stats.alternation?.fraction, 3)} over ${stats.alternation?.nonzeroPairs ?? 0} nonzero pairs, ${stats.alternation?.zeroPairs ?? 0} zero pairs, ${stats.alternation?.totalPairs ?? 0} total pairs; rounded drifts ${JSON.stringify(stats.histogram)}; panel refresh ${numberText(refresh.refreshRateHz)}Hz from ${refresh.frameCount ?? 'null'} frames with median delta ${numberText(refresh.medianDeltaMs)}ms; verdict: ${verdicts.cadenceVerdict}.`);
-    console.log(`  3.3 ${label}: published ${stats.population} U/band median ${numberText(stats.bandMedianMs)}ms (spread median ${numberText(stats.spreadMedianMs)}ms, max ${numberText(stats.spreadMaxMs)}ms); L/allowance median ${numberText(stats.actuatorAllowanceMedianMs)}ms; accepted S median ${numberText(stats.stoppingThresholdMedianMs)}ms, max ${numberText(stats.stoppingThresholdMaxMs)}ms; threshold usability ${stats.thresholdUsableCount}/${stats.thresholdPopulationSamples} (${numberText(stats.thresholdUsableFraction, 3)}), schemas ${JSON.stringify(stats.thresholdSchemas)}; predicted half-vsync floor ${numberText(verdicts.predictedFloorMs)}ms; estimate range over the observation ${numberText(stats.estimateRangeMs)}ms; verdict: ${verdicts.floorVerdict}.`);
-    console.log(`  3.4 ${label}: first settled sample index ${stats.firstSettledIndex}; population ${stats.population}; duty ${verdicts.dutyVerdict}; excursions ${JSON.stringify(stats.excursions)}; verdict: ${verdicts.excursionVerdict}; plant sweep minimum ${plantMinimumText}; recommendation: ${verdicts.recommendation}; read over ${figure.observedSamples}/${expectedObservationSamples} samples with ${figure.absent} absent.`);
-    console.log(`  2.11 ${label}: Chrome 10s interpolated scatter ${numberText(converged.convergedSpreadMs)}ms vs half-vsync ${numberText(verdicts.predictedFloorMs)}ms; published ${stats.population} U ${numberText(stats.bandMedianMs)}ms, L ${numberText(stats.actuatorAllowanceMedianMs)}ms, accepted S ${numberText(stats.stoppingThresholdMedianMs)}ms with usability ${numberText(stats.thresholdUsableFraction, 3)}; spread ${numberText(stats.spreadMedianMs)}ms; estimate range over the observation ${numberText(stats.estimateRangeMs)}ms; max per-poll estimate movement ${numberText(stats.maxPerPollMovementMs)}ms over ${stats.perPollPairsUsed} adjacent pairs, ${stats.perPollPairsSkippedForGap} skipped for poll gaps (against the simulated plant's ${numberText(plantMaxPerPollMovementMs(refresh.refreshRateHz))}ms largest per-poll movement over ${PLANT_MOVEMENT_POPULATION}; 4a's 1.32ms is a Chrome task-0 figure, not the plant's, and the two populations are unmatched, so neither supports agreement); verdict: ${verdicts.modelVerdict}; median applied rate ${numberText(stats.actingRateMedian, 6)} over acting fraction ${numberText(stats.actingFraction, 3)}; observed closure ${numberText(stats.observedClosureRateMsPerSec)}ms/s; commanded closure ${numberText(stats.commandedClosureRateMsPerSec)}ms/s; effectiveness fraction ${numberText(stats.effectivenessFraction, 3)}; rate-effectiveness verdict: ${verdicts.rateEffectivenessVerdict}.`);
-    console.log(`  3.5 ${label}: final no-clock counters ${JSON.stringify({ noClock: figure.finalCounters?.noClock ?? null, framesOffered: figure.finalCounters?.framesOffered ?? null })}; first clock held ${figure.firstClock?.held ?? 'null'} counters ${JSON.stringify(figure.firstClock?.counters ?? null)}; first playing held ${figure.firstPlayback?.seam?.held ?? 'null'} counters ${JSON.stringify(figure.firstPlayback?.seam?.counters ?? null)}; verdict: direct controller record count is not observable, and this page construction cannot feed the no-clock arm because records require a clock and an established offset does not return to null.`);
-  }
-  for (const [label, readings] of [['A', linesA], ['B', linesB]]) {
-    const distinct = (key) => [...new Set(readings.map((reading) => reading[key] ?? ''))];
-    console.log(`  T6b ${label} rendered clock lines ${JSON.stringify(distinct('clockText'))} (asserted against CLOCK_LINE_RE); drift lines ${JSON.stringify(distinct('driftText'))} (asserted against DRIFT_LINE_RE with a positive frame count); controller lines ${JSON.stringify(distinct('controllerText'))} (asserted against branch-specific controller shapes, with an acting match required).`);
-  }
-  console.log(`  T8 seam route counters: V before ${JSON.stringify(before.V)}; V after ${JSON.stringify(after.V)}; A3 before ${JSON.stringify(before.A3)}; A3 after ${JSON.stringify(after.A3)}; diagnosis ${routeDiagnosis ?? 'seam fired'}.`);
-  console.log(`  whole pass wall-clock length: ${numberText(Date.now() - PASS_STARTED_AT, 0)}ms (${numberText((Date.now() - PASS_STARTED_AT) / 1000, 1)}s), measured from script start.`);
-  console.log('--- T9 FIGURES END ---');
+  for (const line of t9FigureLines({
+    settleStates,
+    settlePollMs: SETTLE_POLL_MS,
+    convergedWindowMs: CONVERGED_WINDOW_MS,
+    converged: [convergedA, convergedB],
+    spread,
+    wholeRunMedians: [sa.summary?.medianDriftMs, sb.summary?.medianDriftMs],
+    figures: t7Figures,
+    predictedParkingMs,
+    parkingThresholdsUsable,
+    expectedObservationSamples,
+    renderedLines: [['A', linesA], ['B', linesB]],
+    seamCounters: { before, after },
+    routeDiagnosis,
+    elapsedMs: Date.now() - PASS_STARTED_AT,
+  })) console.log(line);
 
 } catch (err) {
   console.log('ERROR:', err.message);

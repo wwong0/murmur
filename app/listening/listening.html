@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Listening comparison — pitch-disabled fallback</title>
+<style>
+  body { font: 15px/1.45 system-ui, sans-serif; max-width: 52rem; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.3rem; }
+  fieldset { border: 1px solid #ccc; border-radius: 6px; margin: 1rem 0; }
+  .row { display: grid; grid-template-columns: 7rem 1fr 14rem; gap: .6rem; align-items: center; padding: .45rem 0; border-top: 1px solid #eee; }
+  .row:first-of-type { border-top: 0; }
+  button { font: inherit; padding: .35rem .8rem; cursor: pointer; }
+  button.playing { background: #2a6; color: #fff; }
+  .desc { color: #444; }
+  .worst { color: #a40; font-weight: 600; }
+  input[type=text] { width: 100%; font: inherit; }
+  #status { font-family: ui-monospace, monospace; background: #f4f4f4; padding: .5rem .7rem; border-radius: 4px; min-height: 1.4em; }
+  #reveal { display: none; background: #fffbe6; border: 1px solid #e6d98a; padding: .6rem .9rem; border-radius: 6px; }
+  small { color: #666; }
+</style>
+</head>
+<body>
+<h1>Listening comparison — pitch-disabled fallback</h1>
+<p>
+  Every condition plays the <strong>same passage from the same start</strong>, for the same
+  <span id="passage-s"></span> s of wall time, with <code>preservesPitch = false</code> — the
+  fallback's setting. Only the playback-rate schedule differs. Headphones recommended.
+</p>
+
+<fieldset>
+  <legend>Material</legend>
+  <label><input type="radio" name="clip" value="speech" checked> Speech — your recording (<code>ludwig.wav</code>, 24 s passage: the correction's first 24 s only)</label><br>
+  <label><input type="radio" name="clip" value="music"> Music — Mozart, Piano Sonata K. 330, I (Musopen)</label>
+</fieldset>
+
+<fieldset>
+  <legend>Labels</legend>
+  <label><input type="checkbox" id="blind"> Hide labels (conditions become A–D in a random order)</label>
+  <button id="reshuffle" type="button">Reshuffle</button>
+  <button id="show" type="button">Reveal</button>
+  <div id="reveal"></div>
+</fieldset>
+
+<fieldset>
+  <legend>Conditions</legend>
+  <div id="rows"></div>
+  <p><button id="stop" type="button">Stop</button></p>
+  <div id="status">idle</div>
+</fieldset>
+
+<p><small>
+  Trajectory source: <span id="provenance"></span>. The page replays the recorded rate writes
+  on their recorded wall-clock times from the moment playback starts; it does not run the
+  controller. See <code>README.md</code> for what this can and cannot show.
+</small></p>
+
+<audio id="player" preload="auto"></audio>
+<script src="trajectory.js"></script>
+<script src="listening.js"></script>
+</body>
+</html>

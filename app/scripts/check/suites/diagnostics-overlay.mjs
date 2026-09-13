@@ -20,8 +20,10 @@ import { DRIFT_LINE_RE } from '../../../public/lib/drift-readout.mjs';
 import {
   CLOCK_LINE_NO_ESTIMATE,
   CLOCK_LINE_RE,
+  CONTROLLER_LINE_ACTUATOR_LIMIT_RE,
   CONTROLLER_LINE_BEYOND_RE,
   CONTROLLER_LINE_BEYOND_UNAVAILABLE_RE,
+  CONTROLLER_LINE_BUDGET_RE,
   CONTROLLER_LINE_CORRECTING_RE,
   CONTROLLER_LINE_ACTING_RE,
   CONTROLLER_LINE_MEASUREMENT_LIMIT_RE,
@@ -281,6 +283,70 @@ export default async function diagnosticsOverlaySuite() {
     assert(!line.includes('-45.0ms') && !line.includes('15.0ms'), 'the provisional components a hold retains do not reach the line');
     assert(CONTROLLER_LINE_HELD_RE.test(line), 'held controller line matches the published held shape');
     assert(!CONTROLLER_LINE_ACTING_RE.test(line), 'a hold is refused by the acting shape');
+  });
+
+  // THE SIGNED FIELD AND THE MAGNITUDE FIELDS ARE NOT THE SAME SHAPE.
+  // `error` is the controller's one signed figure; U, the actuator allowance, the
+  // accepted and required thresholds and the two close durations are magnitudes
+  // that cannot be negative. A pattern admitting a sign on those five accepts a
+  // page whose controller has come apart, and `verify-browser` asserts rendered
+  // text against exactly these patterns — so the fixtures below are the
+  // deliberately broken lines the browser pass must never accept, alongside the
+  // real lines it must.
+  await check('diagnostics overlay: the published patterns refuse a negative magnitude and keep the signed error', async () => {
+    // Rendered through the real renderer, not written out: two branches the case
+    // table above does not reach, so every arm carrying a magnitude is covered.
+    const budget = makeOverlay({
+      controllerState: makeHeldState({
+        mode: 'resolution-budget-hold', reason: 'stopping-threshold-over-budget',
+        requiredStoppingThresholdMs: 20.96, windowRecords: 9,
+      }),
+    }).overlay.lines().controller;
+    const actuator = makeOverlay({
+      controllerState: makeControllerState({
+        rate: 1.00001, mode: 'declining', reason: 'actuator-limit',
+        estimateMs: -30.5, bandMs: 6.2, fastestCloseMs: 2430, windowRecords: 12,
+      }),
+    }).overlay.lines().controller;
+    assertEqual(budget, 'controller: rate 1.000000 · resolution-budget-hold · stopping-threshold-over-budget · required S 21.0ms · ceiling 20.0ms refused over 9 frames', 'the over-budget hold line');
+    assertEqual(actuator, 'controller: rate 1.000010 · declining · actuator-limit · error -30.5ms · U 6.2ms · actuator allowance 0.0ms · stopping threshold 6.2ms over 12 frames', 'the actuator-limit line');
+    assert(CONTROLLER_LINE_BUDGET_RE.test(budget), 'the budget shape accepts its own rendered line');
+    assert(CONTROLLER_LINE_ACTUATOR_LIMIT_RE.test(actuator), 'the actuator-limit shape accepts its own rendered line');
+
+    const MAGNITUDES = ['U ', 'actuator allowance ', 'stopping threshold ', 'required S ', 'close lower bound ', 'close budget '];
+    const lines = [
+      ...controllerCases.filter((testCase) => testCase.shape !== CONTROLLER_LINE_HELD_RE)
+        .map((testCase, index) => [testCase.shape, controllerLines[controllerCases.indexOf(testCase)], testCase.name.slice(0, 40) + index]),
+      [CONTROLLER_LINE_BUDGET_RE, budget, 'budget'],
+      [CONTROLLER_LINE_ACTUATOR_LIMIT_RE, actuator, 'actuator-limit'],
+    ];
+    let negated = 0;
+    for (const [shape, line, label] of lines) {
+      // VALID FIRST. A refusal check is worth nothing beside a pattern that
+      // refuses the healthy line too.
+      assert(shape.test(line), `${label}: the branch shape accepts the real line`);
+      assert(CONTROLLER_LINE_ACTING_RE.test(line), `${label}: so does the acting union`);
+      for (const field of MAGNITUDES) {
+        const at = line.indexOf(field);
+        if (at === -1) continue;
+        const broken = `${line.slice(0, at + field.length)}-${line.slice(at + field.length)}`;
+        if (broken === line || /unavailable/.test(line.slice(at + field.length, at + field.length + 12))) continue;
+        negated += 1;
+        assert(!shape.test(broken), `${label}: a negative ${field.trim()} is refused by the branch shape`);
+        assert(!CONTROLLER_LINE_ACTING_RE.test(broken), `${label}: and by the acting union`);
+      }
+    }
+    assertEqual(negated, 24, 'every magnitude field in every acting arm was negated and refused');
+
+    // The signed field keeps both signs, and now REQUIRES one: `signed()` always
+    // writes a `+` or a `-`, so a line with a bare error magnitude is no more a
+    // page this controller painted than a negative U is.
+    const correcting = controllerLines[controllerCases.findIndex((testCase) => testCase.shape === CONTROLLER_LINE_CORRECTING_RE)];
+    const beyond = controllerLines[controllerCases.findIndex((testCase) => testCase.shape === CONTROLLER_LINE_BEYOND_RE)];
+    assert(correcting.includes('error -12.3ms') && CONTROLLER_LINE_CORRECTING_RE.test(correcting), 'a negative error is accepted');
+    assert(beyond.includes('error +700.2ms') && CONTROLLER_LINE_BEYOND_RE.test(beyond), 'a positive error is accepted');
+    const unsigned = correcting.replace('error -12.3ms', 'error 12.3ms');
+    assert(!CONTROLLER_LINE_CORRECTING_RE.test(unsigned) && !CONTROLLER_LINE_ACTING_RE.test(unsigned), 'an unsigned error is refused');
   });
 
   await check('diagnostics overlay: a figure the controller cannot produce is neither rendered nor vouched for', async () => {

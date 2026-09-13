@@ -30,62 +30,9 @@ import {
   thresholdContractOf,
   windowVerdicts,
 } from '../../drift-figures.mjs';
+import { actingSamples, measurementRecord, noisyPoints, recordSeries, sample, settledSamples, stableSamples } from '../drift-figure-fixtures.mjs';
 
-const recordSeries = (values, startSeq = 1) => values.map((driftMs, index) => ({ seq: startSeq + index, driftMs }));
 const verifyBrowserSource = readFileSync(new URL('../../verify-browser.mjs', import.meta.url), 'utf8');
-const sample = (overrides = {}) => ({
-  atMs: 0,
-  mode: 'declining',
-  reason: null,
-  rate: 1.001,
-  polls: 1,
-  estimateMs: 2,
-  bandMs: 2,
-  spreadMs: 1,
-  halfWidthMs: 2,
-  measurementLimit: 'clock',
-  actuatorAllowanceMs: 0,
-  requiredStoppingThresholdMs: 2,
-  stoppingThresholdMs: 2,
-  thresholdUsable: true,
-  fastestCloseMs: 0,
-  windowRecords: 8,
-  controlRecords: 8,
-  ...overrides,
-});
-const actingSamples = (count, overrides = {}) => Array.from({ length: count }, (_, index) => sample({ atMs: index * 125, polls: index + 1, ...overrides }));
-const settledSamples = (polls, overrides = {}) => polls.map((pollsValue, index) => sample({
-  atMs: index * 125,
-  mode: 'settled',
-  reason: 'held',
-  polls: pollsValue,
-  ...overrides,
-}));
-
-const measurementRecord = ({ localMs, offsetMs = 0, rate = 1.001, interceptMs = 7, epochMs = 1 }) => {
-  const mediaMs = rate * localMs + interceptMs;
-  return {
-    seq: localMs + 1,
-    epochMs,
-    mediaMs,
-    displaySharedMs: localMs + offsetMs,
-    driftMs: mediaMs - localMs - offsetMs,
-    clock: { offsetMs },
-  };
-};
-
-const noisyPoints = (rate, count = 120, stepMs = 50) => Array.from({ length: count }, (_, index) => ({
-  x: index * stepMs,
-  y: rate * index * stepMs + ((index % 7) - 3) * 0.2,
-}));
-
-const stableSamples = (count, overrides = {}) => Array.from({ length: count }, (_, index) => sample({
-  atMs: index * 250,
-  polls: index + 1,
-  rate: 1.0008,
-  estimateMs: 4,
-  ...overrides,
-}));
 
 export default async function driftFiguresSuite() {
   await check('drift-figures: refresh and span use their declared quantiles', async () => {

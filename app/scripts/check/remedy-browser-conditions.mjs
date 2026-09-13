@@ -191,8 +191,8 @@ export function necessaryConditions({
   }
 
   // At f = 0 an accepted threshold above the ceiling is not a refused contract
-  // (`executor-spec.md` C1.3 states the hold for f > 0 only), so it is carried
-  // as an observation on a met row instead of counted as a failure.
+  // (`design.md` D8 → *Ceiling and refusal* states the hold for f > 0 only), so
+  // it is carried as an observation on a met row instead of counted as a failure.
   const zeroFloorAbove = ceiling.aboveCeilingAtZeroFloor?.length ?? 0;
   const ceilingPopulation = {
     polls: ceiling.inspected, ceilingMs: ceiling.ceilingMs, aboveCeilingAtZeroFloor: zeroFloorAbove,

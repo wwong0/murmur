@@ -252,18 +252,6 @@ export function holdSafetyViolations(row, { maxStoppingThresholdMs }) {
   return violations;
 }
 
-/**
- * Clause 5 over every poll that ACCEPTED a threshold. S is required to be
- * exactly U + L — the same IEEE-754 sum the controller computed from the same
- * two published doubles, so this is an identity and not a comparison needing a
- * tolerance — and to sit at or below the fixed ceiling, with no slack above it.
- *
- * A NON-FINITE OPERAND IS A FAILURE, NOT A SKIP. The first version tested the
- * identity only when both U and L were finite, so a poll that accepted a
- * threshold and published no allowance passed clause 5 without the clause ever
- * being applied to it (V2). An observation incapable of establishing the
- * identity has not established it.
- */
 /** Violations that say the row cannot be judged, as opposed to judged wrong. */
 export const UNCERTIFIED_EVIDENCE_GAPS = Object.freeze(['command-settings-absent', 'estimate-or-band-not-finite']);
 
@@ -310,6 +298,16 @@ export function uncertifiedCorrectionViolations(row, { maxStoppingThresholdMs })
   return violations;
 }
 
+/**
+ * Clause 5 over every poll that ACCEPTED a threshold. S must be exactly U + L —
+ * the same IEEE-754 sum the controller computed from the same two published
+ * doubles, so this is an identity and needs no tolerance — and must sit at or
+ * below the fixed ceiling, with no slack above it.
+ *
+ * A NON-FINITE OPERAND IS A FAILURE, NOT A SKIP (V2). Testing the identity only
+ * when U and L are both finite lets a poll that accepted a threshold and
+ * published no allowance pass the clause without it ever being applied.
+ */
 export function thresholdCeilingViolations(rows, { maxStoppingThresholdMs }) {
   const violations = [];
   for (const row of rows) {
