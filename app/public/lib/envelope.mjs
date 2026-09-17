@@ -1,29 +1,13 @@
-// public/lib/envelope.mjs
-//
-// The wire format, shared verbatim by the room server and the browser bundle,
-// so the two sides cannot disagree about the envelope shape.
-//
-// Two shapes, not one: a client supplies routing intent and content, and the
-// server fills room, sender, sequence number and timestamps from its own
-// record of the connection. This is also where EVERY server-originated
-// envelope is constructed, which is what keeps `server/**` free of the content
-// field's name — `scripts/check-structure.mjs` fails the build if it appears
-// there. Reasoning for both: change 1 design.md D2 and D3.
-//
-// Constraints on this file: imported by Node AND by the browser bundle, so no
-// `node:` builtins and no DOM.
+// Shared wire constructors (D2/D3).
 
-/** Wire protocol version. Checked on `join` only (D2). Bump when a routing field changes meaning. */
+/** Protocol version; checked on join (D2). */
 export const PROTOCOL_VERSION = 1;
 
-/** Reserved `to` / `from` addresses. Anything else is a clientId. */
+/** Reserved routing addresses; other addresses are client ids. */
 export const ADDR_ROOM = 'room';
 export const ADDR_SERVER = 'server';
 
-/**
- * Every error code the server may emit. Here rather than in the server so both
- * sides can name them and a client can switch on a code rather than on prose.
- */
+/** Error codes shared by server and client (D2). */
 export const ERROR_CODES = Object.freeze({
   VERSION_MISMATCH: 'version-mismatch',
   BAD_ENVELOPE: 'bad-envelope',
@@ -34,26 +18,10 @@ export const ERROR_CODES = Object.freeze({
   UNKNOWN_RECIPIENT: 'unknown-recipient',
 });
 
-/**
- * Close code for a connection replaced by a newer one presenting that
- * membership's reclaim secret. It tells the replaced client it was replaced
- * rather than dropped, so it stops instead of retrying — it is not what makes
- * the reclaim loop impossible; secret rotation is (1b design.md D5).
- *
- * Shared constant rather than a bare 4000 on each side, because only one of
- * "replaced" and "network dropped" should be retried.
- */
+/** Replaced membership close code (1b design.md D5). */
 export const CLOSE_SUPERSEDED = 4000;
 
-/**
- * A fresh reclaim secret. Issued to every admitted member and returned only in
- * that member's directed `joined` reply (1b design.md D1).
- *
- * `getRandomValues` rather than `randomUUID`: it is unconditionally available
- * in both runtimes this module imports into, where `randomUUID` additionally
- * requires a secure context — which `http://127.0.0.1` happens to satisfy today
- * and a later origin might not.
- */
+/** Fresh secret; it is emitted only in the directed joined envelope (1b D1). */
 export function newReclaimSecret() {
   const bytes = new Uint8Array(16);
   globalThis.crypto.getRandomValues(bytes);
@@ -62,7 +30,7 @@ export function newReclaimSecret() {
   return hex;
 }
 
-/** Protocol message types the server answers itself. Everything else is relayed blind. */
+/** Types interpreted by the server; all others relay blind. */
 export const TYPE_JOIN = 'join';
 export const TYPE_LEAVE = 'leave';
 export const TYPE_ECHO = 'echo';
@@ -71,25 +39,12 @@ export const TYPE_JOINED = 'joined';
 export const TYPE_PRESENCE = 'presence';
 export const TYPE_ERROR = 'error';
 
-/**
- * The routing fields the server fills from connection state. Reference list;
- * nothing imports it — `relayEnvelope` names these fields directly.
- */
+/** Fields overwritten from server connection state by relayEnvelope. */
 export const SERVER_OWNED_FIELDS = Object.freeze(['room', 'from', 'seq', 'ts']);
 
-// ---------------------------------------------------------------------------
-// Client -> server
-// ---------------------------------------------------------------------------
+// Client -> server. Correlation labels and payload are client-owned.
 
-/**
- * Build the envelope a client puts on the wire: routing intent and content.
- *
- * `id` and `replyTo` are the client's own correlation labels and travel
- * untouched in both directions — the server must not renumber them, because
- * client B answers client A by echoing the `id` A chose.
- *
- * @param {{type: string, to: string, id?: string, replyTo?: string, payload?: unknown}} fields
- */
+/** Build a client envelope (D2/D3). @param {{type: string, to: string, id?: string, replyTo?: string, payload?: unknown}} fields */
 export function buildClientEnvelope({ type, to, id, replyTo, payload }) {
   const env = {
     v: PROTOCOL_VERSION,
@@ -102,18 +57,7 @@ export function buildClientEnvelope({ type, to, id, replyTo, payload }) {
   return env;
 }
 
-/**
- * Build the `join` request. Room, tab label and claimed role are content, not
- * routing: the server has no record of this connection yet, so this is the one
- * message whose body it must read.
- *
- * `secret` is omitted on a first join. When present it is the only one of the
- * four the server reads — a join whose secret matches a live membership
- * reclaims it and takes the label, join time and role from the membership
- * rather than from this message (1b design.md D8, D10).
- *
- * @param {{room: string, tabId: string, role: 'host'|'viewer', secret?: string}} fields
- */
+/** Build join content; secret is the only reclaim field (1b D8/D10). */
 export function buildJoinEnvelope({ room, tabId, role, secret }) {
   const body = { room, tabId, role };
   if (secret !== undefined) body.secret = secret;
@@ -124,25 +68,28 @@ export function buildJoinEnvelope({ room, tabId, role, secret }) {
   });
 }
 
-/** Build the round-trip probe. `id` is required — the reply is matched on it. */
+/** Build a correlated round-trip probe. */
 export function buildEchoEnvelope(id) {
   return buildClientEnvelope({ type: TYPE_ECHO, to: ADDR_SERVER, id });
 }
 
-// ---------------------------------------------------------------------------
-// Validation — direction aware, and it reports *why*
-// ---------------------------------------------------------------------------
+export const TYPE_PLAYBACK_OPERATION = 'playback-operation';
+export const TYPE_PLAYBACK_STATE_REQUEST = 'playback-state-request';
+export const TYPE_PLAYBACK_STATE_ANSWER = 'playback-state-answer';
 
-/**
- * `{ok: true}` or `{ok: false, reason}`. The reason rides along in the
- * `bad-envelope` error, so a client that sends rubbish is told what was wrong.
- *
- * Note what is NOT validated: the message body. Validating it would require
- * knowing what the type means, which is the knowledge the server is forbidden
- * to have.
- *
- * @param {unknown} env
- */
+/** Build a room-scoped playback operation (D12). */
+export function buildPlaybackOperationEnvelope(payload) {
+  return buildClientEnvelope({ type: TYPE_PLAYBACK_OPERATION, to: ADDR_ROOM, payload });
+}
+
+/** Build a directed playback-state answer correlated to a request (D12). */
+export function buildPlaybackStateAnswerEnvelope({ to, replyTo, payload }) {
+  return buildClientEnvelope({ type: TYPE_PLAYBACK_STATE_ANSWER, to, replyTo, payload });
+}
+
+// Direction-aware structural validation; payload meaning belongs to consumers.
+
+/** Return `{ok}` or `{ok:false, reason}` for client envelopes. */
 export function validateClientEnvelope(env) {
   if (env === null || typeof env !== 'object' || Array.isArray(env)) {
     return { ok: false, reason: 'envelope must be a JSON object' };
@@ -166,13 +113,7 @@ export function validateClientEnvelope(env) {
   return { ok: true };
 }
 
-/**
- * The mirror check, used by the browser client and the protocol check to
- * confirm the server filled in everything it owns. Not used on the server's
- * own hot path — the server is the one producing these.
- *
- * @param {unknown} env
- */
+/** Confirm server-owned routing and timestamps are present. */
 export function validateServerEnvelope(env) {
   if (env === null || typeof env !== 'object' || Array.isArray(env)) {
     return { ok: false, reason: 'envelope must be a JSON object' };
@@ -193,32 +134,11 @@ export function validateServerEnvelope(env) {
   return { ok: true };
 }
 
-// ---------------------------------------------------------------------------
-// Server -> client
-//
-// Every constructor here leaves `ts.send` at 0. The server's single send
-// helper stamps it immediately before the write, after all other work on the
-// message (design.md D6) — DO NOT stamp it here, or queueing delay lands
-// inside change 2's offset estimate.
-// ---------------------------------------------------------------------------
+// Server -> client. Constructors leave ts.send at 0; send stamps it late (D6).
 
-/**
- * @typedef {object} Routing
- * @property {string} room    room name this connection belongs to
- * @property {string} to      clientId, "room", or "server"
- * @property {number|null} seq room-scoped order position, null when directed
- * @property {number} recv    server receive time that caused this message
- * @property {string} [from]  defaults to "server" for server-originated messages
- * @property {string} [id]
- * @property {string} [replyTo]
- */
+/** @typedef {{room:string, to:string, seq?:number|null, recv:number, from?:string, id?:string, replyTo?:string}} Routing */
 
-/**
- * Shared skeleton. `ts.send` is a placeholder; see the note above.
- * @param {Routing} routing
- * @param {string} type
- * @param {unknown} body
- */
+/** Shared server envelope skeleton; send timestamp remains deferred. */
 function serverEnvelope(routing, type, body) {
   const env = {
     v: PROTOCOL_VERSION,
@@ -235,19 +155,7 @@ function serverEnvelope(routing, type, body) {
   return env;
 }
 
-/**
- * Take a client's envelope and make it the server's. Every field the server
- * owns is overwritten from connection state; type, correlation labels and the
- * whole message body ride through on the spread, byte-identically, without
- * this function or its caller naming any of them.
- *
- * The spread-then-overwrite ORDER is load-bearing: whatever the client put in
- * `from`, `room`, `seq` or `ts` is copied and then immediately replaced by the
- * truth. Reorder it and a client can forge its own identity.
- *
- * @param {Record<string, unknown>} clientEnv  an envelope that has passed validateClientEnvelope
- * @param {Routing} routing
- */
+/** Spread first, then overwrite server-owned routing fields (D3). */
 export function relayEnvelope(clientEnv, routing) {
   return {
     ...clientEnv,
@@ -260,51 +168,17 @@ export function relayEnvelope(clientEnv, routing) {
   };
 }
 
-/**
- * Acknowledge a join: who it is, who else is here, where the room's order
- * stands, and what time the room thinks it is.
- *
- * `seq` inside the body is the room's counter at the moment of the join, so
- * the next room-scoped envelope this client sees carries the following value.
- * The envelope's own `seq` is null — `joined` is directed and outside the
- * room's total order.
- *
- * This is the ONLY envelope the secret is ever written into (1b design.md
- * D1/D12), and `scripts/protocol-check.mjs` asserts that over every envelope
- * the server emits rather than over a list of types.
- *
- * @param {Routing} routing
- * @param {{clientId: string, roster: object[], roomSeq: number, serverTime: number, secret: string}} data
- */
+/** Directed join acknowledgement; the secret appears only here (1b D1/D12). */
 export function makeJoined(routing, { clientId, roster, roomSeq, serverTime, secret }) {
   return serverEnvelope(routing, TYPE_JOINED, { clientId, roster, seq: roomSeq, serverTime, secret });
 }
 
-/**
- * Announce a membership change as the FULL roster, never a delta (design.md
- * D7): a client that maintains no incremental presence state cannot drift out
- * of agreement with the server about who is present.
- *
- * @param {Routing} routing
- * @param {{event: 'join'|'leave', member: object, roster: object[]}} data
- */
+/** Emit the full roster for a membership change (D7). */
 export function makePresence(routing, { event, member, roster }) {
   return serverEnvelope(routing, TYPE_PRESENCE, { event, member, roster });
 }
 
-/**
- * Refuse something, without closing anything.
- *
- * `releaseWithinMs` rides on a `tab-taken` refusal (1b design.md D13): the
- * maximum time the server would take to release that `tabId` if its holder
- * never answered another ping. The client waits that long, which makes its
- * budget correct at every liveness setting without it knowing which one it is
- * in. It is advice attached to a refusal already made, never part of the
- * reclaim decision — that is the secret and nothing else.
- *
- * @param {Routing} routing
- * @param {{code: string, detail?: string, expected?: unknown, got?: unknown, releaseWithinMs?: number}} data
- */
+/** Emit a non-closing refusal and optional reclaim release advice (1b D13). */
 export function makeError(routing, { code, detail, expected, got, releaseWithinMs }) {
   const body = { code };
   if (detail !== undefined) body.detail = detail;
@@ -314,41 +188,14 @@ export function makeError(routing, { code, detail, expected, got, releaseWithinM
   return serverEnvelope(routing, TYPE_ERROR, body);
 }
 
-/**
- * Answer a round-trip probe. Carries no data of its own — the sample lives
- * entirely in `ts`, and the client supplies its own two timestamps at the wire.
- *
- * @param {Routing} routing
- */
+/** Answer a round-trip probe; send time is stamped by the server helper. */
 export function makeEchoReply(routing) {
   return serverEnvelope(routing, TYPE_ECHO_REPLY, {});
 }
 
-// ---------------------------------------------------------------------------
-// Reading message bodies
-//
-// `join` is the one message whose content the server must read — it has no
-// record of the connection yet. Reading it HERE, beside the constructor that
-// wrote it, is what keeps `server/**` free of the content field's name. Read
-// the secret in `server/room-server.mjs` instead and the build fails, which is
-// the check doing its job (1b design.md D7).
-//
-// The browser-side reader below carries no such restriction: the prohibition
-// is on the *server* interpreting content, not the client.
-// ---------------------------------------------------------------------------
+// Browser-side body readers; the server's join reader is the exception (1b D7).
 
-/**
- * Pull the join request's fields out, validated. Returns `{ok, room, tabId,
- * role, secret}` or `{ok: false, reason}`.
- *
- * `secret` is optional and `undefined` on a first join. A secret matching no
- * live member is NOT an error — the client presents its held secret on every
- * rejoin and cannot know whether its old membership still exists, so "matches
- * nothing" is the common path and is admitted as an ordinary join (1b
- * design.md D9). Only a malformed one is refused here.
- *
- * @param {{payload?: unknown}} env
- */
+/** Read and validate join content; an unmatched secret is an ordinary join (1b D9). */
 export function readJoinRequest(env) {
   const body = env.payload;
   if (body === null || typeof body !== 'object' || Array.isArray(body)) {
@@ -370,7 +217,7 @@ export function readJoinRequest(env) {
   return { ok: true, room: b.room, tabId: b.tabId, role: b.role, secret: b.secret };
 }
 
-/** The message body of any envelope. Browser side only. @param {{payload: unknown}} env */
+/** Read any envelope body on the browser side. */
 export function readBody(env) {
   return env.payload;
 }

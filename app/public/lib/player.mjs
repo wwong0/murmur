@@ -88,19 +88,16 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {} } = {}) 
     }
   }
 
-  /**
-   * Throw the open media away and open it again at a new position, as ONE call
-   * — the only mechanism D1's re-open has. A caller that could reach `destroy`
-   * and `load` separately could also leave the page with neither.
-   */
-  function reopen({ startPositionMs = null } = {}) {
-    destroy();
-    load({ startPositionMs });
+  /** Park is the only position write, and scheduled start calls it paused. */
+  function park(positionMs) {
+    if (!video.paused) throw new Error('player.park requires a paused element');
+    if (!Number.isFinite(positionMs) || positionMs < 0) throw new TypeError('player.park requires a non-negative position');
+    video.currentTime = positionMs / 1000;
   }
 
   return {
     load,
-    reopen,
+    park,
     destroy,
     /** Subscribe to fatal player errors. Returns an unsubscribe function. */
     onError(fn) {

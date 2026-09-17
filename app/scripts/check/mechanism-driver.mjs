@@ -31,7 +31,7 @@ import { createRendererAlgorithm } from './mechanism-presentation.mjs';
 import { createFakeClock, DEFAULT_TIME_ORIGIN_MS } from './fake-frames.mjs';
 import { createDriftLog, deriveDriftRecord } from '../../public/lib/frame-drift.mjs';
 import { createDriftController } from '../../public/lib/drift-controller.mjs';
-import { createRoomTimeline } from '../../public/lib/room-timeline.mjs';
+import { createRoomTimeline, fixedPlayingState } from '../../public/lib/room-timeline.mjs';
 
 export const TIME_ORIGIN_MS = DEFAULT_TIME_ORIGIN_MS;
 /** `room.entry.js`'s `setInterval(tickPlayback, 250)`. */
@@ -135,8 +135,7 @@ export function runMechanismCase(config, { createController = createDriftControl
 
   const clock = createFakeClock({ offsetMs: spec.offsetMs, delayTermMs: spec.delayTermMs, ageTermMs: spec.ageTermMs, present: spec.clockPresent });
   const log = createDriftLog({ capacity: spec.logCapacity });
-  const timeline = createRoomTimeline();
-  timeline.observeRoster([{ clientId: 'model', joinedAt: epochMs }]);
+  const timeline = createRoomTimeline({ readState: () => fixedPlayingState(epochMs) });
 
   let elapsedMs = 0;
   let requestedRate = 1;

@@ -9,7 +9,7 @@
 // public/room.html.
 
 import { createRoomClient } from './lib/room-client.mjs';
-import { readBody } from './lib/envelope.mjs';
+import { newReclaimSecret, readBody } from './lib/envelope.mjs';
 import { createPlayer } from './lib/player.mjs';
 import { createClockSync, websocketProbe } from './lib/clock-sync.mjs';
 import { createRoomTimeline } from './lib/room-timeline.mjs';
@@ -18,7 +18,15 @@ import { createDriftController } from './lib/drift-controller.mjs';
 import { initializePlaybackTreatment } from './lib/playback-treatment.mjs';
 import { createFrameSampler } from './lib/frame-sampler.mjs';
 import { createPlaybackStart } from './lib/playback-start.mjs';
+import { createFrameObserver, createStartTelemetry } from './lib/start-telemetry.mjs';
 import { createDiagnosticsOverlay } from './lib/diagnostics-overlay.mjs';
+import {
+  ACQUISITION_BACKOFF_MS,
+  ACQUISITION_REQUEST_TIMEOUT_MS,
+  createPlaybackAcquisition,
+} from './lib/playback-acquisition.mjs';
+import { MAX_FUTURE_MS, PREPARE_LEAD_MS, TRANSITION_LEAD_MS } from './lib/playback-leads.mjs';
+import { runTickSteps } from './lib/tick-steps.mjs';
 
 const BUILD_ID = __BUILD_ID__;
 
@@ -35,9 +43,20 @@ function randomTabId() {
 }
 
 const params = new URLSearchParams(window.location.search);
-const room = params.get('room') ?? 'demo';
-const role = params.get('role') ?? 'viewer';
-const tabId = params.get('tab') ?? randomTabId();
+const suppliedRoom = params.get('room');
+const room = suppliedRoom ?? newReclaimSecret();
+const role = suppliedRoom ? (params.get('role') ?? 'viewer') : 'host';
+const tabId = suppliedRoom ? (params.get('tab') ?? randomTabId()) : randomTabId();
+
+if (!suppliedRoom) {
+  history.replaceState(null, '', `?room=${room}&role=host&tab=${tabId}`);
+}
+
+// Start-timing instrumentation (executor-spec.md §11.2), off unless asked for.
+// `record` returns early when disabled, so every site below is unconditional
+// and the product keeps one code path either way.
+const startTiming = params.get('startTiming') === '1';
+const telemetry = createStartTelemetry({ enabled: startTiming });
 
 const wsScheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const url = `${wsScheme}//${window.location.host}/ws`;
@@ -53,6 +72,20 @@ const driftLine = document.getElementById('drift-line');
 const controllerLine = document.getElementById('controller-line');
 const rosterEl = document.getElementById('roster');
 const noticesEl = document.getElementById('notices');
+const playButton = document.getElementById('play');
+const pauseButton = document.getElementById('pause');
+const backButton = document.getElementById('back-10');
+const forwardButton = document.getElementById('forward-10');
+const modeButton = document.getElementById('control-mode');
+const muteButton = document.getElementById('mute');
+const invite = document.getElementById('invite');
+
+invite.textContent = 'invite link';
+invite.href = `${location.origin}${location.pathname}?room=${encodeURIComponent(room)}`;
+
+function renderMute() {
+  muteButton.textContent = video.muted ? 'unmute' : 'mute';
+}
 
 function addNotice(text, { warn = false } = {}) {
   const li = document.createElement('li');
@@ -112,11 +145,7 @@ client.onEvent('joined', (joined) => {
   // the query string asked for.
   addNotice(`joined as ${joined.clientId} (${joined.role})`);
   renderRoster(joined.roster);
-  // THE WHOLE REPLY, not the roster: the join time in it is the only thing that
-  // tells a reclaimed membership from a new one, and a new one lands in a room
-  // whose epoch this page must not carry over (change 3a design.md D2).
-  timeline.observeJoin(joined);
-  tickPlayback();
+  schedulePollStart(0);
 });
 
 client.onEvent('superseded', () => {
@@ -156,8 +185,7 @@ client.on('presence', (env) => {
   const body = readBody(env);
   addNotice(`presence: ${body.event} — ${body.member?.tabId ?? body.member?.clientId}`);
   renderRoster(body.roster);
-  timeline.observeRoster(body.roster);
-  tickPlayback();
+  schedulePollStart(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -198,16 +226,105 @@ const treatment = initializePlaybackTreatment({
   evidence: params.get('treatmentEvidence') === '1',
 });
 
-const timeline = createRoomTimeline();
+// The replicated playback state (change 5 design.md D4). Built before connect
+// so its `joined` subscriber sees the first join.
+const acquisition = createPlaybackAcquisition({
+  client,
+  clock: clockSync,
+  settings: {
+    transitionLeadMs: TRANSITION_LEAD_MS,
+    maxFutureMs: MAX_FUTURE_MS,
+    requestTimeoutMs: ACQUISITION_REQUEST_TIMEOUT_MS,
+    backoffMs: ACQUISITION_BACKOFF_MS,
+  },
+  mintLineage: newReclaimSecret,
+  onOutcome: ({ env, outcome }) => {
+    if (outcome !== 'applied' && env.from === client.clientId) {
+      addNotice(`your ${env.payload?.kind ?? 'operation'} was rejected: ${outcome}`, { warn: true });
+    }
+    renderControls();
+    if (outcome === 'applied') schedulePollStart(0);
+  },
+  report: (where, error) => addNotice(`playback state ${where} failed: ${error?.message ?? error}`, { warn: true }),
+});
+
+const timeline = createRoomTimeline({ readState: () => acquisition.state });
+
+function controlsReady(kind) {
+  const state = acquisition.state;
+  const now = clockSync.sharedNow();
+  return acquisition.snapshot.resolved
+    && state !== null
+    && Number.isFinite(now)
+    && Number.isFinite(state.current?.atSharedMs)
+    && now >= state.current.atSharedMs
+    && acquisition.permitted(kind);
+}
+
+function renderControls() {
+  const state = acquisition.state;
+  const ready = (kind) => controlsReady(kind);
+  playButton.disabled = !(ready('play') && !state?.current.playing);
+  pauseButton.disabled = !(ready('pause') && state?.current.playing);
+  backButton.disabled = !ready('seek');
+  forwardButton.disabled = !ready('seek');
+  modeButton.hidden = client.role !== 'host';
+  modeButton.disabled = !ready('control-mode');
+  modeButton.textContent = `mode: ${state?.controlMode === 'host' ? 'open' : 'host'}`;
+}
+
+function issue(kind, args) {
+  acquisition.issue(kind, args);
+  renderControls();
+}
+
+function seekBy(deltaMs) {
+  const now = clockSync.sharedNow();
+  if (!Number.isFinite(now)) return;
+  const positionMs = timeline.mediaMsAt(now + TRANSITION_LEAD_MS);
+  if (Number.isFinite(positionMs)) issue('seek', { positionMs: positionMs + deltaMs });
+}
+
+playButton.addEventListener('click', () => issue('play'));
+pauseButton.addEventListener('click', () => issue('pause'));
+backButton.addEventListener('click', () => seekBy(-10_000));
+forwardButton.addEventListener('click', () => seekBy(10_000));
+modeButton.addEventListener('click', () => {
+  const state = acquisition.state;
+  if (state) issue('control-mode', { controlMode: state.controlMode === 'host' ? 'open' : 'host' });
+});
+muteButton.addEventListener('click', () => {
+  video.muted = !video.muted;
+  renderMute();
+});
+renderMute();
+
 const driftLog = createDriftLog();
 // The video element carries its own `requestVideoFrameCallback`; the sampler's
 // default binding calls it on the element it was handed.
 const sampler = createFrameSampler({ video, timeline, clock: clockSync, log: driftLog });
 
+// A second observer on the same frames, never stopped, so the frame the park
+// presented is identifiable too. It holds no log and no timeline: the product
+// sampler above is untouched, and the two streams join offline on
+// `presentedFrames` (executor-spec.md §11.1).
+const frameObserver = startTiming
+  ? createFrameObserver({ video, telemetry, context: telemetryContext, now: pageNow })
+  : null;
+frameObserver?.start();
+
 const controller = createDriftController({
   log: driftLog,
   clock: clockSync,
-  apply: (rate) => treatment.applyRate(rate),
+  // `applyRate` returns nothing — it throws on a refusal and on a failed write —
+  // so there is no applied flag to retain, and `appliedOk` is named absent.
+  apply: startTiming
+    ? (rate) => {
+      const applied = treatment.applyRate(rate);
+      telemetry.record('rate-write', { commandedRate: rate, readbackRate: video.playbackRate, appliedOk: applied ?? null }, telemetryContext());
+      return applied;
+    }
+    : (rate) => treatment.applyRate(rate),
   settings: treatment.settings,
   now: treatment.controllerNow,
 });
@@ -215,29 +332,227 @@ const controller = createDriftController({
 // faulted, a view that says so and carries the kernel's as historical.
 const controllerView = () => treatment.view(controller.state());
 
-const playback = createPlaybackStart({
-  timeline,
-  clock: clockSync,
-  open({ positionMs, epochMs, reopen }) {
-    const seconds = (positionMs / 1000).toFixed(2);
-    if (reopen) {
-      sampler.stop();
-      treatment.open(() => player.reopen({ startPositionMs: positionMs }), 'reopen');
-      controller.markSeam({ afterSeq: driftLog.latestSeq, epochMs, positionMs });
-      addNotice(`timeline reference revised — re-opened at ${seconds}s`, { warn: true });
-    } else {
-      treatment.open(() => player.load({ startPositionMs: positionMs }), 'load');
-      addNotice(`playback opened at ${seconds}s`);
+// ---------------------------------------------------------------------------
+// The scheduled start (D6) and the window drop at every start and park (D7)
+// ---------------------------------------------------------------------------
+
+const start = createPlaybackStart({ prepareLeadMs: PREPARE_LEAD_MS });
+const STARTS_KEPT = 32;
+const starts = [];
+let startTimer = null;
+// Readiness per executor-spec.md C1-7: an event after this attempt's load or
+// park, and for a park only from its `seeked` on; the tick re-checks readyState.
+let readiness = null;
+
+function reportStep(name, error) {
+  addNotice(`${name} failed: ${error?.message ?? error}`, { warn: true });
+}
+
+// The identity and the clock as this page holds them at this instant, read from
+// the same sources the product reads. Every value may be null, and a null is
+// named in the event rather than defaulted (executor-spec.md R17).
+function telemetryContext() {
+  const estimate = clockSync.read();
+  const identity = acquisition.snapshot.identity;
+  return {
+    attemptId: start.state().attemptId,
+    lineage: identity?.lineage ?? null,
+    version: identity?.version ?? null,
+    nowSharedMs: clockSync.sharedNow(),
+    clockOffsetMs: estimate?.offsetMs ?? null,
+    clockHalfWidthMs: estimate?.halfWidthMs ?? null,
+  };
+}
+
+function markSeam(epochMs, positionMs) {
+  controller.markSeam({ afterSeq: driftLog.latestSeq, epochMs, positionMs });
+}
+
+/** The shared instant offered as readiness, or null when nothing was offered. */
+function checkReady() {
+  if (!readiness?.prerequisiteSeen || !(video.readyState >= 3)) return null;
+  const observedSharedMs = clockSync.sharedNow();
+  start.ready(readiness.attemptId, observedSharedMs);
+  return observedSharedMs;
+}
+
+function observeElement(type) {
+  const readyState = video.readyState;
+  const paused = video.paused;
+  const elementCurrentTimeMs = video.currentTime * 1000;
+  const blocked = !readiness || (readiness.needsSeeked && !readiness.prerequisiteSeen && type !== 'seeked');
+  let observedSharedMs = null;
+  if (!blocked) {
+    readiness.prerequisiteSeen = true;
+    observedSharedMs = checkReady();
+  }
+  telemetry.record('element-event', {
+    type,
+    readyState,
+    paused,
+    elementCurrentTimeMs,
+    prerequisiteSeen: readiness?.prerequisiteSeen ?? false,
+    offeredReadiness: observedSharedMs !== null,
+    observedSharedMs,
+  }, telemetryContext());
+}
+
+for (const type of ['canplay', 'canplaythrough', 'seeked']) {
+  video.addEventListener(type, () => runTickSteps([['readiness', () => observeElement(type)]], reportStep));
+}
+
+// Before task 12 the reducer carries neither figure: the physical park IS the
+// room position at S, and no advance is applied. The baseline capture asserts
+// `advanceMs === 0` on every action for exactly that reason.
+const scheduledPositionOf = (action) => action.scheduledPositionMs ?? action.positionMs ?? null;
+const advanceOf = (action) => action.advanceMs ?? 0;
+
+/**
+ * One `action` event per action, with `dispatchedAtLocalMs`/`returnedAtLocalMs`
+ * bracketing the element or player call itself — not the step around it, which
+ * is the measurement the repair brief names first.
+ */
+function recordAction(action, fields, dispatch) {
+  const elementPausedBefore = video.paused;
+  const elementCurrentTimeMs = video.currentTime * 1000;
+  const dispatchedAtLocalMs = pageNow();
+  let threw = null;
+  try {
+    // A dispatch that handles its own failure names it by returning the name; one
+    // that throws is named here and keeps throwing, exactly as it did before.
+    threw = dispatch() ?? null;
+  } catch (error) {
+    threw = error?.name ?? String(error?.message ?? error);
+    throw error;
+  } finally {
+    telemetry.record('action', {
+      action: action.kind,
+      positionMs: action.positionMs ?? null,
+      scheduledPositionMs: scheduledPositionOf(action),
+      advanceMs: advanceOf(action),
+      startAtSharedMs: null,
+      latenessMs: null,
+      seamEpochMs: null,
+      ...fields,
+      elementPausedBefore,
+      elementCurrentTimeMs,
+      dispatchedAtLocalMs,
+      returnedAtLocalMs: pageNow(),
+      threw,
+    }, telemetryContext());
+  }
+}
+
+function play(action) {
+  const seamEpochMs = action.startAtSharedMs - action.positionMs;
+  markSeam(seamEpochMs, action.positionMs);
+  starts.push({
+    attemptId: action.attemptId,
+    afterSeq: driftLog.latestSeq,
+    startAtSharedMs: action.startAtSharedMs,
+    playAtSharedMs: action.startAtSharedMs + action.latenessMs,
+    latenessMs: action.latenessMs,
+    positionMs: action.positionMs,
+  });
+  if (starts.length > STARTS_KEPT) starts.shift();
+  sampler.start();
+  let pending;
+  recordAction(action, { startAtSharedMs: action.startAtSharedMs, latenessMs: action.latenessMs, seamEpochMs }, () => {
+    try {
+      pending = video.play();
+    } catch (error) {
+      pending = Promise.reject(error);
+      return error?.name ?? String(error?.message ?? error);
     }
-    sampler.start();
-  },
+    return null;
+  });
+  const settled = (outcome, errorName) => {
+    // Stamped before the reducer reacts, so the settlement instant is not the
+    // instant of the reaction to it.
+    const settledAtLocalMs = pageNow();
+    const settledSharedMs = clockSync.sharedNow();
+    return ['play-settled', () => telemetry.record('play-settled', { outcome, errorName, settledAtLocalMs, settledSharedMs }, telemetryContext())];
+  };
+  Promise.resolve(pending).then(
+    () => runTickSteps([settled('resolved', null), ['play', () => {
+      start.playResolved(action.attemptId);
+      pollStart();
+    }]], reportStep),
+    (error) => runTickSteps([settled('rejected', error?.name ?? null), ['play', () => {
+      if (start.state().attemptId === action.attemptId) sampler.stop();
+      start.playRejected(action.attemptId, { name: error?.name });
+      addNotice(`play() failed: ${error?.name ?? error}`, { warn: true });
+      pollStart();
+    }]], reportStep),
+  );
+}
+
+function execute(result, state) {
+  for (const action of result.actions) {
+    if (action.kind === 'pause') {
+      sampler.stop();
+      recordAction(action, {}, () => video.pause());
+    } else if (action.kind === 'load' || action.kind === 'park') {
+      // C1-10: a playing attempt's seam is S minus its park; a paused hold's is its mapping.
+      const epochMs = result.startAtSharedMs !== null
+        ? result.startAtSharedMs - action.positionMs
+        : state.current.atSharedMs - state.current.mediaMs;
+      readiness = { attemptId: action.attemptId, needsSeeked: action.kind === 'park', prerequisiteSeen: false };
+      recordAction(action, { startAtSharedMs: result.startAtSharedMs, seamEpochMs: epochMs }, () => {
+        if (action.kind === 'load') treatment.open(() => player.load({ startPositionMs: action.positionMs }), 'load');
+        else player.park(action.positionMs);
+      });
+      if (action.kind === 'load') addNotice(`playback opened at ${(action.positionMs / 1000).toFixed(2)}s`);
+      markSeam(epochMs, action.positionMs);
+    } else if (action.kind === 'play') {
+      play(action);
+    }
+  }
+}
+
+function schedulePollStart(delayMs) {
+  if (startTimer !== null) clearTimeout(startTimer);
+  startTimer = setTimeout(() => {
+    startTimer = null;
+    runTickSteps([['playback-start', pollStart]], reportStep);
+  }, Math.max(0, delayMs));
+}
+
+function pollStart() {
+  checkReady();
+  const state = acquisition.state;
+  const nowSharedMs = clockSync.sharedNow();
+  const result = start.poll({ nowSharedMs, resolved: acquisition.snapshot.resolved, state });
+  telemetry.record('poll', {
+    nowSharedMs,
+    resolved: result.resolved,
+    waiting: result.waiting,
+    missing: result.missing,
+    actions: result.actions.map((action) => action.kind),
+    nextAtSharedMs: result.nextAtSharedMs,
+    opens: result.opens,
+    begun: result.begun,
+    retargets: result.retargets,
+  }, telemetryContext());
+  execute(result, state);
+  if (result.nextAtSharedMs === null) {
+    if (startTimer !== null) clearTimeout(startTimer);
+    startTimer = null;
+  } else {
+    schedulePollStart(result.nextAtSharedMs - (clockSync.sharedNow() ?? result.nextAtSharedMs));
+  }
+}
+
+document.addEventListener('click', () => {
+  start.click();
+  pollStart();
 });
 
 // ---------------------------------------------------------------------------
 // The diagnostics overlay
 // ---------------------------------------------------------------------------
 
-const overlay = createDiagnosticsOverlay({ clock: clockSync, controller: { state: controllerView }, log: driftLog, playback });
+const overlay = createDiagnosticsOverlay({ clock: clockSync, controller: { state: controllerView }, log: driftLog, playback: start });
 
 // ON THE TICK, NOT ON A CLOCK EVENT: the half-width widens with age between
 // samples, so a repaint tied to new samples alone freezes a growing number.
@@ -248,41 +563,19 @@ function paintOverlay() {
   controllerLine.textContent = lines.controller;
 }
 
-/**
- * Poll the load rule, then repaint the lines WHETHER OR NOT THE POLL GOT THERE.
- * The playback and drift polls deliberately let their errors reach this caller
- * so the next tick can retry (playback-start.mjs rule 3), and this is the last place
- * that failure can be reported from: room-client hands a throwing subscriber to a
- * `subscriber-error` event nothing here listens to (CONSTRAINTS.md →
- * *Verification*). An unpainted drift line goes on naming an input the page
- * stopped missing seconds ago.
- *
- * Also called from the roster handlers, because a reference point arriving is
- * not worth a tick's wait.
- */
+// Each step in its own try (D10): the controller's stale rule is what returns
+// the rate to 1.0 when frames stop, so a failing start must not skip it.
 function tickPlayback() {
-  // SEPARATE TRIES, because the controller's stale rule is what returns the
-  // rate to 1.0 when frames stop. A re-open that throws has already stopped the
-  // sampler, so sharing one try left the last correction applied open-loop for
-  // as long as the open kept failing — the one condition the stale rule exists
-  // to end.
-  try {
-    playback.poll();
-  } catch (err) {
-    addNotice(`the player did not open: ${err?.message ?? err}`, { warn: true });
-  }
-  try {
-    treatment.pollController(() => controller.poll());
-  } catch (err) {
-    addNotice(`the drift controller did not poll: ${err?.message ?? err}`, { warn: true });
-  }
-  try {
-    paintOverlay();
-  } catch (err) {
-    addNotice(`the overlay did not paint: ${err?.message ?? err}`, { warn: true });
-  }
+  runTickSteps([
+    ['acquisition', () => acquisition.poll()],
+    ['playback-start', pollStart],
+    ['controller', () => treatment.pollController(() => controller.poll())],
+    ['overlay', paintOverlay],
+    ['controls', renderControls],
+  ], reportStep);
 }
 
+renderControls();
 tickPlayback();
 setInterval(tickPlayback, 250);
 
@@ -308,13 +601,21 @@ window.__app = {
   // and its two figures did not share a definition of the middle of an even set.
   summary: () => driftLog.summary(),
   // BESIDE `clock` AND `drift`, not inside `playback()`. The seam below spreads
-  // `playback.state()`, so a key of the same name there would be silently
+  // `start.state()`, so a key of the same name there would be silently
   // overwritten by this one rather than colliding visibly.
   controller: controllerView,
+  // Measurement instrumentation, inert without `startTiming=1` (§11.2).
+  startTiming: (afterSeq = 0) => telemetry.read(afterSeq),
   pitch: () => treatment.pitch(),
   treatmentEvidence: (maxEvents) => treatment.drainEvidence(maxEvents),
-  playback: () => ({ ...playback.state(), callbacks: sampler.callbacks, sampling: sampler.running, seams: controller.seams }),
-  timeline: () => ({ epochMs: timeline.epochMs, ...timeline.counters }),
+  playback: () => ({
+    ...start.state(),
+    callbacks: sampler.callbacks,
+    sampling: sampler.running,
+    seams: controller.seams,
+    starts: starts.map((entry) => ({ ...entry })),
+  }),
+  timeline: () => acquisition.snapshot,
 };
 
 client.connect();

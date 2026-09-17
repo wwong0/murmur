@@ -10,6 +10,16 @@
 // Under public/lib/: no DOM, no page access.
 
 import { REFUSAL_REASONS } from './frame-drift.mjs';
+import { WAITING_PAUSED, WAITING_PREPARING, WAITING_REFUSED } from './playback-start.mjs';
+
+/** The scheduled start's status as words (change 5 design.md D6): a missing input first. */
+function notPlayingReason({ missing, waiting, retargets }) {
+  if (missing) return `waiting for ${missing}`;
+  if (waiting === WAITING_PAUSED) return 'room paused';
+  if (waiting === WAITING_PREPARING) return `preparing start (retargets ${retargets})`;
+  if (waiting === WAITING_REFUSED) return 'start refused, click the page to start';
+  return 'no reason published';
+}
 
 /** The panel's millisecond format, shared with diagnostics-overlay.mjs: two copies drift apart. */
 export const signed = (ms) => `${ms >= 0 ? '+' : ''}${ms.toFixed(1)}ms`;
@@ -44,9 +54,7 @@ export function createDriftReadout({ log, playback }) {
 
   function text() {
     const status = playback.state();
-    if (!status.playing) {
-      return `drift: not playing — ${status.missing ? `waiting for ${status.missing}` : 'the player did not open'}`;
-    }
+    if (!status.playing) return `drift: not playing — ${notPlayingReason(status)}`;
     const read = log.read({ afterSeq: cursor });
     const before = seenCounters;
     seenCounters = read.counters;

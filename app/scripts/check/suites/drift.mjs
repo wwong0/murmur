@@ -25,7 +25,7 @@ import {
   DEFAULT_CALLBACK_LEAD_MS,
   DEFAULT_TIME_ORIGIN_MS,
 } from '../fake-frames.mjs';
-import { createRoomTimeline } from '../../../public/lib/room-timeline.mjs';
+import { createRoomTimeline, fixedPlayingState } from '../../../public/lib/room-timeline.mjs';
 import { createDriftLog, deriveDriftRecord, DISPLAY_WINDOW_MS } from '../../../public/lib/frame-drift.mjs';
 import { createFrameSampler } from '../../../public/lib/frame-sampler.mjs';
 
@@ -47,11 +47,7 @@ const EPOCH_MS = TIME_ORIGIN_MS + 60_000;
 const ULP_MS = 1e-3;
 
 const timelineAt = (epochMs = EPOCH_MS) => {
-  const timeline = createRoomTimeline();
-  // Only the join time matters to a fixture; room-timeline.mjs is where the
-  // rest of a roster entry is the subject.
-  timeline.observeRoster([{ clientId: 'a', joinedAt: epochMs }]);
-  return timeline;
+  return createRoomTimeline({ readState: () => fixedPlayingState(epochMs) });
 };
 
 /**
@@ -174,7 +170,7 @@ export default async function driftSuite() {
     log.add(derive(asFrame(0), { timeline: brokenTimeline }).outcome);
     log.add(derive(asFrame(1), { timeline: brokenTimeline }).outcome);
     log.add(derive(good, { clock: createFakeClock({ present: false }) }).outcome);
-    log.add(derive(good, { timeline: createRoomTimeline() }).outcome);
+    log.add(derive(good, { timeline: createRoomTimeline({ readState: () => null }) }).outcome);
     log.add(derive(good).outcome);
 
     const { counters, records } = log.read();
@@ -198,7 +194,7 @@ export default async function driftSuite() {
     // change 3b's load-gate alarm reading zero through the fault it watches for.
     const noClockNoEpoch = derive(frameAt({ scheduledMediaMs: 10000 }), {
       clock: createFakeClock({ present: false }),
-      timeline: createRoomTimeline(),
+      timeline: createRoomTimeline({ readState: () => null }),
     }).outcome;
     assertEqual(noClockNoEpoch.reason, 'noClock', 'no clock and no epoch is charged to the clock, which is tested first');
 
@@ -207,7 +203,7 @@ export default async function driftSuite() {
     const foreign = frameAt({ scheduledMediaMs: 10000 });
     foreign.metadata.expectedDisplayTime += 1500;
     assertEqual(
-      derive(foreign, { clock: createFakeClock({ present: false }), timeline: createRoomTimeline() }).outcome.reason,
+      derive(foreign, { clock: createFakeClock({ present: false }), timeline: createRoomTimeline({ readState: () => null }) }).outcome.reason,
       'displayTimeForeign',
       'a display timestamp from another timebase is charged before either of them'
     );
@@ -286,6 +282,32 @@ export default async function driftSuite() {
     // about the clock being right; the clock suite proves that (D5). A review
     // that reads this as clock verification stops looking.
     assertEqual(record.clock.delayTermMs + record.clock.ageTermMs, record.clock.halfWidthMs, 'and the half-width is still the sum of them');
+  });
+
+  await check('frame-drift: epoch follows the mapping at display time and refuses outside or paused mappings', async () => {
+    const pendingState = {
+      lineage: 'pending',
+      version: 2,
+      current: { playing: true, atSharedMs: EPOCH_MS + 5000, mediaMs: 1000 },
+      previous: { playing: true, atSharedMs: EPOCH_MS, mediaMs: 0 },
+      controlMode: 'open',
+    };
+    const before = frameAt({ scheduledMediaMs: 2000, mediaSeconds: 2, epochMs: EPOCH_MS });
+    const beforeOutcome = derive(before, { timeline: createRoomTimeline({ readState: () => pendingState }) }).outcome;
+    assert(beforeOutcome.ok, 'a frame before a pending transition has a retained mapping');
+    assertEqual(beforeOutcome.record.epochMs, EPOCH_MS, 'the earlier mapping supplies the epoch at display time');
+
+    const outside = frameAt({ scheduledMediaMs: 1000, mediaSeconds: 1, epochMs: EPOCH_MS });
+    const outsideOutcome = derive(outside, {
+      timeline: createRoomTimeline({ readState: () => ({ ...pendingState, previous: { ...pendingState.previous, atSharedMs: EPOCH_MS + 2000 } }) }),
+    }).outcome;
+    assertEqual(outsideOutcome.reason, 'noEpoch', 'a frame before the retained predecessor is refused');
+
+    const paused = { ...pendingState, current: { ...pendingState.current, playing: false }, previous: null };
+    const pausedOutcome = derive(frameAt({ scheduledMediaMs: 6000, mediaSeconds: 6, epochMs: EPOCH_MS }), {
+      timeline: createRoomTimeline({ readState: () => paused }),
+    }).outcome;
+    assertEqual(pausedOutcome.reason, 'noEpoch', 'a paused mapping supplies a position but no epoch');
   });
 
   // -------------------------------------------------------------------------

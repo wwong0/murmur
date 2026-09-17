@@ -7,19 +7,33 @@
 
 const harness = () => globalThis.__entryHarness;
 
+/** Subscribers are kept so a test can emit `joined` and deliver room envelopes. */
 export function createRoomClient() {
-  return { onEvent() {}, on() {}, connect() { harness().log('connect'); } };
+  const subscribe = (map, type, fn) => {
+    if (!map.has(type)) map.set(type, []);
+    map.get(type).push(fn);
+    return () => {};
+  };
+  return {
+    get clientId() { return harness().clientId; },
+    get role() { return harness().role; },
+    onEvent(type, fn) { return subscribe(harness().clientEvents, type, fn); },
+    on(type, fn) { return subscribe(harness().clientHandlers, type, fn); },
+    send(envelope) { harness().log('send', envelope); },
+    request: () => new Promise(() => {}),
+    connect() { harness().log('connect'); },
+  };
 }
 
 export function createClockSync() {
-  return { start() {}, read: () => harness().clock };
+  return { start() {}, read: () => harness().clock, sharedNow: () => harness().sharedNowMs };
 }
 
 export function websocketProbe() {
   return () => {};
 }
 
-export function createPlayer() {
+export function createPlayer({ video }) {
   harness().log('player-created');
   return {
     onError() {},
@@ -27,23 +41,27 @@ export function createPlayer() {
       harness().log('load', options);
       harness().onLoad?.();
     },
-    reopen(options) {
-      harness().log('reopen', options);
-      harness().onReopen?.();
+    park(positionMs) {
+      harness().log('park', { positionMs, paused: video.paused });
+      harness().onPark?.();
     },
   };
 }
 
-/** Opens only when the test queues one, through the entry's own tick. */
-export function createPlaybackStart({ open }) {
+/** Emits only the actions the test queues, through the entry's own tick. */
+export function createPlaybackStart() {
   harness().log('playback-start-created');
   return {
-    poll() {
-      const pending = harness().pendingOpen;
-      if (pending === null) return;
-      harness().pendingOpen = null;
-      open(pending);
+    poll(input) {
+      harness().log('playback-start-poll', input);
+      if (harness().pollThrows) throw new Error('scripted poll failure');
+      const actions = harness().pendingActions.splice(0);
+      return { ...harness().startState, actions, nextAtSharedMs: null };
     },
-    state: () => ({ playing: harness().playing, epochMs: null, missing: null }),
+    ready(attemptId, observedSharedMs) { harness().log('ready', { attemptId, observedSharedMs }); },
+    playResolved(attemptId) { harness().log('play-resolved', attemptId); },
+    playRejected(attemptId, error) { harness().log('play-rejected', { attemptId, error }); },
+    click() { harness().log('start-click'); },
+    state: () => ({ ...harness().startState, playing: harness().playing }),
   };
 }

@@ -40,6 +40,10 @@ import roomClientSuite from './check/suites/room-client.mjs';
 import clockSuite from './check/suites/clock.mjs';
 import clockSyncSuite from './check/suites/clock-sync.mjs';
 import roomTimelineSuite from './check/suites/room-timeline.mjs';
+import playbackStateSuite from './check/suites/playback-state.mjs';
+import playbackStateRulesSuite from './check/suites/playback-state-rules.mjs';
+import playbackAcquisitionSuite from './check/suites/playback-acquisition.mjs';
+import playbackAcquisitionTimingSuite from './check/suites/playback-acquisition-timing.mjs';
 import driftSuite from './check/suites/drift.mjs';
 import driftControllerSuite from './check/suites/drift-controller.mjs';
 import driftLoadSuite from './check/suites/drift-load.mjs';
@@ -48,11 +52,17 @@ import driftConvergenceSuite from './check/suites/drift-convergence.mjs';
 import driftReportingSuite from './check/suites/drift-reporting.mjs';
 import driftSettlingSuite from './check/suites/drift-settling.mjs';
 import playbackStartSuite from './check/suites/playback-start.mjs';
+import tickStepsSuite from './check/suites/tick-steps.mjs';
+import settleWaitSuite from './check/suites/settle-wait.mjs';
+import startResidualSuite from './check/suites/start-residual.mjs';
+import startTelemetrySuite from './check/suites/start-telemetry.mjs';
+import startTimingSuite from './check/suites/start-timing.mjs';
 import driftReadoutSuite from './check/suites/drift-readout.mjs';
 import diagnosticsOverlaySuite from './check/suites/diagnostics-overlay.mjs';
 import d8ProductIntegrationSuite from './check/suites/d8-product-integration.mjs';
 import playbackTreatmentSuite from './check/suites/playback-treatment.mjs';
 import playbackTreatmentEntrySuite from './check/suites/playback-treatment-entry.mjs';
+import roomControlsEntrySuite from './check/suites/room-controls-entry.mjs';
 
 console.log(describeFixtures());
 
@@ -72,6 +82,10 @@ for (const suite of [
   clockSuite,
   clockSyncSuite,
   roomTimelineSuite,
+  playbackStateSuite,
+  playbackStateRulesSuite,
+  playbackAcquisitionSuite,
+  playbackAcquisitionTimingSuite,
   driftSuite,
   driftControllerSuite,
   driftLoadSuite,
@@ -80,11 +94,17 @@ for (const suite of [
   driftReportingSuite,
   driftSettlingSuite,
   playbackStartSuite,
+  tickStepsSuite,
+  settleWaitSuite,
+  startResidualSuite,
+  startTelemetrySuite,
+  startTimingSuite,
   driftReadoutSuite,
   diagnosticsOverlaySuite,
   d8ProductIntegrationSuite,
   playbackTreatmentSuite,
   playbackTreatmentEntrySuite,
+  roomControlsEntrySuite,
 ]) {
   await suite();
 }

@@ -9,12 +9,10 @@
 // converged span and the observation window; the length is the price of a bar
 // the controller can fail (4c design.md D2).
 //
-// IT EXITS NON-ZERO ON THIS TREE. The four runs of 2026-09-05 failed 18 to 22
-// assertions: T5 and T10 because the pre-D8 controller never settled, and
-// twelve T8 labels because CDP's offline emulation leaves the websocket up so
-// the seam route never fires. With D8 adopted, verify-product-integration.mjs
-// judges a run against the frozen T8 list in product-integration-evidence.mjs;
-// any other failure is new information. Change 5 owns T8, in `docs/plan/05-*.md`.
+// T8 AND ITS OFFLINE ROUTE ARE GONE (change 5 design.md D11): the fresh-join
+// re-open it forced no longer exists, and CDP's offline emulation never fired it.
+// A window may finish T5 without a correction; the labels that then make no
+// claim print NOT EXERCISED from the two approved lists below, never PASS.
 //
 // It exists because CLAUDE.md records that every defect in the host-origin
 // spike was found by attaching over CDP and reading the console, and because
@@ -67,18 +65,16 @@ import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep, dispose
 import { INTEGRATION_SCHEMA, createRecorder, pitchReference } from './drift-capture.mjs';
 import { auditClient, integrationSummary, readClientEvidence } from './product-integration-evidence.mjs';
 import { DRIFT_LINE_RE } from '../public/lib/drift-readout.mjs';
-import { D8_COMMAND_THRESHOLD, MIN_RECORDS, RATE_EPSILON } from '../public/lib/drift-controller.mjs';
+import { D8_COMMAND_THRESHOLD, MAX_RATE_DEVIATION, MIN_RECORDS, RATE_EPSILON } from '../public/lib/drift-controller.mjs';
 import { CLOCK_LINE_RE, CONTROLLER_LINE_HELD_RE, CONTROLLER_LINE_ACTING_RE } from '../public/lib/diagnostics-overlay.mjs';
 // The arithmetic and the verdicts, next door and pure — this file is the
 // sequence of windows, waits and assertions, and nothing else.
 import {
   MIN_CONVERGED_RECORDS,
-  POST_SEAM_UNVERIFIED,
-  T8_GATED_ASSERTIONS,
   convergedStats,
   observationStats,
-  postSeamSettlingOutcome,
   plantSweepMinimum,
+  steadyCommandStretches,
   predictedParkingDistanceMs,
   refreshFrom,
   standingLag,
@@ -86,8 +82,12 @@ import {
 } from './drift-figures.mjs';
 // The retained-evidence round trip and the T9 block. Both are importable without
 // Chrome, which is what this file is not; see each module's header.
-import { BAR_DEFINITIONS, evaluateSufficiency, rederiveConvergedMedian } from './drift-browser-evidence.mjs';
+import { BAR_DEFINITIONS, barsFromManifest, evaluateSufficiency, readNdjson, rederiveConvergedMedian } from './drift-browser-evidence.mjs';
 import { t9FigureLines } from './drift-browser-report.mjs';
+import { inSyncWithoutCorrection } from './settle-wait.mjs';
+import { TRANSITION_LEAD_MS } from '../public/lib/playback-leads.mjs';
+import { WAITING_PAUSED } from '../public/lib/playback-start.mjs';
+import { startResidual } from './start-residual.mjs';
 
 const PASS_STARTED_AT = Date.now();
 const PORT = 9223;
@@ -159,12 +159,25 @@ const REFERENCE_LAG_MS = [-308, -104];
 // T6b line read-back (design.md D1).
 const LINE_READ_DEADLINE_MS = 3_000;
 const LINE_READ_POLL_MS = 250;
-// T8 seam route (design.md D3).
-const DEPART_DEADLINE_MS = 30_000;
-const DEPART_POLL_MS = 1_000;
-const REJOIN_DEADLINE_MS = 30_000;
-const REJOIN_POLL_MS = 500;
-const SEAM_SETTLE_MS = 3_000;
+// The in-sync settle path and the start residual (change 5 design.md D11).
+const SETTLED_FOR_MS = 5_000;
+const SETTLE_BARS = Object.freeze({ minRecords: MIN_RECORDS, settledForMs: SETTLED_FOR_MS, rateEpsilon: RATE_EPSILON });
+const RESIDUAL_POPULATION = 24;
+const RESIDUAL_DEADLINE_MS = 30_000;
+/**
+ * T5 label stems a window done by the in-sync path makes no claim on (D11,
+ * owner-approved). Printed NOT EXERCISED with their values, never PASS.
+ */
+const SETTLE_WITHOUT_CORRECTION_ASSERTIONS = Object.freeze([
+  'recorded a correction',
+  'applied a rate write',
+  `settled within ${SETTLING_BUDGET_MS}ms`,
+]);
+/** Owner decision O1 option 1 (tasks.md Current status): the same cause, two more labels. */
+const O1_WITHOUT_CORRECTION_ASSERTIONS = Object.freeze([
+  'retains a qualifying saturated stretch',
+  'followed the adopted refusal and dwell policy',
+]);
 
 const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
 const sha = (text) => sha256(text).slice(0, 12);
@@ -321,6 +334,60 @@ const SEAM = `(() => {
   };
 })()`;
 
+/** The page surface change 5 pass 2 adds: controls, invite, URL, and the state they act on. */
+const PAGE = `(() => {
+  const app = window.__app;
+  if (!app) return { present: false };
+  const button = (id) => { const el = document.getElementById(id); return el ? { disabled: el.disabled === true, text: el.textContent } : null; };
+  const invite = document.getElementById('invite');
+  const link = invite && (invite.tagName === 'A' ? invite : invite.querySelector('a'));
+  return {
+    present: true,
+    search: location.search,
+    playback: app.playback(),
+    timeline: app.timeline(),
+    muted: document.querySelector('video').muted,
+    buttons: Object.fromEntries(['play', 'pause', 'back-10', 'forward-10', 'control-mode', 'mute'].map((id) => [id, button(id)])),
+    invite: link ? link.href : null,
+    members: [...document.querySelectorAll('#roster li')].map((li) => li.textContent.trim()),
+  };
+})()`;
+
+/** PAGE, reading a navigating page as absent rather than throwing. */
+async function pageOf(tab) {
+  try {
+    return await tab.evaluate(PAGE);
+  } catch {
+    return { present: false };
+  }
+}
+
+/**
+ * A trusted click through Chrome's input pipeline at the element's centre —
+ * never `element.click()`, which no user can do to a disabled button (D11).
+ * `enableFirst` clears `disabled` in the same evaluation, just before the click,
+ * so the page's next enablement pass has no time to restore it.
+ */
+async function clickElement(tab, selector, { enableFirst = false } = {}) {
+  const box = await tab.evaluate(`(() => {
+    const el = document.querySelector(${JSON.stringify(selector)});
+    if (!el) return null;
+    el.scrollIntoView({ block: 'center' });
+    const disabledBefore = el.disabled === true;
+    if (${enableFirst}) el.disabled = false;
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2, disabledBefore };
+  })()`);
+  if (!box) throw new Error(`${tab.label}: ${selector} is not on the page`);
+  for (const type of ['mousePressed', 'mouseReleased']) {
+    await tab.send('Input.dispatchMouseEvent', { type, x: box.x, y: box.y, button: 'left', clickCount: 1 });
+  }
+  return box;
+}
+
+const sameIdentity = (pages) => pages.every((page) => page.timeline?.identity && JSON.stringify(page.timeline.identity) === JSON.stringify(pages[0].timeline.identity));
+const lastSeamPosition = (page) => page.playback?.seams?.at(-1)?.positionMs;
+
 /** The seam, once the bundle has run. A page probed before that reports nothing. */
 async function seamOf(tab, timeoutMs = 20000) {
   const deadline = Date.now() + timeoutMs;
@@ -340,8 +407,65 @@ async function seamOf(tab, timeoutMs = 20000) {
  * rather than passing one.
  */
 function advancedMs(seam, probe) {
-  const startedAt = seam.playback?.startedAtMediaMs;
+  const startedAt = latestStart(seam)?.positionMs;
   return Number.isFinite(startedAt) ? probe.time * 1000 - startedAt : NaN;
+}
+
+/** The page's start status and its records after the latest start, in one evaluation. */
+const START_RECORDS = `(() => {
+  const app = window.__app;
+  if (!app) return null;
+  const playback = app.playback();
+  const start = playback.starts[playback.starts.length - 1];
+  return { playback, records: start ? app.drift(start.afterSeq).records : [] };
+})()`;
+
+/**
+ * Waits for a start beyond the first `startsBefore` entries with a full residual
+ * population after it, and says which ended the wait.
+ */
+async function awaitStartRecords(tab, label, startsBefore) {
+  const ready = await pollUntil(
+    async () => {
+      const read = await tab.evaluate(START_RECORDS);
+      const start = (read?.playback?.starts?.length ?? 0) > startsBefore ? latestStart(read) : null;
+      const accepted = start ? read.records.filter((record) => record.seq > start.afterSeq && Number.isFinite(record.driftMs)).length : 0;
+      return { read, accepted };
+    },
+    ({ accepted }) => accepted >= RESIDUAL_POPULATION,
+    { everyMs: 500, deadlineAt: Date.now() + RESIDUAL_DEADLINE_MS },
+  );
+  console.log(`  ${label} ${ready.ok ? 'reached' : 'did not reach'} ${RESIDUAL_POPULATION} accepted records after a new start (${ready.value.accepted})`);
+  // No new start: an absent residual, never the older start's figure under this label.
+  const read = ready.value.read;
+  return (read?.playback?.starts?.length ?? 0) > startsBefore ? read : { playback: null, records: [] };
+}
+
+/** A residual for a window whose recorder is not running: its records are retained here first. */
+function evaluateRetainedResidual({ label, fileStem, ready, frameIntervalMs }) {
+  const recordsPath = path.join(RUN_DIR, `${fileStem}.records.ndjson`);
+  const records = Array.isArray(ready.records) ? ready.records : [];
+  fs.writeFileSync(recordsPath, records.map((record) => `${JSON.stringify(record)}\n`).join(''));
+  return evaluateResidual({ label, fileStem, seam: ready, records, retainedRecords: () => readNdjson(recordsPath), frameIntervalMs });
+}
+
+/** Steady-command stretches at the saturated rate in a window's retained captures, as T10 fits them. */
+function saturatedStretchesHeld(label, bars) {
+  const samples = readNdjson(path.join(RUN_DIR, `${label}.captures.ndjson`)).map((capture) => ({ atMs: capture.atMs, ...capture.controller }));
+  return steadyCommandStretches(samples, bars)
+    .filter((stretch) => Math.abs(stretch.medianRate - (1 + MAX_RATE_DEVIATION)) <= bars.RATE_STEADY_TOLERANCE).length;
+}
+
+/** The newest scheduled start the page recorded, or null. */
+function latestStart(seam) {
+  const starts = seam?.playback?.starts;
+  return Array.isArray(starts) && starts.length > 0 ? starts.at(-1) : null;
+}
+
+/** The first seam marked after `start`, whose records a residual must not take. */
+function nextSeamAfterSeq(seam, start) {
+  const later = (seam?.playback?.seams ?? []).map((entry) => entry?.afterSeq).filter((afterSeq) => Number.isSafeInteger(afterSeq) && afterSeq > start?.afterSeq);
+  return later.length > 0 ? Math.min(...later) : Infinity;
 }
 
 const failures = [];
@@ -356,10 +480,33 @@ function expect(label, cond, detail) {
 }
 function expectWhen(label, exercised, cond, detail, qualifier) {
   if (exercised) return expect(label, cond, detail);
-  if (!T8_GATED_ASSERTIONS.includes(label)) throw new Error(`assertion is not approved for gating: ${label}`);
+  const approved = [...SETTLE_WITHOUT_CORRECTION_ASSERTIONS, ...O1_WITHOUT_CORRECTION_ASSERTIONS];
+  if (!approved.some((stem) => label.endsWith(` ${stem}`))) throw new Error(`assertion is not approved for NOT EXERCISED: ${label}`);
   console.log(`NOT EXERCISED  ${label}${detail ? ` — ${detail}` : ''}`);
   console.log(`  ${qualifier}`);
   notExercised.push({ label, qualifier });
+}
+
+/**
+ * The RES labels for one window's latest start: the residual from the page's
+ * records, retained to `<label>.starts.json`, then re-derived from the retained
+ * NDJSON (D11). `retainedRecords` is read only after the first figure exists.
+ */
+function evaluateResidual({ label, fileStem = label, seam, records, retainedRecords, frameIntervalMs }) {
+  const start = latestStart(seam);
+  const nextAfterSeq = nextSeamAfterSeq(seam, start);
+  const inputs = { start, nextAfterSeq, frameIntervalMs, population: RESIDUAL_POPULATION };
+  const residual = startResidual({ records, ...inputs });
+  fs.writeFileSync(path.join(RUN_DIR, `${fileStem}.starts.json`), `${JSON.stringify({ start, nextAfterSeq: Number.isFinite(nextAfterSeq) ? nextAfterSeq : null, residual, frameIntervalMs: Number.isFinite(frameIntervalMs) ? frameIntervalMs : null }, null, 2)}\n`);
+  const intervalText = Number.isFinite(frameIntervalMs) ? frameIntervalMs.toFixed(3) : 'null';
+  expect(
+    `RES ${label} scheduled-start residual within one frame interval (${intervalText}ms)`,
+    residual.status === 'met',
+    `status ${residual.status} · S ${start?.startAtSharedMs ?? 'null'} · playAtSharedMs ${start?.playAtSharedMs ?? 'null'} · latenessMs ${start?.latenessMs ?? 'null'} · medianMs ${residual.medianMs ?? 'null'} · count ${residual.count} · seq ${residual.firstSeq ?? 'null'}..${residual.lastSeq ?? 'null'} after ${start?.afterSeq ?? 'null'} · next seam ${nextAfterSeq} · starts ${seam?.playback?.starts?.length ?? 'null'} · retargets ${seam?.playback?.retargets ?? 'null'}`,
+  );
+  const rederived = startResidual({ records: retainedRecords(), ...inputs });
+  expect(`RES ${label} re-derives from retained records`, JSON.stringify(rederived) === JSON.stringify(residual), `retained ${JSON.stringify(rederived)}; printed ${JSON.stringify(residual)}`);
+  return residual;
 }
 
 /**
@@ -478,9 +625,16 @@ async function waitForSettle(tabs) {
   // wait, and `capAt` is only the backstop for a window that never played.
   // Pump-only turns reuse these persisted latches; checking them twice as often
   // does not require another tab evaluation.
+  // The in-sync path is re-evaluated over every read each turn, not latched: a
+  // run broken after it first qualified keeps the wait going (D11).
   const settledOrOutOfTime = (state) => state.firstSettledAt !== null
+    || inSyncWithoutCorrection(state.reads, SETTLE_BARS).done
     || (state.firstPlaybackAt !== null && Date.now() >= state.firstPlaybackAt + SETTLE_DEADLINE_MS);
   await pollUntil(readAll, (all) => all.every(settledOrOutOfTime), { everyMs: CAPTURE_POLL_MS, deadlineAt: capAt });
+  for (const state of states) {
+    state.inSync = inSyncWithoutCorrection(state.reads, SETTLE_BARS);
+    state.path = state.firstSettledAt !== null ? 'settled' : state.inSync.done ? 'in-sync' : 'neither';
+  }
   return states;
 }
 
@@ -570,40 +724,9 @@ async function readLines(tab, initial) {
   return readings;
 }
 
-async function readRoute(tab) {
-  const [seam, probe] = await Promise.all([tab.evaluate(SEAM), tab.evaluate(PROBE)]);
-  return { seam, probe };
-}
-
-function routeFields(reading) {
-  const seam = reading.seam ?? {};
-  const timeline = seam.timeline ?? {};
-  const playback = seam.playback ?? {};
-  const clock = seam.clock ?? {};
-  const controller = seam.controller ?? {};
-  return {
-    timelineEpochMs: timeline.epochMs ?? null,
-    freshJoins: timeline.freshJoins ?? null,
-    epochRevisions: timeline.epochRevisions ?? null,
-    playbackEpochMs: playback.epochMs ?? null,
-    opens: playback.opens ?? null,
-    reopens: playback.reopens ?? null,
-    callbacks: playback.callbacks ?? null,
-    seams: playback.seams?.length ?? null,
-    probesIssued: clock.probes?.issued ?? null,
-    lost: clock.counters?.lost ?? null,
-    sampleCount: clock.sampleCount ?? null,
-    halfWidthMs: clock.halfWidthMs ?? null,
-    seamDrops: controller.counters?.drops?.seam ?? null,
-    mode: controller.mode ?? null,
-    probeMembers: reading.probe?.members ?? null,
-  };
-}
-
 let recorderA = null;
 let recorderB = null;
 let manifestPath = null;
-let t8Route = null;
 let contentFps = null;
 let contentFpsUnavailableReason = null;
 
@@ -706,11 +829,29 @@ try {
     // (:285-296). So a red on those two beside three green ones is an excursion,
     // not a failure to converge — read them together or the run cannot tell the
     // two apart. Change 4c design.md D2.
-    expect(`T5 ${state.label} is settled at the end of the wait`, controller.mode === 'settled', `${controller.mode ?? 'null'} · ${controller.reason ?? 'null'}`);
-    expect(`T5 ${state.label} recorded a correction`, controller.settlingMs !== null, JSON.stringify(controller.settlingMs));
-    expect(`T5 ${state.label} applied a rate write`, controller.correctionsApplied > 0, JSON.stringify(controller.correctionsApplied));
-    expect(`T5 ${state.label} settled within ${SETTLING_BUDGET_MS}ms`, Number.isFinite(controller.settlingMs) && controller.settlingMs <= SETTLING_BUDGET_MS, JSON.stringify(controller.settlingMs));
+    console.log(`  ${state.label}: done by path ${state.path}; in-sync ${JSON.stringify(state.inSync)}`);
+    const corrected = state.path !== 'in-sync';
+    const inSyncQualifier = `${state.label} finished T5 inside the threshold with no correction (D11 in-sync path), so this label makes no claim`;
+    if (corrected) {
+      expect(`T5 ${state.label} is settled at the end of the wait`, controller.mode === 'settled', `${controller.mode ?? 'null'} · ${controller.reason ?? 'null'}`);
+    } else {
+      const inside = controller.thresholdUsable === true && Math.abs(controller.estimateMs ?? NaN) <= controller.stoppingThresholdMs;
+      expect(`T5 ${state.label} is inside the threshold at the end of the wait`, inside, `estimateMs ${controller.estimateMs ?? 'null'} · acceptedS ${controller.stoppingThresholdMs ?? 'null'} · usable ${controller.thresholdUsable ?? 'null'}`);
+    }
+    expectWhen(`T5 ${state.label} recorded a correction`, corrected, controller.settlingMs !== null, JSON.stringify(controller.settlingMs), inSyncQualifier);
+    expectWhen(`T5 ${state.label} applied a rate write`, corrected, controller.correctionsApplied > 0, JSON.stringify(controller.correctionsApplied), inSyncQualifier);
+    expectWhen(`T5 ${state.label} settled within ${SETTLING_BUDGET_MS}ms`, corrected, Number.isFinite(controller.settlingMs) && controller.settlingMs <= SETTLING_BUDGET_MS, JSON.stringify(controller.settlingMs), inSyncQualifier);
     expect(`T5 ${state.label} holds the base rate at the end of the wait`, Math.abs((controller.rate ?? NaN) - 1) <= RATE_EPSILON, JSON.stringify(controller.rate));
+  }
+  console.log(`  windows needing a correction: ${settleStates.filter((state) => state.path !== 'in-sync').length} of ${settleStates.length}`);
+
+  console.log('\n--- RES: where each scheduled start landed ---');
+  const frameIntervalMs = Number.isFinite(contentFps) ? 1000 / contentFps : NaN;
+  await pumpAll(recorders);
+  for (const [label, tab, recorder] of [['A', a, recorderA], ['B', b, recorderB]]) {
+    const seam = await tab.evaluate(SEAM);
+    await pumpAll(recorders);
+    evaluateResidual({ label, seam, records: seam.records, retainedRecords: () => readNdjson(recorder.recordsPath), frameIntervalMs });
   }
 
   console.log('\n--- T6: measuring a converged span ---');
@@ -750,7 +891,7 @@ try {
   for (const [label, seam] of [['A', sa], ['B', sb]]) {
     expect(`3.7 ${label} reports through the seam that it started playback`, seam.playback?.playing === true, JSON.stringify(seam.playback));
     expect(`3.7 ${label} reports no missing input`, seam.playback?.missing === null, JSON.stringify(seam.playback?.missing));
-    expect(`3.7 ${label} opened the media exactly once`, seam.playback?.opens === 1 && seam.playback?.reopens === 0, `opens=${seam.playback?.opens} reopens=${seam.playback?.reopens}`);
+    expect(`3.7 ${label} opened the media exactly once`, seam.playback?.opens === 1, `opens=${seam.playback?.opens} · retargets=${seam.playback?.retargets} · lastLatenessMs=${seam.playback?.lastLatenessMs}`);
   }
   expect('3.6 both windows hold the same timeline reference point', sa.latest?.epochMs === sb.latest?.epochMs && Number.isFinite(sa.latest?.epochMs), `A=${sa.latest?.epochMs} B=${sb.latest?.epochMs}`);
   expect(`3.6 A is within ${DRIFT_TOLERANCE_MS}ms of the room`, Math.abs(convergedA.convergedMedianMs ?? Infinity) <= DRIFT_TOLERANCE_MS, `median ${convergedA.convergedMedianMs?.toFixed(1)}ms over ${convergedA.convergedCount} records`);
@@ -896,6 +1037,8 @@ try {
         settle: `${figure.label}.settle.ndjson`,
       },
       counts: index === 0 ? countsA : countsB,
+      settlePath: settleStates[index].path,
+      inSync: settleStates[index].inSync,
       observedSamples: figure.observedSamples,
       absentSamples: figure.absent,
       observations: figure.observations,
@@ -919,7 +1062,24 @@ try {
   for (const window of sufficiency.windows) {
     console.log(`  ${window.label}: missed ${window.missed}; ${window.records} retained records and ${window.captures} captures; ${window.qualifyingSaturated} qualifying saturated stretch(es), ${window.qualifyingPlateau} qualifying plateau stretch(es); record minimum ${window.recordMinimumMet ? 'met' : 'not met'}, span minimum ${window.spanMinimumMet ? 'met' : 'not met'}`);
   }
-  expect('T10 both windows retain a sufficient, gap-free capture', sufficiency.ok, JSON.stringify(sufficiency));
+  const sufficiencyBars = barsFromManifest(manifest);
+  expect('T10 both windows were evaluated for sufficiency', sufficiency.windows.length === 2, JSON.stringify(sufficiency.windows.map((window) => window.label)));
+  for (const window of sufficiency.windows) {
+    const settle = settleStates.find((state) => state.label === window.label);
+    expect(`T10 ${window.label} retained the record minimum with no missed polls`, window.missed === 0 && window.recordMinimumMet, `missed ${window.missed} · ${window.records} records`);
+    expect(`T10 ${window.label} retains a qualifying plateau stretch`, window.qualifyingPlateau > 0, `${window.qualifyingPlateau} plateau · ${window.stretches} stretches`);
+    // O1 as widened by the owner after pass 1: a window whose retained captures
+    // never HELD the saturated rate (no steady stretch at it, qualifying or not)
+    // has no saturated fit to make, whether it corrected gently or not at all.
+    const heldSaturated = saturatedStretchesHeld(window.label, sufficiencyBars);
+    expectWhen(
+      `T10 ${window.label} retains a qualifying saturated stretch`,
+      !(window.qualifyingSaturated === 0 && heldSaturated === 0),
+      window.qualifyingSaturated > 0,
+      `${window.qualifyingSaturated} qualifying · ${heldSaturated} steady stretch(es) at rate ${1 + MAX_RATE_DEVIATION} · path ${settle?.path ?? 'null'} · correctionsApplied ${settle?.last?.seam?.controller?.correctionsApplied ?? 'null'}`,
+      `${window.label}'s retained captures never held the saturated rate, so no saturated stretch exists to fit (O1, widened by the owner after pass 1)`,
+    );
+  }
 
   const rederivedA = rederiveConvergedMedian(path.join(RUN_DIR, 'A.records.ndjson'), barSeqA, sa.latest?.seq);
   const rederivedB = rederiveConvergedMedian(path.join(RUN_DIR, 'B.records.ndjson'), barSeqB, sb.latest?.seq);
@@ -941,7 +1101,15 @@ try {
     const { treatment, refusalDwell } = client;
     console.log(`  ${client.label}: treatment ${treatment.status} over ${treatment.observed.samples} samples (startup ${treatment.observed.outcome}); refusal/dwell ${refusalDwell.status} over polls ${refusalDwell.firstPollId}..${refusalDwell.lastPollId}; settled entries ${JSON.stringify(refusalDwell.settledEntries.map((entry) => entry.elapsedMs))}`);
     expect(`INT ${client.label} held the adopted pitch treatment on every retained sample`, treatment.status === 'met', JSON.stringify(treatment.failures));
-    expect(`INT ${client.label} followed the adopted refusal and dwell policy`, refusalDwell.status === 'met', JSON.stringify(refusalDwell.failures));
+    const settle = settleStates.find((state) => state.label === client.label);
+    const onlyNeverSettled = refusalDwell.failures.length === 1 && refusalDwell.failures[0] === 'never-settled';
+    expectWhen(
+      `INT ${client.label} followed the adopted refusal and dwell policy`,
+      !(onlyNeverSettled && settle?.path === 'in-sync'),
+      refusalDwell.status === 'met',
+      JSON.stringify(refusalDwell.failures),
+      `${client.label} finished T5 in sync, and never-settled is its only failure (O1 option 1)`,
+    );
   }
 
   const parkingThresholdsUsable = t7Figures.length === 2 && t7Figures.every((figure) =>
@@ -961,7 +1129,54 @@ try {
   expect('7.2 playback continues past the first few segments', advA2 > 12000 && advB2 > 12000, `A +${(advA2 / 1000).toFixed(1)}s past its start, B +${(advB2 / 1000).toFixed(1)}s`);
   expect('7.2 neither window stalled', pa2.time > pa.time + 5 && pb2.time > pb.time + 5, `A +${(pa2.time - pa.time).toFixed(1)}s, B +${(pb2.time - pb.time).toFixed(1)}s`);
 
+  console.log('\n--- 9.1: replicated pause and resume, by page click ---');
+  const replicaPages = () => Promise.all([pageOf(a), pageOf(b)]);
+  const pauseClickedAt = Date.now();
+  await clickElement(a, '#pause');
+  const paused = await pollUntil(
+    replicaPages,
+    (pages) => pages.every((page) => page.playback?.waiting === WAITING_PAUSED && Number.isFinite(lastSeamPosition(page))) && sameIdentity(pages) && lastSeamPosition(pages[0]) === lastSeamPosition(pages[1]),
+    { everyMs: 100, deadlineAt: pauseClickedAt + TRANSITION_LEAD_MS + 2000 },
+  );
+  const pausedPages = paused.value;
+  const pausedDetail = JSON.stringify(pausedPages.map((page) => ({ waiting: page.playback?.waiting, identity: page.timeline?.identity, parkedAt: lastSeamPosition(page) })));
+  console.log(`  pause ${paused.ok ? 'replicated' : 'did not replicate'} after ${Date.now() - pauseClickedAt}ms: ${pausedDetail}`);
+  expect(`9.1 A's pause click leaves both windows ${WAITING_PAUSED} within ${TRANSITION_LEAD_MS + 2000}ms`, pausedPages.every((page) => page.playback?.waiting === WAITING_PAUSED), pausedDetail);
+  expect('9.1 both paused windows hold the same state identity', sameIdentity(pausedPages), pausedDetail);
+  expect('9.1 both paused windows parked at the same position', Number.isFinite(lastSeamPosition(pausedPages[0])) && lastSeamPosition(pausedPages[0]) === lastSeamPosition(pausedPages[1]), pausedDetail);
+
+  const startsBeforeResume = pausedPages.map((page) => page.playback?.starts?.length ?? 0);
+  // `room-paused` is published while the pause is still pending, and a pending
+  // transition disables every issuing button (C1-11): click only once B's play is live.
+  const playEnabled = await pollUntil(() => pageOf(b), (page) => page.buttons?.play?.disabled === false, { everyMs: 100, deadlineAt: Date.now() + TRANSITION_LEAD_MS + 2000 });
+  expect("9.1 B's play is enabled once the pause has taken effect", playEnabled.ok, JSON.stringify(playEnabled.value.buttons?.play));
+  const resumeClickedAt = Date.now();
+  await clickElement(b, '#play');
+  const resumed = await pollUntil(
+    replicaPages,
+    (pages) => pages.every((page) => page.playback?.playing === true) && sameIdentity(pages),
+    { everyMs: 100, deadlineAt: resumeClickedAt + TRANSITION_LEAD_MS + 5000 },
+  );
+  const resumedDetail = JSON.stringify(resumed.value.map((page) => ({ playing: page.playback?.playing, waiting: page.playback?.waiting, identity: page.timeline?.identity })));
+  console.log(`  resume ${resumed.ok ? 'replicated' : 'did not replicate'} after ${Date.now() - resumeClickedAt}ms`);
+  expect("9.1 B's play click has both windows playing again", resumed.value.every((page) => page.playback?.playing === true), resumedDetail);
+  expect('9.1 both resumed windows hold the same, newer state identity', sameIdentity(resumed.value) && resumed.value[0].timeline.identity.version > pausedPages[0].timeline?.identity?.version, resumedDetail);
+  for (const [index, label, tab] of [[0, 'A', a], [1, 'B', b]]) {
+    const ready = await awaitStartRecords(tab, `${label} resume`, startsBeforeResume[index]);
+    evaluateRetainedResidual({ label: `${label} resume`, fileStem: `${label}-resume`, ready, frameIntervalMs });
+  }
+
   console.log('\n--- 7.1: closing one updates the other ---');
+  // The roster WITH `joinedAt`, which the page renders without: read off A's own
+  // socket frames from here, after every measured span, for the late-join
+  // precondition at 7.3b (D11). Every membership change after this reaches A.
+  let rosterSeenByA = null;
+  a.on('Network.webSocketFrameReceived', ({ response }) => {
+    let env;
+    try { env = JSON.parse(response?.payloadData ?? ''); } catch { return; }
+    if ((env?.type === 'joined' || env?.type === 'presence') && Array.isArray(env.payload?.roster)) rosterSeenByA = env.payload.roster;
+  });
+  await a.send('Network.enable');
   await cdpHttp(`/json/close/${b.targetId}`);
   await sleep(3000);
   const pa3 = await a.evaluate(PROBE);
@@ -1043,6 +1258,7 @@ try {
 
   console.log('\n--- 7.3b: closing the host tab and reopening it with the same tab id ---');
   const noticesB = pv2.notices.length;
+  const rosterAtClose = rosterSeenByA;
   await cdpHttp(`/json/close/${a.targetId}`);
   await sleep(1500);
   const a3 = await attach('A3/host', URL_A);
@@ -1057,6 +1273,24 @@ try {
   expect('7.3b the viewer ends with exactly one host', pv3.members.filter((m) => /host/.test(m)).length === 1, JSON.stringify(pv3.members));
   const advV3 = advancedMs(await seamOf(v), pv3);
   expect('7.3b the viewer kept playing throughout', advV3 > 10000 && !pv3.paused, `+${(advV3 / 1000).toFixed(1)}s past its start`);
+
+  console.log('\n--- LJ / RES: the late joiner after the earliest member left (D11) ---');
+  // The precondition first, from the roster A last received before it closed:
+  // without it, A3 adopting V's state says nothing about the survivor route.
+  const rosterShaped = Array.isArray(rosterAtClose) && rosterAtClose.length >= 2
+    && rosterAtClose.every((member) => typeof member?.tabId === 'string' && Number.isFinite(member.joinedAt))
+    && rosterAtClose.filter((member) => member.tabId === 'A').length === 1;
+  const earliestAtClose = rosterShaped ? rosterAtClose.reduce((first, member) => (member.joinedAt < first.joinedAt ? member : first)) : null;
+  expect('LJ A was the earliest joiner of the members present when it closed', rosterShaped && earliestAtClose.tabId === 'A' && rosterAtClose.filter((member) => member.joinedAt === earliestAtClose.joinedAt).length === 1, JSON.stringify(rosterAtClose));
+  const a3Ready = await awaitStartRecords(a3, 'A3', 0);
+  const [a3Now, vNow] = await Promise.all([a3.evaluate(SEAM), v.evaluate(SEAM)]);
+  const a3Identity = a3Now.timeline?.identity ?? null;
+  const vIdentity = vNow.timeline?.identity ?? null;
+  expect("LJ A3 holds the survivor's state identity", a3Identity !== null && typeof a3Identity === 'object' && JSON.stringify(a3Identity) === JSON.stringify(vIdentity), `A3 ${JSON.stringify(a3Identity)} · V ${JSON.stringify(vIdentity)}`);
+  const a3EpochMs = a3Now.latest?.epochMs;
+  const vEpochMs = vNow.latest?.epochMs;
+  expect("LJ A3's records carry the survivor's epoch", Number.isFinite(a3EpochMs) && Number.isFinite(vEpochMs) && a3EpochMs === vEpochMs, `A3 ${a3EpochMs} · V ${vEpochMs}`);
+  evaluateRetainedResidual({ label: 'A3', fileStem: 'A3', ready: a3Ready, frameIntervalMs });
 
   console.log('\n--- 7.3c: reloading the host tab (change 1b task 4.3) ---');
   // The case design.md D4 names as the accepted hole: a reload throws the
@@ -1089,176 +1323,83 @@ try {
   expect('7.3c the viewer ends with exactly one host', pv4.members.filter((m) => /host/.test(m)).length === 1, JSON.stringify(pv4.members));
   expect('7.3c the viewer kept playing throughout', !pv4.paused, `t=${pv4.time.toFixed(2)}s`);
 
-  console.log('\n--- T8: producing the first seam ---');
-  // THE ROUTE IS READ THROUGH `routeFields` AND NOWHERE ELSE — the fields
-  // printed here are the fields every assertion below is decided on, so a
-  // `before` and an `after` cannot come from two different paths.
-  const before = { V: routeFields(await readRoute(v)), A3: routeFields(await readRoute(a3)) };
-  console.log(`  before V: ${JSON.stringify(before.V)}`);
-  console.log(`  before A3: ${JSON.stringify(before.A3)}`);
-
-  const offlineConditions = { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 };
-  const onlineConditions = { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 };
-  await v.send('Network.enable');
-  await v.send('Network.emulateNetworkConditions', offlineConditions);
-
-  // ONE 30s BUDGET, shared by the two waits below rather than restarted between
-  // them: the departure and the offline signature are the same event, and a
-  // second full deadline would let the hold run to a minute.
-  const routeOfflineStartedAt = Date.now();
-  const routeOfflineDeadlineAt = routeOfflineStartedAt + DEPART_DEADLINE_MS;
-  const departure = await pollUntil(
-    () => a3.evaluate(PROBE),
-    (probe) => probe.members.length === 1,
-    { everyMs: DEPART_POLL_MS, deadlineAt: routeOfflineDeadlineAt },
+  console.log('\n--- 9.1: the host toggle, by page click ---');
+  const controlPages = () => Promise.all([pageOf(a3), pageOf(v)]);
+  const [hostStart] = await controlPages();
+  expect('9.1 the room is not yet in host control', hostStart.present && hostStart.timeline?.controlMode !== 'host', JSON.stringify(hostStart.timeline?.controlMode));
+  await clickElement(a3, '#control-mode');
+  const hostMode = await pollUntil(
+    controlPages,
+    (pages) => pages.every((page) => page.timeline?.controlMode === 'host') && pages[1].buttons?.pause?.disabled === true,
+    { everyMs: 100, deadlineAt: Date.now() + TRANSITION_LEAD_MS + 3000 },
   );
-  const departureObserved = departure.ok;
-  console.log(departureObserved
-    ? `  T8 A3 observed V's departure after ${Date.now() - routeOfflineStartedAt}ms: ${JSON.stringify(departure.value.members)}`
-    : `  T8 departure deadline expired after ${DEPART_DEADLINE_MS / 1000}s; A3 roster ${JSON.stringify(departure.value.members)}`);
+  const [hostHeld, viewerHeld] = hostMode.value;
+  expect("9.1 the host's toggle disables the viewer's pause", viewerHeld.timeline?.controlMode === 'host' && viewerHeld.buttons?.pause?.disabled === true, JSON.stringify({ mode: viewerHeld.timeline?.controlMode, pause: viewerHeld.buttons?.pause }));
+  const rejectedOf = (page) => page.timeline?.rejected?.notPermitted;
+  const heldVersions = [hostHeld, viewerHeld].map((page) => page.timeline?.identity?.version);
 
-  // Named for the two readings in scope, not shadowing them.
-  const deltaValue = (afterValue, beforeValue) => Number.isFinite(afterValue) && Number.isFinite(beforeValue) ? afterValue - beforeValue : NaN;
-  const offlineSignatureFor = (beforeFields, afterFields) => ({
-    probesIssued: deltaValue(afterFields.probesIssued, beforeFields.probesIssued) >= 3,
-    lost: deltaValue(afterFields.lost, beforeFields.lost) >= 3,
-    sampleCountUnchanged: afterFields.sampleCount === beforeFields.sampleCount,
-    halfWidthWidened: Number.isFinite(afterFields.halfWidthMs) && afterFields.halfWidthMs > beforeFields.halfWidthMs,
-    callbacksAdvanced: deltaValue(afterFields.callbacks, beforeFields.callbacks) > 0,
-  });
+  const disabledClick = await clickElement(v, '#pause');
+  await sleep(TRANSITION_LEAD_MS + 1000);
+  const afterDisabled = await controlPages();
+  expect('9.1 a click on the disabled pause issues nothing', disabledClick.disabledBefore && afterDisabled.every((page, i) => rejectedOf(page) === rejectedOf([hostHeld, viewerHeld][i]) && page.timeline?.identity?.version === heldVersions[i]), JSON.stringify({ disabledBefore: disabledClick.disabledBefore, notPermitted: afterDisabled.map(rejectedOf), versions: afterDisabled.map((page) => page.timeline?.identity?.version) }));
 
-  const offline = await pollUntil(
-    async () => {
-      const fields = routeFields(await readRoute(v));
-      return { fields, signature: offlineSignatureFor(before.V, fields) };
-    },
-    ({ signature }) => !departureObserved || Object.values(signature).every(Boolean),
-    { everyMs: DEPART_POLL_MS, deadlineAt: routeOfflineDeadlineAt },
+  const forcedClick = await clickElement(v, '#pause', { enableFirst: true });
+  const rejected = await pollUntil(
+    controlPages,
+    (pages) => pages.every((page, i) => rejectedOf(page) === rejectedOf(afterDisabled[i]) + 1),
+    { everyMs: 100, deadlineAt: Date.now() + TRANSITION_LEAD_MS + 3000 },
   );
-  const { fields: offlineFields, signature: offlineSignature } = offline.value;
-  console.log(`  T8 V offline signature: ${JSON.stringify({ ...offlineSignature, readings: offlineFields })}`);
-  // ONLY `lost` DISCRIMINATES, and the labels below say which clause claims what
-  // (`CONSTRAINTS.md` → *A reading pinned at its cap*). The other two stay
-  // because they say the controller kept its estimate across the hold; both
-  // passed in 4c's runs while every probe was completing, so neither is evidence
-  // of a disconnection and neither may be read as one.
-  expect('T8 V probes issued advanced by at least 3 while offline', offlineSignature.probesIssued, JSON.stringify(offlineFields));
-  expect('T8 V lost exchanges advanced by at least 3 while offline', offlineSignature.lost, JSON.stringify(offlineFields));
-  expect('T8 V kept its clock estimate: the filter window stayed full', offlineSignature.sampleCountUnchanged, JSON.stringify(offlineFields));
-  expect('T8 V clock half-width grew between the two readings', offlineSignature.halfWidthWidened, JSON.stringify(offlineFields));
-  expect('T8 V kept producing callbacks while offline', offlineSignature.callbacksAdvanced, JSON.stringify(offlineFields));
-  expect('T8 A3 observed V departure before the deadline', departureObserved, JSON.stringify(departure.value.members));
+  const rejectedDetail = JSON.stringify({ disabledBefore: forcedClick.disabledBefore, notPermitted: { before: afterDisabled.map(rejectedOf), after: rejected.value.map(rejectedOf) }, versions: rejected.value.map((page) => page.timeline?.identity?.version) });
+  expect('9.1 a viewer pause forced past the disabled button is rejected notPermitted by host and viewer', rejected.value.every((page, i) => rejectedOf(page) === rejectedOf(afterDisabled[i]) + 1), rejectedDetail);
+  expect('9.1 the rejected pause left the state version unchanged', rejected.value.every((page, i) => page.timeline?.identity?.version === heldVersions[i]), rejectedDetail);
 
-  await v.send('Network.emulateNetworkConditions', onlineConditions);
-  const routeRejoinStartedAt = Date.now();
-  const beforeFreshJoins = before.V.freshJoins;
-  const rejoin = await pollUntil(
-    () => v.evaluate(SEAM),
-    (seam) => Number.isFinite(seam.timeline?.freshJoins) && Number.isFinite(beforeFreshJoins) && seam.timeline.freshJoins > beforeFreshJoins,
-    { everyMs: REJOIN_POLL_MS, deadlineAt: routeRejoinStartedAt + REJOIN_DEADLINE_MS },
+  await clickElement(a3, '#control-mode');
+  const sharedAgain = await pollUntil(
+    controlPages,
+    (pages) => pages.every((page) => page.timeline?.controlMode !== 'host') && pages[1].buttons?.pause?.disabled === false,
+    { everyMs: 100, deadlineAt: Date.now() + TRANSITION_LEAD_MS + 3000 },
   );
-  const routeRejoined = rejoin.ok;
-  console.log(routeRejoined
-    ? `  T8 V fresh-joined after ${Date.now() - routeRejoinStartedAt}ms`
-    : `  T8 rejoin deadline expired after ${REJOIN_DEADLINE_MS / 1000}s; V reading ${JSON.stringify(offlineFields)}`);
+  expect("9.1 toggling back re-enables the viewer's pause", sharedAgain.ok, JSON.stringify({ mode: sharedAgain.value[1].timeline?.controlMode, pause: sharedAgain.value[1].buttons?.pause }));
 
-  const transientControllerReadings = [];
-  if (routeRejoined) {
-    const transientStartedAt = Date.now();
-    while (Date.now() - transientStartedAt < SEAM_SETTLE_MS) {
-      const seam = await v.evaluate(SEAM);
-      const controller = seam.controller ?? {};
-      transientControllerReadings.push({
-        atMs: Date.now(),
-        mode: controller.mode ?? null,
-        reason: controller.reason ?? null,
-      });
-      const remaining = SEAM_SETTLE_MS - (Date.now() - transientStartedAt);
-      if (remaining > 0) await sleep(Math.min(OBSERVE_POLL_MS, remaining));
-    }
-  }
-  const transientTooFew = transientControllerReadings.some((reading) => reading.mode === 'waiting' && reading.reason === 'too-few-records');
-  console.log(`  T8 transient waiting · too-few-records observed: ${transientTooFew ? 'yes' : 'no'} over ${transientControllerReadings.length} samples at ${OBSERVE_POLL_MS}ms`);
+  console.log('\n--- 9.1: the mute toggle, by page click ---');
+  const [muteHostBefore, muteViewerBefore] = await controlPages();
+  await clickElement(a3, '#mute');
+  await sleep(500);
+  const [muteHostAfter, muteViewerAfter] = await controlPages();
+  const muteDetail = JSON.stringify({ A3: [muteHostBefore.muted, muteHostAfter.muted], V: [muteViewerBefore.muted, muteViewerAfter.muted], versions: [muteHostBefore, muteHostAfter, muteViewerBefore, muteViewerAfter].map((page) => page.timeline?.identity?.version) });
+  expect("9.1 A3's mute flips its own element and not V's", typeof muteHostBefore.muted === 'boolean' && muteHostAfter.muted === !muteHostBefore.muted && muteViewerAfter.muted === muteViewerBefore.muted, muteDetail);
+  expect('9.1 mute changes no state version', muteHostAfter.timeline?.identity?.version === muteHostBefore.timeline?.identity?.version && muteViewerAfter.timeline?.identity?.version === muteViewerBefore.timeline?.identity?.version, muteDetail);
 
-  const routeAfterV = await readRoute(v);
-  const after = { V: routeFields(routeAfterV), A3: routeFields(await readRoute(a3)) };
-  console.log(`  after V: ${JSON.stringify(after.V)}`);
-  console.log(`  after A3: ${JSON.stringify(after.A3)}`);
+  console.log('\n--- 9.1: a page with no room creates one, and invites ---');
+  const n = await attach('N/creator', `${ORIGIN}/room.html`);
+  const created = await pollUntil(() => pageOf(n), (page) => page.present && /[?&]room=/.test(page.search) && page.members.length > 0, { everyMs: 250, deadlineAt: Date.now() + 15_000 });
+  const createdQuery = new URLSearchParams(created.value.search ?? '');
+  const createdRoom = createdQuery.get('room');
+  const createdTab = createdQuery.get('tab');
+  expect('9.1 the no-room page rewrote its URL with a new room, role=host and a tab', /^[0-9a-f]{32}$/.test(createdRoom ?? '') && createdQuery.get('role') === 'host' && Boolean(createdTab), created.value.search);
+  let inviteUrl = null;
+  try { inviteUrl = new URL(created.value.invite); } catch { /* asserted below */ }
+  expect('9.1 the invite link carries the room and nothing else', inviteUrl !== null && inviteUrl.pathname === '/room.html' && [...inviteUrl.searchParams.keys()].join(',') === 'room' && inviteUrl.searchParams.get('room') === createdRoom, created.value.invite);
+  expect('9.1 the creator holds the host role under its tab', created.value.members.some((member) => member.startsWith(`${createdTab} · host`)), JSON.stringify(created.value.members));
 
-  const delta = (who, field) => deltaValue(after[who][field], before[who][field]);
-  const freshJoinDelta = delta('V', 'freshJoins');
-  const reopenDelta = delta('V', 'reopens');
-  const openDelta = delta('V', 'opens');
-  const seamDelta = delta('V', 'seams');
-  // The two things the route fields cannot carry: the seam LIST rather than its
-  // length, and the controller state that is not part of the route.
-  const afterVPlayback = routeAfterV.seam?.playback ?? {};
-  const afterVController = routeAfterV.seam?.controller ?? {};
-  const newVSeam = Array.isArray(afterVPlayback.seams) && Number.isFinite(before.V.seams)
-    ? afterVPlayback.seams[before.V.seams]
-    : null;
+  await n.send('Page.reload', { ignoreCache: false });
+  await sleep(1000);
+  await n.send('Runtime.enable');
+  // D4's reload race may refuse the new page first; it retries in (7.3c).
+  const reloaded = await pollUntil(() => pageOf(n), (page) => page.present && page.members.some((member) => member.startsWith(`${createdTab} · host`)), { everyMs: 500, deadlineAt: Date.now() + 25_000 });
+  const reloadedQuery = new URLSearchParams(reloaded.value.search ?? '');
+  expect('9.1 the reloaded creator keeps its room and tab', reloadedQuery.get('room') === createdRoom && reloadedQuery.get('tab') === createdTab && reloadedQuery.get('role') === 'host', reloaded.value.search);
+  expect('9.1 the reloaded creator rejoins as host', reloaded.ok, JSON.stringify(reloaded.value.members));
 
-  expect('T8 V freshJoins advanced by exactly 1', freshJoinDelta === 1, `before=${before.V.freshJoins} after=${after.V.freshJoins}`);
-  expect('T8 V epochRevisions advanced by 0', delta('V', 'epochRevisions') === 0, `before=${before.V.epochRevisions} after=${after.V.epochRevisions}`);
-  expect('T8 V timeline epoch moved later', Number.isFinite(after.V.timelineEpochMs) && after.V.timelineEpochMs > before.V.timelineEpochMs, `before=${before.V.timelineEpochMs} after=${after.V.timelineEpochMs}`);
-  expect('T8 V reopens advanced by exactly 1', reopenDelta === 1, `before=${before.V.reopens} after=${after.V.reopens}`);
-  expect('T8 V opens advanced by 0', openDelta === 0, `before=${before.V.opens} after=${after.V.opens}`);
-  expect('T8 V seams advanced by exactly 1', seamDelta === 1, `before=${before.V.seams} after=${after.V.seams}`);
-  expect('T8 V new seam has a nonzero afterSeq', Number.isFinite(newVSeam?.afterSeq) && newVSeam.afterSeq > 0, JSON.stringify(newVSeam));
-  expect('T8 V new seam uses the post-event timeline epoch', newVSeam?.epochMs === after.V.timelineEpochMs, JSON.stringify({ seamEpochMs: newVSeam?.epochMs, timelineEpochMs: after.V.timelineEpochMs }));
-  expect('T8 V seam-drop counter advanced by exactly 1', delta('V', 'seamDrops') === 1, `before=${before.V.seamDrops} after=${after.V.seamDrops}`);
-  expect("T8 V controller's last drop was a seam", afterVController.lastDrop?.reason === 'seam', JSON.stringify(afterVController.lastDrop));
-  expect('T8 V controller returned to the base rate within RATE_EPSILON', Math.abs((afterVController.rate ?? NaN) - 1) <= RATE_EPSILON, JSON.stringify(afterVController.rate));
-  // The assertion below reads the controller AFTER a seam it assumes occurred.
-  // It is evaluated only once that seam is proven; otherwise it claims nothing
-  // rather than reporting a dwell failure about an event that never happened.
-  const postSeam = postSeamSettlingOutcome({
-    before: before.V,
-    after: after.V,
-    newSeam: newVSeam,
-    seamDropDelta: delta('V', 'seamDrops'),
-    mode: after.V.mode,
-  });
-  expectWhen(
-    "T8 V controller did not re-settle during the 3s post-seam read",
-    postSeam.outcome !== 'not-exercised',
-    after.V.mode !== 'settled',
-    JSON.stringify({ mode: after.V.mode, reason: afterVController.reason, seamMissing: postSeam.proof.missing }),
-    POST_SEAM_UNVERIFIED,
+  const invited = inviteUrl ? await attach('I/invite', inviteUrl.href) : null;
+  const joinedByInvite = await pollUntil(
+    () => pageOf(n),
+    (page) => page.members.length === 2 && page.members.some((member) => /^\S+ · viewer · /.test(member) && !member.startsWith(`${createdTab} · `)),
+    { everyMs: 250, deadlineAt: Date.now() + 15_000 },
   );
-  expect('T8 V controller rebuilt a nonempty window', afterVController.windowRecords > 0, JSON.stringify(afterVController.windowRecords));
-  expect('T8 V newest record is after the new seam', Number.isFinite(routeAfterV.seam?.latest?.seq) && routeAfterV.seam.latest.seq > newVSeam?.afterSeq, JSON.stringify({ latestSeq: routeAfterV.seam?.latest?.seq, afterSeq: newVSeam?.afterSeq }));
-  expect('T8 A3 freshJoins stayed unchanged', delta('A3', 'freshJoins') === 0, `before=${before.A3.freshJoins} after=${after.A3.freshJoins}`);
-  expect('T8 A3 epochRevisions stayed unchanged', delta('A3', 'epochRevisions') === 0, `before=${before.A3.epochRevisions} after=${after.A3.epochRevisions}`);
-  expect('T8 A3 reopens stayed unchanged', delta('A3', 'reopens') === 0, `before=${before.A3.reopens} after=${after.A3.reopens}`);
-  expect('T8 A3 seam-drop counter stayed unchanged', delta('A3', 'seamDrops') === 0, `before=${before.A3.seamDrops} after=${after.A3.seamDrops}`);
-  expect('T8 A3 timeline epoch stayed unchanged', after.A3.timelineEpochMs === before.A3.timelineEpochMs, `before=${before.A3.timelineEpochMs} after=${after.A3.timelineEpochMs}`);
-
-  const networkSignaturePresent = offlineSignature.probesIssued && offlineSignature.lost && offlineSignature.sampleCountUnchanged && offlineSignature.halfWidthWidened;
-  if (!offlineSignature.callbacksAdvanced) console.log('  T8 V media stall: playback.callbacks did not advance during the offline hold; this is a stall, not a seam failure.');
-  const routeSignaturePresent = Object.values(offlineSignature).every(Boolean);
-  let routeDiagnosis = null;
-  if (!networkSignaturePresent) routeDiagnosis = 'V never went offline';
-  else if (freshJoinDelta !== 1) routeDiagnosis = 'V went offline and was reclaimed';
-  else if (reopenDelta !== 1) routeDiagnosis = 'V fresh-joined and did not re-open';
-  const routeFired = departureObserved && routeSignaturePresent && freshJoinDelta === 1 && reopenDelta === 1 && openDelta === 0 && seamDelta === 1;
-  if (routeDiagnosis !== null || !routeFired) {
-    console.log(`  T8 route diagnosis: ${routeDiagnosis ?? 'V fresh-joined and re-opened, but another route assertion failed'}; offline signature ${JSON.stringify(offlineSignature)}; V before/after ${JSON.stringify({ before: before.V, after: after.V })}`);
-  } else {
-    console.log(`  T8 route diagnosis: seam fired; V fresh-joined and re-opened once, A3 remained untouched`);
-  }
-  // Recorded for the integration classifier's signature match; it decides nothing here.
-  t8Route = {
-    diagnosis: routeDiagnosis ?? (routeFired ? 'seam fired' : 'V fresh-joined and re-opened, but another route assertion failed'),
-    departureObserved,
-    offlineSignature,
-    deltas: { freshJoins: freshJoinDelta, reopens: reopenDelta, opens: openDelta, seams: seamDelta, seamDrops: delta('V', 'seamDrops'), epochRevisions: delta('V', 'epochRevisions') },
-    vMode: { before: before.V.mode, after: after.V.mode },
-    routeFired,
-    postSeamSettling: postSeam.outcome,
-    postSeamMissing: postSeam.proof.missing,
-    postSeamUnverified: postSeam.outcome === 'not-exercised' ? POST_SEAM_UNVERIFIED : null,
-  };
+  expect("9.1 the invite joins the creator's room as a viewer under a different tab", invited !== null && joinedByInvite.ok, JSON.stringify(joinedByInvite.value.members));
+  if (invited) await cdpHttp(`/json/close/${invited.targetId}`);
+  await cdpHttp(`/json/close/${n.targetId}`);
 
   console.log('\n--- T9: figures ---');
   for (const line of t9FigureLines({
@@ -1273,8 +1414,6 @@ try {
     parkingThresholdsUsable,
     expectedObservationSamples,
     renderedLines: [['A', linesA], ['B', linesB]],
-    seamCounters: { before, after },
-    routeDiagnosis,
     elapsedMs: Date.now() - PASS_STARTED_AT,
   })) console.log(line);
 
@@ -1297,7 +1436,6 @@ try {
       finalManifest.outcome = failures.length === 0 ? 'pass' : 'failed';
       finalManifest.failures = failures.slice();
       finalManifest.notExercised = notExercised.slice();
-      finalManifest.t8Route = t8Route;
       fs.writeFileSync(manifestPath, `${JSON.stringify(finalManifest, null, 2)}\n`);
     } catch (error) {
       failures.push(`manifest finalization failed: ${error?.message ?? error}`);

@@ -11,7 +11,7 @@
 import { check, assert, assertEqual } from '../harness.mjs';
 import { createDriftLog } from '../../../public/lib/frame-drift.mjs';
 import { createDriftReadout, DRIFT_LINE_RE } from '../../../public/lib/drift-readout.mjs';
-import { MISSING_CLOCK } from '../../../public/lib/playback-start.mjs';
+import { MISSING_CLOCK, MISSING_STATE, WAITING_PAUSED, WAITING_PREPARING, WAITING_REFUSED } from '../../../public/lib/playback-start.mjs';
 
 /** The load rule's status, as the read-out consumes it — set directly by each check. */
 function fakePlayback(state = { playing: false, missing: MISSING_CLOCK }) {
@@ -33,11 +33,20 @@ export default async function driftReadoutSuite() {
     const { playback, readout } = rig();
     assertEqual(readout.text(), `drift: not playing — waiting for ${MISSING_CLOCK}`, 'the missing input is named, not summarised');
 
-    // Nothing missing and still not playing is the OTHER fault, and the line
-    // must not name an input the page holds — that sends change 6 after the
-    // wrong thing (playback-start.mjs).
-    playback.held.state = { playing: false, missing: null };
-    assertEqual(readout.text(), 'drift: not playing — the player did not open', 'a page holding both inputs and not playing says so');
+    playback.held.state = { playing: false, missing: MISSING_STATE, waiting: null, retargets: 0 };
+    assertEqual(readout.text(), `drift: not playing — waiting for ${MISSING_STATE}`, 'a missing state is named');
+
+    // Every input present: the waiting reason is named instead, and the pair
+    // differs only in `waiting` (retargets equal, missing null in both).
+    const base = { playing: false, missing: null, retargets: 3 };
+    const lines = [WAITING_PAUSED, WAITING_PREPARING, WAITING_REFUSED].map((waiting) => {
+      playback.held.state = { ...base, waiting };
+      return readout.text();
+    });
+    assertEqual(lines[0], 'drift: not playing — room paused', 'a paused room says so');
+    assertEqual(lines[1], 'drift: not playing — preparing start (retargets 3)', 'preparing names its retargets');
+    assertEqual(lines[2], 'drift: not playing — start refused, click the page to start', 'a refused start names the remedy');
+    assertEqual(new Set(lines).size, 3, 'the three reasons render distinctly');
   });
 
   await check('drift read-out: playing and recording nothing says WHICH counter is rising, fastest first', async () => {

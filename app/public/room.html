@@ -112,13 +112,42 @@
     border-left-color: var(--warn);
     color: var(--warn);
   }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+  .controls button {
+    font: inherit;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0.35rem 0.55rem;
+  }
+  .controls button:disabled {
+    color: var(--fg-dim);
+    opacity: 0.55;
+  }
 </style>
 </head>
 <body>
   <h1>synced watchalong</h1>
   <div class="layout">
-    <video id="video" controls muted playsinline autoplay></video>
+    <video id="video" muted playsinline></video>
     <div class="side">
+      <div class="panel">
+        <h2>controls</h2>
+        <div class="controls">
+          <button id="play" type="button">play</button>
+          <button id="pause" type="button">pause</button>
+          <button id="back-10" type="button">back 10s</button>
+          <button id="forward-10" type="button">forward 10s</button>
+          <button id="control-mode" type="button" hidden>mode: host</button>
+          <button id="mute" type="button">unmute</button>
+        </div>
+        <a id="invite" href="#">invite link</a>
+      </div>
       <div class="panel">
         <h2>connection</h2>
         <div id="status-line">unknown</div>

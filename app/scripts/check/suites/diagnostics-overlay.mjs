@@ -376,6 +376,34 @@ export default async function diagnosticsOverlaySuite() {
     assert(DRIFT_LINE_RE.test(line), 'drift text matches the published pattern');
   });
 
+  await check('diagnostics overlay: the drift line names paused, preparing with retargets, and missing state', async () => {
+    // The three statuses differ only in the fields the scheduled start sets for them.
+    const base = { playing: false, missing: null, waiting: null, retargets: 2 };
+    const statuses = [
+      { ...base, waiting: 'room-paused' },
+      { ...base, waiting: 'preparing' },
+      { ...base, missing: 'playback-state' },
+    ];
+    const lines = statuses.map((playbackState) => makeOverlay({ playbackState }).overlay.lines().drift);
+    assertEqual(lines[0], 'drift: not playing — room paused', 'paused');
+    assertEqual(lines[1], 'drift: not playing — preparing start (retargets 2)', 'preparing with its retargets');
+    assertEqual(lines[2], 'drift: not playing — waiting for playback-state', 'missing state');
+  });
+
+  await check('diagnostics overlay: an in-threshold hold with no correction renders an acting shape (O1 input)', async () => {
+    // Through the shipped controller, as a scheduled start landing in sync would
+    // reach it: records inside the threshold from the first poll, no correction.
+    const rig = recordRig({ halfWidthMs: 4 });
+    for (let i = 0; i < 12; i++) rig.add(1);
+    const state = rig.controller.poll();
+    assert(Number.isFinite(state.estimateMs) && state.thresholdUsable === true, `the hold has a usable threshold: ${JSON.stringify({ mode: state.mode, reason: state.reason })}`);
+    assert(Math.abs(state.estimateMs) <= state.stoppingThresholdMs, 'the estimate is inside the accepted threshold');
+    assertEqual(state.correctionsApplied, 0, 'no correction was applied');
+    assertEqual(`${state.mode}/${state.reason}`, 'declining/measurement-limit', 'the controller publishes declining at its measurement limit');
+    const line = makeOverlay({ controllerState: state }).overlay.lines().controller;
+    assert(CONTROLLER_LINE_ACTING_RE.test(line), `the in-threshold hold matches CONTROLLER_LINE_ACTING_RE: ${line}`);
+  });
+
   await check('diagnostics overlay: one paint consumes the drift read-out once', async () => {
     const { overlay } = makeOverlay();
     const first = overlay.lines();

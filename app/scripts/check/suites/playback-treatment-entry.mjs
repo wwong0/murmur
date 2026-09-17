@@ -33,6 +33,47 @@ async function sourceFiles(dir) {
   return found;
 }
 
+// One scripted frame sequence, and the drift records it must produce whatever
+// the instrument is doing (executor-spec.md §11.2). Every number is arithmetic
+// on the fixture: displayShared = timeOrigin + expectedDisplayTime + offset,
+// scheduled = displayShared − epoch, drift = media − scheduled. The epoch is the
+// sole creation's, `sharedNow + TRANSITION_LEAD_MS` at mediaMs 0.
+const TIME_ORIGIN_MS = 1_700_000_000_000;
+const FIXTURE = Object.freeze({
+  sharedNowMs: 1_700_000_000_400,
+  epochMs: 1_700_000_000_700,
+  clock: Object.freeze({ offsetMs: 500, halfWidthMs: 7, delayTermMs: 4, ageTermMs: 3, sampleCount: 8, counters: Object.freeze({ reanchors: 0 }) }),
+  frames: Object.freeze([
+    { expectedDisplayTime: 900, mediaTime: 0.5, presentedFrames: 101 },
+    { expectedDisplayTime: 1000, mediaTime: 0.625, presentedFrames: 102 },
+    { expectedDisplayTime: 1100, mediaTime: 0.75, presentedFrames: 103 },
+    { expectedDisplayTime: 1200, mediaTime: 0.875, presentedFrames: 104 },
+  ]),
+});
+const RECORD_CLOCK = { offsetMs: 500, halfWidthMs: 7, delayTermMs: 4, ageTermMs: 3, sampleCount: 8 };
+const EXPECTED_RECORDS = [
+  { seq: 1, epochMs: 1_700_000_000_700, mediaMs: 500, displaySharedMs: 1_700_000_001_400, scheduledMediaMs: 700, driftMs: -200, presentedFrames: 101, clock: RECORD_CLOCK },
+  { seq: 2, epochMs: 1_700_000_000_700, mediaMs: 625, displaySharedMs: 1_700_000_001_500, scheduledMediaMs: 800, driftMs: -175, presentedFrames: 102 },
+  { seq: 3, epochMs: 1_700_000_000_700, mediaMs: 750, displaySharedMs: 1_700_000_001_600, scheduledMediaMs: 900, driftMs: -150, presentedFrames: 103 },
+  { seq: 4, epochMs: 1_700_000_000_700, mediaMs: 875, displaySharedMs: 1_700_000_001_700, scheduledMediaMs: 1000, driftMs: -125, presentedFrames: 104 },
+].map((record) => ({ ...record, clock: RECORD_CLOCK }));
+
+function runScriptedFrames(product, { startTiming }) {
+  const page = runEntry(product.code, { search: startTiming ? '?room=r&tab=t&startTiming=1' : '?room=r&tab=t' });
+  page.harness.clock = { ...FIXTURE.clock };
+  page.resolveSole({ nowMs: FIXTURE.sharedNowMs });
+  // A fixed `performance.now()`: the display-window guard compares it against
+  // each frame's display instant, and nothing in a record is derived from it.
+  page.setNow(1000);
+  const armedBeforePlay = page.control.armedFrames();
+  page.act([{ kind: 'play', attemptId: 1, startAtSharedMs: FIXTURE.epochMs, latenessMs: 0, positionMs: 0 }], { startAtSharedMs: FIXTURE.epochMs });
+  const armedAfterPlay = page.control.armedFrames();
+  for (const frame of FIXTURE.frames) {
+    page.control.deliverFrame({ width: 1280, height: 720, presentationTime: frame.expectedDisplayTime - 4, processingDuration: 0.004, ...frame });
+  }
+  return { page, armedBeforePlay, armedAfterPlay, records: page.app.drift().records };
+}
+
 export default async function playbackTreatmentEntrySuite() {
   const product = await bundleProductEntry();
 
@@ -60,25 +101,74 @@ export default async function playbackTreatmentEntrySuite() {
     assertEqual(page.app.treatmentEvidence(), null, 'without the opt-in the page keeps no event history');
   });
 
-  await check('playback-treatment-entry: a reopen that keeps the flag keeps the controller and writes no second pitch', async () => {
+  await check('playback-treatment-entry: a throwing playback-start step still polls the controller and is reported by name', async () => {
     const page = runEntry(product.code);
-    page.open({});
-    page.open({ reopen: true, positionMs: 5000 });
-    assertEqual(page.count('reopen'), 1, 'the reopen ran');
-    assertEqual(page.count('pitch-write'), 1, 'and wrote no pitch');
-    assertEqual(page.count('controller-created'), 1, 'the controller was not reconstructed');
-    assertEqual(page.app.pitch().fault, null, 'nothing latched');
+    page.harness.pollThrows = true;
     const polls = page.count('controller-poll');
     page.tick();
-    assertEqual(page.count('controller-poll'), polls + 1, 'and it keeps polling');
+    assertEqual(page.count('controller-poll'), polls + 1, 'the controller step ran after the throwing start step');
+    assert(page.notices().some((text) => text.includes('playback-start failed')), 'the failure is reported under its step name');
   });
 
-  await check('playback-treatment-entry: pitch lost across load or reopen latches the fault, and the page shows it', async () => {
-    for (const point of ['load', 'reopen']) {
-      const lose = (control) => control.setPitch(true);
-      const page = runEntry(product.code, point === 'load' ? { onLoad: lose } : { onReopen: lose });
+  await check('playback-treatment-entry: every load, park and play marks one seam, and the sampler follows pause and play', async () => {
+    const page = runEntry(product.code);
+    const identity = page.resolveSole({ nowMs: 10_000 });
+    assert(identity.resolved === true && identity.playing === true, `the real acquisition resolved from its own creation: ${json(identity)}`);
+    const { lineage } = identity.identity;
+    // Pause the room at 10400: paused at media 100 (the creation plays from 0 at 10300).
+    page.deliver({ type: 'playback-operation', seq: 3, from: 'c1', ts: { recv: 10_350 }, payload: { kind: 'pause', basis: { lineage, version: 2 }, atSharedMs: 10_400 } });
+    assertEqual(page.app.timeline().playing, false, 'the pause was applied');
+    const latestSeq = page.app.drift().latestSeq;
+
+    page.act([{ kind: 'load', attemptId: 1, positionMs: 100 }], { startAtSharedMs: null });
+    page.act([{ kind: 'park', attemptId: 2, positionMs: 250 }], { startAtSharedMs: 11_000 });
+    page.act([{ kind: 'pause', attemptId: 3 }]);
+    assertEqual(page.count('sampler-stop'), 1, 'a pause action stops the sampler');
+    assertEqual(page.count('sampler-start'), 0, 'and nothing started it');
+    page.act([{ kind: 'play', attemptId: 2, startAtSharedMs: 11_000, latenessMs: 20, positionMs: 250 }]);
+    assertEqual(page.count('sampler-start'), 1, 'a play action starts the sampler');
+    assertEqual(page.count('play'), 1, 'and calls play() on the element');
+
+    const { seams, starts } = page.app.playback();
+    assertEqual(json(seams), json([
+      { afterSeq: latestSeq, epochMs: 10_300, positionMs: 100 },
+      { afterSeq: latestSeq, epochMs: 10_750, positionMs: 250 },
+      { afterSeq: latestSeq, epochMs: 10_750, positionMs: 250 },
+    ]), 'a paused hold seams at its mapping, a playing park and its play at S minus the park');
+    assertEqual(json(starts), json([{ attemptId: 2, afterSeq: latestSeq, startAtSharedMs: 11_000, playAtSharedMs: 11_020, latenessMs: 20, positionMs: 250 }]), 'the play appended one start');
+
+    page.control.settlePlay(0);
+    await new Promise((resolve) => setImmediate(resolve));
+    assertEqual(json(page.events.filter((event) => event.kind === 'play-resolved').map((event) => event.detail)), json([2]), 'the resolution reached its attempt');
+  });
+
+  await check('playback-treatment-entry: readiness waits for a park\'s seeked, and the tick re-checks readyState', async () => {
+    const page = runEntry(product.code);
+    page.harness.sharedNowMs = 5_000;
+    const readies = () => page.events.filter((event) => event.kind === 'ready').map((event) => event.detail);
+    page.act([{ kind: 'park', attemptId: 7, positionMs: 0 }], { startAtSharedMs: 6_000 });
+    page.video.readyState = 4;
+    page.control.fire('canplay');
+    assertEqual(readies().length, 0, 'canplay before the park\'s seeked is not readiness');
+    page.video.readyState = 2;
+    page.control.fire('seeked');
+    assertEqual(readies().length, 0, 'seeked below HAVE_FUTURE_DATA is not readiness yet');
+    page.video.readyState = 3;
+    page.tick();
+    assertEqual(json(readies()[0]), json({ attemptId: 7, observedSharedMs: 5_000 }), 'the tick reports readiness for the parked attempt');
+
+    const load = runEntry(product.code);
+    load.harness.sharedNowMs = 5_000;
+    load.act([{ kind: 'load', attemptId: 1, positionMs: 0 }], { startAtSharedMs: 6_000 });
+    load.video.readyState = 4;
+    load.control.fire('canplay');
+    assertEqual(load.events.filter((event) => event.kind === 'ready').length, 1, 'a load needs no seeked');
+  });
+
+  await check('playback-treatment-entry: pitch lost across the load latches the fault, and the page shows it', async () => {
+    for (const point of ['load']) {
+      const page = runEntry(product.code, { onLoad: (control) => control.setPitch(true) });
       page.open({});
-      if (point === 'reopen') page.open({ reopen: true, positionMs: 5000 });
       assertEqual(page.app.pitch().fault?.point, `after-${point}`, `${point}: the check after the ${point} latched`);
       const polls = page.count('controller-poll');
       page.tick();
@@ -96,25 +186,24 @@ export default async function playbackTreatmentEntrySuite() {
     }
   });
 
-  await check('playback-treatment-entry: a throwing reopen still runs the interlock, and without a loss it faults nothing', async () => {
+  await check('playback-treatment-entry: a throwing load still runs the interlock, and without a loss it faults nothing', async () => {
     for (const lose of [true, false]) {
       const page = runEntry(product.code, {
-        onReopen: (control) => {
+        onLoad: (control) => {
           if (lose) control.setPitch(true);
-          throw new Error('reopen failed');
+          throw new Error('load failed');
         },
       });
       page.open({});
-      page.open({ reopen: true, positionMs: 5000 });
-      assert(page.notices().some((text) => text.includes('the player did not open: reopen failed')), `${lose}: the entry reported the failed open`);
+      assert(page.notices().some((text) => text.includes('playback-start failed: load failed')), `${lose}: the entry reported the failed open`);
       const polls = page.count('controller-poll');
       page.tick();
       if (lose) {
-        assertEqual(page.app.pitch().fault?.point, 'after-reopen', 'the loss was caught after the throwing reopen');
+        assertEqual(page.app.pitch().fault?.point, 'after-load', 'the loss was caught after the throwing load');
         assertEqual(page.count('controller-poll'), polls, 'and the controller stays suspended');
         assertEqual(page.control.rateWrites().at(-1), 1, 'at unity');
       } else {
-        assertEqual(page.app.pitch().fault, null, 'the control: a throwing reopen alone is not a treatment fault');
+        assertEqual(page.app.pitch().fault, null, 'the control: a throwing load alone is not a treatment fault');
         assertEqual(page.count('controller-poll'), polls + 1, 'and the controller keeps polling');
       }
     }
@@ -141,6 +230,62 @@ export default async function playbackTreatmentEntrySuite() {
     assert(drained.events.some((event) => event.kind === 'open' && event.point === 'load'), 'the load is recorded');
     assert(drained.events.some((event) => event.kind === 'poll'), 'and the polls');
     assertEqual(drained.lost, 0, 'with nothing lost');
+  });
+
+  await check('playback-treatment-entry: without startTiming the instrument is off, nothing extra is armed, and the records are the constructed ones', async () => {
+    const off = runScriptedFrames(product, { startTiming: false });
+    assertEqual(off.page.app.startTiming().enabled, false, 'the seam reports the instrument off');
+    assertEqual(json(off.page.app.startTiming()), json({ enabled: false, events: [], missed: 0, dropped: 0, latestSeq: 0, capacity: 0 }), 'and reads the disabled shape');
+    assertEqual(off.armedBeforePlay, 0, 'no frame observer is armed before the start');
+    assertEqual(off.armedAfterPlay, 1, 'exactly one rVFC consumer, the product sampler');
+    assertEqual(json(off.records), json(EXPECTED_RECORDS), 'the scripted frames produce the constructed records');
+  });
+
+  await check('playback-treatment-entry: the instrument moves no drift record — on and off are byte-identical', async () => {
+    const off = runScriptedFrames(product, { startTiming: false });
+    const on = runScriptedFrames(product, { startTiming: true });
+    assertEqual(on.page.app.startTiming().enabled, true, 'the instrument is on');
+    assertEqual(on.armedBeforePlay, 1, 'the observer is armed before the start');
+    assertEqual(on.armedAfterPlay, 2, 'and the sampler joins it, two consumers on the same frames');
+    assertEqual(json(on.records), json(off.records), 'the same frames produce byte-identical drift records');
+    assertEqual(json(on.records), json(EXPECTED_RECORDS), 'and they are still the constructed ones');
+    const frames = on.page.app.startTiming().events.filter((event) => event.kind === 'frame');
+    assertEqual(frames.length, FIXTURE.frames.length, 'the observer saw every frame');
+    assertEqual(json(frames.map((frame) => frame.presentedFrames)), json(FIXTURE.frames.map((frame) => frame.presentedFrames)), 'and retains the join key the records carry');
+  });
+
+  await check('playback-treatment-entry: a scripted load, readiness, play and resolution record one event each, in order', async () => {
+    const page = runEntry(product.code, { search: '?room=r&tab=t&startTiming=1' });
+    page.harness.sharedNowMs = 6_000;
+    // From a cursor: the page's own load tick and the poll the resolution drives
+    // are real events, and this sequence is the window between them.
+    const cursor = page.app.startTiming().latestSeq;
+    page.act([
+      { kind: 'load', attemptId: 1, positionMs: 0 },
+      { kind: 'play', attemptId: 1, startAtSharedMs: 7_000, latenessMs: 3, positionMs: 0 },
+    ], { startAtSharedMs: 7_000 });
+    page.video.readyState = 4;
+    page.control.fire('canplay');
+    page.control.settlePlay(0);
+    await new Promise((resolve) => setImmediate(resolve));
+    const events = page.app.startTiming().events;
+    const window = events.filter((event) => event.seq > cursor && event.kind !== 'rate-write');
+    const of = (kind) => window.filter((event) => event.kind === kind);
+    assertEqual(json(window.map((event) => event.kind).slice(0, 5)), json(['poll', 'action', 'action', 'element-event', 'play-settled']), 'one poll, two actions, one element event, then the settlement');
+    assertEqual(json(['action', 'element-event', 'play-settled'].map((kind) => of(kind).length)), json([2, 1, 1]), 'and one of each, with nothing repeated');
+    assertEqual(json(window.map((event) => event.seq).sort((a, b) => a - b)), json(window.map((event) => event.seq)), 'seq runs forward');
+    assert(window.at(-1).kind === 'poll' && window.at(-1).seq > of('play-settled')[0].seq, 'the poll the resolution drives comes after the settlement it is reacting to');
+    assertEqual(json(of('poll')[0].actions), json(['load', 'play']), 'the poll names the actions it returned');
+    const [load, play] = of('action');
+    assertEqual(json([load.action, load.startAtSharedMs, load.advanceMs, load.scheduledPositionMs, load.elementPausedBefore]), json(['load', 7_000, 0, 0, true]), 'the load carries an uncompensated park');
+    assertEqual(json([play.action, play.startAtSharedMs, play.latenessMs, play.seamEpochMs, play.threw]), json(['play', 7_000, 3, 7_000, null]), 'and the play its scheduled start and seam');
+    assert(play.dispatchedAtLocalMs <= play.returnedAtLocalMs, `the play call is bracketed: ${play.dispatchedAtLocalMs} then ${play.returnedAtLocalMs}`);
+    assert(play.dispatchedAtLocalMs < play.returnedAtLocalMs, 'and the two instants are distinct, so the bracket is around the call and not around nothing');
+    const settled = of('play-settled')[0];
+    assertEqual(json([settled.outcome, settled.errorName]), json(['resolved', null]), 'the settlement is reported with no error');
+    assert(settled.settledAtLocalMs >= play.returnedAtLocalMs, `the settlement follows the return: ${settled.settledAtLocalMs} against ${play.returnedAtLocalMs}`);
+    const ready = of('element-event')[0];
+    assertEqual(json([ready.type, ready.readyState, ready.offeredReadiness, ready.observedSharedMs]), json(['canplay', 4, true, 6_000]), 'the element event says what readiness it offered');
   });
 
   await check('playback-treatment-entry: composed research arms keep their own treatment behind the stand-in', async () => {

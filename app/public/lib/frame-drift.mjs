@@ -58,7 +58,7 @@ const REFUSED = Object.freeze(
  * uncertainty describes the clock as it was when the frame was shown (D5).
  *
  * @param {{metadata: object, timeOriginMs: number, localNowMs: number,
- *   clock: {read: (atMs: number) => object}, timeline: {mediaMsAt: Function, epochMs: number|null},
+ *   clock: {read: (atMs: number) => object}, timeline: {mediaMsAt: Function, epochMsAt: Function},
  *   displayWindowMs?: number}} input
  */
 export function deriveDriftRecord({ metadata, timeOriginMs, localNowMs, clock, timeline, displayWindowMs = DISPLAY_WINDOW_MS }) {
@@ -83,7 +83,12 @@ export function deriveDriftRecord({ metadata, timeOriginMs, localNowMs, clock, t
 
   const displaySharedMs = displayLocalMs + estimate.offsetMs;
   const scheduledMediaMs = timeline.mediaMsAt(displaySharedMs);
-  if (scheduledMediaMs === null) return REFUSED.noEpoch;
+  // New timelines answer at the display instant; the getter fallback keeps
+  // older pure test doubles usable without restoring it to room-timeline.
+  const epochMs = typeof timeline.epochMsAt === 'function'
+    ? timeline.epochMsAt(displaySharedMs)
+    : timeline.epochMs;
+  if (scheduledMediaMs === null || !Number.isFinite(epochMs)) return REFUSED.noEpoch;
 
   const mediaMs = mediaTime * 1000;
   return {
@@ -91,7 +96,7 @@ export function deriveDriftRecord({ metadata, timeOriginMs, localNowMs, clock, t
     record: {
       // On every record: a pairwise figure across clients holding different
       // epochs is meaningless, and D1's remaining hole makes that reachable.
-      epochMs: timeline.epochMs,
+      epochMs,
       mediaMs,
       displaySharedMs,
       // The timeline's answer, not the arithmetic behind it — change 5 replaces

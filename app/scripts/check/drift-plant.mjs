@@ -9,7 +9,7 @@
 import { createFakeClock, DEFAULT_CALLBACK_LEAD_MS, DEFAULT_TIME_ORIGIN_MS } from './fake-frames.mjs';
 import { createDriftLog, deriveDriftRecord } from '../../public/lib/frame-drift.mjs';
 import { createDriftController } from '../../public/lib/drift-controller.mjs';
-import { createRoomTimeline } from '../../public/lib/room-timeline.mjs';
+import { createRoomTimeline, fixedPlayingState } from '../../public/lib/room-timeline.mjs';
 
 export const TIME_ORIGIN_MS = DEFAULT_TIME_ORIGIN_MS;
 
@@ -28,8 +28,7 @@ export function plant({
   const epochMs = TIME_ORIGIN_MS + 60_000;
   const intervalMs = 1000 / fps;
   const vsyncMs = 1000 / refreshHz;
-  const timeline = createRoomTimeline();
-  timeline.observeRoster([{ clientId: 'a', joinedAt: epochMs }]);
+  const timeline = createRoomTimeline({ readState: () => fixedPlayingState(epochMs) });
   const clock = createFakeClock({ offsetMs, delayTermMs, ageTermMs, present: clockPresent });
   const log = createDriftLog({ capacity: 10000 });
   const applied = [];
@@ -102,8 +101,7 @@ export function plant({
 
 export function recordRig({ settings = {}, offsetMs = 0, halfWidthMs = 4 } = {}) {
   const epochMs = TIME_ORIGIN_MS + 60_000;
-  const timeline = createRoomTimeline();
-  timeline.observeRoster([{ clientId: 'a', joinedAt: epochMs }]);
+  const timeline = createRoomTimeline({ readState: () => fixedPlayingState(epochMs) });
   const clock = createFakeClock({ offsetMs, delayTermMs: halfWidthMs, ageTermMs: 0 });
   const log = createDriftLog({ capacity: 10000 });
   let localNowMs = epochMs + 2000 - offsetMs;

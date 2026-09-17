@@ -37,8 +37,6 @@ export function t9FigureLines({
   parkingThresholdsUsable,
   expectedObservationSamples,
   renderedLines,
-  seamCounters,
-  routeDiagnosis,
   elapsedMs,
 }) {
   const lines = ['--- T9 FIGURES BEGIN ---'];
@@ -66,7 +64,6 @@ export function t9FigureLines({
     const distinct = (key) => [...new Set(readings.map((reading) => reading[key] ?? ''))];
     lines.push(`  T6b ${label} rendered clock lines ${JSON.stringify(distinct('clockText'))} (asserted against CLOCK_LINE_RE); drift lines ${JSON.stringify(distinct('driftText'))} (asserted against DRIFT_LINE_RE with a positive frame count); controller lines ${JSON.stringify(distinct('controllerText'))} (asserted against branch-specific controller shapes, with an acting match required).`);
   }
-  lines.push(`  T8 seam route counters: V before ${JSON.stringify(seamCounters.before.V)}; V after ${JSON.stringify(seamCounters.after.V)}; A3 before ${JSON.stringify(seamCounters.before.A3)}; A3 after ${JSON.stringify(seamCounters.after.A3)}; diagnosis ${routeDiagnosis ?? 'seam fired'}.`);
   lines.push(`  whole pass wall-clock length: ${numberText(elapsedMs, 0)}ms (${numberText(elapsedMs / 1000, 1)}s), measured from script start.`);
   lines.push('--- T9 FIGURES END ---');
   return lines;
