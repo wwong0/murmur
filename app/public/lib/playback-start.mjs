@@ -3,7 +3,10 @@
 // Pure scheduled-start reducer (D6). The entry supplies state, the shared
 // instant and the returned actions; this module owns no timer, DOM or clock.
 
-import { mediaMsAt } from './playback-state.mjs';
+import { epochMsAt, mediaMsAt } from './playback-state.mjs';
+
+/** The advance's accepted range (executor-spec.md §2.5 C1 amendment). */
+const ADVANCE_RANGE_MS = Object.freeze([0, 250]);
 
 export const MISSING_CLOCK = 'clock-estimate';
 export const MISSING_STATE = 'playback-state';
@@ -28,9 +31,15 @@ function targetFor(state) {
   return { playing: false, effectiveMs: current.atSharedMs, positionMs: current.mediaMs };
 }
 
-export function createPlaybackStart({ prepareLeadMs } = {}) {
+export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 } = {}) {
   if (!Number.isFinite(prepareLeadMs) || prepareLeadMs < 0) {
     throw new TypeError('prepareLeadMs must be a finite non-negative number');
+  }
+  const [advanceLow, advanceHigh] = ADVANCE_RANGE_MS;
+  // A value outside the range is a configuration fault, not something to clamp:
+  // the upper bound keeps an advance below S's own preparation lead.
+  if (!Number.isFinite(presentationAdvanceMs) || presentationAdvanceMs < advanceLow || presentationAdvanceMs > advanceHigh) {
+    throw new TypeError(`presentationAdvanceMs must be a finite number in [${advanceLow}, ${advanceHigh}]`);
   }
 
   let nextAttemptId = 1;
@@ -90,21 +99,33 @@ export function createPlaybackStart({ prepareLeadMs } = {}) {
     elementPlaying = false;
   }
 
-  function setupPosition(actions, id, positionMs) {
+  /**
+   * `positionMs` is the PHYSICAL park — what the entry writes. `mapping` is what
+   * the room is showing at S, carried explicitly so the entry publishes the room
+   * mapping on the seam rather than deriving it from the park (§12).
+   */
+  function setupPosition(actions, id, mapping) {
     if (!loaded) {
-      actions.push({ kind: 'load', attemptId: id, positionMs });
+      actions.push({ kind: 'load', attemptId: id, ...mapping });
       loaded = true;
       opens += 1;
     } else {
-      actions.push({ kind: 'park', attemptId: id, positionMs });
+      actions.push({ kind: 'park', attemptId: id, ...mapping });
     }
   }
 
   function newPlayingAttempt(state, target, nowSharedMs) {
     const id = nextAttemptId++;
     const S = Math.max(target.effectiveMs, nowSharedMs + prepareLeadMs);
-    const positionMs = mediaMsAt(state, S);
-    if (!Number.isFinite(positionMs)) {
+    // Both through the mapping's own arithmetic, never by adding the advance to
+    // a position: the timeline decides what media instant S + advance is (C1-6).
+    const mapping = {
+      positionMs: mediaMsAt(state, S + presentationAdvanceMs),
+      scheduledPositionMs: mediaMsAt(state, S),
+      advanceMs: presentationAdvanceMs,
+      seamEpochMs: epochMsAt(state, S),
+    };
+    if (![mapping.positionMs, mapping.scheduledPositionMs, mapping.seamEpochMs].every(Number.isFinite)) {
       missing = MISSING_STATE;
       return result([], null);
     }
@@ -113,15 +134,24 @@ export function createPlaybackStart({ prepareLeadMs } = {}) {
       id,
       target,
       S,
-      positionMs,
+      mapping,
+      positionMs: mapping.positionMs,
       readyAtSharedMs: null,
       playDispatched: false,
       parked: true,
     };
     pauseAction(actions, id);
-    setupPosition(actions, id, positionMs);
+    setupPosition(actions, id, mapping);
     return result(actions, S);
   }
+
+  /** A paused target parks at the state's position exactly: no advance, ever (D6). */
+  const pausedMapping = (target) => ({
+    positionMs: target.positionMs,
+    scheduledPositionMs: target.positionMs,
+    advanceMs: 0,
+    seamEpochMs: target.effectiveMs - target.positionMs,
+  });
 
   function newPausedAttempt(target, nowSharedMs) {
     const id = nextAttemptId++;
@@ -132,7 +162,7 @@ export function createPlaybackStart({ prepareLeadMs } = {}) {
       return result(actions, target.effectiveMs);
     }
     pauseAction(actions, id);
-    setupPosition(actions, id, target.positionMs);
+    setupPosition(actions, id, pausedMapping(target));
     attempt.parked = true;
     presented = { playing: false, positionMs: target.positionMs };
     retryAfterError = false;
@@ -151,7 +181,7 @@ export function createPlaybackStart({ prepareLeadMs } = {}) {
         attemptId: attempt.id,
         startAtSharedMs: attempt.S,
         latenessMs: lastLatenessMs,
-        positionMs: attempt.positionMs,
+        ...attempt.mapping,
       }], null);
     }
     retargets += 1;
@@ -203,7 +233,7 @@ export function createPlaybackStart({ prepareLeadMs } = {}) {
           attempt.deferred = false;
           const actions = [];
           pauseAction(actions, attempt.id);
-          setupPosition(actions, attempt.id, target.positionMs);
+          setupPosition(actions, attempt.id, pausedMapping(target));
           attempt.parked = true;
           presented = { playing: false, positionMs: target.positionMs };
           return result(actions, null);

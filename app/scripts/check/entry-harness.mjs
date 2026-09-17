@@ -336,8 +336,9 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
       harness.pendingActions.push(...actions);
       this.tick();
     },
+    /** The shape the real reducer emits: the physical park and the mapping it serves. */
     open(options) {
-      this.act([{ kind: 'load', attemptId: 1, positionMs: 0, ...options }], { startAtSharedMs: 1000 });
+      this.act([{ kind: 'load', attemptId: 1, positionMs: 0, scheduledPositionMs: 0, advanceMs: 0, seamEpochMs: 1000, ...options }], { startAtSharedMs: 1000 });
     },
   };
 }

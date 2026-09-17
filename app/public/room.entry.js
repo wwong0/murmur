@@ -25,7 +25,7 @@ import {
   ACQUISITION_REQUEST_TIMEOUT_MS,
   createPlaybackAcquisition,
 } from './lib/playback-acquisition.mjs';
-import { MAX_FUTURE_MS, PREPARE_LEAD_MS, TRANSITION_LEAD_MS } from './lib/playback-leads.mjs';
+import { MAX_FUTURE_MS, PREPARE_LEAD_MS, PRESENTATION_ADVANCE_MS, TRANSITION_LEAD_MS } from './lib/playback-leads.mjs';
 import { runTickSteps } from './lib/tick-steps.mjs';
 
 const BUILD_ID = __BUILD_ID__;
@@ -336,7 +336,7 @@ const controllerView = () => treatment.view(controller.state());
 // The scheduled start (D6) and the window drop at every start and park (D7)
 // ---------------------------------------------------------------------------
 
-const start = createPlaybackStart({ prepareLeadMs: PREPARE_LEAD_MS });
+const start = createPlaybackStart({ prepareLeadMs: PREPARE_LEAD_MS, presentationAdvanceMs: PRESENTATION_ADVANCE_MS });
 const STARTS_KEPT = 32;
 const starts = [];
 let startTimer = null;
@@ -401,12 +401,6 @@ for (const type of ['canplay', 'canplaythrough', 'seeked']) {
   video.addEventListener(type, () => runTickSteps([['readiness', () => observeElement(type)]], reportStep));
 }
 
-// Before task 12 the reducer carries neither figure: the physical park IS the
-// room position at S, and no advance is applied. The baseline capture asserts
-// `advanceMs === 0` on every action for exactly that reason.
-const scheduledPositionOf = (action) => action.scheduledPositionMs ?? action.positionMs ?? null;
-const advanceOf = (action) => action.advanceMs ?? 0;
-
 /**
  * One `action` event per action, with `dispatchedAtLocalMs`/`returnedAtLocalMs`
  * bracketing the element or player call itself — not the step around it, which
@@ -427,9 +421,10 @@ function recordAction(action, fields, dispatch) {
   } finally {
     telemetry.record('action', {
       action: action.kind,
+      // A `pause` carries no position, and says so rather than inventing one.
       positionMs: action.positionMs ?? null,
-      scheduledPositionMs: scheduledPositionOf(action),
-      advanceMs: advanceOf(action),
+      scheduledPositionMs: action.scheduledPositionMs ?? null,
+      advanceMs: action.advanceMs ?? null,
       startAtSharedMs: null,
       latenessMs: null,
       seamEpochMs: null,
@@ -444,8 +439,10 @@ function recordAction(action, fields, dispatch) {
 }
 
 function play(action) {
-  const seamEpochMs = action.startAtSharedMs - action.positionMs;
-  markSeam(seamEpochMs, action.positionMs);
+  // The room's own mapping, as the reducer computed it — never S minus the
+  // physical park, which differs from it by the advance (§12, C1-10).
+  const seamEpochMs = action.seamEpochMs;
+  markSeam(seamEpochMs, action.scheduledPositionMs);
   starts.push({
     attemptId: action.attemptId,
     afterSeq: driftLog.latestSeq,
@@ -453,6 +450,11 @@ function play(action) {
     playAtSharedMs: action.startAtSharedMs + action.latenessMs,
     latenessMs: action.latenessMs,
     positionMs: action.positionMs,
+    scheduledPositionMs: action.scheduledPositionMs,
+    advanceMs: action.advanceMs,
+    // The seam's own epoch, so acceptance can check it against the room's
+    // (§15 item 4) without re-deriving it from the advanced park.
+    epochMs: seamEpochMs,
   });
   if (starts.length > STARTS_KEPT) starts.shift();
   sampler.start();
@@ -487,23 +489,22 @@ function play(action) {
   );
 }
 
-function execute(result, state) {
+function execute(result) {
   for (const action of result.actions) {
     if (action.kind === 'pause') {
       sampler.stop();
       recordAction(action, {}, () => video.pause());
     } else if (action.kind === 'load' || action.kind === 'park') {
-      // C1-10: a playing attempt's seam is S minus its park; a paused hold's is its mapping.
-      const epochMs = result.startAtSharedMs !== null
-        ? result.startAtSharedMs - action.positionMs
-        : state.current.atSharedMs - state.current.mediaMs;
+      // C1-10: the reducer carries the mapping each action serves, playing or
+      // paused, so nothing here derives an epoch from the physical park.
+      const epochMs = action.seamEpochMs;
       readiness = { attemptId: action.attemptId, needsSeeked: action.kind === 'park', prerequisiteSeen: false };
       recordAction(action, { startAtSharedMs: result.startAtSharedMs, seamEpochMs: epochMs }, () => {
         if (action.kind === 'load') treatment.open(() => player.load({ startPositionMs: action.positionMs }), 'load');
         else player.park(action.positionMs);
       });
       if (action.kind === 'load') addNotice(`playback opened at ${(action.positionMs / 1000).toFixed(2)}s`);
-      markSeam(epochMs, action.positionMs);
+      markSeam(epochMs, action.scheduledPositionMs);
     } else if (action.kind === 'play') {
       play(action);
     }
@@ -534,7 +535,7 @@ function pollStart() {
     begun: result.begun,
     retargets: result.retargets,
   }, telemetryContext());
-  execute(result, state);
+  execute(result);
   if (result.nextAtSharedMs === null) {
     if (startTimer !== null) clearTimeout(startTimer);
     startTimer = null;

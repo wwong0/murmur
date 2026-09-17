@@ -18,6 +18,8 @@ import { commandThresholdFor } from '../d8-research-controller.mjs';
 import { buildResearchBundle } from '../../remedy-browser-build.mjs';
 import { buildOptions } from '../../build.mjs';
 import { D8_COMMAND_THRESHOLD } from '../../../public/lib/drift-controller.mjs';
+import { seamEpochAgreement } from '../../start-residual.mjs';
+import { PRESENTATION_ADVANCE_MS } from '../../../public/lib/playback-leads.mjs';
 import { CONTROLLER_LINE_TREATMENT_FAULT_RE } from '../../../public/lib/diagnostics-overlay.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -66,7 +68,7 @@ function runScriptedFrames(product, { startTiming }) {
   // each frame's display instant, and nothing in a record is derived from it.
   page.setNow(1000);
   const armedBeforePlay = page.control.armedFrames();
-  page.act([{ kind: 'play', attemptId: 1, startAtSharedMs: FIXTURE.epochMs, latenessMs: 0, positionMs: 0 }], { startAtSharedMs: FIXTURE.epochMs });
+  page.act([{ kind: 'play', attemptId: 1, startAtSharedMs: FIXTURE.epochMs, latenessMs: 0, positionMs: 0, scheduledPositionMs: 0, advanceMs: 0, seamEpochMs: FIXTURE.epochMs }], { startAtSharedMs: FIXTURE.epochMs });
   const armedAfterPlay = page.control.armedFrames();
   for (const frame of FIXTURE.frames) {
     page.control.deliverFrame({ width: 1280, height: 720, presentationTime: frame.expectedDisplayTime - 4, processingDuration: 0.004, ...frame });
@@ -120,12 +122,12 @@ export default async function playbackTreatmentEntrySuite() {
     assertEqual(page.app.timeline().playing, false, 'the pause was applied');
     const latestSeq = page.app.drift().latestSeq;
 
-    page.act([{ kind: 'load', attemptId: 1, positionMs: 100 }], { startAtSharedMs: null });
-    page.act([{ kind: 'park', attemptId: 2, positionMs: 250 }], { startAtSharedMs: 11_000 });
+    page.act([{ kind: 'load', attemptId: 1, positionMs: 100, scheduledPositionMs: 100, advanceMs: 0, seamEpochMs: 10_300 }], { startAtSharedMs: null });
+    page.act([{ kind: 'park', attemptId: 2, positionMs: 250, scheduledPositionMs: 250, advanceMs: 0, seamEpochMs: 10_750 }], { startAtSharedMs: 11_000 });
     page.act([{ kind: 'pause', attemptId: 3 }]);
     assertEqual(page.count('sampler-stop'), 1, 'a pause action stops the sampler');
     assertEqual(page.count('sampler-start'), 0, 'and nothing started it');
-    page.act([{ kind: 'play', attemptId: 2, startAtSharedMs: 11_000, latenessMs: 20, positionMs: 250 }]);
+    page.act([{ kind: 'play', attemptId: 2, startAtSharedMs: 11_000, latenessMs: 20, positionMs: 250, scheduledPositionMs: 250, advanceMs: 0, seamEpochMs: 10_750 }]);
     assertEqual(page.count('sampler-start'), 1, 'a play action starts the sampler');
     assertEqual(page.count('play'), 1, 'and calls play() on the element');
 
@@ -135,18 +137,73 @@ export default async function playbackTreatmentEntrySuite() {
       { afterSeq: latestSeq, epochMs: 10_750, positionMs: 250 },
       { afterSeq: latestSeq, epochMs: 10_750, positionMs: 250 },
     ]), 'a paused hold seams at its mapping, a playing park and its play at S minus the park');
-    assertEqual(json(starts), json([{ attemptId: 2, afterSeq: latestSeq, startAtSharedMs: 11_000, playAtSharedMs: 11_020, latenessMs: 20, positionMs: 250 }]), 'the play appended one start');
+    assertEqual(json(starts), json([{ attemptId: 2, afterSeq: latestSeq, startAtSharedMs: 11_000, playAtSharedMs: 11_020, latenessMs: 20, positionMs: 250, scheduledPositionMs: 250, advanceMs: 0, epochMs: 11_000 - 250 }]), 'the play appended one start');
 
     page.control.settlePlay(0);
     await new Promise((resolve) => setImmediate(resolve));
     assertEqual(json(page.events.filter((event) => event.kind === 'play-resolved').map((event) => event.detail)), json([2]), 'the resolution reached its attempt');
   });
 
+  // The defect §12 exists to prevent, and the one that would evade every
+  // controller assertion: with a nonzero advance, `S − physical park` is the
+  // true room epoch MINUS the advance, and the controller drops its own window
+  // by `afterSeq`, so nothing downstream would contradict it.
+  await check('playback-treatment-entry: the seam publishes the room mapping epoch, not S minus the advanced park', async () => {
+    const A = PRESENTATION_ADVANCE_MS;
+    assert(A > 0, `this check is only a check with a nonzero advance, got ${A}`);
+    const page = runEntry(product.code, { search: '?room=r&tab=t' });
+    page.harness.clock = { ...FIXTURE.clock };
+    const identity = page.resolveSole({ nowMs: FIXTURE.sharedNowMs });
+    // The sole creation plays from mediaMs 0 at sharedNow + TRANSITION_LEAD_MS.
+    const roomEpochMs = FIXTURE.epochMs;
+    assert(identity.playing === true, 'the room this start serves is playing');
+    const latestSeq = page.app.drift().latestSeq;
+    // One mapping, three actions: the room position at S, and the park an
+    // advance beyond it. Nothing but the advance separates the two.
+    const serving = (S) => ({ scheduledPositionMs: S - roomEpochMs, positionMs: S - roomEpochMs + A, advanceMs: A, seamEpochMs: roomEpochMs });
+    const S1 = roomEpochMs + 700;
+    const S2 = roomEpochMs + 1_700;
+    page.act([{ kind: 'load', attemptId: 1, ...serving(S1) }], { startAtSharedMs: S1 });
+    page.act([{ kind: 'park', attemptId: 2, ...serving(S2) }], { startAtSharedMs: S2 });
+    page.act([{ kind: 'play', attemptId: 2, startAtSharedMs: S2, latenessMs: 0, ...serving(S2) }], { startAtSharedMs: S2 });
+
+    const { seams, starts } = page.app.playback();
+    assertEqual(seams.length, 3, 'the load, the park and the play each marked exactly one seam');
+    assertEqual(json(seams), json([
+      { afterSeq: latestSeq, epochMs: roomEpochMs, positionMs: 700 },
+      { afterSeq: latestSeq, epochMs: roomEpochMs, positionMs: 1_700 },
+      { afterSeq: latestSeq, epochMs: roomEpochMs, positionMs: 1_700 },
+    ]), 'every seam publishes the room mapping epoch and the room position at S');
+    // Two-sided: the derived expression is a different, reachable number, so the
+    // assertion above is not satisfied by the two happening to agree.
+    assertEqual(S2 - serving(S2).positionMs, roomEpochMs - A, 'S minus the advanced park is the room epoch minus the advance');
+    assert(seams.every((seam) => seam.epochMs !== S2 - serving(S2).positionMs), 'and no seam published that');
+    const wrote = page.events.filter((event) => event.kind === 'load' || event.kind === 'park');
+    assertEqual(json(wrote.map((event) => event.detail.startPositionMs ?? event.detail.positionMs)), json([700 + A, 1_700 + A]), 'the player was written the advanced park, not the room position');
+    assertEqual(json([starts[0].positionMs, starts[0].scheduledPositionMs, starts[0].advanceMs]), json([1_700 + A, 1_700, A]), 'the start entry keeps the park, the room position and the advance apart');
+    assertEqual(starts[0].epochMs, roomEpochMs, 'and publishes the seam epoch acceptance reads (§15 item 4)');
+
+    // The records come from the timeline, so seam and record must agree.
+    page.setNow(1000);
+    page.control.deliverFrame({ width: 1280, height: 720, presentationTime: 896, processingDuration: 0.004, ...FIXTURE.frames[0] });
+    const records = page.app.drift().records;
+    assertEqual(records.length, 1, 'the delivered frame produced one record');
+    assertEqual(records[0].epochMs, seams[0].epochMs, 'the record carries the same epoch the seam published');
+    assert(Number.isFinite(records[0].epochMs) && Number.isFinite(seams[0].epochMs), 'both are finite');
+
+    // The acceptance label, over the page's OWN published figures rather than a
+    // fixture: this is the path `verify:browser` takes (§15 items 1 and 4).
+    const accepted = records.map((record, index) => ({ ...record, seq: starts[0].afterSeq + 1 + index }));
+    assertEqual(seamEpochAgreement({ start: starts[0], records: accepted }).status, 'agrees', 'EPOCH agrees over the entry point\'s own start and records');
+    assertEqual(seamEpochAgreement({ start: { ...starts[0], epochMs: S2 - starts[0].positionMs }, records: accepted }).status, 'derived',
+      'and the same start with the derived epoch is caught, so the label can fail');
+  });
+
   await check('playback-treatment-entry: readiness waits for a park\'s seeked, and the tick re-checks readyState', async () => {
     const page = runEntry(product.code);
     page.harness.sharedNowMs = 5_000;
     const readies = () => page.events.filter((event) => event.kind === 'ready').map((event) => event.detail);
-    page.act([{ kind: 'park', attemptId: 7, positionMs: 0 }], { startAtSharedMs: 6_000 });
+    page.act([{ kind: 'park', attemptId: 7, positionMs: 0, scheduledPositionMs: 0, advanceMs: 0, seamEpochMs: 6_000 }], { startAtSharedMs: 6_000 });
     page.video.readyState = 4;
     page.control.fire('canplay');
     assertEqual(readies().length, 0, 'canplay before the park\'s seeked is not readiness');
@@ -159,7 +216,7 @@ export default async function playbackTreatmentEntrySuite() {
 
     const load = runEntry(product.code);
     load.harness.sharedNowMs = 5_000;
-    load.act([{ kind: 'load', attemptId: 1, positionMs: 0 }], { startAtSharedMs: 6_000 });
+    load.act([{ kind: 'load', attemptId: 1, positionMs: 0, scheduledPositionMs: 0, advanceMs: 0, seamEpochMs: 6_000 }], { startAtSharedMs: 6_000 });
     load.video.readyState = 4;
     load.control.fire('canplay');
     assertEqual(load.events.filter((event) => event.kind === 'ready').length, 1, 'a load needs no seeked');
@@ -261,8 +318,8 @@ export default async function playbackTreatmentEntrySuite() {
     // are real events, and this sequence is the window between them.
     const cursor = page.app.startTiming().latestSeq;
     page.act([
-      { kind: 'load', attemptId: 1, positionMs: 0 },
-      { kind: 'play', attemptId: 1, startAtSharedMs: 7_000, latenessMs: 3, positionMs: 0 },
+      { kind: 'load', attemptId: 1, positionMs: 0, scheduledPositionMs: 0, advanceMs: 0, seamEpochMs: 7_000 },
+      { kind: 'play', attemptId: 1, startAtSharedMs: 7_000, latenessMs: 3, positionMs: 0, scheduledPositionMs: 0, advanceMs: 0, seamEpochMs: 7_000 },
     ], { startAtSharedMs: 7_000 });
     page.video.readyState = 4;
     page.control.fire('canplay');

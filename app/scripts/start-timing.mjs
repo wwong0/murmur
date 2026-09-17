@@ -25,6 +25,8 @@ export const PLANNED_STARTS = 8;
 /** §13 G0's bars, each written here and nowhere else. */
 export const PARK_TOLERANCE_MS = 0.001;
 export const IDENTITY_TOLERANCE_MS = 0.001;
+/** How exactly a treated start must have applied the compiled advance (§13.1). */
+export const ADVANCE_TOLERANCE_MS = 0.001;
 export const SLOPE_TOLERANCE = 0.002;
 /** §13 G1's band, G2's attribution bar and its floor. */
 export const AGGREGATE_BAND_MS = Object.freeze([-60, -15]);
@@ -160,6 +162,10 @@ export function reduceStart(input) {
     label, condition, phase, requestedTargetMs, events = [], records = [], start,
     nextAfterSeq = Infinity, frameIntervalMs, latticeOffsetMs,
     telemetry = {}, nativeRateReadback = null,
+    // The treated run supplies the advance it compiled in. A start that did not
+    // apply it — an old bundle, a paused target, a zero — is unusable, never a
+    // treated observation (§13.1). The baseline supplies nothing and is unaffected.
+    expectedAdvanceMs = null,
     // 72 and 24 in the capture. The qualification runs a reduced window, which
     // is why both are arguments and neither is read from a constant below.
     framesPerStart = FRAMES_PER_START, residualPopulation = RESIDUAL_POPULATION,
@@ -256,6 +262,15 @@ export function reduceStart(input) {
   if (!finite(identityResidualMs) || Math.abs(identityResidualMs) > IDENTITY_TOLERANCE_MS) refuse('identity-residual');
   if (!finite(slope) || Math.abs(slope - 1) > SLOPE_TOLERANCE) refuse('slope-off-unity');
   if (nativeRateReadback !== 1) refuse('native-rate-not-unity');
+  if (finite(expectedAdvanceMs)) {
+    for (const event of [park, play]) {
+      if (!event || !finite(event.advanceMs) || Math.abs(event.advanceMs - expectedAdvanceMs) > ADVANCE_TOLERANCE_MS) refuse('advance-not-applied');
+    }
+    // The park it actually wrote must be the room position plus that advance,
+    // or the entry moved a figure the reducer did not (§12).
+    if (!finite(requestedParkMs) || !finite(scheduledParkMs)
+      || Math.abs((requestedParkMs - scheduledParkMs) - expectedAdvanceMs) > ADVANCE_TOLERANCE_MS) refuse('park-not-advanced');
+  }
 
   return {
     label,
@@ -380,6 +395,134 @@ export function reduceCapture(input) {
   const [clampLow, clampHigh] = ADVANCE_CLAMP_MS;
   const advanceMs = Math.min(clampHigh, Math.max(clampLow, Math.round(-aggregate * 10) / 10));
   return { ...result('ADVANCE', null), aggregate, advanceMs };
+}
+
+/**
+ * §13.1 condition 4, as one function, so the negative control below and the
+ * treated verdict run the SAME arithmetic rather than two copies of it: did the
+ * advance move the population by the amount it was supposed to?
+ */
+export function mechanismCheck({ treatedMedians = [], baselineAggregate, advanceMs, Um }) {
+  const observed = treatedMedians.length > 0 && treatedMedians.every(finite) ? median(treatedMedians) : null;
+  const expected = finite(baselineAggregate) && finite(advanceMs) ? baselineAggregate + advanceMs : null;
+  const deltaMs = finite(observed) && finite(expected) ? Math.abs(observed - expected) : null;
+  return { held: finite(deltaMs) && finite(Um) && deltaMs <= Um, observed, expected, deltaMs, Um: finite(Um) ? Um : null };
+}
+
+/**
+ * §13.1's negative control (task 13.3), run in `npm run check` before any
+ * treated start: the same check fed the BASELINE medians must say no, and fed
+ * the same medians shifted by the advance must say yes. A control that cannot
+ * fail stops the treated run and is reported inconclusive, never as a pass.
+ */
+export function mechanismControl({ baselineMedians = [], baselineAggregate, advanceMs, Um }) {
+  const negative = mechanismCheck({ treatedMedians: baselineMedians, baselineAggregate, advanceMs, Um });
+  const positive = mechanismCheck({ treatedMedians: baselineMedians.map((value) => value + advanceMs), baselineAggregate, advanceMs, Um });
+  const power = finite(advanceMs) && finite(Um) && advanceMs >= 2 * Um;
+  return {
+    held: negative.held === false && positive.held === true && power,
+    negative, positive, power,
+    powerInputs: { advanceMs, Um, required: finite(Um) ? 2 * Um : null, marginMs: finite(advanceMs) && finite(Um) ? advanceMs - 2 * Um : null },
+  };
+}
+
+/**
+ * §13.1's treated condition, in the order O2 option 1′ fixed, stopping at the
+ * first failure. Every bar comes from the frozen baseline or from the constants
+ * above; nothing is chosen from treated data.
+ *
+ * `baseline` is read from the baseline run's `summary.json` — `aggregate`,
+ * `medians`, `Um` and the advance that was compiled in — and never recomputed
+ * here (§13.1 item 4).
+ */
+export function reduceTreated(input) {
+  const {
+    starts = [], leads = [], frameIntervalMs, displayCadenceMs,
+    plannedStarts = PLANNED_STARTS, baseline = {},
+  } = input;
+  const { aggregate: baselineAggregate, medians: baselineMedians = [], Um, advanceMs } = baseline;
+  const usable = starts.filter((start) => start.unusable.length === 0);
+  const medians = usable.map((start) => start.residual.medianMs);
+  const maxHalfWidthMs = usable.length > 0 && usable.every((start) => finite(start.maxHalfWidthMs))
+    ? Math.max(...usable.map((start) => start.maxHalfWidthMs)) : null;
+  const U = uncertaintyMs({ displayCadenceMs, frameIntervalMs, maxHalfWidthMs });
+  const spreadOf = (values) => (values.length > 0 && values.every(finite) ? Math.max(...values) - Math.min(...values) : null);
+  const baselineSpread = spreadOf(baselineMedians);
+  const aggregate = medians.length > 0 ? median(medians) : null;
+  const gates = [];
+  const result = (verdict, reason) => ({
+    verdict, reason, condition: 'treated', plannedStarts,
+    usableCount: usable.length, medians, aggregate, advanceMs: finite(advanceMs) ? advanceMs : null,
+    U, Um: finite(Um) ? Um : null,
+    baseline: { aggregate: finite(baselineAggregate) ? baselineAggregate : null, medians: baselineMedians, spread: baselineSpread },
+    uncertainty: { displayCadenceMs, frameIntervalMs, maxHalfWidthMs },
+    gates, starts, leads,
+  });
+
+  // The control first: an instrument that cannot say no does not get to say yes.
+  const control = mechanismControl({ baselineMedians, baselineAggregate, advanceMs, Um });
+  gates.push(gate('T-CONTROL', control.held, control, 'the negative control goes red, its positive twin green, and advanceMs >= 2 * Um'));
+  if (!control.held) return result('INCONCLUSIVE', 'S-ADVANCE-UNRESOLVED');
+
+  const g0 = gate('T-G0', usable.length === plannedStarts && starts.length === plannedStarts,
+    { planned: plannedStarts, retained: starts.length, usable: usable.length, unusable: starts.filter((s) => s.unusable.length).map((s) => ({ label: s.label, reasons: s.unusable })) },
+    'every planned treated start usable, with the advance applied');
+  gates.push(g0);
+  if (!g0.held) return result('INCONCLUSIVE', 'S-DIAG-EVIDENCE');
+
+  const uGate = gate('T-U', finite(U) && U > 0 && U <= MAX_UNCERTAINTY_MS, { U, displayCadenceMs, frameIntervalMs, maxHalfWidthMs }, `0 < U <= ${MAX_UNCERTAINTY_MS}`);
+  gates.push(uGate);
+  if (!uGate.held) return result('INCONCLUSIVE', 'S-CADENCE');
+
+  // 1 — every treated start meets D11's unchanged bar.
+  const missed = usable.filter((start) => start.residual.status !== 'met').map((start) => ({ label: start.label, status: start.residual.status, medianMs: start.residual.medianMs }));
+  const c1 = gate('T1', missed.length === 0, { missed, statuses: usable.map((start) => start.residual.status) }, 'every treated start residual.status === met');
+  gates.push(c1);
+  if (!c1.held) return result('FAILED', 'S-RESIDUAL');
+
+  // 2a — the replacement for the original condition 2 (O2 option 1′).
+  const worstMs = medians.length > 0 ? Math.max(...medians.map(Math.abs)) : null;
+  const c2a = gate('T2a', finite(worstMs) && finite(frameIntervalMs) && worstMs <= frameIntervalMs, { worstMs, bar: frameIntervalMs }, 'max |treated median| <= frameIntervalMs');
+  gates.push(c2a);
+  if (!c2a.held) return result('FAILED', 'S-ADVANCE-SPREAD');
+
+  // 2b — a translation cannot widen the spread; this is what says so.
+  const treatedSpread = spreadOf(medians);
+  const spreadBar = finite(baselineSpread) && finite(Um) ? baselineSpread + Um : null;
+  const c2b = gate('T2b', finite(treatedSpread) && finite(spreadBar) && treatedSpread <= spreadBar, { treatedSpread, baselineSpread, Um, bar: spreadBar }, 'spread(treated) <= spread(baseline) + Um');
+  gates.push(c2b);
+  if (!c2b.held) return result('FAILED', 'S-ADVANCE-SPREAD');
+
+  // Improvement — so that "no change at all" fails on the figure the repair is
+  // about, and not only on the mechanism check.
+  const improvementBar = finite(baselineAggregate) && finite(Um) ? Math.abs(baselineAggregate) - 2 * Um : null;
+  const improvement = gate('T-IMPROVE', finite(aggregate) && finite(improvementBar) && Math.abs(aggregate) <= improvementBar,
+    { aggregate, baselineAggregate, Um, bar: improvementBar }, '|aggregate treated| <= |aggregate baseline| - 2 * Um');
+  gates.push(improvement);
+  if (!improvement.held) return result('FAILED', 'S-ADVANCE-SPREAD');
+
+  // The per-start lead bar: an over-advance puts a start ahead of the room.
+  const maxMedian = medians.length > 0 ? Math.max(...medians) : null;
+  const leadBar = finite(frameIntervalMs) ? frameIntervalMs / 2 : null;
+  const perStartLead = gate('T-LEAD-BAR', finite(maxMedian) && finite(leadBar) && maxMedian <= leadBar, { maxMedian, bar: leadBar, medians }, 'max(treated medians) <= + frameIntervalMs / 2');
+  gates.push(perStartLead);
+  if (!perStartLead.held) return result('FAILED', 'S-LEAD');
+
+  // 3 — the later-frame lead test, on records the controller is already acting on.
+  const tailMedian = median(usable.map((start) => start.tailMs).filter(finite));
+  const notHeld = leads.filter((lead) => lead.status !== 'held').map((lead) => ({ label: lead.label, status: lead.status, medianMs: lead.medianMs }));
+  const c3 = gate('T3', leads.length === usable.length && notHeld.length === 0 && finite(tailMedian) && finite(U) && tailMedian <= U,
+    { leads, notHeld, tailMedian, U }, 'every startLead held, and median(tailMs) <= +U');
+  gates.push(c3);
+  if (!c3.held) return result('FAILED', 'S-LEAD');
+
+  // 4 — the mechanism, against the frozen Um and never against U.
+  const mechanism = mechanismCheck({ treatedMedians: medians, baselineAggregate, advanceMs, Um });
+  const c4 = gate('T4', mechanism.held, mechanism, '|median(treated) - (aggregate + advanceMs)| <= Um');
+  gates.push(c4);
+  if (!c4.held) return result('INCONCLUSIVE', 'S-ADVANCE-UNRESOLVED');
+
+  return result('REPAIRED', null);
 }
 
 /**

@@ -4,8 +4,8 @@
 // 40ms interval and the population 24, off the 41.67ms content interval, so a
 // constant bar cannot pass.
 
-import { check, assertEqual } from '../harness.mjs';
-import { startResidual } from '../../start-residual.mjs';
+import { check, assert, assertEqual, assertNear } from '../harness.mjs';
+import { seamEpochAgreement, startLead, startResidual } from '../../start-residual.mjs';
 
 const START = Object.freeze({ attemptId: 3, afterSeq: 100, startAtSharedMs: 5000, playAtSharedMs: 5004, latenessMs: 4, positionMs: 250 });
 const BAR = 40;
@@ -54,6 +54,105 @@ export default async function startResidualSuite() {
       ['no frame interval', { frameIntervalMs: Number.NaN }],
     ]) {
       assertEqual(residual(overrides).status, 'absent', `${name} is absent`);
+    }
+  });
+
+  // `startLead` is a separate export and asks a different question: after the
+  // residual population has gone by, is the start running AHEAD of the room?
+  // D11's reducer above is frozen and nothing here touches it (R18).
+  await check('start lead: one-sided against U, over the records after the residual population', async () => {
+    const U = 30;
+    // The first 24 are wildly ahead and must not count; only the tail does.
+    const tailed = (count, tailMs) => Array.from({ length: count }, (_, i) => ({ seq: 101 + i, driftMs: i < 24 ? 9999 : tailMs, epochMs: 7000 }));
+    const lead = (overrides) => startLead({ records: tailed(48, 0), start: START, nextAfterSeq: Infinity, skip: 24, minCount: 24, uncertaintyMs: U, ...overrides });
+
+    const skipped = lead({});
+    assertEqual(skipped.status, 'held', 'a start whose tail sits on the room is held');
+    assertEqual(skipped.medianMs, 0, 'and the first 24 records, however far ahead, are not in the median');
+    assertEqual(skipped.count, 24, 'the population is what is left after the skip');
+    assertEqual(skipped.uncertaintyMs, U, 'and it reports the tolerance it judged against');
+    assertEqual(lead({ records: tailed(48, U) }).status, 'held', 'a median exactly at +U is held');
+    assertEqual(lead({ records: tailed(48, U) }).medianMs, U, 'and reports it');
+    assertEqual(lead({ records: tailed(48, U + 0.001) }).status, 'lead', 'U + 0.001 ahead is a lead');
+    // One-sided on purpose: behind the room is D11's question, not this one.
+    assertEqual(lead({ records: tailed(48, -U) }).status, 'held', 'the same magnitude behind the room is held');
+    assertEqual(lead({ records: tailed(48, -9999) }).status, 'held', 'and so is far behind it');
+  });
+
+  await check('start lead: short, the next seam, and absent are their own outcomes — never a pass', async () => {
+    const U = 30;
+    const tailed = (count, tailMs, lateMs = tailMs) => Array.from({ length: count }, (_, i) => ({
+      seq: 101 + i, driftMs: i < 24 ? 9999 : (i < 48 ? tailMs : lateMs), epochMs: 7000,
+    }));
+    const lead = (overrides) => startLead({ records: tailed(48, 0), start: START, nextAfterSeq: Infinity, skip: 24, minCount: 24, uncertaintyMs: U, ...overrides });
+
+    assertEqual(lead({ records: tailed(47, 0) }).status, 'short', '23 records after the skip is short');
+    assertEqual(lead({ records: tailed(47, 0) }).count, 23, 'and counts what it had');
+    // The pair differs in the seam alone (R6): the same 72 records, judged with
+    // and without the 24 that belong to the next start.
+    const acrossSeam = tailed(72, 0, 999);
+    assertEqual(lead({ records: acrossSeam }).status, 'lead', 'records from the next seam drag the median over the bar');
+    assertEqual(lead({ records: acrossSeam, nextAfterSeq: 148 }).status, 'held', 'bounded at the next seam, the same start is held');
+    assertEqual(lead({ records: acrossSeam, nextAfterSeq: 148 }).count, 24, 'over the records that belong to it');
+
+    for (const [name, overrides] of [
+      ['null start', { start: null }],
+      ['start without afterSeq', { start: { ...START, afterSeq: undefined } }],
+      ['fractional afterSeq', { start: { ...START, afterSeq: 100.5 } }],
+      ['records not an array', { records: null }],
+      ['no tolerance', { uncertaintyMs: undefined }],
+      ['non-finite tolerance', { uncertaintyMs: Number.NaN }],
+      ['infinite tolerance', { uncertaintyMs: Infinity }],
+      ['negative skip', { skip: -1 }],
+    ]) {
+      const result = lead(overrides);
+      assertEqual(result.status, 'absent', `${name} is absent`);
+      assert(result.status !== 'held', `${name} is not read as a pass`);
+    }
+  });
+
+  // §15 item 4. The park is advanced, so `S - positionMs` and `S -
+  // scheduledPositionMs` differ by exactly the advance: a seam that derived its
+  // epoch from the physical park is off by one content frame, and nothing else
+  // in the run would notice, because the controller drops its window by seq.
+  await check('seam epoch: the room mapping epoch, not S minus the advanced park', async () => {
+    const ADVANCE = 1000 / 24;
+    const SCHEDULED = 250;
+    const S = 5000;
+    const ROOM_EPOCH = S - SCHEDULED;
+    const seam = (epochMs) => ({ afterSeq: 100, startAtSharedMs: S, scheduledPositionMs: SCHEDULED, positionMs: SCHEDULED + ADVANCE, advanceMs: ADVANCE, epochMs });
+    const at = (epochMs) => records(24, { a: 0, epochMs });
+    const agreement = (overrides) => seamEpochAgreement({ start: seam(ROOM_EPOCH), records: at(ROOM_EPOCH), ...overrides });
+
+    const held = agreement({});
+    assertEqual(held.status, 'agrees', 'a seam carrying the room mapping epoch agrees');
+    assertEqual(held.fromRoomMs, ROOM_EPOCH, 'and the room figure is S minus the ROOM position');
+    assertEqual(held.deltaMs, 0, 'with no gap between them');
+    assertEqual(held.recordEpochMs, ROOM_EPOCH, 'and the first accepted record carries the same epoch');
+
+    // R6: this pair differs in the seam epoch alone.
+    const derived = agreement({ start: seam(S - (SCHEDULED + ADVANCE)) });
+    assertEqual(derived.status, 'derived', 'a seam that derived its epoch from the advanced park is caught');
+    assertNear(derived.deltaMs, -ADVANCE, 0.001, 'and the gap it reports is exactly the advance');
+
+    // The seam can agree with the room and still disagree with what the
+    // timeline gave the records; both halves are load-bearing.
+    assertEqual(agreement({ records: at(ROOM_EPOCH - ADVANCE) }).status, 'derived', 'a seam whose records carry a different epoch is caught too');
+    assertEqual(agreement({ start: { ...seam(ROOM_EPOCH), advanceMs: 0, positionMs: SCHEDULED } }).status, 'agrees', 'and an untreated start, where the two terms coincide, still agrees');
+
+    for (const [name, overrides] of [
+      ['null start', { start: null }],
+      ['no epoch', { start: { ...seam(ROOM_EPOCH), epochMs: undefined } }],
+      ['non-finite epoch', { start: { ...seam(ROOM_EPOCH), epochMs: Number.NaN } }],
+      ['no scheduled position', { start: { ...seam(ROOM_EPOCH), scheduledPositionMs: undefined } }],
+      ['no S', { start: { ...seam(ROOM_EPOCH), startAtSharedMs: Infinity } }],
+      ['records not an array', { records: null }],
+      ['no records after the seam', { records: [] }],
+      ['records without an epoch', { records: records(24, { a: 0, epochMs: Number.NaN }) }],
+    ]) {
+      const result = seamEpochAgreement({ start: seam(ROOM_EPOCH), records: at(ROOM_EPOCH), ...overrides });
+      assertEqual(result.status, 'absent', `${name} is absent`);
+      assert(result.status !== 'agrees', `${name} is not read as a pass`);
     }
   });
 }

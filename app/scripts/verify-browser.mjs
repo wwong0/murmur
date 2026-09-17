@@ -87,7 +87,7 @@ import { t9FigureLines } from './drift-browser-report.mjs';
 import { inSyncWithoutCorrection } from './settle-wait.mjs';
 import { TRANSITION_LEAD_MS } from '../public/lib/playback-leads.mjs';
 import { WAITING_PAUSED } from '../public/lib/playback-start.mjs';
-import { startResidual } from './start-residual.mjs';
+import { seamEpochAgreement, startResidual } from './start-residual.mjs';
 
 const PASS_STARTED_AT = Date.now();
 const PORT = 9223;
@@ -502,10 +502,20 @@ function evaluateResidual({ label, fileStem = label, seam, records, retainedReco
   expect(
     `RES ${label} scheduled-start residual within one frame interval (${intervalText}ms)`,
     residual.status === 'met',
-    `status ${residual.status} · S ${start?.startAtSharedMs ?? 'null'} · playAtSharedMs ${start?.playAtSharedMs ?? 'null'} · latenessMs ${start?.latenessMs ?? 'null'} · medianMs ${residual.medianMs ?? 'null'} · count ${residual.count} · seq ${residual.firstSeq ?? 'null'}..${residual.lastSeq ?? 'null'} after ${start?.afterSeq ?? 'null'} · next seam ${nextAfterSeq} · starts ${seam?.playback?.starts?.length ?? 'null'} · retargets ${seam?.playback?.retargets ?? 'null'}`,
+    `status ${residual.status} · S ${start?.startAtSharedMs ?? 'null'} · playAtSharedMs ${start?.playAtSharedMs ?? 'null'} · latenessMs ${start?.latenessMs ?? 'null'} · advanceMs ${start?.advanceMs ?? 'null'} · scheduledPositionMs ${start?.scheduledPositionMs ?? 'null'} · positionMs ${start?.positionMs ?? 'null'} · medianMs ${residual.medianMs ?? 'null'} · count ${residual.count} · seq ${residual.firstSeq ?? 'null'}..${residual.lastSeq ?? 'null'} after ${start?.afterSeq ?? 'null'} · next seam ${nextAfterSeq} · starts ${seam?.playback?.starts?.length ?? 'null'} · retargets ${seam?.playback?.retargets ?? 'null'}`,
   );
   const rederived = startResidual({ records: retainedRecords(), ...inputs });
   expect(`RES ${label} re-derives from retained records`, JSON.stringify(rederived) === JSON.stringify(residual), `retained ${JSON.stringify(rederived)}; printed ${JSON.stringify(residual)}`);
+  // §15 item 4. The seam must carry the ROOM's mapping epoch. With a nonzero
+  // advance `S - scheduledPositionMs` and `S - positionMs` differ by the
+  // advance, so a seam derived from the physical park is caught here — and
+  // nowhere else, because the controller drops its window by `afterSeq`.
+  const epoch = seamEpochAgreement({ start, records: retainedRecords() });
+  expect(
+    `EPOCH ${label} seam epoch equals the room mapping epoch`,
+    epoch.status === 'agrees',
+    `status ${epoch.status} · seam epochMs ${epoch.epochMs ?? 'null'} · S - scheduledPositionMs ${epoch.fromRoomMs ?? 'null'} · first record epochMs ${epoch.recordEpochMs ?? 'null'} · delta ${epoch.deltaMs ?? 'null'} · advanceMs ${start?.advanceMs ?? 'null'}`,
+  );
   return residual;
 }
 

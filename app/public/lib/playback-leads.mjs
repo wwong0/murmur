@@ -12,3 +12,6 @@ export const PREPARE_LEAD_MS = 350;
 export const CLOCK_ERROR_ALLOWANCE_MS = 1000;
 /** The far-future bound on an operation's instant (design.md D3). */
 export const MAX_FUTURE_MS = TRANSITION_LEAD_MS + CLOCK_ERROR_ALLOWANCE_MS;
+/** One content frame ahead, so the frame presented is the room's (design.md D6;
+ * O2 option 1′, results/5-start-diagnostic-2026-09-17T06-25-21.953Z/). */
+export const PRESENTATION_ADVANCE_MS = 1000 / 24;

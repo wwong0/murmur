@@ -26,8 +26,11 @@ import {
   CONDITIONS, PHASES, RESIDUAL_POPULATION,
   captureBoundary, drainExpression, latticeExpression, parseNdjson, probeHostExpression,
   probeSeekExpression, probeStateExpression, progressExpression,
-  rateShimScript, rateShimStateExpression, reduceCapture, reduceLattice, reduceStart, startSatisfied,
+  rateShimScript, rateShimStateExpression, reduceCapture, reduceLattice, reduceStart, reduceTreated,
+  startSatisfied, uncertaintyMs, decisionToleranceMs,
 } from './start-timing.mjs';
+import { startLead } from './start-residual.mjs';
+import { PRESENTATION_ADVANCE_MS } from '../public/lib/playback-leads.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -51,6 +54,11 @@ const LATE_FIRST_READ_MS = 1500;
  * what `late-first-read` did on its first invocation.
  */
 const BROWSER_CASES = ['server-loss', 'cleanup-failure', 'late-first-read'];
+/**
+ * How far a baseline target may sit from its intended phase on THIS run's
+ * measured lattice before the two populations stop being matched (§13.1).
+ */
+const MATCHED_PHASE_TOLERANCE = 0.01;
 
 const valueOf = (name) => process.argv.find((arg) => arg.startsWith(`${name}=`))?.slice(name.length + 1) ?? null;
 const integerOf = (name, fallback) => {
@@ -67,6 +75,13 @@ const requestedCondition = valueOf('--condition') ?? 'both';
 const startsPerCondition = integerOf('--starts-per-condition', 4);
 const framesPerStart = integerOf('--frames-per-start', 72);
 const planFrom = valueOf('--plan-from');
+/**
+ * A treated run requires the compiled advance on every action, so a page built
+ * without it is refused rather than averaged in. A baseline requires nothing.
+ */
+const expectedAdvanceMs = planFrom ? PRESENTATION_ADVANCE_MS : null;
+/** The baseline's frozen figures and plan, read once in `prepareRun`. */
+let frozen = null;
 const startedAt = Date.now();
 const startedAtIso = new Date(startedAt).toISOString();
 const runDir = path.resolve(APP_DIR, valueOf('--run-dir') ?? path.join('results', `5-start-diagnostic-${startedAtIso.replaceAll(':', '-')}`));
@@ -118,6 +133,9 @@ function prepareRun() {
   if (simulationCase && !SIMULATION_CASES.includes(simulationCase)) throw new Error(`unknown qualification case: ${simulationCase}`);
   if (simulationCase && !qualification) throw new Error('--case requires --qualification');
   if (framesPerStart !== 72 && !qualification) throw new Error('--frames-per-start below 72 requires --qualification');
+  // Read before anything runs: a treated run that cannot find its frozen
+  // baseline must not spend ten minutes discovering it.
+  frozen = frozenTolerance();
   assertWithinRunDir();
   fs.mkdirSync(runDir, { recursive: true });
   manifestPath = path.join(runDir, 'manifest.json');
@@ -397,6 +415,7 @@ async function runStart({ m, label, condition, phase, requestedTargetMs, frameIn
     telemetry: { missed: drained.missed, droppedDelta },
     nativeRateReadback: shim.nativeReadback,
     framesPerStart, residualPopulation: manifest.planned.residualPopulation,
+    expectedAdvanceMs,
   });
 
   manifest.observed.starts.push({
@@ -497,7 +516,7 @@ async function acquire() {
     const ahead = buffered.ranges.find(([, end]) => end - buffered.currentMs > 4000);
     if (!ahead) throw new Error(`no buffered range extends 4s beyond ${buffered.currentMs}ms; the resume condition has nowhere to seek`);
     const resumeAnchor = onLattice(Math.max(ahead[0] + 500, buffered.currentMs + 1500));
-    const resumeTargets = targetsFrom(resumeAnchor);
+    const resumeTargets = matchedTargets('resume', targetsFrom(resumeAnchor), { latticeOffsetMs, frameIntervalMs });
     manifest.plan = { ...(manifest.plan ?? {}), resume: { room: resumeRoom, anchorMs: resumeAnchor, targets: resumeTargets, buffered: buffered.ranges } };
     writeManifest();
     console.log(`resume condition in ${resumeRoom}, targets ${resumeTargets.map((t) => t.toFixed(3)).join(', ')}`);
@@ -531,7 +550,7 @@ async function acquire() {
 
   if (conditions.includes('load')) {
     const loadAnchor = onLattice(60_000);
-    const loadTargets = targetsFrom(loadAnchor);
+    const loadTargets = matchedTargets('load', targetsFrom(loadAnchor), { latticeOffsetMs, frameIntervalMs });
     manifest.plan = { ...(manifest.plan ?? {}), load: { anchorMs: loadAnchor, targets: loadTargets, rooms: phases.map((phase) => `start-${slug}-load-${phase}`) } };
     writeManifest();
     console.log(`load condition, targets ${loadTargets.map((t) => t.toFixed(3)).join(', ')}`);
@@ -679,6 +698,7 @@ function recomputeFromDisk(streams, capture, acquired) {
       telemetry: { missed: observed.telemetryMissed, droppedDelta: observed.telemetryDroppedDelta },
       nativeRateReadback: observed.nativeRateReadback,
       framesPerStart, residualPopulation: manifest.planned.residualPopulation,
+      expectedAdvanceMs,
     });
     for (const figure of RECOMPUTED_FIGURES) {
       if (!Object.is(again[figure], published[figure])) mismatches.push(`${published.label}.${figure}: disk ${again[figure]} vs published ${published[figure]}`);
@@ -691,26 +711,113 @@ function recomputeFromDisk(streams, capture, acquired) {
   return { starts: capture.starts.length, figures: RECOMPUTED_FIGURES.length, frames: streams.frames.length, verified: true };
 }
 
+/**
+ * The baseline's frozen decision inputs. Every one is read off disk and none is
+ * recomputed here (§13.1 item 4): `Um` and the aggregate judge the treated run,
+ * and the plan is what makes its eight starts matched.
+ */
 function frozenTolerance() {
   if (!planFrom) return null;
   const file = path.resolve(APP_DIR, planFrom, 'summary.json');
   if (!fs.existsSync(file)) throw new Error(`--plan-from has no summary.json: ${file}`);
   const baseline = JSON.parse(fs.readFileSync(file, 'utf8'));
   if (!Number.isFinite(baseline.Um)) throw new Error(`the baseline summary carries no Um: ${file}`);
-  return { Um: baseline.Um, from: planFrom, plan: baseline.plan ?? null };
+  if (!Number.isFinite(baseline.aggregate)) throw new Error(`the baseline summary carries no aggregate: ${file}`);
+  if (!Array.isArray(baseline.medians) || !baseline.medians.every(Number.isFinite)) {
+    throw new Error(`the baseline summary carries no usable per-start medians: ${file}`);
+  }
+  // A value run must judge the SAME population size it was matched to. Only a
+  // qualification may run a smaller window, and it publishes no verdict anyone acts on.
+  if (!qualification && baseline.medians.length !== plannedStarts) {
+    throw new Error(`the baseline summary carries ${baseline.medians.length} per-start medians, not ${plannedStarts}: ${file}`);
+  }
+  if (!baseline.plan) throw new Error(`the baseline summary carries no plan to match against: ${file}`);
+  return { Um: baseline.Um, aggregate: baseline.aggregate, medians: baseline.medians, from: planFrom, plan: baseline.plan };
+}
+
+/**
+ * The targets this run runs at. A treated run takes the BASELINE's verbatim —
+ * that, and nothing weaker, is what makes the two populations matched — and
+ * refuses them if this run's own measured lattice puts them at different
+ * phases, because then the starts are not comparable and the run must abort
+ * rather than measure something else.
+ */
+function matchedTargets(condition, computed, { latticeOffsetMs, frameIntervalMs }) {
+  const all = frozen?.plan?.[condition]?.targets ?? null;
+  if (!all) return computed;
+  if (!Array.isArray(all) || all.length < computed.length) {
+    throw new Error(`--plan-from has ${all?.length} ${condition} targets, this run plans ${computed.length}`);
+  }
+  if (!qualification && all.length !== computed.length) {
+    throw new Error(`--plan-from has ${all.length} ${condition} targets, this run plans ${computed.length}`);
+  }
+  const planned = all.slice(0, computed.length);
+  planned.forEach((target, index) => {
+    if (!Number.isFinite(target)) throw new Error(`--plan-from ${condition} target ${index} is not finite: ${target}`);
+    const offset = (((target - latticeOffsetMs) % frameIntervalMs) + frameIntervalMs) % frameIntervalMs;
+    const achieved = offset / frameIntervalMs;
+    const wanted = phases[index];
+    // On the circle: phase 0.9999 is a hair from 0, not a whole interval away.
+    const raw = Math.abs(achieved - wanted);
+    const gap = Math.min(raw, 1 - raw);
+    if (!(gap <= MATCHED_PHASE_TOLERANCE)) {
+      throw new Error(`${condition} target ${index} (${target}ms) sits at phase ${achieved} on this run's lattice, not the planned ${wanted}`);
+    }
+  });
+  console.log(`${condition}: matched to the baseline plan's targets from ${frozen.from}`);
+  return planned;
+}
+
+/**
+ * §13.1 condition 3, per start: the later frames, after the residual population
+ * the controller has already acted on, judged one-sidedly against `U`. The
+ * records come from what this run retained, and `U` from this run's own regime.
+ */
+function leadsFor(starts, uncertainty) {
+  return starts.filter((start) => start.unusable.length === 0).map((start) => {
+    const observed = manifest.observed.starts.find((entry) => entry.label === start.label);
+    return {
+      label: start.label,
+      ...startLead({
+        records: retained.records.filter((record) => record.label === start.label),
+        start: { afterSeq: observed.afterSeq },
+        nextAfterSeq: Infinity,
+        skip: manifest.planned.residualPopulation,
+        minCount: manifest.planned.residualPopulation,
+        uncertaintyMs: uncertainty,
+      }),
+    };
+  });
 }
 
 function publish(acquired) {
   const streams = readStreams();
   if (simulationCase === 'write-failure') throw new Error('simulated publication write failure');
-  const frozen = frozenTolerance();
-  const capture = reduceCapture({
+  const shared = {
     starts: acquired.starts,
     frameIntervalMs: acquired.frameIntervalMs,
     displayCadenceMs: acquired.displayCadenceMs,
     plannedStarts,
-    condition: manifest.condition,
-  });
+  };
+  // The treated run is judged by §13.1's conditions against the frozen
+  // baseline, never by §13's rule again: that rule already returned its verdict
+  // and this run is not allowed to restate it.
+  let leads = [];
+  let capture;
+  if (frozen) {
+    const usable = acquired.starts.filter((start) => start.unusable.length === 0);
+    const maxHalfWidthMs = usable.length > 0 && usable.every((start) => Number.isFinite(start.maxHalfWidthMs))
+      ? Math.max(...usable.map((start) => start.maxHalfWidthMs)) : null;
+    const U = uncertaintyMs({ displayCadenceMs: acquired.displayCadenceMs, frameIntervalMs: acquired.frameIntervalMs, maxHalfWidthMs });
+    leads = leadsFor(acquired.starts, U);
+    capture = reduceTreated({
+      ...shared,
+      leads,
+      baseline: { aggregate: frozen.aggregate, medians: frozen.medians, Um: frozen.Um, advanceMs: expectedAdvanceMs },
+    });
+  } else {
+    capture = reduceCapture({ ...shared, condition: manifest.condition });
+  }
   const summary = {
     schemaVersion: 1,
     nonAcceptance: true,
@@ -726,10 +833,15 @@ function publish(acquired) {
     // Written by the baseline run and read by the treated one — never
     // recomputed from treated data (§13.1 item 4).
     Um: frozen ? frozen.Um : capture.Um,
-    UmSource: frozen ? { frozenFrom: frozen.from, observedThisRun: capture.Um } : 'this run',
+    UmSource: frozen
+      ? { frozenFrom: frozen.from, observedThisRun: decisionToleranceMs({ medians: capture.medians, maxHalfWidthMs: capture.uncertainty.maxHalfWidthMs }) }
+      : 'this run',
     UmTerms: { medianSpanMs: capture.medians.length > 0 ? Math.max(...capture.medians) - Math.min(...capture.medians) : null, maxHalfWidthMs: capture.uncertainty.maxHalfWidthMs },
     usableCount: capture.usableCount,
     plannedStarts,
+    expectedAdvanceMs,
+    leads,
+    baseline: capture.baseline ?? null,
     gates: capture.gates,
     starts: capture.starts.map((start) => ({ ...start, firstPlayingFrame: start.firstPlayingFrame?.seq ?? null })),
     plan: manifest.plan,

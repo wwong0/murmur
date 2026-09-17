@@ -57,6 +57,7 @@ import settleWaitSuite from './check/suites/settle-wait.mjs';
 import startResidualSuite from './check/suites/start-residual.mjs';
 import startTelemetrySuite from './check/suites/start-telemetry.mjs';
 import startTimingSuite from './check/suites/start-timing.mjs';
+import startTreatedSuite from './check/suites/start-treated.mjs';
 import driftReadoutSuite from './check/suites/drift-readout.mjs';
 import diagnosticsOverlaySuite from './check/suites/diagnostics-overlay.mjs';
 import d8ProductIntegrationSuite from './check/suites/d8-product-integration.mjs';
@@ -99,6 +100,7 @@ for (const suite of [
   startResidualSuite,
   startTelemetrySuite,
   startTimingSuite,
+  startTreatedSuite,
   driftReadoutSuite,
   diagnosticsOverlaySuite,
   d8ProductIntegrationSuite,

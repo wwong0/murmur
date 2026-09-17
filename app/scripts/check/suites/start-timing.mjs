@@ -49,6 +49,9 @@ function buildStart(edit = {}) {
     readinessSharedMs = S_MS - 100, requestedTargetMs = PARK_MS, frameCount = 72,
     dropRecordKey = false, duplicateFrameKey = false, absentKey = null, slopeFactor = 1,
     keep = false,
+    // The treated run's two extra inputs: what the page applied, and what the
+    // reducer was told to require. The baseline leaves both at their defaults.
+    advanceMs = 0, expectedAdvanceMs = null,
   } = edit;
 
   let seq = 0;
@@ -58,9 +61,9 @@ function buildStart(edit = {}) {
   push('poll', { resolved: true, retargets: 0, opens: 1, begun: 0 });
   push('element-event', { type: 'canplay', readyState: 4, paused: true, offeredReadiness: true, observedSharedMs: readinessSharedMs });
   push('frame', { paused: true, presentedFrames: 1000, mediaTimeMs: 59_980, expectedDisplayTimeMs: 999_400, timeOriginMs: 0 });
-  push('action', { action: 'load', positionMs: PARK_MS, scheduledPositionMs: PARK_MS, advanceMs: 0 });
+  push('action', { action: 'load', positionMs: PARK_MS + advanceMs, scheduledPositionMs: PARK_MS, advanceMs });
   push('action', {
-    action: 'play', positionMs: PARK_MS, scheduledPositionMs: PARK_MS, advanceMs: 0, startAtSharedMs: S_MS,
+    action: 'play', positionMs: PARK_MS + advanceMs, scheduledPositionMs: PARK_MS, advanceMs, startAtSharedMs: S_MS,
     latenessMs: 0, dispatchedAtLocalMs: 999_505, returnedAtLocalMs: 999_507, elementPausedBefore: true, threw: null,
   });
   push('play-settled', { outcome: 'resolved', errorName: null, settledAtLocalMs: 999_515, settledSharedMs: 1_000_015 });
@@ -91,6 +94,7 @@ function buildStart(edit = {}) {
     label: 'resume-0', condition: 'resume', phase: 0, requestedTargetMs, events, records,
     start: { afterSeq: 100 }, nextAfterSeq: Infinity,
     frameIntervalMs: FRAME_INTERVAL_MS, latticeOffsetMs: 0, telemetry, nativeRateReadback,
+    expectedAdvanceMs,
   });
 }
 
@@ -629,5 +633,26 @@ export default async function startTimingSuite() {
       threw = error.message;
     }
     assert(threw !== null && threw.includes('newest'), 'and an unknown pick is refused by name, never defaulted');
+  });
+
+  // The treated run's own G0 clause (§13.1): a start that did not apply the
+  // compiled advance is unusable, never a treated observation. The pairs below
+  // differ in the advance alone (R6).
+  await check('start timing: a treated start that did not apply the advance is unusable', async () => {
+    const A = 1000 / 24;
+    const untreated = buildStart({});
+    assertEqual(JSON.stringify(untreated.unusable), '[]', 'the baseline start, asked for no advance, is usable');
+    assertEqual(untreated.advanceMs, 0, 'and reports the advance it applied');
+
+    const treated = buildStart({ advanceMs: A, expectedAdvanceMs: A });
+    assertEqual(JSON.stringify(treated.unusable), '[]', 'a start that applied the advance it was asked for is usable');
+    assertEqual(treated.advanceMs, A, 'and reports it');
+    assertNear(treated.requestedParkMs - treated.scheduledParkMs, A, 0.001, 'the physical park is the room position plus the advance');
+    assertEqual(treated.scheduledParkMs, untreated.scheduledParkMs, 'and the room position did not move');
+    assertEqual(treated.residual.medianMs, untreated.residual.medianMs, 'the frozen residual reads the records, not the park');
+
+    assertEqual(JSON.stringify(buildStart({ advanceMs: 0, expectedAdvanceMs: A }).unusable), JSON.stringify(['advance-not-applied', 'park-not-advanced']), 'an uncompensated start in a treated run is refused by name');
+    assertEqual(JSON.stringify(buildStart({ advanceMs: A - 0.002, expectedAdvanceMs: A }).unusable), JSON.stringify(['advance-not-applied', 'park-not-advanced']), 'and so is one two thousandths short of it');
+    assertEqual(JSON.stringify(buildStart({ advanceMs: A - 0.0005, expectedAdvanceMs: A }).unusable), '[]', 'half a thousandth is inside the tolerance');
   });
 }

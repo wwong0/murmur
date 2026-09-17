@@ -13,6 +13,9 @@ import {
   WAITING_PREPARING,
   WAITING_REFUSED,
 } from '../../../public/lib/playback-start.mjs';
+import { PRESENTATION_ADVANCE_MS } from '../../../public/lib/playback-leads.mjs';
+
+const json = (value) => JSON.stringify(value);
 
 const playing = (atSharedMs = 1000, mediaMs = 500, lineage = 'room', version = 1, previous = null) => ({
   lineage,
@@ -47,9 +50,11 @@ function fakeElement() {
   return { element, apply };
 }
 
-function rig({ state = playing(), resolved = true, nowSharedMs = 1000, prepareLeadMs = 400 } = {}) {
+// `presentationAdvanceMs` is left undefined by default, so every check below
+// exercises the option OMITTED — the shape all of them were written against.
+function rig({ state = playing(), resolved = true, nowSharedMs = 1000, prepareLeadMs = 400, presentationAdvanceMs } = {}) {
   const fake = fakeElement();
-  const start = createPlaybackStart({ prepareLeadMs });
+  const start = createPlaybackStart({ prepareLeadMs, presentationAdvanceMs });
   const context = { state, resolved, nowSharedMs };
   function poll(overrides = {}) {
     Object.assign(context, overrides);
@@ -298,6 +303,76 @@ export default async function playbackStartSuite() {
     pausedRig.poll();
     assertEqual(pausedRig.poll({ state: { ...paused(), lineage: 'other', version: 4 }, nowSharedMs: 1200 }).actions.length, 0, 'equal paused position ignores a new lineage');
     assertEqual(pausedRig.poll({ state: { ...paused(), controlMode: 'host' }, nowSharedMs: 1300 }).actions.length, 0, 'paused control-mode-only change does nothing');
+  });
+
+  // --- The presentation advance (executor-spec.md §14 items 1-3, O2 option 1') ---
+  //
+  // One playing mapping, exact by construction: S = max(1000, 1000 + 400) =
+  // 1400, the room position at S is 500 + 400 = 900, and the room epoch is
+  // 1000 - 500 = 500. Every expected number below is arithmetic on those.
+  const ADVANCE = 37;
+  const advanceRig = (presentationAdvanceMs) => {
+    const r = rig({ presentationAdvanceMs });
+    const prepared = r.poll();
+    r.start.ready(prepared.attemptId, 1200);
+    const due = r.poll({ nowSharedMs: 1400 });
+    return { prepared, due, played: due.actions[0], r };
+  };
+
+  await check('playback-start: with no advance the physical park IS the room position, and the seam is S minus it', async () => {
+    for (const [label, made] of [['omitted', advanceRig(undefined)], ['explicit zero', advanceRig(0)]]) {
+      for (const action of [made.prepared.actions[0], made.played]) {
+        assertEqual(action.positionMs, 900, `${label}: ${action.kind} parks at the room position at S`);
+        assertEqual(action.scheduledPositionMs, 900, `${label}: and reports the same room position`);
+        assertEqual(action.advanceMs, 0, `${label}: with no advance`);
+        assertEqual(action.seamEpochMs, 500, `${label}: and the room mapping epoch`);
+        assertEqual(action.seamEpochMs, 1400 - action.positionMs, `${label}: which S minus the park still equals here`);
+      }
+    }
+    const held = rig({ state: paused(1000, 700) }).poll().actions[0];
+    assertEqual(json([held.positionMs, held.scheduledPositionMs, held.advanceMs, held.seamEpochMs]), json([700, 700, 0, 300]), 'a paused hold parks at the state position and seams at its own mapping');
+  });
+
+  await check('playback-start: a nonzero advance moves the physical park and nothing else', async () => {
+    const zero = advanceRig(0);
+    const advanced = advanceRig(ADVANCE);
+    // R6: the two rigs differ in the advance and in nothing else, so every
+    // field that is equal below is equal for that reason.
+    for (const [kind, before, after] of [['park', zero.prepared.actions[0], advanced.prepared.actions[0]], ['play', zero.played, advanced.played]]) {
+      assertEqual(after.positionMs, before.positionMs + ADVANCE, `${kind}: the physical park moves by the advance`);
+      assertEqual(after.positionMs, 900 + ADVANCE, `${kind}: to mediaMsAt(S + advance)`);
+      assertEqual(after.scheduledPositionMs, before.scheduledPositionMs, `${kind}: the room position at S does not move`);
+      assertEqual(after.seamEpochMs, before.seamEpochMs, `${kind}: nor does the room mapping epoch`);
+      assertEqual(after.advanceMs, ADVANCE, `${kind}: the action carries the advance it used`);
+      assertEqual(after.seamEpochMs !== 1400 - after.positionMs, true, `${kind}: S minus the advanced park is no longer the epoch`);
+    }
+    assertEqual(advanced.played.startAtSharedMs, zero.played.startAtSharedMs, 'S is unchanged');
+    assertEqual(advanced.played.latenessMs, zero.played.latenessMs, 'and so is the lateness');
+    assertEqual(advanced.prepared.nextAtSharedMs, zero.prepared.nextAtSharedMs, 'and the instant the module asks to be polled at');
+    // §14 item 8: the repair adds no substitute for `begun` and removes no counter.
+    advanced.r.start.playResolved(advanced.played.attemptId);
+    zero.r.start.playResolved(zero.played.attemptId);
+    assertEqual(json([advanced.r.start.state().opens, advanced.r.start.state().begun, advanced.r.start.state().retargets]), json([1, 1, 0]), 'an advanced start opens once, begins once and retargets never');
+    assertEqual(json(advanced.r.start.state()), json(zero.r.start.state()), 'and its whole published status is the uncompensated one');
+    // A paused target has no advance to apply, so its action is identical.
+    const pausedAction = (presentationAdvanceMs) => rig({ state: paused(1000, 700), presentationAdvanceMs }).poll().actions[0];
+    assertEqual(json(pausedAction(ADVANCE)), json(pausedAction(0)), 'a paused target parks identically whatever the advance');
+  });
+
+  await check('playback-start: the advance is validated, both sides, and is not clamped', async () => {
+    for (const bad of [-1, -0.001, Number.NaN, Infinity, -Infinity, '37', null, 250.1, 1000]) {
+      let threw = null;
+      try {
+        createPlaybackStart({ prepareLeadMs: 400, presentationAdvanceMs: bad });
+      } catch (error) {
+        threw = error;
+      }
+      assert(threw instanceof TypeError, `${json(bad)} is refused with a TypeError, got ${threw}`);
+    }
+    for (const good of [0, 37, 250, PRESENTATION_ADVANCE_MS]) {
+      assertEqual(typeof createPlaybackStart({ prepareLeadMs: 400, presentationAdvanceMs: good }).poll, 'function', `${good} is accepted`);
+    }
+    assertEqual(PRESENTATION_ADVANCE_MS, 1000 / 24, 'the compiled advance is one content frame at 24fps (O2 option 1\')');
   });
 
   await check('playback-start: seeded random transitions never write a position while playing', async () => {
