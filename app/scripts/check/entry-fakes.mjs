@@ -48,9 +48,14 @@ export function createPlayer({ video }) {
   };
 }
 
-/** Emits only the actions the test queues, through the entry's own tick. */
-export function createPlaybackStart() {
-  harness().log('playback-start-created');
+/**
+ * Emits only the actions the test queues, through the entry's own tick. The
+ * construction options are logged because they are the entry's own wiring and
+ * nothing else in `npm run check` observes it: the real reducer is faked here,
+ * so its own suite cannot see what the page passes (d1-findings.md R2).
+ */
+export function createPlaybackStart(options) {
+  harness().log('playback-start-created', options);
   return {
     poll(input) {
       harness().log('playback-start-poll', input);

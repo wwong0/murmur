@@ -103,6 +103,19 @@ export default async function playbackTreatmentEntrySuite() {
     assertEqual(page.app.treatmentEvidence(), null, 'without the opt-in the page keeps no event history');
   });
 
+  await check('playback-treatment-entry: the page constructs the start with the compiled presentation advance', async () => {
+    const page = runEntry(product.code);
+    const constructed = page.events.find((event) => event.kind === 'playback-start-created');
+    assert(constructed !== undefined, 'the page constructed the scheduled start');
+    const { presentationAdvanceMs } = constructed.detail ?? {};
+    // Two-sided: the exact compiled constant, and positive. A zero would leave
+    // every EPOCH label agreeing by coincidence and every residual untreated,
+    // with nothing else in this suite able to tell (d1-findings.md R2).
+    assert(Object.is(presentationAdvanceMs, PRESENTATION_ADVANCE_MS),
+      `the page passed the compiled advance, got ${presentationAdvanceMs}`);
+    assert(presentationAdvanceMs > 0, `the advance the page passed is positive, got ${presentationAdvanceMs}`);
+  });
+
   await check('playback-treatment-entry: a throwing playback-start step still polls the controller and is reported by name', async () => {
     const page = runEntry(product.code);
     page.harness.pollThrows = true;
