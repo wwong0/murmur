@@ -83,11 +83,9 @@ export function deriveDriftRecord({ metadata, timeOriginMs, localNowMs, clock, t
 
   const displaySharedMs = displayLocalMs + estimate.offsetMs;
   const scheduledMediaMs = timeline.mediaMsAt(displaySharedMs);
-  // New timelines answer at the display instant; the getter fallback keeps
-  // older pure test doubles usable without restoring it to room-timeline.
-  const epochMs = typeof timeline.epochMsAt === 'function'
-    ? timeline.epochMsAt(displaySharedMs)
-    : timeline.epochMs;
+  // Both answers are taken at the display instant, so a record cannot pair a
+  // position from one mapping with an epoch from another.
+  const epochMs = timeline.epochMsAt(displaySharedMs);
   if (scheduledMediaMs === null || !Number.isFinite(epochMs)) return REFUSED.noEpoch;
 
   const mediaMs = mediaTime * 1000;

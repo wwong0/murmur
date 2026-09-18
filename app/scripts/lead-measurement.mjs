@@ -2,6 +2,8 @@
 // publication; these functions keep its figures and in-page observations
 // independently testable (executor-spec.md §7).
 
+import { median as medianOfSorted } from '../public/lib/frame-drift.mjs';
+
 export const TICK_BACKSTOP_MS = 250;
 export const CLOCK_ERROR_ALLOWANCE_MS = 1000;
 export const POPULATIONS = Object.freeze(['buffered', 'unbuffered']);
@@ -13,11 +15,14 @@ export function ceil50(value) {
   return Math.ceil(value / 50) * 50;
 }
 
+/**
+ * The one sorting median every script here reads. The middle of an even set is
+ * `frame-drift.mjs`'s and nobody else's: a second definition is how the page and
+ * the browser pass came to disagree once already (app/CLAUDE.md).
+ */
 export function median(values) {
   if (!Array.isArray(values) || values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+  return medianOfSorted([...values].sort((a, b) => a - b));
 }
 
 export function nearestRankP99(values) {

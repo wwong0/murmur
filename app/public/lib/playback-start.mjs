@@ -135,7 +135,6 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 }
       target,
       S,
       mapping,
-      positionMs: mapping.positionMs,
       readyAtSharedMs: null,
       playDispatched: false,
       parked: true,
@@ -153,20 +152,28 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 }
     seamEpochMs: target.effectiveMs - target.positionMs,
   });
 
-  function newPausedAttempt(target, nowSharedMs) {
-    const id = nextAttemptId++;
+  /**
+   * The only place a paused target parks — reached either as the attempt is
+   * created or when a deferred one comes due, which must write the same actions.
+   */
+  function parkPaused(target) {
     const actions = [];
-    attempt = { id, target, parked: false, deferred: false };
-    if (elementPlaying && nowSharedMs < target.effectiveMs) {
-      attempt.deferred = true;
-      return result(actions, target.effectiveMs);
-    }
-    pauseAction(actions, id);
-    setupPosition(actions, id, pausedMapping(target));
+    attempt.deferred = false;
+    pauseAction(actions, attempt.id);
+    setupPosition(actions, attempt.id, pausedMapping(target));
     attempt.parked = true;
     presented = { playing: false, positionMs: target.positionMs };
     retryAfterError = false;
     return result(actions, null);
+  }
+
+  function newPausedAttempt(target, nowSharedMs) {
+    attempt = { id: nextAttemptId++, target, parked: false, deferred: false };
+    if (elementPlaying && nowSharedMs < target.effectiveMs) {
+      attempt.deferred = true;
+      return result([], target.effectiveMs);
+    }
+    return parkPaused(target);
   }
 
   function duePlaying(nowSharedMs) {
@@ -229,15 +236,7 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 }
     if (!target.playing) {
       if (retryAfterError) retryAfterError = false;
       if (attempt && sameTarget(attempt.target, target)) {
-        if (attempt.deferred && nowSharedMs >= target.effectiveMs) {
-          attempt.deferred = false;
-          const actions = [];
-          pauseAction(actions, attempt.id);
-          setupPosition(actions, attempt.id, pausedMapping(target));
-          attempt.parked = true;
-          presented = { playing: false, positionMs: target.positionMs };
-          return result(actions, null);
-        }
+        if (attempt.deferred && nowSharedMs >= target.effectiveMs) return parkPaused(target);
         return result([], attempt.deferred ? target.effectiveMs : null);
       }
       return newPausedAttempt(target, nowSharedMs);

@@ -4,12 +4,7 @@
 // the first records after its `play()` (change 5 design.md D11), against one
 // content frame interval. Pure — records and the start entry are arguments.
 
-const median = (values) => {
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = sorted.length >> 1;
-  // Even count: the mean of the middle two, frame-drift's summary definition.
-  return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
-};
+import { median } from './lead-measurement.mjs';
 
 /**
  * @param {{records: object[], start: object, nextAfterSeq: number, frameIntervalMs: number, population?: number}} input

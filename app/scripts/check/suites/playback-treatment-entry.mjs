@@ -349,6 +349,12 @@ export default async function playbackTreatmentEntrySuite() {
     const [load, play] = of('action');
     assertEqual(json([load.action, load.startAtSharedMs, load.advanceMs, load.scheduledPositionMs, load.elementPausedBefore]), json(['load', 7_000, 0, 0, true]), 'the load carries an uncompensated park');
     assertEqual(json([play.action, play.startAtSharedMs, play.latenessMs, play.seamEpochMs, play.threw]), json(['play', 7_000, 3, 7_000, null]), 'and the play its scheduled start and seam');
+    // The header comes from `telemetryContext`, which the entry guards so the
+    // shipped build does not read the clock, the identity and the start state
+    // four times a second with nothing recorded. A guard that stopped answering
+    // WITH the instrument on would null every header field and leave every
+    // assertion above green, so this is the one that fails on it.
+    assertEqual(json([play.atSharedMs, play.absentFields.includes('atSharedMs')]), json([6_000, false]), 'the event carries the live shared instant, not an absent header');
     assert(play.dispatchedAtLocalMs <= play.returnedAtLocalMs, `the play call is bracketed: ${play.dispatchedAtLocalMs} then ${play.returnedAtLocalMs}`);
     assert(play.dispatchedAtLocalMs < play.returnedAtLocalMs, 'and the two instants are distinct, so the bracket is around the call and not around nothing');
     const settled = of('play-settled')[0];

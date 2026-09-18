@@ -9,8 +9,6 @@ import {
 } from './envelope.mjs';
 import {
   createPlaybackStateHolder,
-  epochMsAt,
-  mediaMsAt,
   readPlaybackState,
   stateIdentity,
 } from './playback-state.mjs';
@@ -314,11 +312,9 @@ export function createPlaybackAcquisition({
     const nextRoster = object(body) && Array.isArray(body.roster) ? body.roster : roster;
     if (!holder.state) {
       roster = nextRoster;
+      // Presence joins the same ordered buffer as operations but is not counted
+      // by `bufferedOperations`, which reports operations only.
       buffer.push(env);
-      if (env.type === TYPE_PRESENCE) {
-        // The counter is intentionally only for operations; presence is still
-        // retained in the same ordered buffer.
-      }
       if (activeRequest && !hasMember(activeRequest.target)) {
         abandoned += 1;
         activeRequest = null;
@@ -364,15 +360,6 @@ export function createPlaybackAcquisition({
   unsubs.push(client.on(TYPE_PRESENCE, safePresence));
   unsubs.push(client.on(TYPE_PLAYBACK_OPERATION, safeOperation));
   unsubs.push(client.on(TYPE_PLAYBACK_STATE_REQUEST, safeRequest));
-
-  const timeline = {
-    mediaMsAt(sharedMs) {
-      return holder.state ? mediaMsAt(holder.state, sharedMs) : null;
-    },
-    epochMsAt(sharedMs) {
-      return holder.state ? epochMsAt(holder.state, sharedMs) : null;
-    },
-  };
 
   function issue(kind, args = {}) {
     if (disposed || !holder.state) return false;
@@ -435,7 +422,6 @@ export function createPlaybackAcquisition({
         bufferedOperations,
       });
     },
-    timeline,
     dispose() {
       if (disposed) return;
       disposed = true;

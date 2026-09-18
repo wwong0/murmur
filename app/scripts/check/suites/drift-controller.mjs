@@ -88,7 +88,7 @@ export default async function driftControllerSuite() {
     const filter = createClockFilter();
     const log = createDriftLog({ capacity: 8 });
     const epochMs = 0;
-    const timeline = { epochMs, mediaMsAt: (sharedMs) => sharedMs - epochMs };
+    const timeline = { epochMsAt: () => epochMs, mediaMsAt: (sharedMs) => sharedMs - epochMs };
     const clock = { read: (atMs) => filter.read(atMs) };
     let localNowMs = 1000;
 

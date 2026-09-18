@@ -8,6 +8,7 @@ import {
 import { FROZEN_WS } from '../fixtures.mjs';
 import { TYPE_PLAYBACK_STATE_REQUEST } from '../../../public/lib/envelope.mjs';
 import { createPlaybackAcquisition } from '../../../public/lib/playback-acquisition.mjs';
+import { median } from '../../lead-measurement.mjs';
 
 const clock = { sharedNow: () => performance.timeOrigin + performance.now() };
 
@@ -21,12 +22,6 @@ function waitFor(test, label, timeoutMs = 5000) {
     };
     poll();
   });
-}
-
-function median(values) {
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
 async function measure({ room, peer, client }, requestTimeoutMs, backoffMs, label) {

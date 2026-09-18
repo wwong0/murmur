@@ -17,6 +17,7 @@ import {
   TYPE_PLAYBACK_STATE_REQUEST,
 } from '../../../public/lib/envelope.mjs';
 import { createPlaybackAcquisition } from '../../../public/lib/playback-acquisition.mjs';
+import { mediaMsAt } from '../../../public/lib/playback-state.mjs';
 
 const SETTINGS = Object.freeze({
   transitionLeadMs: 150,
@@ -151,7 +152,7 @@ export default async function playbackAcquisitionSuite() {
       assertEqual(cd.snapshot.identity.version, survivor.version, 'late join reaches survivor version');
       const at = survivor.current.atSharedMs;
       for (const instant of [at - 1000, at, at + 1000]) {
-        assertEqual(cd.timeline.mediaMsAt(instant), bd.timeline.mediaMsAt(instant), `timeline agrees at ${instant}`);
+        assertEqual(mediaMsAt(cd.state, instant), mediaMsAt(bd.state, instant), `timeline agrees at ${instant}`);
       }
     } finally {
       for (const driver of drivers) driver.dispose();
@@ -219,7 +220,7 @@ export default async function playbackAcquisitionSuite() {
       await ready(cd);
       const at = ad.state.current.atSharedMs;
       for (const instant of [at - 1000, at + 1000]) {
-        assertEqual(cd.timeline.mediaMsAt(instant), ad.timeline.mediaMsAt(instant), `pending mapping at ${instant}`);
+        assertEqual(mediaMsAt(cd.state, instant), mediaMsAt(ad.state, instant), `pending mapping at ${instant}`);
       }
       assertSameState(ad, cd, 'pending transition identity');
     } finally {

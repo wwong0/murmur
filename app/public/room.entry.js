@@ -318,13 +318,13 @@ const controller = createDriftController({
   clock: clockSync,
   // `applyRate` returns nothing — it throws on a refusal and on a failed write —
   // so there is no applied flag to retain, and `appliedOk` is named absent.
-  apply: startTiming
-    ? (rate) => {
-      const applied = treatment.applyRate(rate);
-      telemetry.record('rate-write', { commandedRate: rate, readbackRate: video.playbackRate, appliedOk: applied ?? null }, telemetryContext());
-      return applied;
-    }
-    : (rate) => treatment.applyRate(rate),
+  // ONE PATH, not a startTiming pair: `record` is the early return when the
+  // instrument is off, which is what keeps this call identical either way.
+  apply: (rate) => {
+    const applied = treatment.applyRate(rate);
+    telemetry.record('rate-write', { commandedRate: rate, readbackRate: video.playbackRate, appliedOk: applied ?? null }, telemetryContext());
+    return applied;
+  },
   settings: treatment.settings,
   now: treatment.controllerNow,
 });
@@ -351,7 +351,14 @@ function reportStep(name, error) {
 // The identity and the clock as this page holds them at this instant, read from
 // the same sources the product reads. Every value may be null, and a null is
 // named in the event rather than defaulted (executor-spec.md R17).
+//
+// THE ONE PLACE THE INSTRUMENT COSTS ANYTHING IS GUARDED, so every call site
+// below stays unconditional and the product keeps one code path: `record`'s own
+// early return does not stop its third argument being built, and these four
+// reads would otherwise run four times a second on the shipped path with
+// nothing recorded (D1 R7, `docs/constraints/measurement.md`).
 function telemetryContext() {
+  if (!startTiming) return null;
   const estimate = clockSync.read();
   const identity = acquisition.snapshot.identity;
   return {
