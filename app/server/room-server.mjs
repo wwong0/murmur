@@ -24,6 +24,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
+import { classifyPath, countDelivered, createCounters } from './byte-accounting.mjs';
 
 import {
   PROTOCOL_VERSION,
@@ -213,6 +214,20 @@ export function startRoomServer(opts = {}) {
   const quiet = opts.quiet ?? false;
 
   const log = quiet ? () => {} : (...args) => console.log('[room]', ...args);
+  const counters = createCounters();
+  const socketStates = new WeakMap();
+  let nextSocketId = 1;
+
+  function responsePosition(socket) {
+    if (!socket) return { socketId: null, responseIndex: null };
+    let state = socketStates.get(socket);
+    if (!state) {
+      state = { socketId: nextSocketId++, responseIndex: 0 };
+      socketStates.set(socket, state);
+    }
+    state.responseIndex += 1;
+    return { socketId: state.socketId, responseIndex: state.responseIndex };
+  }
 
   /** @type {Map<string, Room>} */
   const rooms = new Map();
@@ -292,12 +307,20 @@ export function startRoomServer(opts = {}) {
    */
   function completeResponse(res, ctx) {
     res.on('close', () => {
-      // Change 6 attaches delivered-byte accounting here, reading
-      // res.socket.bytesWritten against ctx.socketBytesAtStart and clamping to
-      // ctx.expectedBytes, attributed to ctx.clientTag. Change 1 deliberately
-      // measures nothing — an assertion or a counter in the running server is
-      // work on the measured path (CONSTRAINTS.md).
-      void ctx;
+      const result = ctx.socket
+        ? countDelivered({
+            socketBytesAtStart: ctx.socketBytesAtStart,
+            socketBytesAtEnd: ctx.socket.bytesWritten,
+            expectedBytes: ctx.expectedBytes,
+            writableFinished: res.writableFinished,
+          })
+        : { delivered: 0, waste: 0, aborted: !res.writableFinished };
+      counters.record({
+        ...ctx,
+        ...result,
+        socketBytesAtEnd: ctx.socket ? ctx.socket.bytesWritten : ctx.socketBytesAtStart,
+      });
+      if (!ctx.socket) counters.incrementResponsesWithNoSocket();
     });
   }
 
@@ -313,12 +336,20 @@ export function startRoomServer(opts = {}) {
     }
     const type = MIME[path.extname(absPath).toLowerCase()] ?? 'application/octet-stream';
     res.writeHead(200, { 'Content-Type': type, 'Content-Length': stat.size, 'Cache-Control': 'no-store' });
+    // Flushed headers leave the captured socket delta equal to this response's body.
+    res.flushHeaders();
+    const socket = res.socket;
+    const position = responsePosition(socket);
 
     completeResponse(res, {
       clientTag,
       urlPath: req.url,
+      kind: classifyPath(req.url),
       expectedBytes: stat.size,
-      socketBytesAtStart: res.socket ? res.socket.bytesWritten : 0,
+      socket,
+      socketId: position.socketId,
+      responseIndex: position.responseIndex,
+      socketBytesAtStart: socket ? socket.bytesWritten : 0,
     });
 
     const stream = fs.createReadStream(absPath);
@@ -363,6 +394,20 @@ export function startRoomServer(opts = {}) {
     // Per-request client identity for change 6's attribution, taken from a
     // header so media URLs stay identical for every peer.
     const clientTag = typeof req.headers['x-app-tab'] === 'string' ? req.headers['x-app-tab'] : null;
+
+    if (req.method === 'GET' && pathname === '/harness/counters') {
+      counters.incrementSnapshotRequests();
+      const body = JSON.stringify({
+        atMs: Date.now(),
+        atIso: new Date().toISOString(),
+        serverNowMs: serverNow(),
+        uptimeMs: process.uptime() * 1000,
+        counters: counters.snapshot(),
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(body);
+      return;
+    }
 
     if (pathname.startsWith('/media/')) {
       const abs = resolveWithin(mediaDir, pathname.slice('/media'.length));
@@ -777,7 +822,7 @@ export function startRoomServer(opts = {}) {
     });
   });
 
-  return { httpServer, wss, rooms, close, ready, mediaDir, livenessMs, serverNow };
+  return { httpServer, wss, rooms, close, ready, mediaDir, livenessMs, serverNow, counters };
 }
 
 // Run directly: `npm start`.

@@ -18,9 +18,20 @@ const DEFAULT_SRC = '/media/master.m3u8';
  * @param {HTMLVideoElement} config.video   the video element to attach to; passed in, never looked up
  * @param {string} [config.src]             defaults to '/media/master.m3u8'
  * @param {object} [config.hlsConfig]       extra hls.js config, merged in
+ * @param {string} [config.clientTag]       per-tab header value for media requests
  */
-export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {} } = {}) {
+export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientTag } = {}) {
   if (!video) throw new Error('createPlayer: "video" is required');
+
+  const playerConfig = typeof clientTag === 'string' && clientTag.length > 0
+    ? {
+        ...hlsConfig,
+        xhrSetup: (xhr, url) => {
+          xhr.open('GET', url, true);
+          xhr.setRequestHeader('x-app-tab', clientTag);
+        },
+      }
+    : hlsConfig;
 
   /** @type {Set<Function>} */
   const errorHandlers = new Set();
@@ -49,7 +60,7 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {} } = {}) 
       // `startPosition` LAST. It is this call's argument, chosen by the load
       // rule; `hlsConfig` is construction-time config, and letting it silently
       // win would put playback somewhere no decision named.
-      hls = new Hls({ ...hlsConfig, startPosition });
+      hls = new Hls({ ...playerConfig, startPosition });
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) {
           emitError({ fatal: true, type: data.type, details: data.details, error: data.error });

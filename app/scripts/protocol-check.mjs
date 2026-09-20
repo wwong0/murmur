@@ -28,6 +28,8 @@ import { report } from './check/harness.mjs';
 import { describeFixtures, disposeFixtures } from './check/fixtures.mjs';
 
 import mediaSuite from './check/suites/media.mjs';
+import byteAccountingSuite from './check/suites/byte-accounting.mjs';
+import harnessFiguresSuite from './check/suites/harness-figures.mjs';
 import joinSuite from './check/suites/join.mjs';
 import hostSuite from './check/suites/host.mjs';
 import identitySuite from './check/suites/identity.mjs';
@@ -64,6 +66,7 @@ import d8ProductIntegrationSuite from './check/suites/d8-product-integration.mjs
 import playbackTreatmentSuite from './check/suites/playback-treatment.mjs';
 import playbackTreatmentEntrySuite from './check/suites/playback-treatment-entry.mjs';
 import roomControlsEntrySuite from './check/suites/room-controls-entry.mjs';
+import runnerCoreSuite from './check/suites/runner-core.mjs';
 
 console.log(describeFixtures());
 
@@ -71,6 +74,8 @@ console.log(describeFixtures());
 // of them can observe another.
 for (const suite of [
   mediaSuite,
+  byteAccountingSuite,
+  harnessFiguresSuite,
   joinSuite,
   hostSuite,
   identitySuite,
@@ -107,6 +112,7 @@ for (const suite of [
   playbackTreatmentSuite,
   playbackTreatmentEntrySuite,
   roomControlsEntrySuite,
+  runnerCoreSuite,
 ]) {
   await suite();
 }

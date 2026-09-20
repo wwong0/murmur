@@ -208,7 +208,7 @@ client.onEvent('joined', () => clockSync.start());
 // Player, the room timeline, and the drift instrument
 // ---------------------------------------------------------------------------
 
-const player = createPlayer({ video });
+const player = createPlayer({ video, clientTag: tabId });
 player.onError((detail) => {
   addNotice(`player error: ${detail.type ?? 'unknown'} ${detail.details ?? ''}`, { warn: true });
 });

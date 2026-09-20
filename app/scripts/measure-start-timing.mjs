@@ -21,6 +21,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, disposeChrome, sleep } from './cdp.mjs';
+import {
+  createDeadline,
+  createManifestFile,
+  createNdjson,
+  prepareRunDirectory,
+  retainedBytes as retainedBytesIn,
+  runFinally,
+} from './runner/core.mjs';
+import { startOriginMonitor as startMonitor, stopOriginMonitor as stopMonitor } from './runner/origin-monitor.mjs';
 import { refreshFrom } from './drift-figures.mjs';
 import {
   CONDITIONS, PHASES, RESIDUAL_POPULATION,
@@ -87,7 +96,8 @@ const startedAtIso = new Date(startedAt).toISOString();
 const runDir = path.resolve(APP_DIR, valueOf('--run-dir') ?? path.join('results', `5-start-diagnostic-${startedAtIso.replaceAll(':', '-')}`));
 const relativeRunDir = path.relative(RESULTS_DIR, runDir).split(path.sep).join('/');
 const slug = relativeRunDir.replaceAll(/[^a-zA-Z0-9-]/g, '-');
-const deadlineAt = startedAt + MAX_WALL_MS;
+const deadline = createDeadline({ startedAt, maxWallMs: MAX_WALL_MS });
+const { deadlineAt, check: checkDeadline, bounded, waitFor } = deadline;
 const cdpHttp = (pathname) => cdpHttpOn(PORT, pathname);
 
 // Only `--case=server-loss` owns a server, and only that case may stop one.
@@ -99,7 +109,7 @@ const plannedStarts = conditions.length * startsPerCondition;
 const phases = PHASES.slice(0, startsPerCondition);
 
 let manifest = null;
-let manifestPath = null;
+let manifestFile = null;
 let chrome = null;
 let profile = null;
 let ownedServer = null;
@@ -113,17 +123,7 @@ let originMonitor = null;
 // Run directory, manifest, budget
 // ---------------------------------------------------------------------------
 
-function assertWithinRunDir() {
-  if (!relativeRunDir || relativeRunDir.startsWith('..') || path.isAbsolute(relativeRunDir)) {
-    throw new Error(`run output directory must be inside ${RESULTS_DIR}: ${runDir}`);
-  }
-  if (fs.existsSync(runDir)) throw new Error(`run output directory already exists: ${runDir}`);
-}
-
-function writeManifest() {
-  if (!manifestPath || !manifest) return;
-  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-}
+const writeManifest = () => manifestFile?.write();
 
 function prepareRun() {
   if (requestedCondition !== 'both' && !CONDITIONS.includes(requestedCondition)) {
@@ -136,10 +136,9 @@ function prepareRun() {
   // Read before anything runs: a treated run that cannot find its frozen
   // baseline must not spend ten minutes discovering it.
   frozen = frozenTolerance();
-  assertWithinRunDir();
-  fs.mkdirSync(runDir, { recursive: true });
-  manifestPath = path.join(runDir, 'manifest.json');
-  manifest = {
+  prepareRunDirectory({ appDir: APP_DIR, resultsDir: RESULTS_DIR, runDir, createParents: true });
+  manifestFile = createManifestFile({ runDir });
+  manifest = manifestFile.set({
     schemaVersion: 1,
     status: 'running',
     outcome: 'running',
@@ -182,29 +181,9 @@ function prepareRun() {
     exclusions: { unusableStarts: [], telemetryMissed: 0, telemetryDropped: 0 },
     cleanup: { status: 'pending' },
     failures: [],
-  };
+  });
   writeManifest();
   console.log(`run output directory: ${runDir}`);
-}
-
-function checkDeadline(label) {
-  if (Date.now() >= deadlineAt) throw new Error(`${label} exceeded the ${MAX_WALL_MS}ms run budget`);
-}
-
-async function bounded(promise, timeoutMs, label) {
-  checkDeadline(label);
-  const remaining = Math.max(1, Math.min(timeoutMs, deadlineAt - Date.now()));
-  let timer;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label} timed out after ${remaining}ms`)), remaining);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 function withOriginMonitor(promise) {
@@ -217,17 +196,6 @@ async function evaluate(tab, expression, label, timeoutMs = 30_000) {
 
 async function cdpSend(tab, method, params, label, timeoutMs = 10_000) {
   return withOriginMonitor(bounded(tab.send(method, params), timeoutMs, label));
-}
-
-async function waitFor(label, read, done, timeoutMs = 60_000, everyMs = 250) {
-  const finish = Math.min(deadlineAt, Date.now() + timeoutMs);
-  let value = await read();
-  while (!done(value)) {
-    if (Date.now() >= finish) throw new Error(`${label} not reached before ${timeoutMs}ms`);
-    await sleep(Math.min(everyMs, Math.max(1, finish - Date.now())));
-    value = await read();
-  }
-  return value;
 }
 
 // ---------------------------------------------------------------------------
@@ -322,54 +290,24 @@ async function awaitPlaying(tab, label) {
 
 function startOriginMonitor() {
   const healthUrl = `${ORIGIN}/room.html?room=${encodeURIComponent(`${slug}-monitor`)}&role=viewer&tab=start-monitor`;
-  let stopped = false;
-  let controller = null;
-  const monitor = { startedAt: new Date().toISOString(), promise: null, stop() { stopped = true; controller?.abort(); } };
-  monitor.promise = (async () => {
-    let consecutive = 0;
-    while (!stopped) {
-      if (Date.now() >= deadlineAt) throw new Error(`overall run exceeded ${MAX_WALL_MS}ms while monitoring the server`);
-      controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 1000);
-      try {
-        const response = await fetch(healthUrl, { cache: 'no-store', signal: controller.signal });
-        await response.arrayBuffer();
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        consecutive = 0;
-      } catch (error) {
-        if (stopped) return;
-        consecutive += 1;
-        if (consecutive >= 2) {
-          const detectedAt = new Date().toISOString();
-          const reason = `server unavailable at ${detectedAt}: ${error.message}`;
-          manifest.serverMonitor = { startedAt: monitor.startedAt, endpoint: healthUrl, failureDetectedAt: detectedAt, failureReason: reason };
-          writeManifest();
-          const failed = new Error(reason);
-          failed.serverUnavailable = true;
-          throw failed;
-        }
-      } finally {
-        clearTimeout(timeout);
-        controller = null;
-      }
-      await sleep(250);
-    }
-  })();
-  monitor.promise.catch(() => {});
-  originMonitor = monitor;
+  originMonitor = startMonitor({
+    healthUrl,
+    deadlineAt,
+    maxWallMs: MAX_WALL_MS,
+    onFailure: ({ startedAt: monitorStartedAt, endpoint, failureDetectedAt, failureReason }) => {
+      manifest.serverMonitor = { startedAt: monitorStartedAt, endpoint, failureDetectedAt, failureReason };
+      writeManifest();
+    },
+  });
 }
 
 async function stopOriginMonitor() {
   const monitor = originMonitor;
   originMonitor = null;
-  if (!monitor) return;
-  monitor.stop();
-  await monitor.promise.catch(() => {});
+  await stopMonitor(monitor);
 }
 
-function appendNdjson(name, records) {
-  fs.appendFileSync(path.join(runDir, name), records.map((record) => `${JSON.stringify(record)}\n`).join(''));
-}
+const appendNdjson = (name, records) => createNdjson(runDir).append(name, records);
 
 // ---------------------------------------------------------------------------
 // One start
@@ -970,9 +908,7 @@ function armServerLossTrigger() {
 
 // ---------------------------------------------------------------------------
 
-function retainedBytes() {
-  return fs.readdirSync(runDir).reduce((total, name) => total + fs.statSync(path.join(runDir, name)).size, 0);
-}
+const retainedBytes = () => retainedBytesIn(runDir);
 
 async function cleanup() {
   if (simulationCase === 'cleanup-failure') throw new Error('simulated Chrome cleanup failure');
@@ -1021,17 +957,7 @@ async function main() {
       cleanupFailure = error;
       console.error(`CLEANUP ERROR: ${error.message}`);
     }
-    if (manifest) {
-      const failed = failure || cleanupFailure;
-      manifest.runEndedAt = new Date().toISOString();
-      manifest.runWallMs = Date.now() - startedAt;
-      manifest.retainedBytes = fs.existsSync(runDir) ? retainedBytes() : 0;
-      manifest.status = failed ? 'aborted' : 'complete';
-      manifest.outcome = failed ? 'failed' : 'pass';
-      manifest.failures = [failure, cleanupFailure].filter(Boolean).map((error) => error.message);
-      if (cleanupFailure) manifest.cleanup = { status: 'failed', error: cleanupFailure.message, tabs: tabs.length };
-      writeManifest();
-    }
+    runFinally({ manifest: manifestFile, failure, cleanupFailure, startedAt, runDir, tabs, withWallAndBytes: true });
   }
   if (failure || cleanupFailure) process.exitCode = 1;
 }

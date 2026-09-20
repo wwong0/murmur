@@ -17,6 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CHROME, FLAGS, attach, cdpHttp, sleep, disposeChrome } from './cdp.mjs';
+import { assertServedBundle, prepareRunDirectory } from './runner/core.mjs';
 import { WAITING_REFUSED } from '../public/lib/playback-start.mjs';
 
 const PORT = 9225;
@@ -31,10 +32,9 @@ const POLL_MS = 100;
 const runDirArgument = process.argv.find((arg) => arg.startsWith('--run-dir='))?.slice('--run-dir='.length);
 if (!runDirArgument) throw new Error('--run-dir=results/<name> is required');
 const RUN_DIR = path.resolve(APP_DIR, runDirArgument);
-const relative = path.relative(RESULTS_DIR, RUN_DIR);
-if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error(`run directory must be inside ${RESULTS_DIR}: ${RUN_DIR}`);
-if (fs.existsSync(RUN_DIR)) throw new Error(`run directory already exists: ${RUN_DIR}`);
-fs.mkdirSync(RUN_DIR, { recursive: true });
+// `createParents` keeps `mkdirSync(..., { recursive: true })`'s behaviour: a
+// nested `--run-dir` worked here before the conversion and still does.
+prepareRunDirectory({ appDir: APP_DIR, resultsDir: RESULTS_DIR, runDir: RUN_DIR, createParents: true });
 
 const failures = [];
 const labels = [];
@@ -45,7 +45,6 @@ function expect(label, cond, detail) {
 }
 
 const PLAYBACK = '(() => window.__app ? window.__app.playback() : null)()';
-const sha = (text) => crypto.createHash('sha256').update(text).digest('hex').slice(0, 12);
 
 async function waitFor(tab, done, deadlineMs) {
   const deadlineAt = Date.now() + deadlineMs;
@@ -91,9 +90,9 @@ try {
   report.readings.unmuted = unmuted;
   expect('9.2 the element was unmuted before the first scheduled start', unmuted?.muted === false && unmuted.starts === 0, JSON.stringify(unmuted));
 
-  const served = await (await fetch(`${ORIGIN}/room.bundle.js`)).text();
   const buildId = await tab.evaluate('window.__app.buildId');
-  expect('9.2 the page runs the bundle on disk', sha(served) === sha(fs.readFileSync(BUNDLE_PATH, 'utf8')) && served.includes(buildId), `served ${sha(served)} · page ${buildId}`);
+  const bundle = await assertServedBundle({ origin: ORIGIN, bundlePath: BUNDLE_PATH, pageBuildId: buildId });
+  expect('9.2 the page runs the bundle on disk', bundle.matches && bundle.pageIdInServed, `served ${bundle.servedSha} · page ${buildId}`);
 
   const refusal = await waitFor(tab, (playback) => playback?.waiting === WAITING_REFUSED, REFUSAL_DEADLINE_MS);
   report.readings.refused = refusal.value;

@@ -56,12 +56,12 @@
 //    scripts/protocol-check.mjs instead.
 
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep, disposeChrome } from './cdp.mjs';
+import { assertServedBundle, prepareRunDirectory } from './runner/core.mjs';
 import { INTEGRATION_SCHEMA, createRecorder, pitchReference } from './drift-capture.mjs';
 import { auditClient, integrationSummary, readClientEvidence } from './product-integration-evidence.mjs';
 import { DRIFT_LINE_RE } from '../public/lib/drift-readout.mjs';
@@ -105,10 +105,10 @@ const RUN_DIR_ARGUMENT = process.argv.find((arg) => arg.startsWith('--run-dir=')
 const RUN_DIR = RUN_DIR_ARGUMENT === null
   ? path.join(RESULTS_DIR, PASS_STARTED_AT_ISO.replaceAll(':', '-'))
   : path.resolve(APP_DIR, RUN_DIR_ARGUMENT);
+// Containment is `prepareRunDirectory`'s, below, and only its. A second copy
+// here would trip on the same input, and two guards at one threshold cannot be
+// told apart by a probe (CONSTRAINTS.md -> Verification).
 const RUN_DIRECTORY_NAME = path.relative(RESULTS_DIR, RUN_DIR).split(path.sep).join('/');
-if (RUN_DIRECTORY_NAME === '' || RUN_DIRECTORY_NAME.startsWith('..') || path.isAbsolute(RUN_DIRECTORY_NAME)) {
-  throw new Error(`run output directory must be inside ${RESULTS_DIR}: ${RUN_DIR}`);
-}
 const MEDIA_DIR = path.resolve(process.env.APP_MEDIA_DIR ?? path.join(APP_DIR, '..', 'step0', 'content'));
 const WINDOW_STATE = 'visible, non-occluded (Chrome automation flags)';
 const MAX_RETAINED_BYTES = 10 * 1024 * 1024;
@@ -179,30 +179,14 @@ const O1_WITHOUT_CORRECTION_ASSERTIONS = Object.freeze([
   'followed the adopted refusal and dwell policy',
 ]);
 
-const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
-const sha = (text) => sha256(text).slice(0, 12);
-
-function prepareRunDirectory() {
-  fs.mkdirSync(path.dirname(RUN_DIR), { recursive: true });
-  const relativeRunDir = path.relative(APP_DIR, RUN_DIR);
-  try {
-    const ignoredBy = execFileSync('git', ['check-ignore', '-v', '--', relativeRunDir], {
-      cwd: APP_DIR,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    throw new Error(`run output directory is ignored by ${ignoredBy.trim()}`);
-  } catch (error) {
-    if (error?.status !== 1) throw error;
-  }
-  if (fs.existsSync(RUN_DIR)) {
-    throw new Error(`run output directory already exists: ${RUN_DIR}`);
-  }
-  fs.mkdirSync(RUN_DIR);
-  console.log(`run output directory: ${RUN_DIR}`);
-}
-
-prepareRunDirectory();
+prepareRunDirectory({
+  appDir: APP_DIR,
+  resultsDir: RESULTS_DIR,
+  runDir: RUN_DIR,
+  refuseIgnored: true,
+  createParents: true,
+});
+console.log(`run output directory: ${RUN_DIR}`);
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'app-verify-'));
 
 // Copied from verify-frames.mjs's readContentFrameRate. That file executes its
@@ -801,13 +785,12 @@ try {
   // than that (3b design.md D3).
   const seamEarly = await seamOf(a);
   expect('3.1 the page publishes the harness seam', seamEarly.present === true, JSON.stringify(seamEarly).slice(0, 120));
-  const served = await (await fetch(`${ORIGIN}/room.bundle.js`)).text();
-  const onDisk = fs.readFileSync(BUNDLE_PATH, 'utf8');
-  console.log(`  build id: ${seamEarly.buildId} · served ${sha(served)} · on disk ${sha(onDisk)}`);
-  expect('3.1 the origin serves this tree’s bundle', sha(served) === sha(onDisk), `served ${sha(served)}, on disk ${sha(onDisk)}`);
+  const bundle = await assertServedBundle({ origin: ORIGIN, bundlePath: BUNDLE_PATH, pageBuildId: seamEarly.buildId });
+  console.log(`  build id: ${seamEarly.buildId} · served ${bundle.servedSha} · on disk ${bundle.diskSha}`);
+  expect('3.1 the origin serves this tree’s bundle', bundle.matches, `served ${bundle.servedSha}, on disk ${bundle.diskSha}`);
   expect(
     '3.1 the page is running the bundle the origin is serving',
-    typeof seamEarly.buildId === 'string' && served.includes(seamEarly.buildId),
+    bundle.pageIdInServed,
     `page reports ${seamEarly.buildId}`
   );
 
@@ -1013,8 +996,8 @@ try {
     gitHead,
     build: {
       pageBuildId: seamEarly.buildId ?? null,
-      servedBundleSha256: sha256(served),
-      onDiskBundleSha256: sha256(onDisk),
+      servedBundleSha256: bundle.servedSha256,
+      onDiskBundleSha256: bundle.diskSha256,
     },
     chrome: {
       version: chromeInfo.Browser ?? null,

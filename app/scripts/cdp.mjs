@@ -9,48 +9,23 @@
 // `npm run check`: it needs Chrome and a running server, which is the whole
 // reason the protocol check exists next to it.
 
-import { spawnSync } from 'node:child_process';
-import fs from 'node:fs';
 import { WebSocket } from 'ws';
+
+import { windowsChrome } from './runner/browser-platform.mjs';
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export const CHROME = 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe';
-
 /**
- * End THIS RUN'S Chrome AND NOTHING ELSE, then take its profile directory with
- * it. Never widen either kill to `/IM chrome.exe`: that ends every Chrome on the
- * machine, the developer's own windows included, mid-run and with no warning.
- *
- * Two scopes, both narrow. The tree rooted at the process we spawned is the run
- * — the extra `--new-window` launches hand their window to that same browser
- * process and exit, so `/T` reaches them. The profile sweep is the backstop for a
- * browser that outlived its launcher, and it can only ever match this run because
- * the `--user-data-dir` is a throwaway directory made for it.
- *
- * The wait belongs here: a Chrome still holding files in the profile is what
- * makes the removal fail, so whoever ends the browser owns the settling time. A
- * profile that will not delete is not worth failing a dev aid over.
- *
- * Windows-only, like `CHROME` above.
+ * The Windows Chrome path and the Windows disposal, re-exported from the
+ * platform adapter that now owns both (`runner/browser-platform.mjs`, design.md
+ * D9). Five files import these and are outside this change's conversion set, so
+ * what they get has to stay byte-identical — which is why this is a re-export
+ * and not a second definition. The container's adapter is the other
+ * implementation; nothing here chooses between them.
  */
-export async function disposeChrome(child, profile) {
-  if (child && child.pid) spawnSync('taskkill', ['/F', '/T', '/PID', String(child.pid)], { stdio: 'ignore' });
-  spawnSync(
-    'powershell',
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -like '*${profile}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
-    ],
-    { stdio: 'ignore' }
-  );
-  await sleep(1500);
-  try {
-    fs.rmSync(profile, { recursive: true, force: true });
-  } catch {}
-}
+export const CHROME = windowsChrome.locate();
+
+export const disposeChrome = (child, profile) => windowsChrome.dispose(child, profile);
 
 /**
  * Autoplay without a gesture, and every throttle Chrome applies to a window it
