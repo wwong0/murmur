@@ -335,12 +335,22 @@ export function startRoomServer(opts = {}) {
       return;
     }
     const type = MIME[path.extname(absPath).toLowerCase()] ?? 'application/octet-stream';
-    res.writeHead(200, { 'Content-Type': type, 'Content-Length': stat.size, 'Cache-Control': 'no-store' });
-    // Flushed headers leave the captured socket delta equal to this response's body.
-    res.flushHeaders();
     const socket = res.socket;
     const position = responsePosition(socket);
+    const originResponseId = position.socketId === null
+      ? null
+      : `${position.socketId}:${position.responseIndex}`;
+    const headers = {
+      'Content-Type': type,
+      'Content-Length': stat.size,
+      'Cache-Control': 'no-store',
+    };
+    if (originResponseId !== null) headers['X-App-Response-Id'] = originResponseId;
+    res.writeHead(200, headers);
 
+    // Flush the response headers before recording the body baseline. Otherwise
+    // keep-alive header bytes can be attributed to the following body.
+    res.flushHeaders();
     completeResponse(res, {
       clientTag,
       urlPath: req.url,
@@ -349,6 +359,7 @@ export function startRoomServer(opts = {}) {
       socket,
       socketId: position.socketId,
       responseIndex: position.responseIndex,
+      originResponseId,
       socketBytesAtStart: socket ? socket.bytesWritten : 0,
     });
 

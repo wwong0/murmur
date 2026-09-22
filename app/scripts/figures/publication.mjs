@@ -1,6 +1,16 @@
 // Publication and CSV boundaries for harness figures.
 
+import { evaluateByteControl } from '../harness/byte-control.mjs';
+
 const PUBLICATION = Symbol('published-figure');
+const RECEIPT_COHORT_METHOD = 'client-receipt-cohort-v1';
+
+const RECEIPT_COHORT_FIELDS = Object.freeze([
+  ['hostUploadMultiplier', (value) => Number.isFinite(value) && value >= 0],
+  ['distinctSegmentBytesConsumedInWindow', (value) => Number.isFinite(value) && value > 0],
+  ['originSegmentBytesDeliveredInWindow', (value) => Number.isFinite(value) && value >= 0],
+  ['distinctSegmentsCompletedInWindow', (value) => Number.isInteger(value) && value > 0],
+]);
 
 const BYTE_FIELDS = Object.freeze([
   'condition.name',
@@ -79,6 +89,13 @@ function missingFields(kind, context, figure) {
   return null;
 }
 
+function missingReceiptCohortField(figure) {
+  for (const [field, valid] of RECEIPT_COHORT_FIELDS) {
+    if (!valid(figure?.[field])) return field;
+  }
+  return null;
+}
+
 export function requiredContextFields(kind, context = {}) {
   const fields = [...(REQUIRED_CONTEXT_FIELDS[kind] ?? [])];
   const tags = declaredTags(context, {});
@@ -88,6 +105,21 @@ export function requiredContextFields(kind, context = {}) {
 export function publish(kind, figure = {}, context = {}) {
   const missing = missingFields(kind, context, figure);
   if (missing) return { published: false, missing };
+  const accountingMethod = context.byteAccountingMethod ?? figure.byteAccountingMethod;
+  if (kind === 'byte' && accountingMethod === RECEIPT_COHORT_METHOD) {
+    if (figure.byteAccountingMethod !== RECEIPT_COHORT_METHOD) return { published: false, missing: 'byteAccountingMethod' };
+    for (const tag of declaredTags(context, figure)) {
+      for (const field of ['peerByteFractionByClient', 'originVsClientBytesByClient']) {
+        if (absent(figure[field]?.[tag])) return { published: false, missing: `${field}[${tag}]` };
+      }
+    }
+    const missingReceiptField = missingReceiptCohortField(figure);
+    if (missingReceiptField) return { published: false, missing: missingReceiptField };
+  }
+  if (kind === 'byte') {
+    const reasons = evaluateByteControl({ bars: context.condition?.bars, tags: declaredTags(context, figure), figures: figure });
+    if (reasons.length) return { published: false, missing: `${reasons[0].reason}:${reasons[0].tag}`, reasons };
+  }
   const copy = structuredClone(figure);
   const bad = finiteTree(copy);
   if (bad) return { published: false, missing: `nonfinite:${bad}` };

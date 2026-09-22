@@ -22,6 +22,19 @@ export function attachTabTakenDetector(tab, onCollision) {
   });
 }
 
+function responseHeader(headers, wanted) {
+  if (!headers || typeof headers !== 'object') return null;
+  const matches = Object.entries(headers)
+    .filter(([name]) => name.toLowerCase() === wanted.toLowerCase())
+    .map(([, value]) => value);
+  if (matches.length === 0) return null;
+  if (matches.length > 1 && new Set(matches.map(String)).size !== 1) {
+    throw new Error(`response has conflicting ${wanted} headers`);
+  }
+  const value = matches[0];
+  return typeof value === 'string' ? value : value == null ? null : String(value);
+}
+
 export function createRequestRecorder(tab) {
   const requests = new Map();
   const records = [];
@@ -63,6 +76,7 @@ export function createRequestRecorder(tab) {
         startMs: eventMs(params),
         raw: { requestTimestamp: params.timestamp, requestWallTime: params.wallTime },
         headerBytes: undefined,
+        originResponseId: null,
         bodyBytesFromChunks: 0,
         bodyBytesFromTotal: undefined,
         finished: false,
@@ -73,6 +87,7 @@ export function createRequestRecorder(tab) {
       const request = requests.get(params.requestId);
       if (!request) return;
       request.headerBytes = params.response?.encodedDataLength;
+      request.originResponseId = responseHeader(params.response?.headers, 'x-app-response-id');
       request.raw.responseTimestamp = params.timestamp;
     }),
     tab.on('Network.dataReceived', (params) => {
@@ -120,6 +135,19 @@ export function createRequestRecorder(tab) {
   };
 }
 
+/**
+ * The 125 ms poll, read FIELD BY FIELD rather than as objects.
+ *
+ * VideoPlaybackQuality carries its counters as prototype accessors, and CDP's
+ * returnByValue keeps own enumerable properties only — so the object itself
+ * crosses as an empty one. A real run polled 1440 times per client, recorded
+ * `"quality": {}` every time, produced no dropped-frame figure at all, and
+ * threw nothing; the run refusal is what caught it
+ * (CONSTRAINTS.md → *Verification*). `harness-poll-shape.mjs` puts this
+ * expression through the same serialisation against a stub whose counters are
+ * on the prototype, which is the only way an assertion here can fail for the
+ * reason the browser did.
+ */
 export function pollExpression() {
   return `(() => {
     const video = document.querySelector('video');
@@ -130,7 +158,17 @@ export function pollExpression() {
       clock: __app.clock(),
       controller: __app.controller(),
       playback: scalar,
-      quality: video?.getVideoPlaybackQuality?.() ?? null,
+      quality: video && typeof video.getVideoPlaybackQuality === 'function'
+        ? (() => {
+            const q = video.getVideoPlaybackQuality();
+            return {
+              droppedVideoFrames: q.droppedVideoFrames,
+              totalVideoFrames: q.totalVideoFrames,
+              corruptedVideoFrames: q.corruptedVideoFrames,
+              creationTime: q.creationTime
+            };
+          })()
+        : null,
       stalls: window.__harnessStalls ?? null
     };
   })()`;

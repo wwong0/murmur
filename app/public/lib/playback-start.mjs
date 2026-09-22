@@ -179,7 +179,7 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 }
   function duePlaying(nowSharedMs) {
     if (!attempt || !attempt.target.playing) return result([], null);
     if (attempt.playDispatched) return result([], null);
-    if (attempt.readyAtSharedMs !== null && attempt.readyAtSharedMs <= attempt.S) {
+    if (attempt.readyAtSharedMs !== null) {
       attempt.playDispatched = true;
       elementPlaying = true;
       lastLatenessMs = nowSharedMs - attempt.S;
@@ -191,9 +191,7 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 }
         ...attempt.mapping,
       }], null);
     }
-    retargets += 1;
-    invalidateAttempt();
-    return null;
+    return result([], null);
   }
 
   function poll({ nowSharedMs, resolved: nextResolved = false, state = null } = {}) {
@@ -253,14 +251,12 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 }
       return newPlayingAttempt(state, target, nowSharedMs);
     }
     if (nowSharedMs < attempt.S) return result([], attempt.S);
-    const due = duePlaying(nowSharedMs);
-    if (due) return due;
-    return newPlayingAttempt(state, target, nowSharedMs);
+    return duePlaying(nowSharedMs);
   }
 
   function ready(attemptId, observedSharedMs) {
     if (!attempt || attempt.id !== attemptId || !attempt.target.playing || !attempt.parked) return;
-    if (!Number.isFinite(observedSharedMs) || observedSharedMs > attempt.S) return;
+    if (!Number.isFinite(observedSharedMs)) return;
     if (attempt.readyAtSharedMs === null) attempt.readyAtSharedMs = observedSharedMs;
   }
 

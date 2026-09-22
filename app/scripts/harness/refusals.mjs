@@ -1,5 +1,6 @@
 import { requiredContextFields } from '../figures/publication.mjs';
 import { CDP_QUALIFICATION_REASON, validateCdpQualification } from './qualification.mjs';
+import { evaluateByteControl } from './byte-control.mjs';
 
 export const REFUSAL_SCOPE = Object.freeze({
   neverPlayed: Object.freeze(['byte', 'drift']),
@@ -34,6 +35,10 @@ export const REFUSAL_REASONS = Object.freeze([
   'run-directory-exists',
   'client-cadence-unavailable',
   CDP_QUALIFICATION_REASON,
+  'peer-byte-control-unavailable',
+  'peer-byte-control-above-declared-bar',
+  'origin-client-agreement-unavailable',
+  'origin-client-agreement-above-declared-bar',
 ]);
 
 const PUBLICATION_ONLY_REASONS = new Set([CDP_QUALIFICATION_REASON]);
@@ -245,6 +250,8 @@ export function evaluateRefusals(input = {}) {
     const missing = publicationMissing(input.publicationContext, tags);
     if (missing) addReason(reasons, `required-context-absent:${missing}`, REFUSAL_SCOPE.publication, { field: missing, figure: 'byte' });
   }
+
+  reasons.push(...evaluateByteControl({ bars, tags, figures: input.publicationContext ?? {} }));
 
   if (condition.publishes === true || input.requireCdpQualification === true) {
     const qualification = validateCdpQualification(input.cdpQualification);

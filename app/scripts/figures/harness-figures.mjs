@@ -1,6 +1,7 @@
 // Pure arithmetic for retained measurement streams.
 
 import { median, percentile } from '../../public/lib/frame-drift.mjs';
+import { computeReceiptCohort } from './receipt-cohort.mjs';
 
 export const PEER_FRACTION_ABS_MAX = 0.02;
 
@@ -173,16 +174,17 @@ function droppedFrames(records) {
   return qualityCounter(records, 'droppedVideoFrames');
 }
 
-function clientFigures(tag, client, origin, window, content) {
+function clientFigures(tag, client, origin, window, content, receipt) {
   const records = recordsFor(client, window);
   const polls = pollsFor(client, window);
   const result = {};
   const originBucket = origin.byClient[tag];
   const originBytes = numberOr(originBucket?.mediaBytesDelivered);
   const originWaste = numberOr(originBucket?.abortedMediaBytesDelivered);
-  const originCompletedBytes = finite(originBytes) && finite(originWaste) ? originBytes - originWaste : undefined;
+  const originCompletedBytes = receipt ? receipt.originCompletedBytes
+    : finite(originBytes) && finite(originWaste) ? originBytes - originWaste : undefined;
   const clientBytes = clientMediaBytes(client, window);
-  const receivedCompletedBytes = numberOr(clientBytes?.completedBytes);
+  const receivedCompletedBytes = receipt ? receipt.clientCompletedBytes : numberOr(clientBytes?.completedBytes);
   const receivedAbortedBytes = numberOr(clientBytes?.canceledBytes);
 
   if (finite(originCompletedBytes) && finite(receivedCompletedBytes) && receivedCompletedBytes > 0) {
@@ -278,7 +280,12 @@ function clientProbeFigures(records, prefix) {
   const lost = cumulativeDelta(records, (record) => prefix.startsWith('clock')
     ? record.clock?.counters?.lost
     : record.counters?.lost ?? record.echo?.counters?.lost);
-  if (finite(issued) && issued > 0 && finite(lost)) result[`${prefix.startsWith('clock') ? 'clock' : 'echo'}LossFraction`] = lost / issued;
+  // echo-probe.mjs marks each sample lost or not and publishes no cumulative
+  // counter, so reading one here left echoLossFraction empty on every real run
+  // while the fixture's manufactured counters kept the field green.
+  const flagged = prefix.startsWith('clock') ? [] : records.filter((record) => typeof record.lost === 'boolean');
+  if (flagged.length) result.echoLossFraction = flagged.filter((record) => record.lost).length / flagged.length;
+  else if (finite(issued) && issued > 0 && finite(lost)) result[`${prefix.startsWith('clock') ? 'clock' : 'echo'}LossFraction`] = lost / issued;
   return result;
 }
 
@@ -312,15 +319,33 @@ function linkFigures(samples, window, capacityBitsPerSecond) {
 
 export function computeFigures(input = {}) {
   const window = input.window;
-  const origin = originWindow(input.originStart ?? input.origin?.start, input.originEnd ?? input.origin?.end);
+  const originEnd = input.originEnd ?? input.origin?.end;
+  const origin = originWindow(input.originStart ?? input.origin?.start, originEnd);
   const clients = input.clients ?? {};
   const tags = tagsFrom(input, clients);
+  const method = input.byteAccountingMethod ?? input.context?.byteAccountingMethod;
+  if (method !== undefined && method !== null && method !== 'client-receipt-cohort-v1') {
+    throw new Error(`unknown byte accounting method: ${method}`);
+  }
+  if (originEnd?.responseAccountingVersion === 2 && method == null) {
+    throw new Error('version-2 origin evidence requires an explicitly declared byte accounting method');
+  }
+  const cohort = method != null
+    ? computeReceiptCohort({ clients, declaredClientTags: tags, window, originEnd })
+    : null;
+  const distinctBytes = cohort?.distinctSegmentBytesConsumedInWindow ?? origin.distinctSegmentBytesConsumedInWindow;
   const { byClient: originByClient, segmentBytesDeliveredInWindow, ...originFigures } = origin;
   const result = {
     ...originFigures,
+    ...(cohort ? {
+      byteAccountingMethod: cohort.method,
+      distinctSegmentBytesConsumedInWindow: distinctBytes,
+      distinctSegmentsCompletedInWindow: cohort.distinctSegmentsCompletedInWindow,
+      completedResponseCohortByClient: cohort.byClient,
+    } : {}),
     originSegmentBytesDeliveredInWindow: segmentBytesDeliveredInWindow,
-    hostUploadMultiplier: origin.distinctSegmentBytesConsumedInWindow > 0
-      ? segmentBytesDeliveredInWindow / origin.distinctSegmentBytesConsumedInWindow
+    hostUploadMultiplier: distinctBytes > 0
+      ? segmentBytesDeliveredInWindow / distinctBytes
       : undefined,
     peerByteFractionByClient: {},
     originVsClientBytesByClient: {},
@@ -347,7 +372,7 @@ export function computeFigures(input = {}) {
 
   for (const tag of tags) {
     const client = clients[tag] ?? {};
-    const { result: figures, polls } = clientFigures(tag, client, { ...origin, byClient: originByClient }, window, input.content);
+    const { result: figures, polls } = clientFigures(tag, client, { ...origin, byClient: originByClient }, window, input.content, cohort?.byClient[tag]);
     if (finite(figures.peerFraction)) result.peerByteFractionByClient[tag] = figures.peerFraction;
     if (finite(figures.receivedMediaBytes)) result.clientReceivedMediaBytesByClient ??= {};
     if (finite(figures.receivedMediaBytes)) result.clientReceivedMediaBytesByClient[tag] = figures.receivedMediaBytes;

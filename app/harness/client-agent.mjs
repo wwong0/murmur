@@ -105,12 +105,36 @@ function canConnect(port) {
   });
 }
 
+async function pageTargets() {
+  const response = await fetch(`http://127.0.0.1:${CDP_UPSTREAM_PORT}/json/list`, { cache: 'no-store' });
+  if (!response.ok) throw new Error(`/json/list answered HTTP ${response.status}`);
+  return (await response.json()).filter((target) => target.type === 'page');
+}
+
+/**
+ * Ready means A PAGE TARGET EXISTS, not that the port is bound.
+ *
+ * Chrome binds its debugger port well before it finishes first-run profile
+ * setup and has an `about:blank` to attach to, and the driver's readiness
+ * signal is this agent answering `/status`. A bare TCP connect therefore
+ * reported ready into a window where `attach` could still exhaust its whole
+ * retry budget and fail with "window never appeared" — observed on a cold
+ * container starting two clients at once.
+ */
 async function waitForChrome() {
-  for (let attempt = 0; attempt < 80; attempt++) {
-    if (await canConnect(CDP_UPSTREAM_PORT)) return;
+  let lastError = null;
+  for (let attempt = 0; attempt < 240; attempt++) {
+    if (await canConnect(CDP_UPSTREAM_PORT)) {
+      try {
+        if ((await pageTargets()).length > 0) return;
+        lastError = new Error('CDP is up but has no page target yet');
+      } catch (error) {
+        lastError = error;
+      }
+    }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error(`Chrome CDP did not accept connections on ${CDP_UPSTREAM_PORT}`);
+  throw new Error(`Chrome CDP never offered a page target on ${CDP_UPSTREAM_PORT}: ${lastError?.message ?? 'port never accepted'}`);
 }
 
 function readBody(request) {

@@ -377,7 +377,7 @@ function markSeam(epochMs, positionMs) {
 
 /** The shared instant offered as readiness, or null when nothing was offered. */
 function checkReady() {
-  if (!readiness?.prerequisiteSeen || !(video.readyState >= 3)) return null;
+  if (!readiness?.prerequisiteSeen || video.seeking || !(video.readyState >= 3)) return null;
   const observedSharedMs = clockSync.sharedNow();
   start.ready(readiness.attemptId, observedSharedMs);
   return observedSharedMs;
@@ -387,7 +387,10 @@ function observeElement(type) {
   const readyState = video.readyState;
   const paused = video.paused;
   const elementCurrentTimeMs = video.currentTime * 1000;
-  const blocked = !readiness || (readiness.needsSeeked && !readiness.prerequisiteSeen && type !== 'seeked');
+  // Native events carry no attempt ID. A queued event from an earlier park
+  // must not qualify a replacement whose current seek is still unfinished.
+  const blocked = !readiness || video.seeking
+    || (readiness.needsSeeked && !readiness.prerequisiteSeen && type !== 'seeked');
   let observedSharedMs = null;
   if (!blocked) {
     readiness.prerequisiteSeen = true;

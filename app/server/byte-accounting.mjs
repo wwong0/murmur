@@ -2,6 +2,8 @@
 
 const MEDIA_KINDS = new Set(['segment', 'init', 'playlist']);
 
+export const RESPONSE_ACCOUNTING_VERSION = 2;
+
 export function classifyPath(urlPath) {
   const pathname = String(urlPath).split(/[?#]/, 1)[0];
   if (!pathname.startsWith('/media/')) return 'overhead';
@@ -42,6 +44,7 @@ function clone(value) {
 
 export function createCounters() {
   const state = {
+    responseAccountingVersion: RESPONSE_ACCOUNTING_VERSION,
     mediaBytesDelivered: 0,
     segmentBytesDelivered: 0,
     initBytesDelivered: 0,
@@ -68,6 +71,7 @@ export function createCounters() {
     expectedBytes,
     socketId = null,
     responseIndex = null,
+    originResponseId = null,
     socketBytesAtStart = null,
     socketBytesAtEnd = null,
   }) {
@@ -108,6 +112,9 @@ export function createCounters() {
     state.responseRecords.push({
       socketId,
       responseIndex,
+      originResponseId,
+      clientTag,
+      kind,
       urlPath,
       socketBytesAtStart,
       socketBytesAtEnd,

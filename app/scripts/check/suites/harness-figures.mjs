@@ -1,4 +1,6 @@
 // Constructed section-6 arithmetic and publication cases.
+// Counter-only fixtures preserve legacy retained-run recomputation. Version 2
+// receipts are exercised by receipt-cohort and harness-byte-cohort suites.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -238,6 +240,22 @@ export default async function harnessFiguresSuite() {
     assertEqual(figures.echoRoundTripMsP95ByClient.A, 40, 'echo p95 is nearest-rank');
     assertEqual(figures.echoRoundTripMsP99ByClient.A, 40, 'echo p99 is nearest-rank');
     assertEqual(figures.echoLossFraction.A, 0.25, 'echo loss is separate from clock loss');
+  });
+
+  // The records above carry cumulative probe counters. echo-probe.mjs writes a
+  // per-sample lost flag and no counters at all, so the assertion above passed
+  // for a year against a shape no run produces: every real run left
+  // echoLossFraction empty. This drives the figure from what the probe writes.
+  await check('harness figures: echo loss reads the flag echo-probe.mjs actually writes', async () => {
+    const emitted = [0, 125, 250, 375].map((atMs, index) => {
+      const lost = index === 2;
+      return { atMs, seq: index, t1: atMs, ...(lost ? {} : { t4: atMs + [10, 20, 0, 40][index], rttMs: [10, 20, 0, 40][index] }), lost };
+    });
+    const input = fixture();
+    const figures = computeFigures({ ...input, clients: { A: { ...input.clients.A, echoRecords: emitted } } });
+    assertEqual(figures.echoLossFraction.A, 0.25, 'one lost sample in four is read from the flags');
+    assertEqual(figures.echoRoundTripMsP50ByClient.A, 20, 'a lost sample contributes no round trip');
+    assertEqual(figures.echoRoundTripMsP99ByClient.A, 40, 'the surviving samples keep nearest rank');
   });
 
   await check('harness figures: publication refuses exact missing context and CSV has no side door', async () => {

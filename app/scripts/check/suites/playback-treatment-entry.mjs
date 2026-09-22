@@ -235,6 +235,44 @@ export default async function playbackTreatmentEntrySuite() {
     assertEqual(load.events.filter((event) => event.kind === 'ready').length, 1, 'a load needs no seeked');
   });
 
+  await check('playback-treatment-entry: queued readiness cannot qualify an unfinished replacement seek', async () => {
+    const page = runEntry(product.code);
+    page.harness.sharedNowMs = 5_000;
+    const park = (id, positionMs) => page.act([{ kind: 'park', attemptId: id,
+      positionMs, scheduledPositionMs: positionMs, advanceMs: 0, seamEpochMs: 4_000,
+    }], { startAtSharedMs: 6_000 });
+    const readies = () => page.events.filter((event) => event.kind === 'ready');
+    park(7, 1000);
+    park(8, 2000);
+    // The native event has no attempt ID. A queued event from the old seek
+    // arrives while the replacement's currentTime write is still seeking.
+    page.video.seeking = true;
+    page.video.readyState = 4;
+    page.control.fire('seeked');
+    page.tick();
+    assertEqual(readies().length, 0, 'an unfinished replacement cannot receive readiness from the queued old event');
+    page.video.seeking = false;
+    page.tick();
+    assertEqual(readies().length, 0, 'the ignored event cannot latch a prerequisite that revives on a later tick');
+    page.control.fire('seeked');
+    assertEqual(json(readies().map((event) => event.detail)), json([{ attemptId: 8, observedSharedMs: 5_000 }]), 'the completed replacement seek still qualifies');
+
+    const tick = runEntry(product.code);
+    tick.harness.sharedNowMs = 5_000;
+    tick.act([{ kind: 'park', attemptId: 9, positionMs: 0, scheduledPositionMs: 0,
+      advanceMs: 0, seamEpochMs: 6_000 }], { startAtSharedMs: 6_000 });
+    tick.video.seeking = false;
+    tick.video.readyState = 2;
+    tick.control.fire('seeked');
+    tick.video.seeking = true;
+    tick.video.readyState = 4;
+    tick.tick();
+    assertEqual(tick.events.filter((event) => event.kind === 'ready').length, 0, 'the polling path also waits while the element is seeking');
+    tick.video.seeking = false;
+    tick.tick();
+    assertEqual(tick.events.filter((event) => event.kind === 'ready').length, 1, 'polling recovers when the live seek is complete');
+  });
+
   await check('playback-treatment-entry: pitch lost across the load latches the fault, and the page shows it', async () => {
     for (const point of ['load']) {
       const page = runEntry(product.code, { onLoad: (control) => control.setPitch(true) });

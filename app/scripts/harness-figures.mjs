@@ -63,6 +63,7 @@ export function readRunDirectory(runDir) {
   const window = manifest.window ?? manifest.measureWindow;
   const context = manifest.context ?? manifest;
   const input = {
+    byteAccountingMethod: manifest.byteAccountingMethod,
     window,
     originStart,
     originEnd,
@@ -86,7 +87,11 @@ export function recomputeRunDirectory(runDir) {
     bytesByClient: bytesByClientCsv(publishedByte),
     utilisation: utilisationCsv(publishedByte),
   };
-  return { figures, publishedByte, csv, regime: guardRegimes([{ ...retained.input, name: retained.manifest.condition?.name }]) };
+  return {
+    figures, publishedByte, csv,
+    accountingMethod: figures.byteAccountingMethod ?? 'legacy-origin-close-vs-client-receipt',
+    regime: guardRegimes([{ ...retained.input, name: retained.manifest.condition?.name }]),
+  };
 }
 
 function main() {

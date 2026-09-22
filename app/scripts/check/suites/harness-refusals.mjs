@@ -8,12 +8,14 @@ import {
   decideFinalization,
   drainClient,
   mergeVerifiedContext,
+  runHarness,
   settleFinalization,
 } from '../../harness-run.mjs';
 import { attachTabTakenDetector, isTabTakenNetworkFrame } from '../../harness/cdp-records.mjs';
 import { evaluateRefusals, REFUSAL_REASONS, refusalReasonSetIsUnique } from '../../harness/refusals.mjs';
 import { validateCdpQualification } from '../../harness/qualification.mjs';
 import { bytesByClientCsv, isPublishedFigure, publish, utilisationCsv } from '../../figures/publication.mjs';
+import { HTTP } from '../fixtures.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const BARS = { recordCoverageMin: 0.95, droppedFrameFractionMax: 0.02, driftLogMissedMax: 0 };
@@ -235,6 +237,73 @@ export default async function harnessRefusalsSuite() {
     assertEqual(result.runRefused, false, 'qualification blocks publication only');
     assertEqual(result.figures.byte, false, 'unqualified byte figure suppressed');
     assertEqual(result.figures.drift, true, 'unqualified byte mapping leaves drift eligible');
+
+    const never = evaluateRefusals({ ...evidence(), cdpQualification: null });
+    const failed = evaluateRefusals({ ...evidence(), cdpQualification: { status: 'failed', reason: 'qualification-error:recorder stopped' } });
+    const neverEvidence = never.reasons.find((entry) => entry.reason === 'cdp-byte-mapping-unqualified').evidence;
+    const failedEvidence = failed.reasons.find((entry) => entry.reason === 'cdp-byte-mapping-unqualified').evidence;
+    assertEqual(neverEvidence.attempted, false, 'never-run evidence is marked unattempted');
+    assertEqual(failedEvidence.attempted, true, 'failed-run evidence is marked attempted');
+    assertEqual(failedEvidence.status, 'failed', 'failed-run status is retained');
+    assertEqual(failedEvidence.qualificationReason, 'qualification-error:recorder stopped', 'failed-run reason is retained');
+    assertEqual(never.figures.byte, false, 'never-run byte figure suppressed');
+    assertEqual(failed.figures.byte, false, 'failed-run byte figure suppressed');
+  });
+
+  await check('harness-refusals: the run qualifies once after the first client and retains thrown failure evidence', async () => {
+    const tab = {
+      on: () => () => {},
+      send: async () => {},
+      evaluate: async (source) => source.includes('wallMs') ? { wallMs: Date.now(), performanceNowMs: 0 } : true,
+    };
+    const topology = {
+      async prepare() { return { containers: { origin: 'origin-container' } }; },
+      async applyQdiscs() { return []; },
+      async teardown() {},
+    };
+    const stopAfterQualification = async () => { throw new Error('stop after qualification'); };
+    // prepareRunDirectory refuses a run directory outside results/, so this one
+    // has to be written there. The removal is in a finally because a failing
+    // assertion below would otherwise leave a directory in the evidence tree
+    // that the run register knows nothing about.
+    const run = async (name, qualifier) => {
+      const runDir = path.join(ROOT, 'results', `check-cdp-qualification-${process.pid}-${Date.now()}-${name}`);
+      try {
+        try {
+          await runHarness({
+            conditionName: 'shakedown/filler-null',
+            runDir,
+            originUrl: HTTP,
+            clientOriginUrl: HTTP,
+            topology,
+            clientFactory: async () => ({ tab }),
+            establishCadence: stopAfterQualification,
+            qualifyCdpBytes: qualifier,
+          });
+        } catch (error) {
+          assertEqual(error.message, 'stop after qualification', 'the harness stops at the injected cadence seam');
+        }
+        return JSON.parse(fs.readFileSync(path.join(runDir, 'manifest.json'), 'utf8'));
+      } finally {
+        fs.rmSync(runDir, { recursive: true, force: true });
+      }
+    };
+
+    let calls = 0;
+    const passed = { status: 'passed', statSizeBytes: 7, bodyBytesFromChunks: 7, bodyBytesFromTotal: 7 };
+    const merged = await run('passed', async (calledTab, options) => {
+      calls += 1;
+      assertEqual(calledTab, tab, 'the first prepared tab is qualified');
+      assertEqual(options.originContainer, 'origin-container', 'the prepared origin container is passed');
+      return passed;
+    });
+    assertEqual(calls, 1, 'the qualifier is called exactly once per run');
+    assertEqual(JSON.stringify(merged.cdpQualification), JSON.stringify(passed), 'qualification is merged into the manifest');
+
+    const failed = await run('throw', async () => { throw new Error('recorder stopped'); });
+    assertEqual(failed.cdpQualification.status, 'failed', 'a throwing qualifier records failure');
+    assertEqual(failed.cdpQualification.reason, 'qualification-error:recorder stopped', 'a throwing qualifier records its reason');
+    assert(failed.cdpQualification !== null, 'a throwing qualifier never leaves null evidence');
   });
 
   await check('harness-refusals: unattributed origin delta suppresses byte figures only', async () => {
@@ -252,9 +321,17 @@ export default async function harnessRefusalsSuite() {
   });
 
   await check('harness-refusals: an unestablished cadence refuses the run and names the client', async () => {
-    const none = evaluateRefusals(evidence({ cadence: cadenceRecords(['c01'], { classification: 'none', presentIntervalMs: null, reasons: ['no rVFC callbacks'] }) }));
+    // `none` WITH A FINITE INTERVAL, because that is what the classifier
+    // actually returns: `classifyCadence` carries `raf.p50` through its none
+    // branch, so a probe that saw too few callbacks — or saw them too dispersed
+    // to be one cadence — reports a real number beside its refusal. A fixture
+    // with a null interval would be caught by the finiteness clause and would
+    // leave the classification clause untested, which a mutation of that clause
+    // alone confirmed: it survived a full green check.
+    const none = evaluateRefusals(evidence({ cadence: cadenceRecords(['c01'], { classification: 'none', presentIntervalMs: 12.4, impliedHz: null, optimismVsSixtyHzMs: null, reasons: ['no rVFC callbacks'] }) }));
+    const unreadable = evaluateRefusals(evidence({ cadence: cadenceRecords(['c01'], { presentIntervalMs: null }) }));
     const absent = evaluateRefusals(evidence({ cadence: {} }));
-    for (const result of [none, absent]) {
+    for (const result of [none, unreadable, absent]) {
       assert(has(result, 'client-cadence-unavailable'), 'cadence reason');
       assertEqual(result.runRefused, true, 'an unestablished cadence is a run refusal, not a publication one');
       assertEqual(result.figures.byte, false, 'byte suppressed');

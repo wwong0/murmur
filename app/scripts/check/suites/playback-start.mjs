@@ -119,21 +119,54 @@ export default async function playbackStartSuite() {
     assertEqual(lateFirst.attemptId, late.actions[0].attemptId, 'the late tick serves the same attempt');
   });
 
-  await check('playback-start: not ready at S retargets, and stale readiness cannot play the old attempt', async () => {
+  await check('playback-start: delayed readiness keeps one parked attempt across late polls', async () => {
+    const advance = 37;
+    const r = rig({ prepareLeadMs: 0, presentationAdvanceMs: advance });
+    const first = r.poll();
+    const original = first.actions[0];
+    assertEqual(first.nextAtSharedMs, 1000, 'zero preparation lead schedules the deadline at S');
+    assertEqual(original.positionMs, 537, 'the one preparation position includes presentation advance');
+
+    for (let now = 1000; now <= 1200; now += 25) {
+      const waiting = r.poll({ nowSharedMs: now });
+      assertEqual(waiting.actions.length, 0, `poll at ${now} does not rewrite the parked position`);
+      assertEqual(waiting.nextAtSharedMs, null, `poll at ${now} schedules no expired deadline`);
+      assertEqual(waiting.attemptId, first.attemptId, `poll at ${now} keeps the same attempt`);
+    }
+    assertEqual(r.element.writes.length, 1, 'delayed readiness has one preparation position');
+
+    r.start.ready(first.attemptId, 1250);
+    const late = r.poll({ nowSharedMs: 1300 });
+    assertEqual(late.actions.length, 1, 'late readiness eventually dispatches play');
+    assertEqual(late.actions[0].kind, 'play', 'the eventual action is play');
+    assertEqual(late.actions[0].attemptId, first.attemptId, 'play uses the original attempt');
+    assertEqual(late.actions[0].startAtSharedMs, 1000, 'play uses the original S');
+    assertEqual(late.actions[0].latenessMs, 300, 'play records actual lateness from the original S');
+    assertEqual(late.actions[0].positionMs, original.positionMs, 'play retains the original advanced position');
+    assertEqual(late.actions[0].scheduledPositionMs, original.scheduledPositionMs, 'play retains the original scheduled position');
+    assertEqual(late.actions[0].advanceMs, advance, 'play retains the original presentation advance');
+    assertEqual(late.actions[0].seamEpochMs, original.seamEpochMs, 'play retains the original seam mapping');
+
+    r.start.playResolved(first.attemptId);
+    r.start.ready(first.attemptId, 1300);
+    const after = r.poll({ nowSharedMs: 1350 });
+    assertEqual(after.actions.length, 0, 'duplicate late polls do not dispatch play again');
+    assertEqual(r.element.plays.length, 1, 'delayed readiness starts exactly once');
+  });
+
+  await check('playback-start: not ready at S retains the attempt and accepts late readiness', async () => {
     const r = rig();
     const first = r.poll();
-    const retarget = r.poll({ nowSharedMs: 1400 });
-    assertEqual(retarget.actions.map((a) => a.kind).join(','), 'park', 'not-ready preparation retargets with a new park');
-    assertEqual(retarget.nextAtSharedMs, 1800, 'the retarget computes S from its own poll');
-    assertEqual(retarget.actions[0].positionMs, 1300, 'the retarget parks at mediaMsAt of the new S');
-    assertEqual(retarget.attemptId !== first.attemptId, true, 'retarget has a fresh attempt id');
-    assertEqual(retarget.retargets, 1, 'retarget is counted');
-    r.start.ready(first.attemptId, 1000);
-    const stillPreparing = r.poll({ nowSharedMs: 1400 });
-    assertEqual(stillPreparing.actions.length, 0, 'stale readiness does not revive the old attempt');
-    r.start.ready(retarget.attemptId, 1400);
-    const due = r.poll({ nowSharedMs: 1800 });
-    assertEqual(due.actions[0].kind, 'play', 'the new attempt plays when it is ready');
+    const deadline = r.poll({ nowSharedMs: 1400 });
+    assertEqual(deadline.actions.length, 0, 'not-ready preparation does not rewrite at S');
+    assertEqual(deadline.nextAtSharedMs, null, 'an unready deadline schedules no expired retry');
+    assertEqual(deadline.attemptId, first.attemptId, 'the original attempt remains live');
+    assertEqual(deadline.retargets, 0, 'an unready deadline is not a retarget');
+    r.start.ready(first.attemptId, 1500);
+    const late = r.poll({ nowSharedMs: 1600 });
+    assertEqual(late.actions[0].kind, 'play', 'the original attempt plays when late readiness arrives');
+    assertEqual(late.actions[0].attemptId, first.attemptId, 'late readiness plays the retained attempt');
+    assertEqual(late.actions[0].latenessMs, 200, 'late play records lateness from the original S');
   });
 
   await check('playback-start: pause, rejoin and a second seek before S prevent the old start', async () => {
@@ -169,9 +202,9 @@ export default async function playbackStartSuite() {
 
     const next = rig();
     const old = next.poll();
-    next.poll({ nowSharedMs: 1400 });
-    const replacement = next.start.state().attemptId;
-    next.start.ready(replacement, 1400);
+    const replacementPark = next.poll({ nowSharedMs: 1100, state: playing(1200, 900) });
+    const replacement = replacementPark.attemptId;
+    next.start.ready(replacement, 1500);
     next.poll({ nowSharedMs: 1800 });
     const beforeReplacementResult = JSON.stringify(next.start.state());
     next.start.playResolved(old.attemptId);
@@ -180,12 +213,15 @@ export default async function playbackStartSuite() {
 
     const readiness = rig();
     const oldPark = readiness.poll();
-    const replacementPark = readiness.poll({ nowSharedMs: 1400 });
+    const replacementReadinessPark = readiness.poll({ nowSharedMs: 1100, state: playing(1200, 900) });
     readiness.start.ready(oldPark.attemptId, 1000);
-    const due = readiness.poll({ nowSharedMs: 1800 });
+    const due = readiness.poll({ nowSharedMs: 1800, state: playing(1200, 900) });
     assertEqual(due.actions.some((action) => action.kind === 'play'), false, 'readiness from an earlier park does not qualify the replacement');
-    assertEqual(due.retargets, 2, 'the replacement retargets when it is also not ready');
-    assertEqual(replacementPark.attemptId !== oldPark.attemptId, true, 'the replacement remains distinct');
+    assertEqual(due.retargets, 0, 'an unready replacement remains parked without retargeting');
+    assertEqual(replacementReadinessPark.attemptId !== oldPark.attemptId, true, 'the replacement remains distinct');
+    readiness.start.ready(replacementReadinessPark.attemptId, 1800);
+    const replacementDue = readiness.poll({ nowSharedMs: 1900, state: playing(1200, 900) });
+    assertEqual(replacementDue.actions[0].kind, 'play', 'readiness for the replacement still permits play');
   });
 
   await check('playback-start: a paused join loads once, and a future pause waits only when the element is playing', async () => {

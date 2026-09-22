@@ -7,6 +7,7 @@ import { startOriginMonitor, stopOriginMonitor } from './runner/origin-monitor.m
 import { recomputeRunDirectory } from './harness-figures.mjs';
 import { isPublishedFigure } from './figures/publication.mjs';
 import { attachTabTakenDetector, boundaryExpression, createRequestRecorder, installStallRecorder, pollExpression } from './harness/cdp-records.mjs';
+import { qualifyCdpBytes as defaultQualifyCdpBytes } from './harness/qualification.mjs';
 import { evaluateRefusals } from './harness/refusals.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -108,6 +109,7 @@ function initialManifest(conditionName, condition, runDir, startedAt, tags) {
   const start = startedAt + condition.excludedPrefixMs;
   return {
     schemaVersion: 1,
+    byteAccountingMethod: 'client-receipt-cohort-v1',
     runId: path.basename(runDir),
     status: 'running',
     outcome: 'running',
@@ -165,6 +167,20 @@ function noClientFactory() {
 async function defaultEstablishCadence(sessions, options) {
   const { establishCadence } = await import('./harness-cadence.mjs');
   return establishCadence(sessions, options);
+}
+
+function failedCdpQualification(reason) {
+  return { status: 'failed', reason };
+}
+
+async function qualifyFirstClient(tab, originContainer, qualifier) {
+  if (!originContainer) return failedCdpQualification('qualification-unavailable:origin-container');
+  if (!tab) return failedCdpQualification('qualification-unavailable:first-client-tab');
+  try {
+    return await qualifier(tab, { originContainer }) ?? failedCdpQualification('qualification-failed:no-result');
+  } catch (error) {
+    return failedCdpQualification(`qualification-error:${error?.message ?? String(error)}`);
+  }
 }
 
 export function mergeVerifiedContext(manifest, seam = {}) {
@@ -369,7 +385,7 @@ async function disposeSession(session) {
   if (session.dispose) await session.dispose();
 }
 
-export async function runHarness({ conditionName, runDir = defaultRunDir(conditionName), originUrl, clientOriginUrl = originUrl, topology = section3Topology(), clientFactory = noClientFactory, establishCadence = defaultEstablishCadence } = {}) {
+export async function runHarness({ conditionName, runDir = defaultRunDir(conditionName), originUrl, clientOriginUrl = originUrl, topology = section3Topology(), clientFactory = noClientFactory, establishCadence = defaultEstablishCadence, qualifyCdpBytes = defaultQualifyCdpBytes } = {}) {
   const condition = conditionForName(conditionName);
   const startedAt = Date.now();
   const tags = tagsFor(condition);
@@ -401,11 +417,21 @@ export async function runHarness({ conditionName, runDir = defaultRunDir(conditi
     if (!originUrl) throw new Error('origin URL is required for a harness run');
     monitor = startOriginMonitor({ healthUrl: `${originUrl}/room.html`, deadlineAt: deadline.deadlineAt, maxWallMs, onFailure: (event) => manifestFile.merge({ originFailure: event }) });
     monitor.promise.catch((error) => { failure ??= error; });
-    for (const session of sessions) {
+    for (const [index, session] of sessions.entries()) {
       const clientUrl = `${clientOriginUrl}/room.html?room=${encodeURIComponent(room)}&role=${session.role}&tab=${session.tag}`;
       const acquired = await clientFactory({ tag: session.tag, role: session.role, room, url: clientUrl, condition, runDir: prepared.runDir });
       Object.assign(session, acquired);
+      if (index === 0 && !session.tab) {
+        manifestFile.merge({ cdpQualification: failedCdpQualification('qualification-unavailable:first-client-tab') });
+        manifestFile.write();
+        throw new Error('first client tab is unavailable for CDP qualification');
+      }
       await prepareClient(session, clientUrl, deadline);
+      if (index === 0) {
+        const qualification = await qualifyFirstClient(session.tab, preparedTopology.containers?.origin, qualifyCdpBytes);
+        manifestFile.set(mergeVerifiedContext(manifestFile.get(), { cdpQualification: qualification }));
+        manifestFile.write();
+      }
       await session.startEcho?.({ room: `${room}-probe`, out: `/results/${path.basename(prepared.runDir)}/client-${session.tag}.echo.ndjson`, intervalMs: ECHO_INTERVAL_MS });
     }
 
