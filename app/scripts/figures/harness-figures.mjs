@@ -227,8 +227,8 @@ function clientFigures(tag, client, origin, window, content) {
   if (finite(presentedSpan) && presentedSpan > 0) result.coverageRatio = records.length / presentedSpan;
   const dropped = droppedFrames(polls);
   const total = qualityCounter(polls, 'totalVideoFrames');
-  if (finite(dropped) && finite(total) && total + dropped > 0) {
-    result.droppedFrameFraction = dropped / (total + dropped);
+  if (finite(dropped) && finite(total) && total > 0) {
+    result.droppedFrameFraction = dropped / total;
   }
 
   return { result, records, polls };

@@ -1,0 +1,40 @@
+# A client: one headless Google Chrome, driven over CDP from the host.
+#
+# **Google Chrome stable from Google's own repository, never Debian's
+# Chromium.** The content is H.264 and a Chromium built without the proprietary
+# codecs decodes none of it — which arrives as a client that joins, plays
+# nothing and reports zero frames, i.e. as a result rather than as a missing
+# dependency (executor-spec.md §3.2). The version string is read back at run
+# time and written into the manifest.
+#
+# ffmpeg is here for `ffprobe` only: `verify-frames.mjs` reads the content's
+# frame rate from the media every run rather than trusting a constant.
+
+FROM node:24-bookworm-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates curl gnupg iproute2 iputils-ping ffmpeg fonts-liberation \
+ && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+      | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
+ && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+      > /etc/apt/sources.list.d/google-chrome.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends google-chrome-stable \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY . .
+
+ENV APP_CHROME=/usr/bin/google-chrome
+ENV APP_BROWSER_PLATFORM=linux
+ENV APP_ORIGIN=http://origin-media:8100
+# ffprobe reads the frame rate from here; compose mounts the content read-only.
+ENV APP_MEDIA_DIR=/media
+
+EXPOSE 9222 9223
+CMD ["node", "harness/client-agent.mjs"]

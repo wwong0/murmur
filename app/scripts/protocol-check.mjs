@@ -30,6 +30,8 @@ import { describeFixtures, disposeFixtures } from './check/fixtures.mjs';
 import mediaSuite from './check/suites/media.mjs';
 import byteAccountingSuite from './check/suites/byte-accounting.mjs';
 import harnessFiguresSuite from './check/suites/harness-figures.mjs';
+import harnessRefusalsSuite from './check/suites/harness-refusals.mjs';
+import harnessCadenceSuite from './check/suites/harness-cadence.mjs';
 import joinSuite from './check/suites/join.mjs';
 import hostSuite from './check/suites/host.mjs';
 import identitySuite from './check/suites/identity.mjs';
@@ -76,6 +78,8 @@ for (const suite of [
   mediaSuite,
   byteAccountingSuite,
   harnessFiguresSuite,
+  harnessRefusalsSuite,
+  harnessCadenceSuite,
   joinSuite,
   hostSuite,
   identitySuite,

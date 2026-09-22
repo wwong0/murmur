@@ -1,0 +1,36 @@
+# The origin: the existing app server, its built bundle, and `tc`.
+#
+# `npm ci --omit=dev` plus an explicit esbuild, because the bundle is built in
+# the image and esbuild is a devDependency: `--omit=dev` would leave the image
+# with no bundler and `npm run build` would fail at the one step that makes the
+# page the clients load the page this tree describes.
+#
+# iproute2 carries `tc` and `ip`. The qdiscs are attached from the host with
+# `docker exec`, so the tool has to exist in here rather than out there.
+#
+# ffmpeg is here for `ffprobe`, and it is here rather than only in the client
+# because this is the container that has `/media` mounted. The content's frame
+# rate is read from the media every run and no constant is substituted for it
+# (executor-spec.md §10), so the reader has to be where the file is.
+
+FROM node:24-bookworm-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends iproute2 iputils-ping ca-certificates ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev \
+ && npm install --no-save --no-package-lock esbuild@0.25.12
+
+COPY . .
+RUN npm run build
+
+ENV APP_MEDIA_DIR=/media
+ENV APP_PORT=8100
+ENV APP_HOST=0.0.0.0
+
+EXPOSE 8100
+CMD ["node", "harness/origin-entry.mjs"]

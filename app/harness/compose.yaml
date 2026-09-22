@@ -1,0 +1,171 @@
+# The harness topology: one origin, up to ten clients, one background-load
+# sink, and TWO networks.
+#
+# `wa-media` carries HTTP, the media and the websocket. `wa-control` carries
+# CDP and the agent API. **Every qdisc attaches to the media interface only**
+# (design.md D1, executor-spec.md §3.1): a qdisc on the one interface would
+# shape the channel the measurement is read over, and a 200ms `netem delay`
+# would then be measured through itself.
+#
+# Interface names are NOT declared here and must never be hard-coded: with two
+# networks the attachment order inside the container is not guaranteed, so
+# `apply-qdisc.mjs` resolves the interface by its IPv4 address on the
+# `wa-media` subnet and records the name it resolved.
+#
+# Only the services a condition needs are started: `docker compose up -d origin
+# sink c01 c02` brings up two clients and nothing else.
+
+name: wa6a
+
+x-client: &client
+  build:
+    context: ..
+    dockerfile: harness/Dockerfile.client
+  image: wa6a-client:latest
+  init: true
+  # Chrome's shared memory, sized rather than relocated. `--disable-dev-shm-usage`
+  # changes WHERE Chrome puts shared memory, which is a change to the regime;
+  # a larger /dev/shm is not (executor-spec.md §3.3).
+  shm_size: 1gb
+  cap_add:
+    - NET_ADMIN
+  depends_on:
+    - origin
+  # NO `environment` HERE. A service's own `environment` REPLACES the anchor's
+  # rather than merging into it, so a setting put here is silently dropped by
+  # all ten clients — which is how `APP_MEDIA_DIR` arrived empty in a container
+  # that had the media mounted. The shared settings are `ENV` in
+  # Dockerfile.client; each service below carries only what differs.
+  volumes:
+    # Read-only, and read for one reason: `verify-frames.mjs` re-reads the
+    # content's frame rate with ffprobe every run rather than carrying a
+    # constant (executor-spec.md §10), and it runs in HERE. Nothing in the
+    # client serves this directory — the media still arrives over wa-media.
+    - ../../step0/content:/media:ro
+    - ../results:/results
+  networks:
+    - wa-media
+    - wa-control
+
+services:
+  origin:
+    build:
+      context: ..
+      dockerfile: harness/Dockerfile.origin
+    image: wa6a-origin:latest
+    init: true
+    cap_add:
+      - NET_ADMIN
+    environment:
+      APP_MEDIA_DIR: /media
+      APP_PORT: '8100'
+      APP_HOST: 0.0.0.0
+    volumes:
+      - ../../step0/content:/media:ro
+      - ../results:/results
+    ports:
+      - '127.0.0.1:8110:8100'
+    # Per-network aliases, because `origin` alone resolves to BOTH addresses and
+    # a client that picked the control one would fetch its media past the shaped
+    # interface — the rig would report an impairment it never applied. Clients
+    # are given `origin-media` and nothing else.
+    networks:
+      wa-media:
+        aliases:
+          - origin-media
+      wa-control:
+        aliases:
+          - origin-control
+
+  sink:
+    image: wa6a-origin:latest
+    init: true
+    command: ['node', 'harness/sink.mjs', '--port=9500']
+    networks:
+      - wa-media
+
+  c01:
+    <<: *client
+    environment:
+      APP_TAG: c01
+    ports:
+      - '127.0.0.1:9301:9222'
+      - '127.0.0.1:9401:9223'
+
+  c02:
+    <<: *client
+    environment:
+      APP_TAG: c02
+    ports:
+      - '127.0.0.1:9302:9222'
+      - '127.0.0.1:9402:9223'
+
+  c03:
+    <<: *client
+    environment:
+      APP_TAG: c03
+    ports:
+      - '127.0.0.1:9303:9222'
+      - '127.0.0.1:9403:9223'
+
+  c04:
+    <<: *client
+    environment:
+      APP_TAG: c04
+    ports:
+      - '127.0.0.1:9304:9222'
+      - '127.0.0.1:9404:9223'
+
+  c05:
+    <<: *client
+    environment:
+      APP_TAG: c05
+    ports:
+      - '127.0.0.1:9305:9222'
+      - '127.0.0.1:9405:9223'
+
+  c06:
+    <<: *client
+    environment:
+      APP_TAG: c06
+    ports:
+      - '127.0.0.1:9306:9222'
+      - '127.0.0.1:9406:9223'
+
+  c07:
+    <<: *client
+    environment:
+      APP_TAG: c07
+    ports:
+      - '127.0.0.1:9307:9222'
+      - '127.0.0.1:9407:9223'
+
+  c08:
+    <<: *client
+    environment:
+      APP_TAG: c08
+    ports:
+      - '127.0.0.1:9308:9222'
+      - '127.0.0.1:9408:9223'
+
+  c09:
+    <<: *client
+    environment:
+      APP_TAG: c09
+    ports:
+      - '127.0.0.1:9309:9222'
+      - '127.0.0.1:9409:9223'
+
+  c10:
+    <<: *client
+    environment:
+      APP_TAG: c10
+    ports:
+      - '127.0.0.1:9310:9222'
+      - '127.0.0.1:9410:9223'
+
+networks:
+  wa-media:
+    driver: bridge
+  wa-control:
+    driver: bridge

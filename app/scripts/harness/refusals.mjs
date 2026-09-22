@@ -1,0 +1,287 @@
+import { requiredContextFields } from '../figures/publication.mjs';
+import { CDP_QUALIFICATION_REASON, validateCdpQualification } from './qualification.mjs';
+
+export const REFUSAL_SCOPE = Object.freeze({
+  neverPlayed: Object.freeze(['byte', 'drift']),
+  noRecords: Object.freeze(['drift']),
+  coverage: Object.freeze(['drift']),
+  evicted: Object.freeze(['drift']),
+  driftEvidence: Object.freeze(['drift']),
+  qualityEvidence: Object.freeze(['byte', 'drift']),
+  droppedFrames: Object.freeze(['byte', 'drift']),
+  unattributed: Object.freeze(['byte']),
+  tabCollision: Object.freeze(['byte', 'drift']),
+  runDirectory: Object.freeze([]),
+  publication: Object.freeze(['byte']),
+  cdpQualification: Object.freeze(['byte']),
+  cadence: Object.freeze(['byte', 'drift']),
+});
+
+export const REFUSAL_REASONS = Object.freeze([
+  'client-never-began-playback',
+  'client-holds-no-drift-records',
+  'record-coverage-below-declared-fraction',
+  'record-coverage-unavailable',
+  'drift-log-discarded-records',
+  'drift-log-missed-unavailable',
+  'drift-page-reset',
+  'drift-drain-gap-unavailable',
+  'drift-drain-gap-over-60s',
+  'dropped-frame-evidence-unavailable',
+  'dropped-frames-above-declared-bar',
+  'origin-unattributed-bytes-nonzero',
+  'server-refused-tab-id',
+  'run-directory-exists',
+  'client-cadence-unavailable',
+  CDP_QUALIFICATION_REASON,
+]);
+
+const PUBLICATION_ONLY_REASONS = new Set([CDP_QUALIFICATION_REASON]);
+
+const finite = (value) => Number.isFinite(value);
+const present = (value) => value !== undefined && value !== null;
+const eventTime = (record) => record?.displaySharedMs ?? record?.atMs ?? record?.endMs;
+
+function inWindow(records, window) {
+  if (!Array.isArray(records)) return [];
+  if (!finite(window?.startMs) || !finite(window?.endMs)) return records;
+  return records.filter((record) => {
+    const at = eventTime(record);
+    return finite(at) && at >= window.startMs && at <= window.endMs;
+  });
+}
+
+function addReason(reasons, reason, scope, detail = {}) {
+  reasons.push({ reason, scope: [...scope], ...detail });
+}
+
+function counterDelta(after, before, field) {
+  const right = Number(after?.[field] ?? 0);
+  const left = Number(before?.[field] ?? 0);
+  return finite(right) && finite(left) ? right - left : undefined;
+}
+
+function clientRecords(client) {
+  return client?.records ?? client?.driftRecords ?? [];
+}
+
+function clientPolls(client) {
+  return client?.polls ?? client?.pollRecords ?? [];
+}
+
+function coverageFor(tag, client, window, minimum) {
+  const records = inWindow(clientRecords(client), window);
+  const bad = { tag, records: records.length };
+  if (records.length === 0) return { available: false, detail: { ...bad, reason: 'empty-window' } };
+  let previousSeq;
+  let previousPresented;
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!finite(record?.seq) || (previousSeq !== undefined && record.seq <= previousSeq)) {
+      return { available: false, detail: { ...bad, index, field: 'seq', record } };
+    }
+    if (!finite(record?.presentedFrames)) {
+      return { available: false, detail: { ...bad, index, field: 'presentedFrames', record } };
+    }
+    if (previousPresented !== undefined && record.presentedFrames <= previousPresented) {
+      return { available: false, detail: { ...bad, index, field: 'presentedFrames', record } };
+    }
+    previousSeq = record.seq;
+    previousPresented = record.presentedFrames;
+  }
+  const span = records.at(-1).presentedFrames - records[0].presentedFrames + 1;
+  if (!(span > 0)) return { available: false, detail: { ...bad, field: 'presentedFramesSpan', span } };
+  const coverage = records.length / span;
+  const passes = records.length + 0.5 >= minimum * span;
+  return { available: true, records: records.length, span, coverage, passes, detail: bad };
+}
+
+function droppedFraction(client, window) {
+  const polls = inWindow(clientPolls(client), window);
+  if (polls.length < 2) return { available: false, detail: { field: 'quality' } };
+  let previous;
+  for (const poll of polls) {
+    const quality = poll?.quality ?? poll?.videoQuality;
+    const dropped = Number(quality?.droppedVideoFrames);
+    const total = Number(quality?.totalVideoFrames);
+    if (!finite(dropped) || !finite(total)
+      || (previous && (dropped < previous.dropped || total < previous.total))) {
+      return { available: false, detail: { dropped, total, field: 'quality' } };
+    }
+    previous = { dropped, total };
+  }
+  const first = polls[0]?.quality ?? polls[0]?.videoQuality;
+  const last = polls.at(-1)?.quality ?? polls.at(-1)?.videoQuality;
+  const dropped = Number(last.droppedVideoFrames) - Number(first.droppedVideoFrames);
+  const total = Number(last.totalVideoFrames) - Number(first.totalVideoFrames);
+  if (!finite(dropped) || !finite(total) || total <= 0 || dropped < 0) {
+    return { available: false, detail: { dropped, total, field: 'quality' } };
+  }
+  return { available: true, dropped, total, fraction: dropped / total };
+}
+
+function publicationMissing(context, tags) {
+  const value = { ...(context ?? {}), declaredClientTags: tags };
+  return requiredContextFields('byte', value).find((field) => {
+    const parts = field.match(/^([^[]+)\[(.+)\]$/);
+    if (parts) return !present(value[parts[1]]?.[parts[2]]);
+    const path = field.split('.');
+    let current = value;
+    for (const key of path) current = current?.[key];
+    return !present(current);
+  });
+}
+
+export function evaluateRefusals(input = {}) {
+  const condition = input.condition ?? {};
+  const bars = condition.bars ?? {};
+  const window = input.window ?? condition.window;
+  const clients = input.clients ?? {};
+  const tags = input.declaredClientTags ?? Object.keys(clients);
+  const reasons = [];
+  const coverage = {};
+  const dropped = {};
+  const realtimeFactorByClient = {};
+
+  for (const tag of tags) {
+    const client = clients[tag] ?? {};
+    const playback = client.finalPlayback ?? client.playbackEnd ?? client.playback ?? {};
+    if (playback.begun === undefined || playback.begun === 0) {
+      addReason(reasons, 'client-never-began-playback', REFUSAL_SCOPE.neverPlayed, { tag });
+    }
+    if (clientRecords(client).length === 0) {
+      addReason(reasons, 'client-holds-no-drift-records', REFUSAL_SCOPE.noRecords, { tag });
+    }
+    const result = coverageFor(tag, client, window, Number(bars.recordCoverageMin));
+    coverage[tag] = result;
+    const records = inWindow(clientRecords(client), window);
+    if (records.length >= 2) {
+      const display = records.at(-1).displaySharedMs - records[0].displaySharedMs;
+      const media = records.at(-1).mediaMs - records[0].mediaMs;
+      if (finite(display) && display > 0 && finite(media)) realtimeFactorByClient[tag] = media / display;
+    }
+    if (!result.available) {
+      addReason(reasons, 'record-coverage-unavailable', REFUSAL_SCOPE.coverage, { tag, detail: result.detail });
+    } else if (!result.passes) {
+      addReason(reasons, 'record-coverage-below-declared-fraction', REFUSAL_SCOPE.coverage, {
+        tag,
+        coverage: result.coverage,
+        presentedFramesSpan: result.span,
+        recordsInWindow: result.records,
+      });
+    }
+    const missedValue = client.driftLogMissed ?? input.driftLogMissed?.[tag];
+    const missed = Number(missedValue);
+    if (!finite(missed)) {
+      addReason(reasons, 'drift-log-missed-unavailable', REFUSAL_SCOPE.driftEvidence, { tag });
+    } else if (missed > Number(bars.driftLogMissedMax ?? 0)) {
+      addReason(reasons, 'drift-log-discarded-records', REFUSAL_SCOPE.evicted, { tag, missed });
+    }
+    if (client.pageReset === true || input.pageReset?.[tag] === true) {
+      addReason(reasons, 'drift-page-reset', REFUSAL_SCOPE.driftEvidence, { tag });
+    }
+    const maxGap = Number(client.maxDriftDrainGapMs ?? input.maxDriftDrainGapMs?.[tag]);
+    if (!finite(maxGap)) {
+      addReason(reasons, 'drift-drain-gap-unavailable', REFUSAL_SCOPE.driftEvidence, { tag });
+    } else if (maxGap > 60_000) {
+      addReason(reasons, 'drift-drain-gap-over-60s', REFUSAL_SCOPE.driftEvidence, { tag, maxGapMs: maxGap });
+    }
+    const quality = droppedFraction(client, window);
+    dropped[tag] = quality;
+    if (!quality.available) {
+      addReason(reasons, 'dropped-frame-evidence-unavailable', REFUSAL_SCOPE.qualityEvidence, { tag, detail: quality.detail });
+    } else if (quality.fraction > Number(bars.droppedFrameFractionMax)) {
+      addReason(reasons, 'dropped-frames-above-declared-bar', REFUSAL_SCOPE.droppedFrames, {
+        tag,
+        fraction: quality.fraction,
+        dropped: quality.dropped,
+        total: quality.total,
+      });
+    }
+    if (Object.prototype.hasOwnProperty.call(input, 'publicationContext')) {
+      const polls = inWindow(clientPolls(client), window);
+      const epochs = polls.map((poll) => poll.stalls?.epoch).filter(present);
+      if (polls.some((poll) => !present(poll.stalls?.epoch)) || new Set(epochs).size !== 1) {
+        addReason(reasons, `required-context-absent:stallCountByClient[${tag}]`, REFUSAL_SCOPE.publication, {
+          field: `stallCountByClient[${tag}]`,
+          figure: 'byte',
+        });
+      }
+    }
+  }
+
+  // The cadence gate is D6's, not D5's: a run in a regime whose display cadence
+  // could not be established is a criterion-1 figure measured in a regime no
+  // user is in, so it is refused rather than published with a caveat (spec
+  // delta, "Display cadence is established before the measure window"). It is
+  // evaluated when the run declares a cadence or publishes a figure, so
+  // constructed evidence for the other gates is not required to carry one.
+  if (Object.prototype.hasOwnProperty.call(input, 'cadence') || condition.publishes === true) {
+    for (const tag of tags) {
+      const record = input.cadence?.[tag];
+      if (!record || record.classification === 'none' || !finite(record.presentIntervalMs)) {
+        addReason(reasons, 'client-cadence-unavailable', REFUSAL_SCOPE.cadence, {
+          tag,
+          classification: record?.classification ?? null,
+          detail: record?.reasons ?? ['no cadence record for this client'],
+        });
+      }
+    }
+  }
+
+  if (input.tabCollision === true || tags.some((tag) => clients[tag]?.tabCollision === true)) {
+    addReason(reasons, 'server-refused-tab-id', REFUSAL_SCOPE.tabCollision);
+  }
+  if (input.runDirectoryExists === true) addReason(reasons, 'run-directory-exists', REFUSAL_SCOPE.runDirectory);
+
+  const start = input.originStart?.counters ?? input.originStart;
+  const end = input.originEnd?.counters ?? input.originEnd;
+  const unattributed = counterDelta(end, start, 'unattributedMediaBytesDelivered');
+  if (finite(unattributed) && unattributed !== 0) {
+    addReason(reasons, 'origin-unattributed-bytes-nonzero', REFUSAL_SCOPE.unattributed, { delta: unattributed });
+  }
+
+  if (Object.prototype.hasOwnProperty.call(input, 'publicationContext')) {
+    const missing = publicationMissing(input.publicationContext, tags);
+    if (missing) addReason(reasons, `required-context-absent:${missing}`, REFUSAL_SCOPE.publication, { field: missing, figure: 'byte' });
+  }
+
+  if (condition.publishes === true || input.requireCdpQualification === true) {
+    const qualification = validateCdpQualification(input.cdpQualification);
+    if (!qualification.valid) {
+      addReason(reasons, CDP_QUALIFICATION_REASON, REFUSAL_SCOPE.cdpQualification, {
+        field: 'cdpQualification',
+        figure: 'byte',
+        evidence: qualification,
+      });
+    }
+  }
+
+  const uniqueReasonSet = [...new Set(reasons.map((entry) => entry.reason))];
+  const duplicateReasons = reasons.map((entry) => entry.reason).filter((reason, index, all) => all.indexOf(reason) !== index);
+  const suppressed = { byte: false, drift: false };
+  for (const entry of reasons) for (const figure of entry.scope) suppressed[figure] = true;
+
+  return {
+    refused: reasons.length > 0,
+    runRefused: reasons.some((entry) => !entry.reason.startsWith('required-context-absent:')
+      && !PUBLICATION_ONLY_REASONS.has(entry.reason)
+      && (entry.scope.includes('byte') || entry.scope.includes('drift') || entry.reason === 'run-directory-exists')),
+    publicationRefused: reasons.some((entry) => entry.reason.startsWith('required-context-absent:')
+      || PUBLICATION_ONLY_REASONS.has(entry.reason)),
+    reasons,
+    reasonSet: uniqueReasonSet,
+    duplicateReasons: [...new Set(duplicateReasons)],
+    coverage,
+    dropped,
+    published: { realtimeFactorByClient },
+    unattributedDelta: unattributed,
+    figures: { byte: !suppressed.byte, drift: !suppressed.drift },
+  };
+}
+
+export function refusalReasonSetIsUnique() {
+  return new Set(REFUSAL_REASONS).size === REFUSAL_REASONS.length;
+}
+
+export { coverageFor, droppedFraction, publicationMissing };

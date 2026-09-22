@@ -27,6 +27,23 @@ export const CHROME = windowsChrome.locate();
 
 export const disposeChrome = (child, profile) => windowsChrome.dispose(child, profile);
 
+export function rewriteWebSocketDebuggerUrl(target, port) {
+  const name = target?.id ?? target?.url ?? 'unknown target';
+  if (!target?.webSocketDebuggerUrl) throw new Error(`target ${name} has no webSocketDebuggerUrl`);
+  let rewritten;
+  try {
+    rewritten = new URL(target.webSocketDebuggerUrl);
+  } catch {
+    throw new Error(`target ${name} has an invalid webSocketDebuggerUrl`);
+  }
+  if (rewritten.protocol !== 'ws:' && rewritten.protocol !== 'wss:') {
+    throw new Error(`target ${name} has an unsupported webSocketDebuggerUrl scheme`);
+  }
+  rewritten.hostname = '127.0.0.1';
+  rewritten.port = String(port);
+  return rewritten.toString();
+}
+
 /**
  * Autoplay without a gesture, and every throttle Chrome applies to a window it
  * thinks nobody is looking at. A measurement taken through a throttled
@@ -158,8 +175,11 @@ export async function attach(port, url, { label = null, exclude = null } = {}) {
   for (let i = 0; i < 80; i++) {
     const list = await cdpHttp(port, '/json/list');
     const found = list.find((t) => t.type === 'page' && !exclude?.has(t.id) && t.url.startsWith(url.split('?')[0]));
+    // Still gated on the url being THERE, not on it being usable: Chrome
+    // publishes a page target a tick before its debugger url, and treating that
+    // tick as a hard failure would abort the retry this loop exists to be.
     if (found && found.webSocketDebuggerUrl) {
-      const tab = new Tab(found, { label });
+      const tab = new Tab({ ...found, webSocketDebuggerUrl: rewriteWebSocketDebuggerUrl(found, port) }, { label });
       await tab.ready;
       await tab.send('Runtime.enable');
       return tab;

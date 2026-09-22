@@ -207,7 +207,15 @@ export default async function harnessFiguresSuite() {
     assertNear(figures.realtimeFactorFromFrameQualityByClient.A, 3_197 / (24 * 180), 1e-12, 'frame quality uses total video frames over the window');
     assertNear(figures.coverageRatioByClient.A, 3_037 / 3_197, 1e-12, 'coverage uses canonical drift records over presented frames');
     assertEqual(figures.stallCountByClient.A, 265, 'stall count is a windowed poll counter delta');
-    assertNear(figures.droppedFrameFractionByClient.A, 1 / 3_198, 1e-12, 'video quality counters are windowed poll deltas');
+    assertNear(figures.droppedFrameFractionByClient.A, 1 / 3_197, 1e-12, 'dropped frames divide by total video frames, which includes dropped frames');
+    assert(Math.abs(figures.droppedFrameFractionByClient.A - (1 / 3_198)) > 1e-12, 'dropped-frame denominator does not add dropped frames twice');
+    const edgePolls = fixture().clients.A.polls.map((record) => ({ ...record, quality: { ...record.quality } }));
+    edgePolls.forEach((record, index) => {
+      record.quality.totalVideoFrames = [0, 25, 50, 100][index];
+      record.quality.droppedVideoFrames = [0, 0, 0, 2][index];
+    });
+    const edge = computeFigures(fixture({ clients: { A: { ...fixture().clients.A, polls: edgePolls } } }));
+    assertNear(edge.droppedFrameFractionByClient.A, 0.02, 1e-12, 'the declared 0.02 dropped-frame bar is represented exactly at its edge');
     assertEqual(figures.presentedFramesByClient.A, 3_197, 'presented frame count is retained');
     assertNear(figures.uplinkUtilisationMean, 1, 1e-12, '225 MB over 180 seconds at 10 Mbps is full utilisation');
     assertNear(figures.uplinkUtilisationPeak, 1, 1e-12, 'the only link interval has full utilisation');

@@ -11,14 +11,28 @@
 // pass, and a state firing at a fraction of the frame rate — or firing and
 // refusing every frame — passes a bare callback count.
 
-import { spawn, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CHROME, FLAGS, attach, cdpHttp, sleep, disposeChrome } from './cdp.mjs';
+import { FLAGS, attach, cdpHttp, sleep } from './cdp.mjs';
+import { selectBrowserPlatform } from './runner/browser-platform.mjs';
 
-const ORIGIN = 'http://127.0.0.1:8100';
+// The platform adapter rather than cdp.mjs's Windows re-exports (D9): change 6a
+// runs this same file inside the client container, where the Windows path does
+// not exist and `taskkill` is not a command.
+const BROWSER = selectBrowserPlatform();
+
+// The browsers in the container are not on the host's loopback. On the host this
+// default is the origin `npm start` serves; in the container it is the media
+// network's alias, and giving a browser the wrong one measures the wrong link.
+const ORIGIN = process.env.APP_ORIGIN ?? 'http://127.0.0.1:8100';
+
+// Chrome refuses to start as root in a container without these, and there is no
+// GPU there to use. Carried per platform so the host run's flag set is unchanged
+// — a measurement taken under a different flag set is a different measurement.
+const PLATFORM_FLAGS = BROWSER.name === 'linux' ? ['--no-sandbox', '--disable-gpu'] : [];
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // THE SAME RESOLUTION room-server.mjs USES, env var included. The bar below is
 // read from this directory and applied to whatever the server is serving, so the
@@ -123,9 +137,8 @@ async function runState({ name, room, port, extraFlags, minimizeAfterAttach }, f
   console.log(`\n--- ${name} ---`);
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), `verify-frames-${name}-`));
   const url = `${ORIGIN}/room.html?room=${room}&role=host&tab=T`;
-  const chrome = spawn(
-    CHROME,
-    [...FLAGS, ...extraFlags, `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, '--window-size=700,500', '--window-position=0,0', url],
+  const chrome = BROWSER.launch(
+    [...FLAGS, ...PLATFORM_FLAGS, ...extraFlags, `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, '--window-size=700,500', '--window-position=0,0', url],
     { stdio: 'ignore' }
   );
   try {
@@ -184,11 +197,47 @@ async function runState({ name, room, port, extraFlags, minimizeAfterAttach }, f
 
     return { name, dCallbacks, elapsedSec, callbacksPerSec, requiredCallbacksPerSec, accepted, acceptRatio, refusalDeltas, mediaAdvancedMs, elapsedMs, pass: passRate && passAccept && passRefusals };
   } finally {
-    await disposeChrome(chrome, profile);
+    // The adapter's report, kept: a disposal that failed to remove the profile
+    // is how a container run orphans 92 MB, and discarding the report is what
+    // makes that failure silent (browser-platform.mjs).
+    const disposal = await BROWSER.dispose(chrome, profile);
+    console.log(`  disposal: ${JSON.stringify(disposal)}`);
   }
 }
 
-try {
+const STATES = [
+  { name: 'visible', room: 'verify-frames-visible', port: 9301, extraFlags: [] },
+  { name: 'minimized', room: 'verify-frames-minimized', port: 9302, extraFlags: [], minimizeAfterAttach: true },
+  { name: 'headless', room: 'verify-frames-headless', port: 9303, extraFlags: ['--headless=new'] },
+];
+
+/**
+ * Which states to run, and where to write what they said.
+ *
+ * `--states=` exists because the container has no display and only `headless`
+ * is meaningful there. It REFUSES a name it does not know instead of silently
+ * selecting nothing: a run that measured no state and printed ALL PASS is the
+ * false pass this script was written to prevent.
+ */
+export function parseArgs(argv, states = STATES) {
+  const known = new Map(states.map((state) => [state.name, state]));
+  const value = (flag) => argv.find((entry) => entry.startsWith(`${flag}=`))?.slice(flag.length + 1) ?? null;
+  const requested = value('--states');
+  const selected = requested === null ? states : requested.split(',').map((entry) => entry.trim()).filter(Boolean).map((name) => {
+    if (!known.has(name)) throw new Error(`unknown state ${JSON.stringify(name)}; known states are ${[...known.keys()].join(', ')}`);
+    return known.get(name);
+  });
+  if (selected.length === 0) throw new Error('--states selected no state; omit the flag to run all of them');
+  return { states: selected, report: value('--report') };
+}
+
+// Guarded, so `parseArgs` can be imported and asserted. Without it, importing
+// this file to reach one pure function launches three browsers.
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const options = isMain ? parseArgs(process.argv.slice(2)) : null;
+let report = null;
+
+if (isMain) try {
   const fps = readContentFrameRate();
   console.log(`content frame rate (ffprobe, init.mp4 + seg-00000.m4s): ${fps} fps`);
 
@@ -196,11 +245,7 @@ try {
   // actually runs in, and a minimized window that cannot be measured is a result
   // about minimized windows, not a reason to learn nothing about headless.
   const results = [];
-  for (const state of [
-    { name: 'visible', room: 'verify-frames-visible', port: 9301, extraFlags: [] },
-    { name: 'minimized', room: 'verify-frames-minimized', port: 9302, extraFlags: [], minimizeAfterAttach: true },
-    { name: 'headless', room: 'verify-frames-headless', port: 9303, extraFlags: ['--headless=new'] },
-  ]) {
+  for (const state of options.states) {
     try {
       results.push(await runState(state, fps));
     } catch (err) {
@@ -221,10 +266,33 @@ try {
       `accept ${(r.acceptRatio * 100).toFixed(1)}%, refusals ${JSON.stringify(r.refusalDeltas)} — ${r.pass ? 'PASS' : 'FAIL'}`
     );
   }
+
+  report = {
+    origin: ORIGIN,
+    mediaDir: MEDIA_DIR,
+    browserPlatform: BROWSER.name,
+    chrome: BROWSER.locate(),
+    flags: [...FLAGS, ...PLATFORM_FLAGS],
+    frameRate: fps,
+    frameRateSource: 'ffprobe(init.mp4 + seg-00000.m4s)',
+    bars: { measureMs: MEASURE_MS, minCallbackRatio: MIN_CALLBACK_RATIO, minAcceptRatio: MIN_ACCEPT_RATIO },
+    statesRequested: options.states.map((state) => state.name),
+    results,
+    endedAt: new Date().toISOString(),
+  };
 } catch (err) {
   console.log('ERROR:', err.message);
   failures.push(err.message);
 } finally {
+  // Written even when the run failed, and carrying the failures: a report that
+  // only exists for a passing run is a file whose presence is the verdict, and
+  // the evidence for the state that could NOT be measured is the evidence this
+  // change most needs (CONSTRAINTS.md → *Artifacts*).
+  if (options.report) {
+    fs.mkdirSync(path.dirname(path.resolve(options.report)), { recursive: true });
+    fs.writeFileSync(path.resolve(options.report), `${JSON.stringify({ ...(report ?? { results: [] }), failures, ok: failures.length === 0 }, null, 2)}\n`);
+    console.log(`report: ${path.resolve(options.report)}`);
+  }
   console.log(`\n${failures.length === 0 ? 'ALL PASS' : `${failures.length} FAILURE(S): ${failures.join('; ')}`}`);
   process.exit(failures.length === 0 ? 0 : 1);
 }
