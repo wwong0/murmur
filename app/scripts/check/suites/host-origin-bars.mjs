@@ -1,5 +1,5 @@
 import { assert, assertEqual, check } from '../harness.mjs';
-import { FROZEN_BASELINE, judgeHostOrigin } from '../../figures/host-origin-bars.mjs';
+import { FROZEN_BASELINE, armFigures, judgeHostOrigin } from '../../figures/host-origin-bars.mjs';
 
 const TAGS = Object.keys(FROZEN_BASELINE.realtimeFactorByClient);
 
@@ -55,5 +55,22 @@ export default async function hostOriginBarsSuite() {
   await check('host-origin bars: any verified baseline drift is refused', async () => {
     expectError(() => judgeHostOrigin({ baseline: { ...baseline, hostUploadMultiplier: 99 }, capped: baseline, uncapped: fast }), 'hostUploadMultiplier');
     expectError(() => judgeHostOrigin({ baseline: { ...baseline, realtimeFactorByClient: { ...baseline.realtimeFactorByClient, c03: 0.7 } }, capped: baseline, uncapped: fast }), 'realtimeFactorByClient.c03');
+  });
+
+  await check('host-origin bars: an arm refused publication is judged on its recomputed figures', async () => {
+    const uncappedRecompute = { figures: fast, publishedByte: { published: false, missing: 'condition.capacityMbps' } };
+    assertEqual(armFigures(uncappedRecompute, 'uncapped'), fast, 'publication-refused arm yields its recomputed figures');
+    assertEqual(judgeHostOrigin({ baseline, capped: baseline, uncapped: armFigures(uncappedRecompute, 'uncapped') }).uncappedFast, true, 'publication-refused uncapped arm can be fast');
+    const published = { ...baseline, uplinkUtilisationMean: 0.95 };
+    assertEqual(armFigures({ figures: baseline, publishedByte: published }, 'capped'), published, 'a published arm yields its published figures');
+  });
+
+  await check('host-origin bars: a capped arm refused publication cannot pass', async () => {
+    const cappedRecompute = { figures: baseline, publishedByte: { published: false, missing: 'window.linkSamples' } };
+    const judged = judgeHostOrigin({ baseline, capped: armFigures(cappedRecompute, 'capped'), uncapped: fast });
+    assertEqual(judged.routing, 'instrument-refusal', 'a publication-refused capped arm routes to refusal');
+    expectError(() => armFigures(cappedRecompute), 'arm must be capped or uncapped');
+    // Mutation, D1 2026-09-23: the fallback to recomputed figures for either arm
+    // turned 'a publication-refused capped arm routes to refusal' red; restored, green.
   });
 }

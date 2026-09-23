@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { readRunDirectory, recomputeRunDirectory } from './harness-figures.mjs';
 import { viewerHttpLeak, uplinkVersusDelivered, loopbackAnswer } from './figures/host-origin-checks.mjs';
-import { judgeHostOrigin } from './figures/host-origin-bars.mjs';
+import { armFigures, judgeHostOrigin } from './figures/host-origin-bars.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -53,7 +53,7 @@ function oq1(runDir, retained) {
   return loopbackAnswer({ L, S, T: uplink.txBytes, D: uplink.deliveredMediaBytes });
 }
 
-function arm(runDir) {
+function arm(runDir, name) {
   const retained = readRunDirectory(runDir);
   const recomputed = recomputeRunDirectory(runDir);
   const manifest = retained.manifest;
@@ -62,7 +62,7 @@ function arm(runDir) {
   const uplink = uplinkVersusDelivered({ linkSamples: retained.input.linkSamples, window: retained.input.window, originStart: retained.input.originStart, originEnd: retained.input.originEnd });
   return {
     directory: path.basename(runDir),
-    figures: recomputed.publishedByte ?? recomputed.figures,
+    figures: armFigures(recomputed, name),
     refusal: refusalEvidence,
     leak,
     uplink,
@@ -83,8 +83,8 @@ function parse(argv) {
 
 export function compareHostOrigin({ cappedDir, uncappedDir, baselineDir = BASELINE_DIR, outputDir = null } = {}) {
   const baseline = json(path.join(baselineDir, 'published-figures.json'));
-  const capped = arm(cappedDir);
-  const uncapped = arm(uncappedDir);
+  const capped = arm(cappedDir, 'capped');
+  const uncapped = arm(uncappedDir, 'uncapped');
   const verdict = judgeHostOrigin({ baseline, capped: { ...capped.figures, ...capped.refusal }, uncapped: { ...uncapped.figures, ...uncapped.refusal } });
   const destination = outputDir ?? path.join(RESULTS_DIR, `7a2-comparison-${new Date().toISOString().replaceAll(':', '-')}`);
   fs.mkdirSync(destination);

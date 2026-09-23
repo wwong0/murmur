@@ -117,6 +117,23 @@ export default async function hostLinkSuite() {
     rig.link.close();
   });
 
+  await check('host-link: an XHR listener added before open fires once the link answers', async () => {
+    const rig = setup();
+    await flush();
+    const XHR = rig.link.createShimXhr({ RealXHR: class {}, baseUrl: BASE });
+    const xhr = new XHR();
+    const loads = [];
+    xhr.addEventListener('load', () => loads.push(xhr.status));
+    xhr.open('GET', `${BASE}media/seg-00000.m4s`, true);
+    xhr.responseType = 'arraybuffer';
+    xhr.send();
+    await settle(rig.clock);
+    assertEqual(JSON.stringify(loads), '[200]', 'a listener added before open hears load');
+    // Mutation, D1 2026-09-23: `_use` copying the pending listeners onto the backing
+    // as a `_listeners` field threw `target._listeners.get is not a function`; restored, green.
+    rig.link.close();
+  });
+
   await check('host-link: heads precede progress, fetch resolves before body, playlist text and walk are correct', async () => {
     const rig = setup();
     await flush();
@@ -257,7 +274,7 @@ export default async function hostLinkSuite() {
     assert(!('tabId' in reqs[0]), 'wire request carries no tab identity');
 
     const oldLinkId = rig.link.snapshot().linkId;
-    rig.client.emit('presence', { payload: { roster: [{ clientId: 'host-2', role: 'host' }] } });
+    rig.client.emit('presence', { from: 'server', payload: { roster: [{ clientId: 'host-2', role: 'host' }] } });
     await flush();
     assert(rig.client.sent.some((message) => message.type === 'host-link-offer' && message.to === 'host-2'), 'new host receives a new offer');
     rig.client.emit('host-link-answer', { from: 'host-1', payload: { linkId: oldLinkId, sdp: 'stale' } });
@@ -348,9 +365,9 @@ export default async function hostLinkSuite() {
     const rig = setup();
     await flush();
     const offersTo = (id) => rig.client.sent.filter((message) => message.type === 'host-link-offer' && message.to === id).length;
-    rig.client.emit('presence', { payload: { roster: [{ clientId: 'viewer-1', role: 'viewer' }] } });
+    rig.client.emit('presence', { from: 'server', payload: { roster: [{ clientId: 'viewer-1', role: 'viewer' }] } });
     assertEqual(rig.link.snapshot().state, 'absent', 'a roster without a host reads absent');
-    rig.client.emit('presence', { payload: { roster: [{ clientId: 'host-1', role: 'host' }] } });
+    rig.client.emit('presence', { from: 'server', payload: { roster: [{ clientId: 'host-1', role: 'host' }] } });
     await flush();
     const states = rig.changes.map((value) => value.state);
     assert(states.lastIndexOf('connecting') < states.lastIndexOf('open'), 'the link passes connecting on its way to open');
@@ -362,7 +379,7 @@ export default async function hostLinkSuite() {
     await flush();
     assertEqual(rig.link.snapshot().requests, 1, 'the request is pending before the clock drains it');
     const openBefore = rig.changes.length;
-    rig.client.emit('presence', { payload: { roster: [{ clientId: 'host-2', role: 'host' }] } });
+    rig.client.emit('presence', { from: 'server', payload: { roster: [{ clientId: 'host-2', role: 'host' }] } });
     await flush();
     assertEqual(JSON.stringify(errors), '[0]', 'a host change fails the pending request with status 0');
     assertEqual(rig.link.snapshot().requests, 0, 'the request table is empty after the host change');
@@ -376,13 +393,13 @@ export default async function hostLinkSuite() {
     await flush();
     assertEqual(rig.link.snapshot().state, 'failed', 'a closed channel reads failed');
     assertEqual(offersTo('host-2'), 1, 'a failure with no rejoin sends no offer');
-    rig.client.emit('presence', { payload: { roster: [{ clientId: 'host-2', role: 'host' }] } });
+    rig.client.emit('presence', { from: 'server', payload: { roster: [{ clientId: 'host-2', role: 'host' }] } });
     await flush();
     assertEqual(offersTo('host-2'), 1, 'an unchanged roster does not re-link a failed link');
 
     // The viewer rejoins; its open link survives until the host drops
     // the pc it holds for the departed id, and that failure re-links.
-    rig.client.emit('presence', { payload: { roster: [{ clientId: 'host-2', role: 'host' }] } });
+    rig.client.emit('presence', { from: 'server', payload: { roster: [{ clientId: 'host-2', role: 'host' }] } });
     rig.client.emitEvent('joined', { clientId: 'viewer-3', roster: [{ clientId: 'host-2', role: 'host' }] });
     await flush();
     assertEqual(offersTo('host-2'), 2, 'a rejoin re-links a failed link');
@@ -396,6 +413,22 @@ export default async function hostLinkSuite() {
     assertEqual(rig.link.snapshot().state, 'open', 'the link is open again after the drop');
     // Mutation, C2 2026-09-23: `fail` without its re-initiate line turned
     // 'the host dropping the departed viewer id re-links at once' red; restored, green.
+    rig.link.close();
+  });
+
+  await check('host-link: a member-relayed presence does not re-target the link', async () => {
+    const rig = setup();
+    rig.client.emit('presence', { from: 'server', payload: { roster: [{ clientId: 'host-1', role: 'host' }] } });
+    await flush();
+    const linkId = rig.link.snapshot().linkId;
+    rig.client.emit('presence', { from: 'viewer-9', payload: { roster: [{ clientId: 'viewer-9', role: 'host' }] } });
+    rig.client.emit('presence', { from: 'viewer-9', payload: { roster: [] } });
+    await flush();
+    assert(!rig.client.sent.some((message) => message.to === 'viewer-9'), 'a forged presence draws no offer');
+    assertEqual(rig.link.snapshot().linkId, linkId, 'a forged presence leaves the link in place');
+    assertEqual(rig.link.snapshot().state, 'open', 'a forged presence leaves the link open');
+    // Mutation, D1 2026-09-23: the unguarded `client.on('presence', discover)`
+    // turned 'a forged presence leaves the link in place' red; restored, green.
     rig.link.close();
   });
 }

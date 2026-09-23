@@ -7,6 +7,7 @@ import {
   parseControl,
 } from './segment-protocol.mjs';
 import { createShimFetch, createShimXhr } from './host-link-shim.mjs';
+import { ADDR_SERVER } from './envelope.mjs';
 
 function nowOf(clock) {
   return clock && typeof clock.now === 'function' ? () => clock.now() : () => performance.now();
@@ -338,7 +339,11 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
 
   client.on('host-link-answer', incomingAnswer);
   client.on('host-link-ice', incomingIce);
-  client.on('presence', discover);
+  // Only the server's presence names the host: a member can relay an envelope
+  // typed `presence` (D1-1).
+  client.on('presence', (env) => {
+    if (env?.from === ADDR_SERVER) discover(env);
+  });
   client.onEvent('joined', discover);
 
   return {

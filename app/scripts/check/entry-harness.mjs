@@ -228,7 +228,7 @@ export const IDLE_START_STATE = Object.freeze({
  * `videoOptions` whose writes land in the same ordered event list as the
  * page's own. `onLoad`/`onPark` receive the element's control.
  */
-export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', onPark, onLoad } = {}) {
+export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', onPark, onLoad, settings = { delivery: 'http', iceServers: [] }, globals = {} } = {}) {
   let pinnedNowMs = null;
   const events = [];
   const intervals = [];
@@ -244,6 +244,7 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     sharedNowMs: null,
     clientId: null,
     role: 'viewer',
+    roster: [],
     clientEvents: new Map(),
     clientHandlers: new Map(),
     playing: false,
@@ -258,7 +259,12 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     __entryHarness: harness,
     console: { log() {}, warn() {}, error() {} },
     URLSearchParams,
+    URL,
     crypto: globalThis.crypto,
+    // The page's settings read; `settings: null` leaves the page without fetch.
+    fetch: settings && (async (resource) => (String(resource) === '/app-settings'
+      ? { ok: true, status: 200, json: async () => settings }
+      : { ok: false, status: 404, json: async () => null, arrayBuffer: async () => new ArrayBuffer(0) })),
     location: { search, protocol: 'http:', host: '127.0.0.1:8100' },
     history,
     // `now` walks with the event list so page stamps stay ordered and distinct.
@@ -287,6 +293,8 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
   };
   context.location.origin = 'http://127.0.0.1:8100';
   context.location.pathname = '/room.html';
+  Object.assign(context, globals);
+  if (!context.fetch) delete context.fetch;
   context.window = context;
   vm.createContext(context);
   vm.runInContext(code, context);

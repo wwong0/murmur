@@ -1,9 +1,10 @@
-import { assert, assertEqual, check } from '../harness.mjs';
+import { assert, assertEqual, check, waitEvent } from '../harness.mjs';
 import { createFakeClock } from '../fake-channel.mjs';
 import { createFakeRoomClient, createFakeRtcFactory } from '../fake-rtc.mjs';
 import { computeReceiptCohort } from '../../figures/receipt-cohort.mjs';
 import { createHostLink } from '../../../public/lib/host-link.mjs';
 import { createHostOrigin } from '../../../public/lib/host-origin.mjs';
+import { ADDR_ROOM } from '../../../public/lib/envelope.mjs';
 
 // P6 discrimination probe: opportunity is a canceled receipt joined to an aborted host record;
 // mutation marks the receipt finished; named red assertion is "P6 aborted receipt is not finished";
@@ -25,6 +26,39 @@ function stats() {
     ['local', { type: 'local-candidate', id: 'local', candidateType: 'host', address: '10.0.0.1' }],
     ['remote', { type: 'remote-candidate', id: 'remote', candidateType: 'host', address: '10.0.0.2' }],
   ]);
+}
+
+// F1 roster probes: opportunity is a real host room-client receiving a later joiner's offer,
+// and a member-relayed `presence` naming a forged tag. Mutations: room-client ignores presence;
+// then it accepts presence from any sender. Named reds: "F1 host resolves a later joiner's tag"
+// and "F1 a member's relayed presence does not rewrite the tag". Restored to the staged tree.
+
+function nextEnvelope(client, type, accept = () => true, timeoutMs = 3000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { off(); reject(new Error(`no ${type} within ${timeoutMs}ms`)); }, timeoutMs);
+    const off = client.on(type, (env) => {
+      if (!accept(env)) return;
+      clearTimeout(timer);
+      off();
+      resolve(env);
+    });
+  });
+}
+
+// The lookup answerHostOffer makes, read at the instant the offer arrives.
+async function tagAtOffer(host, viewer) {
+  const offer = nextEnvelope(host, 'host-link-offer', (env) => env.from === viewer.clientId);
+  viewer.send({ type: 'host-link-offer', to: host.clientId, payload: { linkId: 'l', sdp: 'x' } });
+  const env = await offer;
+  return host.roster.find((member) => member.clientId === env.from)?.tabId ?? null;
+}
+
+async function joinAfter(host, viewer) {
+  const announced = nextEnvelope(host, 'presence', (env) => env.payload?.event === 'join' && env.payload?.member?.tabId === 'c01');
+  const joined = waitEvent(viewer, 'joined');
+  viewer.connect();
+  await joined;
+  await announced;
 }
 
 async function flush() {
@@ -160,6 +194,33 @@ export default async function hostReceiptsSuite() {
     assertEqual(result.byClient.c01.clientCompletedBytes, 0, 'aborted receipt contributes no client cohort bytes');
     expectError(() => cohort([{ ...receipt, finished: true, canceled: false }], originSnapshot), 'matched origin record marked aborted');
     rig.link.close();
+  });
+
+  await check('host-receipts: a host resolves the tag of a viewer that joins after it, and after it rejoins', async ({ client }) => {
+    const host = client('host-tab', 'host');
+    const hostJoined = waitEvent(host, 'joined');
+    host.connect();
+    await hostJoined;
+    assertEqual(host.roster.length, 1, 'the host joined an empty room');
+
+    const first = client('c01', 'viewer', { autoReconnect: false });
+    await joinAfter(host, first);
+    assertEqual(await tagAtOffer(host, first), 'c01', "F1 host resolves a later joiner's tag");
+
+    const forged = nextEnvelope(host, 'presence', (env) => env.from === first.clientId);
+    first.send({ type: 'presence', to: ADDR_ROOM, payload: { roster: [{ clientId: first.clientId, tabId: 'forged', role: 'viewer' }] } });
+    await forged;
+    assertEqual(await tagAtOffer(host, first), 'c01', "F1 a member's relayed presence does not rewrite the tag");
+
+    const departed = first.clientId;
+    const left = nextEnvelope(host, 'presence', (env) => env.payload?.event === 'leave');
+    first.close();
+    await left;
+    const again = client('c01', 'viewer', { autoReconnect: false });
+    await joinAfter(host, again);
+    assert(again.clientId !== departed, 'the rejoin is a new member');
+    assert(!host.roster.some((member) => member.clientId === departed), 'the departed member left the host roster');
+    assertEqual(await tagAtOffer(host, again), 'c01', "F1 host resolves a rejoined viewer's tag");
   });
 
   await check('host-receipts: capacity evicts oldest receipts and exposes missed count', async () => {

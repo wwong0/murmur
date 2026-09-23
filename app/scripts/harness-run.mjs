@@ -205,7 +205,30 @@ export function mergeVerifiedContext(manifest, seam = {}) {
   return next;
 }
 
-async function prepareClient(session, url, deadline) {
+// The ready merge keeps what prepare recorded: a host run's control-UDP drop and
+// default-route read-backs are manifest evidence (7a2 acceptance A7), and a host
+// topology missing either aborts the run before any client starts.
+export function readyTopology(prepared, qdiscs, condition) {
+  const topology = { ...prepared, status: 'ready', qdiscs: qdiscs ?? condition.qdiscs };
+  if (condition.delivery !== 'host') return topology;
+  if (!topology.controlUdpDrop?.readBack) throw new Error('host topology recorded no controlUdpDrop read-back');
+  const missing = ['origin', ...tagsFor(condition)].filter((name) => !topology.mediaDefaultRoute?.[name]?.readBack);
+  if (missing.length) throw new Error(`host topology recorded no mediaDefaultRoute read-back for ${missing.join(', ')}`);
+  return topology;
+}
+
+/**
+ * How long a viewer's page may take to become ready. A host run's later viewers
+ * load the bundle over the shaped link the earlier viewers' host-link streams
+ * already fill, so 30 s aborted the capped arm on c05 (7a2 tasks.md, Current
+ * status). The wait is before `placeWindow`, so no figure sees it; each
+ * client's actual wait is recorded as `pageReadyMs`.
+ */
+export function clientReadyTimeoutMs(condition) {
+  return condition?.delivery === 'host' ? 120_000 : 30_000;
+}
+
+async function prepareClient(session, url, deadline, readyTimeoutMs = 30_000) {
   const tab = session.tab;
   const recorder = createRequestRecorder(tab);
   session.recorder = recorder;
@@ -216,8 +239,10 @@ async function prepareClient(session, url, deadline) {
   recorder.setPageMapping(pageClock);
   session.removeCollisionListener = attachTabTakenDetector(tab, () => { session.tabCollision = true; });
   session.clockJoinRecorder = attachClockJoinRecorder(tab);
+  const navigatedAt = Date.now();
   await tab.send('Page.navigate', { url });
-  await deadline.waitFor(`client ${session.tag}`, () => tab.evaluate('Boolean(document.body && window.__app)'), Boolean, 30_000, 100);
+  await deadline.waitFor(`client ${session.tag}`, () => tab.evaluate('Boolean(document.body && window.__app)'), Boolean, readyTimeoutMs, 100);
+  session.pageReadyMs = Date.now() - navigatedAt;
   await tab.evaluate(installStallRecorder(session.stallEpoch));
   return recorder;
 }
@@ -494,7 +519,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     manifestFile.set(mergeVerifiedContext(manifestFile.get(), preparedTopology));
     manifestFile.write();
     const qdiscs = await topology.applyQdiscs({ condition, runDir: prepared.runDir, manifest: manifestFile.get() });
-    manifestFile.merge({ topology: { status: 'ready', qdiscs: qdiscs ?? condition.qdiscs } });
+    manifestFile.merge({ topology: readyTopology(manifestFile.get().topology, qdiscs, condition) });
     manifestFile.write();
     if (!originUrl) throw new Error('origin URL is required for a harness run');
     monitor = startOriginMonitor({ healthUrl: `${originUrl}/room.html`, deadlineAt: deadline.deadlineAt, maxWallMs, onFailure: (event) => manifestFile.merge({ originFailure: event }), requestTimeoutMs: condition.monitorRequestTimeoutMs });
@@ -515,7 +540,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
         manifestFile.write();
         throw new Error('first client tab is unavailable for CDP qualification');
       }
-      await prepareClient(session, clientUrl, deadline);
+      await prepareClient(session, clientUrl, deadline, clientReadyTimeoutMs(condition));
       if (index === 0) {
         const qualification = hostSession
           ? await qualifyFirstLink(session.tab, hostSession.tab, preparedTopology.containers?.origin, qualifyLinkReceipts)
@@ -591,6 +616,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
           maxDriftDrainGapMs: session.maxDrainGapMs,
           tabCollision: session.tabCollision,
           playbackEnd: session.endPlayback,
+          pageReadyMs: session.pageReadyMs ?? null,
         } } });
         await disposeSession(session);
       } catch (error) {

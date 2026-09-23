@@ -119,6 +119,27 @@ function controlUdpDrop({ container, ifName, subnet = null, exec = defaultExec }
   return { ifName, subnet, argv: [qdisc, ...filters], readBack };
 }
 
+function networkGateway(networkName, exec, project) {
+  const inspected = JSON.parse(exec(['docker', 'network', 'inspect', `${project}_${networkName}`]));
+  const gateway = (inspected?.[0]?.IPAM?.Config ?? []).map((entry) => entry.Gateway).find(Boolean);
+  if (!gateway) throw new Error(`${project}_${networkName} declares no IPv4 gateway`);
+  return gateway;
+}
+
+// Chrome without media permission gathers host candidates on the default-route
+// interface only, so a host run points every browser container's default route at
+// wa-media (7a2 design.md D3, observation). A read-back that differs aborts the run.
+function mediaDefaultRoute({ container, subnet, gateway, exec = defaultExec }) {
+  const { ifName } = resolveInterface(container, subnet, exec);
+  const argv = ['ip', 'route', 'replace', 'default', 'via', gateway, 'dev', ifName];
+  dockerExec(container, argv, exec);
+  const readBack = JSON.parse(dockerExec(container, ['ip', '-json', 'route', 'show', 'default'], exec));
+  if (readBack.length !== 1 || readBack[0].gateway !== gateway || readBack[0].dev !== ifName) {
+    throw new Error(`default route on ${container} did not read back as ${gateway} dev ${ifName}: ${JSON.stringify(readBack)}`);
+  }
+  return { container, ifName, gateway, argv, readBack };
+}
+
 function readLoopbackCounter(container, exec = defaultExec) {
   const value = Number(dockerExec(container, ['cat', '/sys/class/net/lo/statistics/tx_bytes'], exec).trim());
   if (!Number.isSafeInteger(value) || value < 0) throw new Error(`invalid loopback tx_bytes for ${container}`);
@@ -282,6 +303,9 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
         state.subnets.set(CONTROL_NETWORK, controlSubnet);
         state.control = resolveInterface(state.containers.origin, controlSubnet, exec);
         state.controlUdpDrop = controlUdpDrop({ container: state.containers.origin, ifName: state.control.ifName, subnet: controlSubnet, exec });
+        const gateway = networkGateway(MEDIA_NETWORK, exec, project);
+        state.mediaDefaultRoute = Object.fromEntries(['origin', ...services.filter((name) => /^c\d+$/.test(name))]
+          .map((name) => [name, mediaDefaultRoute({ container: state.containers[name], subnet, gateway, exec })]));
         exec(['docker', 'exec', '-d', '-e', 'APP_TAG=c00', state.containers.origin, 'sh', '-c', 'cd /app && node harness/client-agent.mjs > /tmp/host-agent.log 2>&1']);
       }
 
@@ -304,7 +328,7 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
         sampler: state.sampler,
         backgroundLoad: state.backgroundLoad,
         content,
-        ...(state.controlUdpDrop ? { controlUdpDrop: state.controlUdpDrop } : {}),
+        ...(state.controlUdpDrop ? { controlUdpDrop: state.controlUdpDrop, mediaDefaultRoute: state.mediaDefaultRoute } : {}),
         regime: {
           ...condition,
           images: imageDigests(exec),

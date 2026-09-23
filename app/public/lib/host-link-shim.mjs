@@ -310,6 +310,7 @@ export function createShimXhr({ link, RealXHR, baseUrl } = {}) {
       this._pendingHeaders = [];
       this._pendingResponseType = '';
       this._pendingProperties = new Map();
+      this._pendingListeners = [];
     }
 
     _use(backing, isLink) {
@@ -317,6 +318,8 @@ export function createShimXhr({ link, RealXHR, baseUrl } = {}) {
       this._isLink = isLink;
       if (this._pendingResponseType) backing.responseType = this._pendingResponseType;
       for (const [name, value] of this._pendingProperties) backing[name] = value;
+      // A listener added before open is replayed, not copied as a field (D1-2).
+      for (const [type, fn, options] of this._pendingListeners) backing.addEventListener(type, fn, options);
     }
 
     _replayHeaders() {
@@ -354,11 +357,7 @@ export function createShimXhr({ link, RealXHR, baseUrl } = {}) {
     abort() { this._backing?.abort(); }
     addEventListener(type, fn, options) {
       if (this._backing) this._backing.addEventListener(type, fn, options);
-      else {
-        const list = this._pendingProperties.get('_listeners') ?? [];
-        list.push([type, fn, options]);
-        this._pendingProperties.set('_listeners', list);
-      }
+      else this._pendingListeners.push([type, fn, options]);
     }
     removeEventListener(type, fn) { this._backing?.removeEventListener(type, fn); }
     getAllResponseHeaders() { return this._backing?.getAllResponseHeaders() ?? ''; }

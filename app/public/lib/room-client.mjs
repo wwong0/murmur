@@ -26,6 +26,7 @@ import {
   ERROR_CODES,
   TYPE_JOINED,
   TYPE_ERROR,
+  TYPE_PRESENCE,
   CLOSE_SUPERSEDED,
   TYPE_ECHO,
   buildClientEnvelope,
@@ -279,6 +280,13 @@ export function createRoomClient(config) {
       applyJoinRefusal(env);
     } else if (env.seq !== null && env.seq !== undefined) {
       checkOrder(env.seq);
+    }
+    // The roster is the latest one the server sent, not the join snapshot: a
+    // host resolves a later joiner's tag from it (7a2 ⚑ F1). Only the server's
+    // own presence counts — a member can relay an envelope typed `presence`.
+    if (env.type === TYPE_PRESENCE && env.from === ADDR_SERVER) {
+      const roster = readBody(env).roster;
+      if (Array.isArray(roster)) state.roster = roster;
     }
 
     // Subscribers run BEFORE the request promise resolves, deliberately. It

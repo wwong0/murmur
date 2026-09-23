@@ -17,6 +17,7 @@ export function createRoomClient() {
   return {
     get clientId() { return harness().clientId; },
     get role() { return harness().role; },
+    get roster() { return harness().roster; },
     onEvent(type, fn) { return subscribe(harness().clientEvents, type, fn); },
     on(type, fn) { return subscribe(harness().clientHandlers, type, fn); },
     send(envelope) { harness().log('send', envelope); },

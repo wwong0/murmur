@@ -9,7 +9,7 @@
 // public/room.html.
 
 import { createRoomClient } from './lib/room-client.mjs';
-import { newReclaimSecret, readBody } from './lib/envelope.mjs';
+import { ADDR_SERVER, newReclaimSecret, readBody } from './lib/envelope.mjs';
 import { createPlayer } from './lib/player.mjs';
 import { createClockSync, websocketProbe } from './lib/clock-sync.mjs';
 import { createRoomTimeline } from './lib/room-timeline.mjs';
@@ -339,7 +339,8 @@ client.onEvent('gap', ({ expected, actual }) => {
 
 client.on('presence', (env) => {
   const body = readBody(env);
-  if (delivery === 'host' && client.role === 'host') closeDepartedHostPeers(body.roster);
+  // A member can relay an envelope typed `presence`; only the server's closes peers (D1-1).
+  if (env.from === ADDR_SERVER && delivery === 'host' && client.role === 'host') closeDepartedHostPeers(body.roster);
   addNotice(`presence: ${body.event} — ${body.member?.tabId ?? body.member?.clientId}`);
   renderRoster(body.roster);
   schedulePollStart(0);
@@ -797,9 +798,9 @@ window.__app = {
 
 async function startApp() {
   try {
-    const settingsResponse = typeof window.fetch === 'function'
-      ? await window.fetch('/app-settings', { cache: 'no-store' })
-      : { ok: true, json: async () => ({ delivery: 'host', iceServers: [] }) };
+    // No fetch means no settings: the page does not guess a delivery (D1-4).
+    if (typeof window.fetch !== 'function') throw new Error('fetch is unavailable');
+    const settingsResponse = await window.fetch('/app-settings', { cache: 'no-store' });
     if (!settingsResponse.ok) throw new Error(`HTTP ${settingsResponse.status}`);
     const settings = await settingsResponse.json();
     if (!settings || (settings.delivery !== 'host' && settings.delivery !== 'http') || !Array.isArray(settings.iceServers)) {

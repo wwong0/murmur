@@ -90,6 +90,7 @@ import d8ProductIntegrationSuite from './check/suites/d8-product-integration.mjs
 import playbackTreatmentSuite from './check/suites/playback-treatment.mjs';
 import playbackTreatmentEntrySuite from './check/suites/playback-treatment-entry.mjs';
 import roomControlsEntrySuite from './check/suites/room-controls-entry.mjs';
+import hostEntrySuite from './check/suites/host-entry.mjs';
 import runnerCoreSuite from './check/suites/runner-core.mjs';
 
 console.log(describeFixtures());
@@ -160,6 +161,7 @@ for (const suite of [
   playbackTreatmentSuite,
   playbackTreatmentEntrySuite,
   roomControlsEntrySuite,
+  hostEntrySuite,
   runnerCoreSuite,
 ]) {
   await suite();

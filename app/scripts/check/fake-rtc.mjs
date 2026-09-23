@@ -40,7 +40,7 @@ export function createFakeRoomClient({ clientId = 'viewer-1', roster = [] } = {}
       return () => eventHandlers.get(type)?.delete(fn);
     },
     emit(type, value) {
-      if (type === 'presence') client.roster = value?.payload?.roster ?? value?.roster ?? value;
+      if (type === 'presence' && value?.from === 'server') client.roster = value?.payload?.roster ?? value?.roster ?? value;
       for (const fn of [...(typeHandlers.get(type) ?? [])]) fn(value);
     },
     emitEvent(type, value) {
