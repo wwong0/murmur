@@ -10,11 +10,11 @@ function inWindow(records, window, field) {
 }
 
 function clientRecords(client) {
-  return client?.records ?? client?.driftRecords ?? [];
+  return client?.records ?? [];
 }
 
 function clientPolls(client) {
-  return client?.polls ?? client?.pollRecords ?? client?.controllerPolls ?? [];
+  return client?.polls ?? [];
 }
 
 function values(records, read) {
@@ -118,17 +118,29 @@ export function driftContext({ clients = {}, tags = Object.keys(clients), window
   return result;
 }
 
+// The run figures a drift figure carries. Byte figures pass the byte gates, not
+// these, so a byte figure copied in here would publish without them
+// (d1-findings.md F1, F2).
+const DRIFT_REGIME_FIGURES = Object.freeze([
+  'uplinkUtilisationMean', 'uplinkUtilisationPeak', 'capacityBitsPerSecond',
+  'qdiscBacklogBytesMean', 'qdiscBacklogBytesPeak', 'qdiscBacklogNonzeroFraction', 'qdiscBacklogBytesP99',
+  'standingQueueDelayMsP50NearestRank', 'standingQueueDelayMsP99', 'qdiscDropsInWindow', 'qdiscOverlimitsInWindow',
+  'realtimeFactorByClient', 'realtimeFactorFromFrameQualityByClient', 'realtimeFactorDisagreement',
+  'stallCountByClient', 'droppedFrameFractionByClient', 'presentedFramesByClient', 'coverageRatioByClient',
+  'evaluationSkipsByClient', 'pollIntervalMsP50', 'pollIntervalMsP95', 'pollIntervalMsMax',
+  'clockBestDelayMsP50ByClient', 'clockBestDelayMsP95ByClient', 'clockBestDelayMsP99ByClient', 'clockLossFraction',
+  'echoRoundTripMsP50ByClient', 'echoRoundTripMsP95ByClient', 'echoRoundTripMsP99ByClient', 'echoLossFraction',
+]);
+
 export function driftFigure({ figures = {}, pairwise = {}, context = {}, condition = {}, window = {}, content = {} } = {}) {
   const { declaredClientTags: _declaredClientTags, clients: _clients, ...contextFields } = context;
   const figure = {
-    ...figures,
+    ...Object.fromEntries(DRIFT_REGIME_FIGURES.filter((name) => name in figures).map((name) => [name, figures[name]])),
     ...pairwise,
     ...contextFields,
     condition,
     window,
     content,
-    ...(pairwise.criterionVerdict === undefined ? {} : { criterionVerdict: pairwise.criterionVerdict }),
-    ...(pairwise.p99Verdict === undefined ? {} : { p99Verdict: pairwise.p99Verdict }),
   };
   return figure;
 }

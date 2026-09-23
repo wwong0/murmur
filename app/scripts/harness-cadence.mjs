@@ -1,11 +1,5 @@
 // What display cadence a headless container actually has (design.md D6).
 //
-// A headless browser has no monitor, so its clients either render on a
-// synthetic fixed cadence or have none at all. If they have none, criterion 1
-// would be measured in a regime no real user is ever in, and the baseline
-// flatters the system against viewers on 60Hz screens by up to 16.7ms — the
-// same fault as the controller's simulated plant, in a second place.
-//
 // rAF is the cadence reading and rVFC is not: rAF follows the compositor's
 // begin-frame source whether or not a video is playing, while rVFC is bounded
 // below by the content's 24fps and would report the content's rate as the

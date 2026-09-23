@@ -1,4 +1,4 @@
-import { requiredContextFields } from '../figures/publication.mjs';
+import { missingFields } from '../figures/publication.mjs';
 import { CDP_QUALIFICATION_REASON, validateCdpQualification } from './qualification.mjs';
 import { evaluateByteControl } from './byte-control.mjs';
 
@@ -67,11 +67,11 @@ function counterDelta(after, before, field) {
 }
 
 function clientRecords(client) {
-  return client?.records ?? client?.driftRecords ?? [];
+  return client?.records ?? [];
 }
 
 function clientPolls(client) {
-  return client?.polls ?? client?.pollRecords ?? [];
+  return client?.polls ?? [];
 }
 
 function coverageFor(tag, client, window, minimum) {
@@ -106,7 +106,7 @@ function droppedFraction(client, window) {
   if (polls.length < 2) return { available: false, detail: { field: 'quality' } };
   let previous;
   for (const poll of polls) {
-    const quality = poll?.quality ?? poll?.videoQuality;
+    const quality = poll?.quality;
     const dropped = Number(quality?.droppedVideoFrames);
     const total = Number(quality?.totalVideoFrames);
     if (!finite(dropped) || !finite(total)
@@ -115,26 +115,14 @@ function droppedFraction(client, window) {
     }
     previous = { dropped, total };
   }
-  const first = polls[0]?.quality ?? polls[0]?.videoQuality;
-  const last = polls.at(-1)?.quality ?? polls.at(-1)?.videoQuality;
+  const first = polls[0]?.quality;
+  const last = polls.at(-1)?.quality;
   const dropped = Number(last.droppedVideoFrames) - Number(first.droppedVideoFrames);
   const total = Number(last.totalVideoFrames) - Number(first.totalVideoFrames);
   if (!finite(dropped) || !finite(total) || total <= 0 || dropped < 0) {
     return { available: false, detail: { dropped, total, field: 'quality' } };
   }
   return { available: true, dropped, total, fraction: dropped / total };
-}
-
-function publicationMissing(context, tags) {
-  const value = { ...(context ?? {}), declaredClientTags: tags };
-  return requiredContextFields('byte', value).find((field) => {
-    const parts = field.match(/^([^[]+)\[(.+)\]$/);
-    if (parts) return !present(value[parts[1]]?.[parts[2]]);
-    const path = field.split('.');
-    let current = value;
-    for (const key of path) current = current?.[key];
-    return !present(current);
-  });
 }
 
 export function evaluateRefusals(input = {}) {
@@ -150,7 +138,7 @@ export function evaluateRefusals(input = {}) {
 
   for (const tag of tags) {
     const client = clients[tag] ?? {};
-    const playback = client.finalPlayback ?? client.playbackEnd ?? client.playback ?? {};
+    const playback = client.finalPlayback ?? {};
     if (playback.begun === undefined || playback.begun === 0) {
       addReason(reasons, 'client-never-began-playback', REFUSAL_SCOPE.neverPlayed, { tag });
     }
@@ -175,17 +163,16 @@ export function evaluateRefusals(input = {}) {
         recordsInWindow: result.records,
       });
     }
-    const missedValue = client.driftLogMissed ?? input.driftLogMissed?.[tag];
-    const missed = Number(missedValue);
+    const missed = Number(client.driftLogMissed);
     if (!finite(missed)) {
       addReason(reasons, 'drift-log-missed-unavailable', REFUSAL_SCOPE.driftEvidence, { tag });
     } else if (missed > Number(bars.driftLogMissedMax ?? 0)) {
       addReason(reasons, 'drift-log-discarded-records', REFUSAL_SCOPE.evicted, { tag, missed });
     }
-    if (client.pageReset === true || input.pageReset?.[tag] === true) {
+    if (client.pageReset === true) {
       addReason(reasons, 'drift-page-reset', REFUSAL_SCOPE.driftEvidence, { tag });
     }
-    const maxGap = Number(client.maxDriftDrainGapMs ?? input.maxDriftDrainGapMs?.[tag]);
+    const maxGap = Number(client.maxDriftDrainGapMs);
     if (!finite(maxGap)) {
       addReason(reasons, 'drift-drain-gap-unavailable', REFUSAL_SCOPE.driftEvidence, { tag });
     } else if (maxGap > 60_000) {
@@ -215,12 +202,9 @@ export function evaluateRefusals(input = {}) {
     }
   }
 
-  // The cadence gate is D6's, not D5's: a run in a regime whose display cadence
-  // could not be established is a criterion-1 figure measured in a regime no
-  // user is in, so it is refused rather than published with a caveat (spec
-  // delta, "Display cadence is established before the measure window"). It is
-  // evaluated when the run declares a cadence or publishes a figure, so
-  // constructed evidence for the other gates is not required to carry one.
+  // The cadence gate is D6's, not D5's. It is evaluated only when the run
+  // declares a cadence or publishes a figure, so constructed evidence for the
+  // other gates need not carry one.
   if (Object.prototype.hasOwnProperty.call(input, 'cadence') || condition.publishes === true) {
     for (const tag of tags) {
       const record = input.cadence?.[tag];
@@ -247,7 +231,7 @@ export function evaluateRefusals(input = {}) {
   }
 
   if (Object.prototype.hasOwnProperty.call(input, 'publicationContext')) {
-    const missing = publicationMissing(input.publicationContext, tags);
+    const missing = missingFields('byte', { ...input.publicationContext, declaredClientTags: tags });
     if (missing) addReason(reasons, `required-context-absent:${missing}`, REFUSAL_SCOPE.publication, { field: missing, figure: 'byte' });
   }
 
@@ -291,4 +275,3 @@ export function refusalReasonSetIsUnique() {
   return new Set(REFUSAL_REASONS).size === REFUSAL_REASONS.length;
 }
 
-export { coverageFor, droppedFraction, publicationMissing };

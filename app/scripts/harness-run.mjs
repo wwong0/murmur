@@ -106,8 +106,9 @@ export function placeWindow(condition, clientsReadyAtMs) {
   };
 }
 
-function initialManifest(conditionName, condition, runDir, startedAt, tags) {
-  const start = startedAt + condition.excludedPrefixMs;
+function initialManifest(condition, runDir, startedAt, tags) {
+  // Provisional until the clients are ready; `placeWindow` re-places it then.
+  const { clientsReadyAtMs: _provisional, ...window } = placeWindow(condition, startedAt);
   return {
     schemaVersion: 1,
     byteAccountingMethod: 'client-receipt-cohort-v1',
@@ -119,14 +120,7 @@ function initialManifest(conditionName, condition, runDir, startedAt, tags) {
     declaredClientTags: tags,
     clientTags: tags,
     clients: clientDeclaration(tags, tags.map((tag, index) => index === 0 ? 'host' : 'viewer')),
-    window: {
-      startMs: start,
-      endMs: start + condition.measureWindowMs,
-      declaredStartMs: start,
-      declaredEndMs: start + condition.measureWindowMs,
-      excludedPrefixMs: condition.excludedPrefixMs,
-      measureWindowMs: condition.measureWindowMs,
-    },
+    window,
     content: JSON.parse(JSON.stringify(condition.content)),
     regime: JSON.parse(JSON.stringify(condition)),
     cadence: null,
@@ -146,13 +140,6 @@ async function waitUntil(deadline, atMs) {
   while (Date.now() < atMs) {
     deadline.check('run');
     await sleep(Math.min(1000, Math.max(1, atMs - Date.now())));
-  }
-}
-
-async function waitUntilAfter(deadline, atMs) {
-  while (Date.now() <= atMs) {
-    deadline.check('run');
-    await sleep(Math.min(1000, Math.max(1, atMs + 1 - Date.now())));
   }
 }
 
@@ -288,43 +275,18 @@ export function decideFinalization({ evaluation, recomputed, figureKinds, failur
   const publishedDrift = isPublishedFigure(recomputed?.publishedDrift);
   const byteEligible = evaluation?.figures?.byte
     ?? (!evaluation?.refused && !evaluation?.runRefused);
-  const eligibleByte = () => byteAllowed && byteEligible && publishedByte;
-  const eligibleDrift = () => driftAllowed && evaluation?.figures?.drift === true
-    && !evaluation?.runRefused && publishedDrift;
-  if (failure || recomputeError || retainedOverflow) {
-    return { status: 'aborted', outcome: 'failed', exitCode: 1, writeByte: false, writeDrift: false, reason: 'instrument-failure' };
-  }
-  if (evaluation?.runRefused) {
-    return {
-      status: 'refused',
-      outcome: 'refused',
-      exitCode: 1,
-      writeByte: eligibleByte(),
-      writeDrift: false,
-      reason: 'run-refusal',
-    };
-  }
-  if (cleanupFailure) {
-    return { status: 'aborted', outcome: 'failed', exitCode: 1, writeByte: false, writeDrift: false, reason: 'cleanup-failure' };
-  }
-  if (evaluation?.refused) {
-    return {
-      status: 'complete',
-      outcome: 'pass',
-      exitCode: 0,
-      writeByte: eligibleByte(),
-      writeDrift: eligibleDrift(),
-      reason: 'publication-refusal',
-    };
-  }
-  return {
-    status: 'complete',
-    outcome: 'pass',
-    exitCode: 0,
-    writeByte: eligibleByte(),
-    writeDrift: eligibleDrift(),
-    reason: 'published',
+  const aborted = (reason) => ({ status: 'aborted', outcome: 'failed', exitCode: 1, writeByte: false, writeDrift: false, reason });
+  if (failure || recomputeError || retainedOverflow) return aborted('instrument-failure');
+  // A run refusal outranks a cleanup failure; a cleanup failure outranks a pass.
+  if (!evaluation?.runRefused && cleanupFailure) return aborted('cleanup-failure');
+  const writes = {
+    writeByte: byteAllowed && byteEligible && publishedByte,
+    // Refusal scopes, not the run's status, decide what is withheld: a byte-only
+    // run refusal leaves drift eligible (6a design.md D5; d1-findings.md F2).
+    writeDrift: driftAllowed && evaluation?.figures?.drift === true && publishedDrift,
   };
+  if (evaluation?.runRefused) return { status: 'refused', outcome: 'refused', exitCode: 1, ...writes, reason: 'run-refusal' };
+  return { status: 'complete', outcome: 'pass', exitCode: 0, ...writes, reason: evaluation?.refused ? 'publication-refusal' : 'published' };
 }
 
 function clearPublishedOutputs(runDir) {
@@ -431,7 +393,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
   const tags = tagsFor(condition);
   const roles = tags.map((tag, index) => index === 0 ? 'host' : 'viewer');
   const prepared = prepareRunDirectory({ appDir: APP_DIR, resultsDir: RESULTS_DIR, runDir });
-  const manifestFile = createManifestFile({ runDir: prepared.runDir, initial: initialManifest(conditionName, condition, prepared.runDir, startedAt, tags) });
+  const manifestFile = createManifestFile({ runDir: prepared.runDir, initial: initialManifest(condition, prepared.runDir, startedAt, tags) });
   const ndjson = createNdjson(prepared.runDir);
   ndjson.write('origin-link.ndjson', []);
   for (const tag of tags) for (const name of streamNames(tag)) ndjson.write(name, []);
@@ -508,7 +470,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     originEnd = endBoundary.origin;
     for (const session of sessions) session.endPlayback = endBoundary.snapshots[session.tag]?.playback;
     if (condition.disturbance && injectionHarnessMs !== null) {
-      await waitUntilAfter(deadline, injectionHarnessMs + condition.disturbance.observationMs + 2000);
+      await waitUntil(deadline, injectionHarnessMs + condition.disturbance.observationMs + 2000);
     }
     await Promise.all(sessions.map((session) => queuedDrain(session, ndjson)));
   } catch (error) {

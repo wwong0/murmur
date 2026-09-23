@@ -2,9 +2,7 @@
 // containers can reach it.
 //
 // `room-server.mjs` defaults to 127.0.0.1, which inside a container accepts
-// nothing from the client containers. The server is not edited for this — the
-// host is an option it already takes, and this change's write permissions are
-// the harness tree, not `server/` (executor-spec.md §3, Files).
+// nothing from the client containers; the host is an option it already takes.
 
 import { startRoomServer } from '../server/room-server.mjs';
 

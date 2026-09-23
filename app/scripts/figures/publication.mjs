@@ -125,7 +125,7 @@ function missingField(path, context, figure) {
   return absent(value) ? path : null;
 }
 
-function missingFields(kind, context, figure) {
+export function missingFields(kind, context, figure = {}) {
   const fields = REQUIRED_CONTEXT_FIELDS[kind];
   if (!fields) throw new Error(`unknown figure kind: ${kind}`);
   for (const field of fields) {
@@ -216,7 +216,7 @@ export function isPublishedFigure(value) {
   return Boolean(value?.[PUBLICATION]);
 }
 
-function csvCell(value) {
+export function csvCell(value) {
   const text = value === undefined || value === null ? '' : String(value);
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
@@ -247,6 +247,3 @@ export function utilisationCsv(figure) {
   const row = header.map((field) => figure[field]);
   return [header, row].map((line) => line.map(csvCell).join(',')).join('\n') + '\n';
 }
-
-export const writeBytesByClientCsv = bytesByClientCsv;
-export const writeUtilisationCsv = utilisationCsv;

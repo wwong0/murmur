@@ -18,10 +18,9 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /**
  * The Windows Chrome path and the Windows disposal, re-exported from the
  * platform adapter that now owns both (`runner/browser-platform.mjs`, design.md
- * D9). Five files import these and are outside this change's conversion set, so
- * what they get has to stay byte-identical — which is why this is a re-export
- * and not a second definition. The container's adapter is the other
- * implementation; nothing here chooses between them.
+ * D9). A re-export, not a second definition: runners that were not converted
+ * import these and must get byte-identical behaviour. Nothing here chooses
+ * between this and the container's adapter.
  */
 export const CHROME = windowsChrome.locate();
 

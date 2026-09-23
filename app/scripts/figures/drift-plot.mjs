@@ -1,4 +1,4 @@
-import { requirePublished } from './publication.mjs';
+import { csvCell, requirePublished } from './publication.mjs';
 
 const finite = (value) => Number.isFinite(value);
 const numberText = (value) => Number(value).toFixed(3);
@@ -6,11 +6,6 @@ const numberText = (value) => Number(value).toFixed(3);
 function escapeXml(value) {
   return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;');
-}
-
-function csvCell(value) {
-  const text = value === undefined || value === null ? '' : String(value);
-  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
 function intervalOf(published) {

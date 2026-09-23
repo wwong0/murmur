@@ -3,12 +3,8 @@
 // starts, hold a wall-clock budget, append NDJSON, sum what was retained, and
 // write the same tail whether the run passed or aborted.
 //
-// Change 5's D2 review found fifteen functions under the same names in
-// `measure-leads.mjs` and `measure-start-timing.mjs`, six byte-identical, plus
-// a third and fourth copy of the run-directory refusal in `verify-browser.mjs`
-// and `verify-autoplay.mjs`. This change adds runners, so it is the change that
-// pays for the extraction (design.md D9). The parts that genuinely differed
-// between the copies are arguments here, not branches.
+// Where the runners differed, the difference is an argument here, not a branch
+// (6a design.md D9).
 //
 // TEST MACHINERY. No product code imports this. Its guards are covered by
 // `check/suites/runner-core.mjs`, because a guard that only exists inside a
@@ -117,9 +113,8 @@ export function createDeadline({ startedAt, maxWallMs, timers = globalThis }) {
     }
   }
 
-  // `Math.max(1, ...)` on the sleep is measure-start-timing's form. Without it
-  // the interval can be asked to sleep a negative once the finish instant has
-  // passed, which is the strictly worse of the two copies.
+  // Without `Math.max(1, ...)` the interval is asked to sleep a negative once
+  // the finish instant has passed.
   async function waitFor(label, read, done, timeoutMs = 60_000, everyMs = 250) {
     const finish = Math.min(deadlineAt, Date.now() + timeoutMs);
     let value = await read();

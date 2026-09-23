@@ -169,13 +169,8 @@ export function createRequestRecorder(tab) {
  *
  * VideoPlaybackQuality carries its counters as prototype accessors, and CDP's
  * returnByValue keeps own enumerable properties only — so the object itself
- * crosses as an empty one. A real run polled 1440 times per client, recorded
- * `"quality": {}` every time, produced no dropped-frame figure at all, and
- * threw nothing; the run refusal is what caught it
- * (CONSTRAINTS.md → *Verification*). `harness-poll-shape.mjs` puts this
- * expression through the same serialisation against a stub whose counters are
- * on the prototype, which is the only way an assertion here can fail for the
- * reason the browser did.
+ * crosses as an empty one, and nothing throws. `harness-poll-shape.mjs` asserts
+ * this expression through the same serialisation.
  */
 export function pollExpression() {
   return `(() => {
@@ -232,8 +227,4 @@ export function installStallRecorder(epoch) {
     video?.addEventListener('stalled', on);
     return { epoch: state.epoch, installedAtMs: state.installedAtMs };
   })()`;
-}
-
-export function mapMeasureWindowTime(timestamp, mapping) {
-  return finite(timestamp) && finite(mapping?.offsetMs) ? timestamp * 1000 + mapping.offsetMs : undefined;
 }

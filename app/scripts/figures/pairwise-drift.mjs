@@ -69,8 +69,6 @@ function pairVerdict({ lower, upper, delay, age, present, targets }) {
   };
 }
 
-export const pairwiseVerdict = pairVerdict;
-
 export function pairwiseDrift({
   clients = {},
   tags = Object.keys(clients),

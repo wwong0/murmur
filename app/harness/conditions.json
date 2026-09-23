@@ -756,7 +756,8 @@
     "backgroundLoadProtocol": "udp",
     "monitorRequestTimeoutMs": 5000,
     "backgroundLoadCalibration": {
-      "status": "pending",
+      "status": "no-rate-met",
+      "stoppedBy": "executor-spec 1.4 rule 4: realtime below 0.98 at a rate whose queue bar also failed",
       "bars": {
         "standingQueueDelayMsP50NearestRankMin": 200,
         "uplinkUtilisationMeanMin": 0.95,
@@ -770,7 +771,11 @@
         "shakedown/udp-sweep-99"
       ],
       "chosenMbps": null,
-      "runDirs": []
+      "runDirs": ["6b-udp-sweep-87-2026-09-23T03-46-07.425Z", "6b-udp-sweep-87-2026-09-23T03-57-10.646Z"],
+      "perRate": [
+        { "mbps": 87, "runDir": "6b-udp-sweep-87-2026-09-23T03-57-10.646Z", "standingQueueDelayMsP50NearestRank": 40.75784, "uplinkUtilisationMean": 0.9968844019681428, "uplinkUtilisationIncludesBackgroundLoad": true, "realtimeFactorMin": 0.6478045871946309, "met": false },
+        { "mbps": 87, "runDir": "6b-udp-sweep-87-2026-09-23T03-46-07.425Z", "aborted": "liveness monitor timed out behind the filled queue; repeated once after the monitor timeout was declared" }
+      ]
     },
     "figureKinds": ["drift"],
     "criterion": { "statistic": "p99", "targetMs": 100 },

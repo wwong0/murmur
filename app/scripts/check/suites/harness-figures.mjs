@@ -61,9 +61,9 @@ function pollRecord(atMs, index) {
   };
 }
 
-function echoRecord(atMs, index) {
+function echoRecord(t1, index) {
   return {
-    atMs,
+    t1,
     roundTripMs: [10, 20, 30, 40][index],
     probes: { issued: [0, 1, 3, 4][index] },
     counters: { lost: [0, 0, 1, 1][index] },
@@ -94,7 +94,7 @@ function fixture(overrides = {}) {
         requestTimebase: 'measure-window',
         requests: [requestRecord('/media/seg-00000.m4s', 8_000_000)],
         polls: [0, 125, 250, 375].map((atMs, index) => pollRecord(atMs, index)),
-        echoRecords: [0, 125, 250, 375].map((atMs, index) => echoRecord(atMs, index)),
+        echoRecords: [0, 125, 250, 375].map((t1, index) => echoRecord(t1, index)),
       },
     },
     linkSamples: [
@@ -242,19 +242,25 @@ export default async function harnessFiguresSuite() {
     assertEqual(figures.echoLossFraction.A, 0.25, 'echo loss is separate from clock loss');
   });
 
-  // The records above carry cumulative probe counters. echo-probe.mjs writes a
-  // per-sample lost flag and no counters at all, so the assertion above passed
-  // for a year against a shape no run produces: every real run left
-  // echoLossFraction empty. This drives the figure from what the probe writes.
+  // The records above carry cumulative probe counters. echo-probe.mjs writes
+  // exactly { seq, t1, t4, rttMs, lost } per probe, and a lost probe has no t4
+  // (d1-findings.md Q2). The edge probes separate placement by t1 from by t4.
   await check('harness figures: echo loss reads the flag echo-probe.mjs actually writes', async () => {
-    const emitted = [0, 125, 250, 375].map((atMs, index) => {
-      const lost = index === 2;
-      return { atMs, seq: index, t1: atMs, ...(lost ? {} : { t4: atMs + [10, 20, 0, 40][index], rttMs: [10, 20, 0, 40][index] }), lost };
-    });
+    const probe = (seq, t1, rttMs) => (rttMs === null
+      ? { seq, t1, t4: null, rttMs: null, lost: true }
+      : { seq, t1, t4: t1 + rttMs, rttMs, lost: false });
+    const emitted = [
+      probe(0, -5, 25),
+      probe(1, 0, 10),
+      probe(2, 125, 20),
+      probe(3, 250, null),
+      probe(4, 375, 40),
+      probe(5, 179_990, 40),
+    ];
     const input = fixture();
     const figures = computeFigures({ ...input, clients: { A: { ...input.clients.A, echoRecords: emitted } } });
-    assertEqual(figures.echoLossFraction.A, 0.25, 'one lost sample in four is read from the flags');
-    assertEqual(figures.echoRoundTripMsP50ByClient.A, 20, 'a lost sample contributes no round trip');
+    assertEqual(figures.echoLossFraction.A, 0.2, 'one lost probe in five sent inside the window');
+    assertEqual(figures.echoRoundTripMsP50ByClient.A, 30, 'round trips of probes sent inside the window, the lost one contributing none');
     assertEqual(figures.echoRoundTripMsP99ByClient.A, 40, 'the surviving samples keep nearest rank');
   });
 

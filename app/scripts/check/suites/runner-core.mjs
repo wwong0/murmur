@@ -1,10 +1,8 @@
 // scripts/check/suites/runner-core.mjs
 //
-// The run lifecycle in `scripts/runner/`. Its guards used to live inside four
-// browser runners, where nothing in `npm run check` could reach them — and a
-// check outside `npm run check` will not be run (CONSTRAINTS.md ->
-// Verification). Extracting them is what makes them assertable; this file is
-// where they are asserted.
+// The run lifecycle in `scripts/runner/`, asserted here because a guard that
+// lives only inside a browser runner is never run (CONSTRAINTS.md ->
+// Verification).
 //
 // No browser and no container. The two HTTP servers below are a few lines of
 // `node:http` each, on ephemeral ports, disposed in a `finally`.

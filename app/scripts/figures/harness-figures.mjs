@@ -101,12 +101,12 @@ function recordsInWindow(records, window) {
 }
 
 function recordsFor(client, window) {
-  return recordsInWindow(client.records ?? client.driftRecords, window)
+  return recordsInWindow(client.records, window)
     .filter((record) => record && typeof record === 'object');
 }
 
 function pollsFor(client, window) {
-  return recordsInWindow(client.polls ?? client.pollRecords ?? client.controllerPolls, window)
+  return recordsInWindow(client.polls, window)
     .filter((record) => record && typeof record === 'object');
 }
 
@@ -161,7 +161,7 @@ function cumulativeDelta(records, read) {
 }
 
 function qualityCounter(records, name) {
-  return cumulativeDelta(records, (record) => record.quality?.[name] ?? record.videoQuality?.[name]);
+  return cumulativeDelta(records, (record) => record.quality?.[name]);
 }
 
 function stallCount(records) {
@@ -174,6 +174,8 @@ function droppedFrames(records) {
   return qualityCounter(records, 'droppedVideoFrames');
 }
 
+// One client's entry in each `…ByClient` figure, keyed by the figure's name.
+// A figure the client's evidence cannot support is left out.
 function clientFigures(tag, client, origin, window, content, receipt) {
   const records = recordsFor(client, window);
   const polls = pollsFor(client, window);
@@ -192,16 +194,16 @@ function clientFigures(tag, client, origin, window, content, receipt) {
     if (peerFraction < -0.10 || peerFraction > 1.0) {
       throw new RangeError(`peerByteFractionByClient[${tag}] physically impossible: ${peerFraction}`);
     }
-    result.peerFraction = peerFraction;
-    result.receivedMediaBytes = receivedCompletedBytes;
-    result.originMediaBytes = originCompletedBytes;
-    result.originVsClient = {
+    result.peerByteFractionByClient = peerFraction;
+    result.clientReceivedMediaBytesByClient = receivedCompletedBytes;
+    result.originMediaBytesByClient = originCompletedBytes;
+    result.originVsClientBytesByClient = {
       differenceBytes: originCompletedBytes - receivedCompletedBytes,
       differenceFraction: (originCompletedBytes - receivedCompletedBytes) / receivedCompletedBytes,
     };
   }
   if (finite(originWaste) && finite(receivedAbortedBytes) && (originWaste > 0 || clientBytes?.canceledCount > 0)) {
-    result.abortedQueuedResidualBytes = originWaste - receivedAbortedBytes;
+    result.abortedQueuedResidualBytesByClient = originWaste - receivedAbortedBytes;
   }
 
   if (records.length >= 2) {
@@ -209,58 +211,70 @@ function clientFigures(tag, client, origin, window, content, receipt) {
     const last = records.at(-1);
     const displayAdvance = last.displaySharedMs - first.displaySharedMs;
     if (finite(displayAdvance) && displayAdvance > 0 && finite(last.mediaMs) && finite(first.mediaMs)) {
-      result.realtimeFactor = (last.mediaMs - first.mediaMs) / displayAdvance;
+      result.realtimeFactorByClient = (last.mediaMs - first.mediaMs) / displayAdvance;
     }
-    const fps = content?.frameRate ?? content?.fps;
+    const fps = content?.frameRate;
     const frames = qualityCounter(polls, 'totalVideoFrames');
     const seconds = window && finite(window.startMs) && finite(window.endMs)
       ? (window.endMs - window.startMs) / 1000
       : undefined;
     if (finite(fps) && fps > 0 && finite(frames) && finite(seconds) && seconds > 0) {
-      result.realtimeFactorFromFrameQuality = frames / (fps * seconds);
+      result.realtimeFactorFromFrameQualityByClient = frames / (fps * seconds);
     }
   }
   const stalls = stallCount(polls);
-  if (finite(stalls)) result.stallCount = stalls;
+  if (finite(stalls)) result.stallCountByClient = stalls;
   const presented = presentedFrames(records);
-  if (finite(presented)) result.presentedFrames = presented;
+  if (finite(presented)) result.presentedFramesByClient = presented;
   const firstPresented = records[0]?.presentedFrames;
   const presentedSpan = finite(firstPresented) && finite(presented) ? presented - firstPresented + 1 : undefined;
-  if (finite(presentedSpan) && presentedSpan > 0) result.coverageRatio = records.length / presentedSpan;
+  if (finite(presentedSpan) && presentedSpan > 0) result.coverageRatioByClient = records.length / presentedSpan;
   const dropped = droppedFrames(polls);
   const total = qualityCounter(polls, 'totalVideoFrames');
   if (finite(dropped) && finite(total) && total > 0) {
-    result.droppedFrameFraction = dropped / total;
+    result.droppedFrameFractionByClient = dropped / total;
   }
 
-  return { result, records, polls };
+  return {
+    ...result,
+    ...pollFigures(polls),
+    ...clockFigures(polls),
+    ...echoFigures(echoRecordsInWindow(client.echoRecords, window)),
+  };
 }
 
-function pollSamples(client, window) {
-  const source = client.polls ?? client.pollRecords ?? client.controllerPolls ?? [];
-  return recordsInWindow(source, window).map((sample) => ({
-    atMs: sample?.atMs ?? sample?.at ?? sample?.timeMs,
-    polls: typeof sample === 'number' ? sample : sample?.polls ?? sample?.controller?.polls,
-  })).filter((sample) => finite(sample.polls));
+// An echo probe is placed by its send instant: a lost probe has no t4, and
+// placing by eventTime dropped every one of them (d1-findings.md Q2).
+function echoRecordsInWindow(records, window) {
+  const source = Array.isArray(records) ? records : [];
+  if (!window || !finite(window.startMs) || !finite(window.endMs)) return source;
+  return source.filter((record) => finite(record?.t1) && record.t1 >= window.startMs && record.t1 <= window.endMs);
 }
 
 function percentileFields(values, prefix) {
   const sorted = values.filter(finite).sort((a, b) => a - b);
   if (!sorted.length) return {};
   return {
-    [`${prefix}P50`]: median(sorted),
-    [`${prefix}P95`]: percentile(sorted, 0.95),
-    [`${prefix}P99`]: percentile(sorted, 0.99),
+    [`${prefix}P50ByClient`]: median(sorted),
+    [`${prefix}P95ByClient`]: percentile(sorted, 0.95),
+    [`${prefix}P99ByClient`]: percentile(sorted, 0.99),
   };
 }
 
-function perClientPollFigures(client, window) {
-  const samples = pollSamples(client, window);
+function lossFraction(lost, issued) {
+  return finite(issued) && issued > 0 && finite(lost) ? lost / issued : undefined;
+}
+
+function pollFigures(polls) {
+  const samples = polls.map((sample) => ({
+    atMs: sample.atMs ?? sample.at ?? sample.timeMs,
+    polls: sample.polls ?? sample.controller?.polls,
+  })).filter((sample) => finite(sample.polls));
   if (!samples.length) return {};
   const skips = samples.slice(1).reduce((sum, sample, index) => sum + Math.max(0, sample.polls - samples[index].polls - 1), 0);
   const intervals = samples.slice(1).map((sample, index) => sample.atMs - samples[index].atMs).filter((value) => finite(value) && value > 0);
   return {
-    evaluationSkips: skips,
+    evaluationSkipsByClient: skips,
     ...(intervals.length ? {
       pollIntervalMsP50: median([...intervals].sort((a, b) => a - b)),
       pollIntervalMsP95: percentile([...intervals].sort((a, b) => a - b), 0.95),
@@ -269,24 +283,29 @@ function perClientPollFigures(client, window) {
   };
 }
 
-function clientProbeFigures(records, prefix) {
-  const values = records.map((record) => prefix === 'clockBestDelayMs'
-    ? record.clock?.bestDelayMs
-    : record.roundTripMs ?? record.echoRoundTripMs ?? (finite(record.t1) && finite(record.t4) ? record.t4 - record.t1 : undefined)).filter(finite);
-  const result = percentileFields(values, prefix);
-  const issued = cumulativeDelta(records, (record) => prefix.startsWith('clock')
-    ? record.clock?.probes?.issued
-    : record.probes?.issued ?? record.echo?.probes?.issued);
-  const lost = cumulativeDelta(records, (record) => prefix.startsWith('clock')
-    ? record.clock?.counters?.lost
-    : record.counters?.lost ?? record.echo?.counters?.lost);
-  // echo-probe.mjs marks each sample lost or not and publishes no cumulative
-  // counter, so reading one here left echoLossFraction empty on every real run
-  // while the fixture's manufactured counters kept the field green.
-  const flagged = prefix.startsWith('clock') ? [] : records.filter((record) => typeof record.lost === 'boolean');
-  if (flagged.length) result.echoLossFraction = flagged.filter((record) => record.lost).length / flagged.length;
-  else if (finite(issued) && issued > 0 && finite(lost)) result[`${prefix.startsWith('clock') ? 'clock' : 'echo'}LossFraction`] = lost / issued;
-  return result;
+function clockFigures(polls) {
+  const issued = cumulativeDelta(polls, (poll) => poll.clock?.probes?.issued);
+  const lost = cumulativeDelta(polls, (poll) => poll.clock?.counters?.lost);
+  return {
+    ...percentileFields(polls.map((poll) => poll.clock?.bestDelayMs), 'clockBestDelayMs'),
+    clockLossFraction: lossFraction(lost, issued),
+  };
+}
+
+function echoFigures(records) {
+  const roundTrips = records.map((record) => record.roundTripMs ?? record.echoRoundTripMs
+    ?? (finite(record.t1) && finite(record.t4) ? record.t4 - record.t1 : undefined));
+  const issued = cumulativeDelta(records, (record) => record.probes?.issued ?? record.echo?.probes?.issued);
+  const lost = cumulativeDelta(records, (record) => record.counters?.lost ?? record.echo?.counters?.lost);
+  // echo-probe.mjs writes a per-probe `lost` flag and no counter; the counters
+  // here serve only the legacy fixtures (6a design.md D10).
+  const flagged = records.filter((record) => typeof record.lost === 'boolean');
+  return {
+    ...percentileFields(roundTrips, 'echoRoundTripMs'),
+    echoLossFraction: flagged.length
+      ? flagged.filter((record) => record.lost).length / flagged.length
+      : lossFraction(lost, issued),
+  };
 }
 
 function linkFigures(samples, window, capacityBitsPerSecond) {
@@ -347,7 +366,7 @@ export function computeFigures(input = {}) {
     ? computeReceiptCohort({ clients, declaredClientTags: tags, window, originEnd })
     : null;
   const distinctBytes = cohort?.distinctSegmentBytesConsumedInWindow ?? origin.distinctSegmentBytesConsumedInWindow;
-  const { byClient: originByClient, segmentBytesDeliveredInWindow, ...originFigures } = origin;
+  const { byClient: _byClient, segmentBytesDeliveredInWindow, ...originFigures } = origin;
   const result = {
     ...originFigures,
     ...(cohort ? {
@@ -384,35 +403,9 @@ export function computeFigures(input = {}) {
   };
 
   for (const tag of tags) {
-    const client = clients[tag] ?? {};
-    const { result: figures, polls } = clientFigures(tag, client, { ...origin, byClient: originByClient }, window, input.content, cohort?.byClient[tag]);
-    if (finite(figures.peerFraction)) result.peerByteFractionByClient[tag] = figures.peerFraction;
-    if (finite(figures.receivedMediaBytes)) result.clientReceivedMediaBytesByClient ??= {};
-    if (finite(figures.receivedMediaBytes)) result.clientReceivedMediaBytesByClient[tag] = figures.receivedMediaBytes;
-    if (finite(figures.originMediaBytes)) result.originMediaBytesByClient ??= {};
-    if (finite(figures.originMediaBytes)) result.originMediaBytesByClient[tag] = figures.originMediaBytes;
-    if (figures.originVsClient) result.originVsClientBytesByClient[tag] = figures.originVsClient;
-    if (finite(figures.abortedQueuedResidualBytes)) result.abortedQueuedResidualBytesByClient[tag] = figures.abortedQueuedResidualBytes;
-    if (finite(figures.realtimeFactor)) result.realtimeFactorByClient[tag] = figures.realtimeFactor;
-    if (finite(figures.realtimeFactorFromFrameQuality)) result.realtimeFactorFromFrameQualityByClient[tag] = figures.realtimeFactorFromFrameQuality;
-    if (finite(figures.stallCount)) result.stallCountByClient[tag] = figures.stallCount;
-    if (finite(figures.droppedFrameFraction)) result.droppedFrameFractionByClient[tag] = figures.droppedFrameFraction;
-    if (finite(figures.presentedFrames)) result.presentedFramesByClient[tag] = figures.presentedFrames;
-    if (finite(figures.coverageRatio)) result.coverageRatioByClient[tag] = figures.coverageRatio;
-    const poll = perClientPollFigures(client, window);
-    for (const [name, value] of Object.entries(poll)) if (finite(value)) {
-      if (name === 'evaluationSkips') result.evaluationSkipsByClient[tag] = value;
-      if (name.startsWith('pollInterval')) result[name][tag] = value;
-    }
-    const clock = clientProbeFigures(polls, 'clockBestDelayMs');
-    const echo = clientProbeFigures(recordsInWindow(client.echoRecords, window), 'echoRoundTripMs');
-    for (const [name, value] of Object.entries(clock)) if (finite(value)) {
-      if (name.startsWith('clockBestDelayMs')) result[`${name}ByClient`][tag] = value;
-      if (name === 'clockLossFraction') result.clockLossFraction[tag] = value;
-    }
-    for (const [name, value] of Object.entries(echo)) if (finite(value)) {
-      if (name.startsWith('echoRoundTripMs')) result[`${name}ByClient`][tag] = value;
-      if (name === 'echoLossFraction') result.echoLossFraction[tag] = value;
+    const figures = clientFigures(tag, clients[tag] ?? {}, origin, window, input.content, cohort?.byClient[tag]);
+    for (const [name, value] of Object.entries(figures)) {
+      if (value !== undefined) (result[name] ??= {})[tag] = value;
     }
   }
 
@@ -437,7 +430,7 @@ function canonical(value) {
   return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
 }
 
-export function regimeKey(regime) {
+function regimeKey(regime) {
   return JSON.stringify(canonical(regime ?? {}));
 }
 
@@ -452,11 +445,3 @@ export function guardRegimes(runs) {
   const conditions = entries.map((entry) => entry.name);
   return { combined: false, refused: true, reason: `regime-mismatch:${conditions.join(' vs ')}`, conditions, keys: [...groups.keys()] };
 }
-
-export function combineRuns(runs) {
-  const guard = guardRegimes(runs);
-  if (!guard.combined) throw new Error(guard.reason);
-  return runs.length === 1 ? computeFigures(runs[0]) : { runs: runs.map(computeFigures), regime: guard.key };
-}
-
-export { median, percentile };

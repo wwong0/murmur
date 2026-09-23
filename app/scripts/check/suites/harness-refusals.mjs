@@ -326,8 +326,7 @@ export default async function harnessRefusalsSuite() {
     // branch, so a probe that saw too few callbacks — or saw them too dispersed
     // to be one cadence — reports a real number beside its refusal. A fixture
     // with a null interval would be caught by the finiteness clause and would
-    // leave the classification clause untested, which a mutation of that clause
-    // alone confirmed: it survived a full green check.
+    // leave the classification clause untested.
     const none = evaluateRefusals(evidence({ cadence: cadenceRecords(['c01'], { classification: 'none', presentIntervalMs: 12.4, impliedHz: null, optimismVsSixtyHzMs: null, reasons: ['no rVFC callbacks'] }) }));
     const unreadable = evaluateRefusals(evidence({ cadence: cadenceRecords(['c01'], { presentIntervalMs: null }) }));
     const absent = evaluateRefusals(evidence({ cadence: {} }));

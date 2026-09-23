@@ -180,8 +180,11 @@ export default async function harnessDriftPublicationSuite() {
   });
 
   await check('harness drift publication: assembly publishes one branded drift figure', async () => {
-    const assembled = driftFigure({ figures: completeFigure(), pairwise: {}, context: { declaredClientTags: TAGS }, condition: completeFigure().condition, window: WINDOW, content: { frameRate: 2 } });
+    // The context carries the drift fields; the run figures carry a byte figure
+    // too, which the drift figure must not (d1-findings.md F1).
+    const assembled = driftFigure({ figures: { ...completeFigure(), hostUploadMultiplier: 5 }, pairwise: {}, context: { declaredClientTags: TAGS, ...completeFigure() }, condition: completeFigure().condition, window: WINDOW, content: { frameRate: 2 } });
     const result = publish('drift', assembled, { declaredClientTags: TAGS });
     assertEqual(isPublishedFigure(result), true, 'drift assembly invokes the publication gate');
+    assert(!Object.hasOwn(result, 'hostUploadMultiplier'), 'a byte figure among the run figures is not carried');
   });
 }

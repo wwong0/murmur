@@ -11,7 +11,6 @@ import { bytesByClientCsv, publish, utilisationCsv } from './figures/publication
 import { driftSeriesCsv, driftSvg } from './figures/drift-plot.mjs';
 
 function readJson(filePath, fallback = undefined) {
-  if (!filePath) return fallback;
   try {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
   } catch (error) {
@@ -28,11 +27,6 @@ function readNdjson(filePath) {
     if (error.code === 'ENOENT') return undefined;
     throw error;
   }
-}
-
-function firstFile(runDir, names) {
-  const name = names.find((candidate) => fs.existsSync(path.join(runDir, candidate)));
-  return name ? path.join(runDir, name) : undefined;
 }
 
 function counterFrom(value) {
@@ -65,7 +59,7 @@ export function readRunDirectory(runDir) {
   const manifest = readJson(path.join(runDir, 'manifest.json'), {});
   const originStart = counterFrom(readJson(path.join(runDir, 'origin-counters-start.json')));
   const originEnd = counterFrom(readJson(path.join(runDir, 'origin-counters-end.json')));
-  const window = manifest.window ?? manifest.measureWindow;
+  const window = manifest.window;
   const context = manifest.context ?? manifest;
   const tags = manifest.declaredClientTags ?? manifest.clientTags ?? manifest.condition?.clientTags
     ?? Object.keys(manifest.clients ?? {});
@@ -85,7 +79,7 @@ export function readRunDirectory(runDir) {
     clockJoin: Object.fromEntries([...new Set(tags)].map((tag) => [tag,
       readJson(path.join(runDir, `client-${tag}.clock-join.json`))])),
   };
-  return { manifest, input, storedFigures: readJson(firstFile(runDir, ['published-figures.json', 'figures.json']), undefined) };
+  return { manifest, input };
 }
 
 export function recomputeRunDirectory(runDir) {
@@ -119,15 +113,21 @@ export function recomputeRunDirectory(runDir) {
       presentIntervalMsByClient: contextFields.presentIntervalMsByClient,
       targets: retained.input.condition?.criterion,
     });
+    // The context is the drift fields alone: the manifest's lifecycle keys are
+    // written after this recompute, so a figure carrying them could not equal a
+    // later one. Publication reads the assembled figure (d1-findings.md F1).
     const drift = driftFigure({
       figures,
       pairwise,
-      context: { ...context, ...contextFields },
+      context: contextFields,
       condition: retained.input.condition,
       window: retained.input.window,
       content: retained.input.content,
     });
-    const publishedDrift = publish('drift', drift, { ...context, ...contextFields });
+    const publishedDrift = publish('drift', drift, {
+      declaredClientTags: retained.input.declaredClientTags,
+      clients: retained.input.clients,
+    });
     report.publishedDrift = publishedDrift;
     if (publishedDrift.published !== false) {
       report.driftCsv = driftSeriesCsv(publishedDrift);

@@ -6,10 +6,8 @@
 // published container port forwards to an address nothing is listening on and
 // the driver on the host sees "client never exposed CDP". Chrome therefore
 // listens on loopback only and this relay is what binds the published port.
-//
-// Node rather than socat: the client image gets no extra package for this, and
-// the agent process is already there. DevTools' own Host-header check is not in
-// the way — it accepts the `127.0.0.1:<published>` a forwarded request carries.
+// DevTools' Host-header check accepts the `127.0.0.1:<published>` a forwarded
+// request carries.
 
 import net from 'node:net';
 

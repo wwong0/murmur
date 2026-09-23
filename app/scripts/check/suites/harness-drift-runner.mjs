@@ -84,7 +84,7 @@ function writeFixture(root, { figureKinds = ['drift'], tags = ['c01', 'c02'], di
   for (const tag of tags) {
     fs.writeFileSync(path.join(root, `client-${tag}.drift.ndjson`), `${records().map((record) => JSON.stringify(record)).join('\n')}\n`);
     fs.writeFileSync(path.join(root, `client-${tag}.poll.ndjson`), `${polls().map((poll) => JSON.stringify(poll)).join('\n')}\n`);
-    fs.writeFileSync(path.join(root, `client-${tag}.echo.ndjson`), `${JSON.stringify({ atMs: 0, roundTripMs: 2 })}\n${JSON.stringify({ atMs: 1000, roundTripMs: 2 })}\n`);
+    fs.writeFileSync(path.join(root, `client-${tag}.echo.ndjson`), `${JSON.stringify({ seq: 0, t1: 0, t4: 2, rttMs: 2, lost: false })}\n${JSON.stringify({ seq: 1, t1: 998, t4: 1000, rttMs: 2, lost: false })}\n`);
     fs.writeFileSync(path.join(root, `client-${tag}.requests.ndjson`), '');
     fs.writeFileSync(path.join(root, `client-${tag}.clock-join.json`), JSON.stringify({
       timebase: 'cdp-monotonic', joined: [{ cdpMs: 10 }], echoSent: [], echoReplies: [{ cdpMs: 260 }],
@@ -106,6 +106,16 @@ function manifestFile(root) {
   };
 }
 
+function diskManifestFile(root, body) {
+  const file = path.join(root, 'manifest.json');
+  return {
+    path: file,
+    get: () => body,
+    merge: (patch) => Object.assign(body, patch),
+    write: () => fs.writeFileSync(file, `${JSON.stringify(body, null, 2)}\n`),
+  };
+}
+
 function fakeResult() {
   return {
     preconditions: { clockOffsetFinite: true, playbackPlaying: true },
@@ -121,19 +131,54 @@ function fakeResult() {
 }
 
 export default async function harnessDriftRunnerSuite() {
-  await check('harness drift runner: recompute twice is byte-identical and stores published drift', async () => {
+  await check('harness drift runner: the drift file settled by the runner equals a later recompute', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-drift-recompute-'));
     try {
-      writeFixture(root);
+      // The runner's order: manifest written as running, recompute, then settle,
+      // which writes the lifecycle keys. Comparing against a file this check wrote
+      // itself compared the code with itself (d1-findings.md F1).
+      const mf = diskManifestFile(root, { ...writeFixture(root), status: 'running', outcome: 'running' });
+      mf.write();
       const first = recomputeRunDirectory(root);
-      fs.writeFileSync(path.join(root, 'published-drift.json'), `${JSON.stringify(first.publishedDrift, null, 2)}\n`);
-      const second = recomputeRunDirectory(root);
-      assertEqual(JSON.stringify(first), JSON.stringify(second), 'two recomputes are deeply equal');
-      assertEqual(JSON.stringify(first.publishedDrift), JSON.stringify(JSON.parse(fs.readFileSync(path.join(root, 'published-drift.json'), 'utf8'))), 'stored drift matches recompute');
+      assertEqual(JSON.stringify(first), JSON.stringify(recomputeRunDirectory(root)), 'two recomputes are deeply equal');
       assert(first.publishedDrift && first.publishedDrift.published !== false, 'constructed drift publishes');
       assert(typeof first.driftCsv === 'string' && typeof first.driftSvg === 'string', 'published plots are text');
+      const evaluation = { refused: false, runRefused: false, figures: { byte: true, drift: true }, reasons: [] };
+      const decision = decideFinalization({ evaluation, recomputed: first, figureKinds: ['drift'] });
+      settleFinalization({ decision, manifestFile: mf, runDir: root, recomputed: first, evaluation, startedAt: Date.now(), retained: 1 });
+      assertEqual(JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8')).status, 'complete', 'the manifest on disk was settled');
+      const stored = JSON.parse(fs.readFileSync(path.join(root, 'published-drift.json'), 'utf8'));
+      assertEqual(JSON.stringify(recomputeRunDirectory(root).publishedDrift), JSON.stringify(stored), 'stored drift matches a recompute of the settled directory');
+      assert(Number.isFinite(first.figures.mediaBytesDeliveredInWindow), 'the run computed a byte figure the drift file could carry');
+      assert(!Object.hasOwn(stored, 'mediaBytesDeliveredInWindow') && !Object.hasOwn(stored, 'status'), 'the drift file carries no byte figure and no lifecycle key');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await check('harness drift runner: a byte-scoped run refusal still writes drift, a drift-scoped one does not', async () => {
+    // 6a design.md D5: a byte-attribution fault does not suppress a drift figure
+    // (d1-findings.md F2).
+    for (const [scope, driftEligible] of [[['byte'], true], [['byte', 'drift'], false]]) {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-f2-'));
+      try {
+        writeFixture(root);
+        const recomputed = recomputeRunDirectory(root);
+        const evaluation = {
+          refused: true, runRefused: true,
+          figures: { byte: false, drift: driftEligible },
+          reasons: [{ reason: 'origin-unattributed-bytes-nonzero', scope }],
+        };
+        const decision = decideFinalization({ evaluation, recomputed, figureKinds: ['drift'] });
+        assertEqual(`${decision.status}/${decision.exitCode}`, 'refused/1', `scope ${scope}: the run is still refused`);
+        const mf = manifestFile(root);
+        settleFinalization({ decision, manifestFile: mf.file, runDir: root, recomputed, evaluation, startedAt: Date.now(), retained: 1 });
+        for (const name of ['published-drift.json', 'drift-series.csv', 'drift.svg']) {
+          assertEqual(fs.existsSync(path.join(root, name)), driftEligible, `scope ${scope}: ${name} ${driftEligible ? 'written' : 'withheld'}`);
+        }
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
     }
   });
 
