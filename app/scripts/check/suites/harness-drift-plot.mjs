@@ -84,6 +84,8 @@ export default async function harnessDriftPlotSuite() {
     for (const writer of [driftSeriesCsv, driftSvg]) {
       assertEqual(throws(() => writer({})), true, 'unbranded input is refused');
       assertEqual(throws(() => writer({ published: false })), true, 'publication refusal is refused');
+      // Complete in every field but the brand, so only the gate can refuse it.
+      assertEqual(throws(() => writer(JSON.parse(JSON.stringify(publishedFixture())))), true, 'G6 unbranded complete figure is refused');
     }
   });
 

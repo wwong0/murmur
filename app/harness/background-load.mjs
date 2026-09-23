@@ -7,6 +7,11 @@ import { fileURLToPath } from 'node:url';
 
 const USAGE = 'node harness/background-load.mjs --to=<host:port> --mbps=<number|null> [--protocol=tcp|udp] [--granularity-ms=<ms>] [--max-ms=<ms>] [--report=<path>]';
 export const UDP_PAYLOAD_BYTES = 1400;
+// The kernel holds a sender back once its send buffer is queued, and the default
+// 212 992 B is about 90 datagrams, ~10 ms at 100 Mbit. Asking for 4 MiB (the
+// container's wmem_max; Linux doubles it) leaves tbf's own limit to bound the
+// queue (6b design.md D1).
+export const UDP_SEND_BUFFER_BYTES = 4 * 1024 * 1024;
 
 export function parseArgs(argv) {
   const allowed = new Set(['to', 'mbps', 'granularity-ms', 'max-ms', 'report', 'protocol']);
@@ -103,6 +108,7 @@ async function run(options) {
     if (options.protocol === 'udp') {
       report.datagramsSent = state.datagramsSent;
       report.sendErrors = state.sendErrors;
+      report.sendBufferBytes = state.sendBufferBytes ?? null;
     }
     return report;
   };
@@ -138,6 +144,8 @@ async function run(options) {
       socket.once('error', reject);
       socket.bind(0, '0.0.0.0');
     });
+    socket.setSendBufferSize(UDP_SEND_BUFFER_BYTES);
+    state.sendBufferBytes = socket.getSendBufferSize();
     const payload = Buffer.alloc(UDP_PAYLOAD_BYTES);
     let remainderBytes = 0;
     let tick = options.granularityMs;

@@ -14,7 +14,9 @@ export const CONSECUTIVE_FAILURES_BEFORE_ABORT = 2;
 export const REQUEST_TIMEOUT_MS = 1000;
 export const POLL_INTERVAL_MS = 250;
 
-export function startOriginMonitor({ healthUrl, deadlineAt, maxWallMs, onFailure = () => {} }) {
+// A condition that fills the shaped queue on purpose declares a longer timeout,
+// because the host reaches the origin across that queue (6b design.md D1).
+export function startOriginMonitor({ healthUrl, deadlineAt, maxWallMs, onFailure = () => {}, requestTimeoutMs = REQUEST_TIMEOUT_MS }) {
   let stopped = false;
   let controller = null;
   const monitor = {
@@ -32,7 +34,7 @@ export function startOriginMonitor({ healthUrl, deadlineAt, maxWallMs, onFailure
     while (!stopped) {
       if (Date.now() >= deadlineAt) throw new Error(`overall run exceeded ${maxWallMs}ms while monitoring the server`);
       controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
       try {
         const response = await fetch(healthUrl, { cache: 'no-store', signal: controller.signal });
         await response.arrayBuffer();

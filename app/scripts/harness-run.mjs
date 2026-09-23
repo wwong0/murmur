@@ -423,8 +423,7 @@ async function disposeSession(session) {
   if (session.dispose) await session.dispose();
 }
 
-export async function runHarness({ conditionName, runDir = defaultRunDir(conditionName), originUrl, clientOriginUrl = originUrl, topology = section3Topology(), clientFactory = noClientFactory, establishCadence = defaultEstablishCadence, qualifyCdpBytes = defaultQualifyCdpBytes } = {}) {
-  const condition = conditionForName(conditionName);
+export async function runHarness({ conditionName, condition = conditionForName(conditionName), runDir = defaultRunDir(conditionName), originUrl, clientOriginUrl = originUrl, topology = section3Topology(), clientFactory = noClientFactory, establishCadence = defaultEstablishCadence, qualifyCdpBytes = defaultQualifyCdpBytes } = {}) {
   if (condition.backgroundLoadProtocol === 'udp' && condition.backgroundLoadMbps == null) {
     throw new Error(`UDP background load requires a declared rate for condition ${condition.name}`);
   }
@@ -457,7 +456,7 @@ export async function runHarness({ conditionName, runDir = defaultRunDir(conditi
     manifestFile.merge({ topology: { status: 'ready', qdiscs: qdiscs ?? condition.qdiscs } });
     manifestFile.write();
     if (!originUrl) throw new Error('origin URL is required for a harness run');
-    monitor = startOriginMonitor({ healthUrl: `${originUrl}/room.html`, deadlineAt: deadline.deadlineAt, maxWallMs, onFailure: (event) => manifestFile.merge({ originFailure: event }) });
+    monitor = startOriginMonitor({ healthUrl: `${originUrl}/room.html`, deadlineAt: deadline.deadlineAt, maxWallMs, onFailure: (event) => manifestFile.merge({ originFailure: event }), requestTimeoutMs: condition.monitorRequestTimeoutMs });
     monitor.promise.catch((error) => { failure ??= error; });
     for (const [index, session] of sessions.entries()) {
       const clientUrl = `${clientOriginUrl}/room.html?room=${encodeURIComponent(room)}&role=${session.role}&tab=${session.tag}`;
@@ -494,8 +493,8 @@ export async function runHarness({ conditionName, runDir = defaultRunDir(conditi
       loops.push(poll, drain);
     }
     await waitUntil(deadline, manifestFile.get().window.startMs);
-    if (condition.disturbance) {
-      const injection = await maybeInjectDisturbance(sessions, condition.disturbance);
+    const injection = await maybeInjectDisturbance(sessions, condition.disturbance);
+    if (injection) {
       injectionHarnessMs = injection.injectionHarnessMs;
       const disturbance = { ...condition.disturbance, ...injection };
       manifestFile.merge({ disturbance });
@@ -558,6 +557,9 @@ export async function runHarness({ conditionName, runDir = defaultRunDir(conditi
   try {
     retained = retainedBytes(prepared.runDir);
     if (retained > MAX_RETAINED_BYTES) throw new Error(`retained evidence exceeds ${MAX_RETAINED_BYTES} bytes`);
+    // The recompute reads the manifest from disk; unwritten client fields would
+    // make the stored report differ from any later recompute (6b design.md D6).
+    manifestFile.write();
     recomputed = recomputeRunDirectory(prepared.runDir);
     const publicationContext = { ...manifestFile.get(), ...recomputed.figures, declaredClientTags: tags };
     evaluation = evaluateRefusals({ ...evidenceFor(sessions, originStart, originEnd, manifestFile.get()), publicationContext });

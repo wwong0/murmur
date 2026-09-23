@@ -9,6 +9,7 @@
 // host URL would put every media byte through the port forwarder instead of the
 // shaped interface (design.md D1).
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -145,13 +146,51 @@ function startBackgroundLoad({ container, mbps, protocol = 'tcp', runDir, exec =
   return { started: true, mbps, report, command: argv[2] };
 }
 
+// The images carry no procps, so pkill and pgrep do not exist in them; node
+// reads /proc instead. Prints the matching pids, signalling them if asked.
+const PROCESSES = [
+  "const fs = require('fs');",
+  'const [pattern, signal] = process.argv.slice(1);',
+  "const pids = fs.readdirSync('/proc').filter((d) => /^[0-9]+$/.test(d) && d !== '1' && Number(d) !== process.pid)",
+  "  .filter((d) => { try { return fs.readFileSync('/proc/' + d + '/cmdline', 'utf8').includes(pattern); } catch { return false; } });",
+  'if (signal) for (const pid of pids) process.kill(Number(pid), signal);',
+  'console.log(JSON.stringify(pids.map(Number)));',
+].join('\n');
+
+function processes(container, pattern, exec, signal = '') {
+  return JSON.parse(dockerExec(container, ['node', '-e', PROCESSES, pattern, signal], exec).trim());
+}
+
 function stopInContainer(container, pattern, exec = defaultExec) {
   try {
-    dockerExec(container, ['pkill', '-TERM', '-f', pattern], exec);
-    return { container, pattern, signalled: true };
+    const pids = processes(container, pattern, exec, 'SIGTERM');
+    return { container, pattern, signalled: pids.length > 0, pids };
   } catch (error) {
     return { container, pattern, signalled: false, detail: error.message };
   }
+}
+
+/**
+ * Whether a process matching `pattern` is still running. A failed read throws
+ * rather than reading as exited.
+ */
+function running(container, pattern, exec) {
+  return processes(container, pattern, exec).length > 0;
+}
+
+// The sender writes its report on SIGTERM, but compose down kills it with the
+// container, so teardown waits for it to exit first (6b design.md D1).
+async function waitForExit(container, pattern, exec, timeoutMs = 5000) {
+  const startedAt = Date.now();
+  try {
+    while (running(container, pattern, exec)) {
+      if (Date.now() - startedAt > timeoutMs) return { exited: false, waitedMs: Date.now() - startedAt };
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  } catch (error) {
+    return { exited: null, error: error.message };
+  }
+  return { exited: true, waitedMs: Date.now() - startedAt };
 }
 
 /**
@@ -234,12 +273,19 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
       if (state.containers.origin) {
         report.stopped.push(stopInContainer(state.containers.origin, 'sample-link.mjs', exec));
         report.stopped.push(stopInContainer(state.containers.origin, 'background-load.mjs', exec));
+        if (state.backgroundLoad?.started) {
+          report.backgroundLoadExit = await waitForExit(state.containers.origin, 'background-load.mjs', exec);
+        }
+      }
+      if (state.containers.sink && state.backgroundLoad?.started) {
+        report.sink = readSinkCount({ container: state.containers.sink, exec });
       }
       if (condition) report.cleared = clearCondition({ condition, containers: state.containers, exec, subnets: state.subnets });
       if (down) {
         compose(['down', '--remove-orphans'], { project, exec });
         report.down = true;
       }
+      if (state.runDir) fs.writeFileSync(path.join(state.runDir, 'teardown.json'), `${JSON.stringify(report, null, 2)}\n`);
       return report;
     },
 

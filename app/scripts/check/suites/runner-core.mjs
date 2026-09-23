@@ -279,6 +279,28 @@ export default async function runnerCoreSuite() {
     );
   });
 
+  await check('runner-core: a declared monitor timeout outlasts a slow answer that the default treats as a dead server', async () => {
+    // Every answer takes 1300 ms: past the default 1000 ms, inside a declared 3000 ms.
+    await withServer(
+      (req, res) => { setTimeout(() => res.writeHead(200).end('ok'), 1300); },
+      async (origin) => {
+        const options = { healthUrl: `${origin}/health`, deadlineAt: Date.now() + 60_000, maxWallMs: 60_000 };
+        const strict = startOriginMonitor(options);
+        const patient = startOriginMonitor({ ...options, requestTimeoutMs: 3000 });
+        const outcome = (monitor) => monitor.promise.then(() => 'resolved', () => 'rejected');
+        const pending = new Promise((resolve) => setTimeout(() => resolve('pending'), 3500));
+        const [strictOutcome, patientOutcome] = await Promise.all([
+          Promise.race([outcome(strict), pending]),
+          Promise.race([outcome(patient), pending]),
+        ]);
+        await stopOriginMonitor(patient);
+        await stopOriginMonitor(strict);
+        assertEqual(strictOutcome, 'rejected', 'the default timeout aborts on slow answers');
+        assertEqual(patientOutcome, 'pending', 'the declared timeout keeps monitoring');
+      }
+    );
+  });
+
   await check('runner-core: the served-bundle check separates a stale origin from a page on another build', async () => {
     const servedText = 'globalThis.__buildId = "BUILD-AAA"; // served';
     await withServer(

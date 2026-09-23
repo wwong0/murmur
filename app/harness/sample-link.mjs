@@ -51,12 +51,31 @@ function readCounter(ifName, counter) {
   return value;
 }
 
+// JSON, not text: text tc prints a size near a multiple of 1024 as Kb or Mb, which
+// the text parser cannot read, and a saturated queue lands there (6b design.md D1).
 function readRootQdisc(ifName) {
-  const text = execFileSync('tc', ['-s', 'qdisc', 'show', 'dev', ifName], {
+  const text = execFileSync('tc', ['-s', '-j', 'qdisc', 'show', 'dev', ifName], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  return parseQdisc(text);
+  return parseQdiscJson(text);
+}
+
+/** The root qdisc from `tc -s -j`; absent kernel counters remain null, not zero. */
+export function parseQdiscJson(text) {
+  const root = JSON.parse(text).find((entry) => entry?.root === true);
+  if (!root) throw new Error('tc output has no root qdisc');
+  const count = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : null);
+  return {
+    kind: root.kind ?? null,
+    sentBytes: count(root.bytes),
+    sentPackets: count(root.packets),
+    backlogBytes: count(root.backlog),
+    backlogPackets: count(root.qlen),
+    drops: count(root.drops),
+    overlimits: count(root.overlimits),
+    requeues: count(root.requeues),
+  };
 }
 
 /** Parse only the root qdisc; absent kernel counters remain null, not zero. */

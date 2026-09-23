@@ -9,6 +9,8 @@ import { maybeInjectDisturbance, DISTURBANCE_MARKER } from '../../harness/distur
 
 const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const RESULTS = path.join(APP, 'results');
+// Constructed, because calibration writes a rate into the real saturated condition.
+const UDP_WITHOUT_RATE = { name: 'saturated', backgroundLoadProtocol: 'udp', backgroundLoadMbps: null };
 
 function counters(tags, offset) {
   return {
@@ -151,8 +153,11 @@ export default async function harnessDriftRunnerSuite() {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-g2-'));
     try {
       writeFixture(root);
-      const recomputed = recomputeRunDirectory(root);
-      const evaluation = { refused: false, runRefused: false, figures: { byte: false, drift: true }, reasons: [] };
+      // A branded stand-in with its CSVs, and byte evidence eligible, so figureKinds
+      // alone keeps the byte files off disk.
+      const drift = recomputeRunDirectory(root);
+      const recomputed = { ...drift, publishedByte: drift.publishedDrift, csv: { bytesByClient: 'tag\n', utilisation: 'atMs\n' } };
+      const evaluation = { refused: false, runRefused: false, figures: { byte: true, drift: true }, reasons: [] };
       const result = decideFinalization({ evaluation, recomputed, figureKinds: ['drift'] });
       const mf = manifestFile(root);
       settleFinalization({ decision: result, manifestFile: mf.file, runDir: root, recomputed, evaluation, startedAt: Date.now(), retained: 1 });
@@ -173,6 +178,22 @@ export default async function harnessDriftRunnerSuite() {
       settleFinalization({ decision: result, manifestFile: mf.file, runDir: root, recomputed, evaluation, startedAt: Date.now(), retained: 1 });
       for (const name of ['published-drift.json', 'drift-series.csv', 'drift.svg']) assert(!fs.existsSync(path.join(root, name)), `G3 has no ${name}`);
       assertEqual(mf.body.driftPublication.missing, 'clockHalfWidthMsP50ByClient[c01]', 'refusal is on disk');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  await check('harness drift runner G3: a drift-scope refusal of a published drift figure writes no drift files', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-g3-scope-'));
+    try {
+      writeFixture(root);
+      const recomputed = recomputeRunDirectory(root);
+      assert(recomputed.publishedDrift?.published !== false, 'fixture drift figure publishes');
+      const evaluation = { refused: true, runRefused: false, figures: { byte: false, drift: false }, reasons: [] };
+      const result = decideFinalization({ evaluation, recomputed, figureKinds: ['drift'] });
+      const mf = manifestFile(root);
+      settleFinalization({ decision: result, manifestFile: mf.file, runDir: root, recomputed, evaluation, startedAt: Date.now(), retained: 1 });
+      for (const name of ['published-drift.json', 'drift-series.csv', 'drift.svg']) assert(!fs.existsSync(path.join(root, name)), `G3 scope refusal has no ${name}`);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -240,7 +261,7 @@ export default async function harnessDriftRunnerSuite() {
     const runDir = path.join(RESULTS, `check-g4-${process.pid}-${Date.now()}`);
     try {
       let thrown = null;
-      try { await runHarness({ conditionName: 'saturated', runDir }); } catch (error) { thrown = error; }
+      try { await runHarness({ conditionName: 'saturated', condition: UDP_WITHOUT_RATE, runDir }); } catch (error) { thrown = error; }
       assert(thrown, 'missing UDP rate throws');
       assert(thrown.message.includes('saturated'), 'G4 names the condition');
       assert(!fs.existsSync(runDir), 'G4 creates no run directory');
