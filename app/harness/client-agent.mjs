@@ -23,7 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { createCdpRelay } from './cdp-relay.mjs';
-import { FLAGS } from '../scripts/cdp.mjs';
+import { harnessChromeFlags } from './chrome-flags.mjs';
 import { selectBrowserPlatform } from '../scripts/runner/browser-platform.mjs';
 
 const CDP_PORT = Number(process.env.APP_CDP_PORT ?? 9222);
@@ -38,14 +38,6 @@ const TAG = process.env.APP_TAG ?? 'client';
 // is wider. Shared memory is sized in compose (`shm_size`) instead of moved
 // with `--disable-dev-shm-usage`, because the flag changes where Chrome puts
 // it and the size does not.
-const CONTAINER_FLAGS = [
-  '--headless=new',
-  '--no-sandbox',
-  '--disable-gpu',
-  `--remote-debugging-port=${CDP_UPSTREAM_PORT}`,
-  `--window-size=${WINDOW_SIZE}`,
-];
-
 const platform = selectBrowserPlatform();
 
 function chromeVersion() {
@@ -75,7 +67,7 @@ const state = {
   launchedAt: null,
   disposal: null,
   chromeVersion: chromeVersion(),
-  flags: [...FLAGS, ...CONTAINER_FLAGS],
+  flags: harnessChromeFlags({ upstreamPort: CDP_UPSTREAM_PORT, windowSize: WINDOW_SIZE }),
   echo: null,
   cdpRelay: createCdpRelay({ port: CDP_PORT, upstreamPort: CDP_UPSTREAM_PORT }),
 };

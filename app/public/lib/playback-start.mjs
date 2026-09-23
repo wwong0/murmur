@@ -10,6 +10,7 @@ const ADVANCE_RANGE_MS = Object.freeze([0, 250]);
 
 export const MISSING_CLOCK = 'clock-estimate';
 export const MISSING_STATE = 'playback-state';
+export const MISSING_HOST_LINK = 'host-link';
 export const WAITING_PAUSED = 'room-paused';
 export const WAITING_PREPARING = 'preparing';
 export const WAITING_REFUSED = 'play-refused';
@@ -58,6 +59,7 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 }
   let retargets = 0;
   let lastLatenessMs = null;
   let lastPlayError = null;
+  let linkOpen = true;
 
   function snapshot() {
     const playing = presented?.playing === true;
@@ -65,6 +67,8 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 }
     let reportedMissing = missing;
     if (playing) {
       reportedMissing = null;
+    } else if (!linkOpen && reportedMissing === null) {
+      reportedMissing = MISSING_HOST_LINK;
     } else if (reportedMissing === null) {
       if (refused) waiting = WAITING_REFUSED;
       else if (lastState?.current?.playing) waiting = WAITING_PREPARING;
@@ -194,7 +198,8 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 }
     return result([], null);
   }
 
-  function poll({ nowSharedMs, resolved: nextResolved = false, state = null } = {}) {
+  function poll({ nowSharedMs, resolved: nextResolved = false, state = null, linkOpen: nextLinkOpen = true } = {}) {
+    linkOpen = nextLinkOpen === true;
     resolved = nextResolved === true && state !== null;
     lastState = state;
 
@@ -215,6 +220,12 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 }
       return result([], null);
     }
     missing = null;
+
+    if (!loaded && !linkOpen) {
+      missing = MISSING_HOST_LINK;
+      invalidateAttempt();
+      return result([], null);
+    }
 
     if (retryRequested) {
       retryRequested = false;

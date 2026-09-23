@@ -203,7 +203,7 @@ function msUntilNameReleased(member, livenessMs) {
  * short liveness interval and a temporary media root, in-process, without
  * spawning anything.
  *
- * @param {{port?: number, host?: string, mediaDir?: string, livenessMs?: number, quiet?: boolean}} [opts]
+ * @param {{port?: number, host?: string, mediaDir?: string, livenessMs?: number, quiet?: boolean, delivery?: 'host'|'http', iceServers?: object[]}} [opts]
  */
 export function startRoomServer(opts = {}) {
   const host = opts.host ?? DEFAULT_HOST;
@@ -212,6 +212,12 @@ export function startRoomServer(opts = {}) {
   const mediaDir = path.resolve(opts.mediaDir ?? DEFAULT_MEDIA_DIR);
   const livenessMs = opts.livenessMs ?? DEFAULT_LIVENESS_MS;
   const quiet = opts.quiet ?? false;
+  const delivery = opts.delivery ?? 'host';
+  if (delivery !== 'host' && delivery !== 'http') {
+    throw new TypeError(`delivery must be "host" or "http", got ${JSON.stringify(delivery)}`);
+  }
+  const iceServers = opts.iceServers ?? [];
+  if (!Array.isArray(iceServers)) throw new TypeError('iceServers must be an array');
 
   const log = quiet ? () => {} : (...args) => console.log('[room]', ...args);
   const counters = createCounters();
@@ -417,6 +423,12 @@ export function startRoomServer(opts = {}) {
       });
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
       res.end(body);
+      return;
+    }
+
+    if (req.method === 'GET' && pathname === '/app-settings') {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ delivery, iceServers }));
       return;
     }
 
@@ -838,10 +850,17 @@ export function startRoomServer(opts = {}) {
 
 // Run directly: `npm start`.
 if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  let iceServers = [];
+  if (process.env.APP_ICE_SERVERS !== undefined) {
+    iceServers = JSON.parse(process.env.APP_ICE_SERVERS);
+    if (!Array.isArray(iceServers)) throw new TypeError('APP_ICE_SERVERS must be a JSON array');
+  }
   const server = startRoomServer({
     port: process.env.APP_PORT ? Number(process.env.APP_PORT) : undefined,
     mediaDir: process.env.APP_MEDIA_DIR,
     livenessMs: process.env.APP_LIVENESS_INTERVAL_MS ? Number(process.env.APP_LIVENESS_INTERVAL_MS) : undefined,
+    delivery: process.env.APP_DELIVERY,
+    iceServers,
   });
   process.on('SIGINT', () => {
     console.log('[room] SIGINT received, closing');

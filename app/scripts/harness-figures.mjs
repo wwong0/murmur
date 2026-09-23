@@ -35,6 +35,7 @@ function counterFrom(value) {
 
 function clientStreams(runDir, manifest) {
   const files = fs.readdirSync(runDir);
+  const hostDelivery = manifest.condition?.delivery === 'host';
   const tags = manifest.declaredClientTags ?? manifest.clientTags ?? manifest.condition?.clientTags
     ?? files.map((name) => name.match(/^client-(.+)\.(?:drift|poll|requests|echo)\.ndjson$/)?.[1]).filter(Boolean);
   return Object.fromEntries([...new Set(tags)].map((tag) => {
@@ -42,14 +43,17 @@ function clientStreams(runDir, manifest) {
     const recordsFile = path.join(runDir, `client-${safe}.drift.ndjson`);
     const pollFile = path.join(runDir, `client-${safe}.poll.ndjson`);
     const requestFile = path.join(runDir, `client-${safe}.requests.ndjson`);
+    const receiptFile = path.join(runDir, `client-${safe}.receipts.ndjson`);
     const echoFile = path.join(runDir, `client-${safe}.echo.ndjson`);
     const declaration = manifest.clients?.[tag] ?? {};
+    const httpRequests = hostDelivery ? readNdjson(requestFile) : undefined;
     return [tag, {
       ...declaration,
       starts: declaration.boundaries?.end?.playback?.starts ?? [],
       records: readNdjson(recordsFile),
       polls: readNdjson(pollFile),
-      requests: readNdjson(requestFile),
+      requests: hostDelivery ? readNdjson(receiptFile) : readNdjson(requestFile),
+      ...(hostDelivery ? { httpRequests } : {}),
       echoRecords: readNdjson(echoFile),
     }];
   }));

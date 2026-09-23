@@ -54,17 +54,21 @@ services:
       dockerfile: harness/Dockerfile.origin
     image: wa6a-origin:latest
     init: true
+    shm_size: 1gb
     cap_add:
       - NET_ADMIN
     environment:
       APP_MEDIA_DIR: /media
       APP_PORT: '8100'
       APP_HOST: 0.0.0.0
+      APP_DELIVERY: ${WA_DELIVERY:-http}
     volumes:
       - ../../step0/content:/media:ro
       - ../results:/results
     ports:
       - '127.0.0.1:8110:8100'
+      - '127.0.0.1:9300:9222'
+      - '127.0.0.1:9400:9223'
     # Per-network aliases, because `origin` alone resolves to BOTH addresses and
     # a client that picked the control one would fetch its media past the shaped
     # interface — the rig would report an impairment it never applied. Clients

@@ -1,6 +1,7 @@
 import { missingFields } from '../figures/publication.mjs';
-import { CDP_QUALIFICATION_REASON, validateCdpQualification } from './qualification.mjs';
+import { CDP_QUALIFICATION_REASON, LINK_RECEIPT_QUALIFICATION_REASON, validateCdpQualification, validateLinkReceiptQualification } from './qualification.mjs';
 import { evaluateByteControl } from './byte-control.mjs';
+import { viewerHttpLeak, uplinkVersusDelivered } from '../figures/host-origin-checks.mjs';
 
 export const REFUSAL_SCOPE = Object.freeze({
   neverPlayed: Object.freeze(['byte', 'drift']),
@@ -15,6 +16,9 @@ export const REFUSAL_SCOPE = Object.freeze({
   runDirectory: Object.freeze([]),
   publication: Object.freeze(['byte']),
   cdpQualification: Object.freeze(['byte']),
+  hostLeak: Object.freeze(['byte']),
+  hostUplink: Object.freeze(['byte']),
+  receiptHealth: Object.freeze(['byte']),
   cadence: Object.freeze(['byte', 'drift']),
 });
 
@@ -35,6 +39,11 @@ export const REFUSAL_REASONS = Object.freeze([
   'run-directory-exists',
   'client-cadence-unavailable',
   CDP_QUALIFICATION_REASON,
+  'viewer-media-over-http',
+  'host-uplink-below-delivered',
+  'host-uplink-evidence-unavailable',
+  'receipt-log-discarded-records',
+  'receipt-log-reset',
   'peer-byte-control-unavailable',
   'peer-byte-control-above-declared-bar',
   'origin-client-agreement-unavailable',
@@ -238,13 +247,33 @@ export function evaluateRefusals(input = {}) {
   reasons.push(...evaluateByteControl({ bars, tags, figures: input.publicationContext ?? {} }));
 
   if (condition.publishes === true || input.requireCdpQualification === true) {
-    const qualification = validateCdpQualification(input.cdpQualification);
+    const qualification = condition.delivery === 'host'
+      ? validateLinkReceiptQualification(input.cdpQualification)
+      : validateCdpQualification(input.cdpQualification);
     if (!qualification.valid) {
-      addReason(reasons, CDP_QUALIFICATION_REASON, REFUSAL_SCOPE.cdpQualification, {
+      addReason(reasons, condition.delivery === 'host' ? LINK_RECEIPT_QUALIFICATION_REASON : CDP_QUALIFICATION_REASON, REFUSAL_SCOPE.cdpQualification, {
         field: 'cdpQualification',
         figure: 'byte',
         evidence: qualification,
       });
+    }
+  }
+
+  if (condition.delivery === 'host') {
+    const leak = viewerHttpLeak({ roomFinal: input.roomFinal, viewerTags: tags });
+    for (const entry of leak.leaked) addReason(reasons, 'viewer-media-over-http', REFUSAL_SCOPE.hostLeak, entry);
+    if (leak.unattributedBytes !== 0) addReason(reasons, 'viewer-media-over-http', REFUSAL_SCOPE.hostLeak, { tag: null, bytes: leak.unattributedBytes });
+
+    const uplink = uplinkVersusDelivered({ linkSamples: input.linkSamples, window, originStart: start, originEnd: end });
+    if (uplink.txBytes === null || uplink.deliveredMediaBytes === null) {
+      addReason(reasons, 'host-uplink-evidence-unavailable', REFUSAL_SCOPE.hostUplink, { uplink });
+    } else if (uplink.txBytes < uplink.deliveredMediaBytes) {
+      addReason(reasons, 'host-uplink-below-delivered', REFUSAL_SCOPE.hostUplink, uplink);
+    }
+    for (const tag of tags) {
+      const health = input.receiptHealth?.[tag] ?? {};
+      if (Number(health.missed) > 0) addReason(reasons, 'receipt-log-discarded-records', REFUSAL_SCOPE.receiptHealth, { tag, missed: health.missed });
+      if (health.reset === true) addReason(reasons, 'receipt-log-reset', REFUSAL_SCOPE.receiptHealth, { tag });
     }
   }
 
@@ -274,4 +303,3 @@ export function evaluateRefusals(input = {}) {
 export function refusalReasonSetIsUnique() {
   return new Set(REFUSAL_REASONS).size === REFUSAL_REASONS.length;
 }
-

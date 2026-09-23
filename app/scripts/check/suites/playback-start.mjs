@@ -8,6 +8,7 @@ import { check, assert, assertEqual } from '../harness.mjs';
 import {
   createPlaybackStart,
   MISSING_CLOCK,
+  MISSING_HOST_LINK,
   MISSING_STATE,
   WAITING_PAUSED,
   WAITING_PREPARING,
@@ -52,10 +53,10 @@ function fakeElement() {
 
 // `presentationAdvanceMs` is left undefined by default, so every check below
 // exercises the option OMITTED — the shape all of them were written against.
-function rig({ state = playing(), resolved = true, nowSharedMs = 1000, prepareLeadMs = 400, presentationAdvanceMs } = {}) {
+function rig({ state = playing(), resolved = true, nowSharedMs = 1000, prepareLeadMs = 400, presentationAdvanceMs, linkOpen = true } = {}) {
   const fake = fakeElement();
   const start = createPlaybackStart({ prepareLeadMs, presentationAdvanceMs });
-  const context = { state, resolved, nowSharedMs };
+  const context = { state, resolved, nowSharedMs, linkOpen };
   function poll(overrides = {}) {
     Object.assign(context, overrides);
     const result = start.poll(context);
@@ -84,6 +85,48 @@ export default async function playbackStartSuite() {
     assertEqual(status.missing, MISSING_STATE, 'state is named when clock is present');
     assertEqual(status.resolved, false, 'state without a snapshot is not resolved');
   });
+
+  await check('playback-start: a viewer holds the first load until the host link opens', async () => {
+    const r = rig({ linkOpen: false });
+    for (let now = 1000; now <= 10_000; now += 1000) {
+      const held = r.poll({ nowSharedMs: now, linkOpen: false });
+      assertEqual(held.missing, MISSING_HOST_LINK, `poll at ${now} names the closed host link`);
+      assertEqual(held.waiting, null, `poll at ${now} has no generic waiting reason`);
+      assertEqual(held.actions.length, 0, `poll at ${now} does not load early`);
+      assertEqual(held.nextAtSharedMs, null, `poll at ${now} schedules no retry while closed`);
+    }
+    const opened = r.poll({ nowSharedMs: 10_000, linkOpen: true });
+    assertEqual(opened.actions.map((action) => action.kind).join(','), 'load', 'the first open poll loads exactly once');
+    assertEqual(opened.missing, null, 'an open link clears the held reason');
+  });
+
+  await check('playback-start: missing host link never outranks missing clock or state', async () => {
+    const noClock = rig({ resolved: false, linkOpen: false });
+    assertEqual(noClock.poll({ nowSharedMs: null, linkOpen: false }).missing, MISSING_CLOCK, 'clock remains first');
+    const noState = rig({ state: null, linkOpen: false });
+    assertEqual(noState.poll({ linkOpen: false }).missing, MISSING_STATE, 'state remains before link');
+  });
+
+  await check('playback-start: an open loaded element survives a link drop, but a stopped one names it', async () => {
+    const playingRig = rig();
+    const first = beginReady(playingRig);
+    const due = playingRig.poll({ nowSharedMs: 1400 });
+    playingRig.start.playResolved(due.actions[0].attemptId);
+    const playing = playingRig.poll({ nowSharedMs: 1500, linkOpen: false });
+    assertEqual(playing.playing, true, 'a loaded playing element remains playing');
+    assertEqual(playing.missing, null, 'a loaded playing element has no missing reason');
+
+    const stopped = rig();
+    const prepared = stopped.poll();
+    assertEqual(prepared.actions[0].kind, 'load', 'the stopped fixture first loads');
+    const held = stopped.poll({ nowSharedMs: 1200, linkOpen: false });
+    assertEqual(held.playing, false, 'the stopped fixture is not presenting');
+    assertEqual(held.missing, MISSING_HOST_LINK, 'a stopped loaded element names the closed link');
+    assertEqual(held.waiting, null, 'the closed link is not generic preparing');
+  });
+
+  // Mutation: remove the !loaded && !linkOpen hold above; the first closed-link
+  // poll emits load and this check goes red. Restore it before the green run.
 
   await check('playback-start: a playing target loads or parks once, then plays at S', async () => {
     const r = rig();

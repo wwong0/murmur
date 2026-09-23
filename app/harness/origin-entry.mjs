@@ -6,11 +6,19 @@
 
 import { startRoomServer } from '../server/room-server.mjs';
 
+let iceServers = [];
+if (process.env.APP_ICE_SERVERS !== undefined) {
+  iceServers = JSON.parse(process.env.APP_ICE_SERVERS);
+  if (!Array.isArray(iceServers)) throw new TypeError('APP_ICE_SERVERS must be a JSON array');
+}
+
 const server = startRoomServer({
   host: process.env.APP_HOST ?? '0.0.0.0',
   port: process.env.APP_PORT ? Number(process.env.APP_PORT) : undefined,
   mediaDir: process.env.APP_MEDIA_DIR,
   livenessMs: process.env.APP_LIVENESS_INTERVAL_MS ? Number(process.env.APP_LIVENESS_INTERVAL_MS) : undefined,
+  delivery: process.env.APP_DELIVERY,
+  iceServers,
 });
 
 server.ready.then((port) => console.log(`[origin] ready on ${port}`));

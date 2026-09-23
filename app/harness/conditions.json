@@ -3,6 +3,7 @@
   "shakedown": {
     "filler-null": {
       "name": "shakedown/filler-null",
+      "delivery": "http",
       "publishes": false,
       "clients": 2,
       "capacityMbps": 10,
@@ -31,8 +32,40 @@
       },
       "feeds": ["rig-verification", "background-load-null"]
     },
+    "hostorigin-qual": {
+      "name": "shakedown/hostorigin-qual",
+      "delivery": "host",
+      "publishes": false,
+      "clients": 2,
+      "capacityMbps": 10,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": { "rate": "10mbit", "burst": "32kbit", "latency": "400ms" }
+        }
+      ],
+      "backgroundLoadMbps": null,
+      "runLengthMs": 90000,
+      "excludedPrefixMs": 30000,
+      "measureWindowMs": 60000,
+      "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "peerFractionAbsMax": 0.02,
+        "originClientAgreementAbsMax": 0.02,
+        "driftLogMissedMax": 0
+      },
+      "feeds": ["7a2-runner-qualification"]
+    },
     "filler": {
       "name": "shakedown/filler",
+      "delivery": "http",
       "publishes": false,
       "clients": 2,
       "capacityMbps": 10,
@@ -63,6 +96,7 @@
     },
     "uncapped": {
       "name": "shakedown/uncapped",
+      "delivery": "http",
       "publishes": false,
       "clients": 1,
       "capacityMbps": null,
@@ -83,6 +117,7 @@
     },
     "cap10": {
       "name": "shakedown/cap10",
+      "delivery": "http",
       "publishes": false,
       "clients": 1,
       "capacityMbps": 10,
@@ -113,6 +148,7 @@
     },
     "loss5": {
       "name": "shakedown/loss5",
+      "delivery": "http",
       "publishes": false,
       "clients": 1,
       "capacityMbps": null,
@@ -152,6 +188,7 @@
     },
     "loss5-origin-only": {
       "name": "shakedown/loss5-origin-only",
+      "delivery": "http",
       "publishes": false,
       "clients": 1,
       "capacityMbps": null,
@@ -182,6 +219,7 @@
     },
     "delay200": {
       "name": "shakedown/delay200",
+      "delivery": "http",
       "publishes": false,
       "clients": 1,
       "capacityMbps": null,
@@ -212,6 +250,7 @@
     },
     "cap100": {
       "name": "shakedown/cap100",
+      "delivery": "http",
       "publishes": false,
       "clients": 1,
       "capacityMbps": 100,
@@ -242,6 +281,7 @@
     },
     "loss5-cap100": {
       "name": "shakedown/loss5-cap100",
+      "delivery": "http",
       "publishes": false,
       "clients": 1,
       "capacityMbps": 100,
@@ -290,6 +330,7 @@
     },
     "filler-udp-loss": {
       "name": "shakedown/filler-udp-loss",
+      "delivery": "http",
       "publishes": false,
       "clients": 2,
       "capacityMbps": 10,
@@ -332,6 +373,7 @@
     },
     "filler-tcp-loss": {
       "name": "shakedown/filler-tcp-loss",
+      "delivery": "http",
       "publishes": false,
       "clients": 2,
       "capacityMbps": 10,
@@ -374,6 +416,7 @@
     },
     "drift-qual": {
       "name": "shakedown/drift-qual",
+      "delivery": "http",
       "publishes": false,
       "clients": 2,
       "capacityMbps": 100,
@@ -414,6 +457,7 @@
     },
     "udp-sweep-87": {
       "name": "shakedown/udp-sweep-87",
+      "delivery": "http",
       "publishes": false,
       "clients": 5,
       "capacityMbps": 100,
@@ -448,6 +492,7 @@
     },
     "udp-sweep-90": {
       "name": "shakedown/udp-sweep-90",
+      "delivery": "http",
       "publishes": false,
       "clients": 5,
       "capacityMbps": 100,
@@ -482,6 +527,7 @@
     },
     "udp-sweep-93": {
       "name": "shakedown/udp-sweep-93",
+      "delivery": "http",
       "publishes": false,
       "clients": 5,
       "capacityMbps": 100,
@@ -516,6 +562,7 @@
     },
     "udp-sweep-96": {
       "name": "shakedown/udp-sweep-96",
+      "delivery": "http",
       "publishes": false,
       "clients": 5,
       "capacityMbps": 100,
@@ -550,6 +597,7 @@
     },
     "udp-sweep-99": {
       "name": "shakedown/udp-sweep-99",
+      "delivery": "http",
       "publishes": false,
       "clients": 5,
       "capacityMbps": 100,
@@ -583,8 +631,61 @@
       "feeds": ["saturated-calibration-sweep"]
     }
   },
+  "hostorigin-nop2p": {
+    "name": "hostorigin-nop2p",
+    "delivery": "host",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 10,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": { "rate": "10mbit", "burst": "32kbit", "latency": "400ms" }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "runLengthMs": 300000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 180000,
+    "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "peerFractionAbsMax": 0.02,
+      "originClientAgreementAbsMax": 0.02,
+      "driftLogMissedMax": 0
+    },
+    "feeds": ["7a2-d3-capped-arm"]
+  },
+  "hostorigin-uncapped": {
+    "name": "hostorigin-uncapped",
+    "delivery": "host",
+    "publishes": false,
+    "clients": 5,
+    "capacityMbps": null,
+    "qdiscs": [],
+    "backgroundLoadMbps": null,
+    "runLengthMs": 300000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 180000,
+    "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "peerFractionAbsMax": 0.02,
+      "originClientAgreementAbsMax": 0.02,
+      "driftLogMissedMax": 0
+    },
+    "feeds": ["7a2-d3-uncapped-diagnostic"]
+  },
   "baseline-nop2p": {
     "name": "baseline-nop2p",
+    "delivery": "http",
     "publishes": true,
     "clients": 5,
     "capacityMbps": 10,
@@ -615,6 +716,7 @@
   },
   "baseline-nop2p-10": {
     "name": "baseline-nop2p-10",
+    "delivery": "http",
     "publishes": true,
     "clients": 10,
     "capacityMbps": 10,
@@ -645,6 +747,7 @@
   },
   "healthy": {
     "name": "healthy",
+    "delivery": "http",
     "publishes": true,
     "clients": 5,
     "capacityMbps": 100,
@@ -679,6 +782,7 @@
   },
   "loss5-headroom": {
     "name": "loss5-headroom",
+    "delivery": "http",
     "publishes": true,
     "clients": 5,
     "capacityMbps": 100,
@@ -738,6 +842,7 @@
   },
   "saturated": {
     "name": "saturated",
+    "delivery": "http",
     "publishes": true,
     "clients": 5,
     "capacityMbps": 100,
@@ -795,6 +900,7 @@
   },
   "healthy-disturbed": {
     "name": "healthy-disturbed",
+    "delivery": "http",
     "publishes": true,
     "clients": 5,
     "capacityMbps": 100,

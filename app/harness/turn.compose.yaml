@@ -1,0 +1,19 @@
+services:
+  turn:
+    image: coturn/coturn:4.6.2
+    command:
+      - --lt-cred-mech
+      - --user=wa:wa
+      - --realm=wa
+      - --no-tls
+      - --no-dtls
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49170
+      - --external-ip=127.0.0.1
+      - --allow-loopback-peers
+      - --no-cli
+    ports:
+      - "127.0.0.1:3478:3478/udp"
+      - "127.0.0.1:3478:3478/tcp"
+      - "127.0.0.1:49160-49170:49160-49170/udp"

@@ -1,5 +1,6 @@
 // Bounded scheduled-start diagnostic runner (executor-spec.md §11.4). It owns
-// one fresh Chrome profile, drives eight starts over the two conditions, and
+// External servers must run with APP_DELIVERY=http; the owned-server case sets
+// it too. One fresh Chrome profile drives eight starts over the two conditions,
 // publishes only what `reduceCapture` in start-timing.mjs decided.
 //
 // Structure copied from measure-leads.mjs, not imported: run-dir refusal before
@@ -40,6 +41,7 @@ import {
 } from './start-timing.mjs';
 import { startLead } from './start-residual.mjs';
 import { PRESENTATION_ADVANCE_MS } from '../public/lib/playback-leads.mjs';
+import { requireDelivery } from './delivery-pin.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -881,7 +883,7 @@ async function runRateShimCase() {
 
 function startOwnedServer() {
   ownedServer = spawn(process.execPath, [path.join(APP_DIR, 'server', 'room-server.mjs')], {
-    env: { ...process.env, APP_PORT: String(ownedServerPort) }, stdio: 'ignore',
+    env: { ...process.env, APP_PORT: String(ownedServerPort), APP_DELIVERY: 'http' }, stdio: 'ignore',
   });
   ownedServer.once('error', (error) => { throw new Error(`owned server failed to start: ${error.message}`); });
 }
@@ -928,12 +930,16 @@ async function main() {
     if (ownedServerPort) {
       startOwnedServer();
       await waitFor('owned server listening', () => fetch(`${ORIGIN}/room.html`, { cache: 'no-store' }).then((r) => r.ok).catch(() => false), (ok) => ok, 20_000);
+      await requireDelivery(ORIGIN, 'http');
       armServerLossTrigger();
     }
     let acquired;
     if (simulationCase === 'rate-shim') acquired = await runRateShimCase();
     else if (simulationCase && !BROWSER_CASES.includes(simulationCase)) acquired = runSimulation();
-    else acquired = await acquire();
+    else {
+      if (!ownedServerPort) await requireDelivery(ORIGIN, 'http');
+      acquired = await acquire();
+    }
     const summary = publish(acquired);
     if (retainedBytes() > MAX_RETAINED_BYTES) throw new Error(`retained evidence exceeds ${MAX_RETAINED_BYTES} bytes`);
     console.log(`verdict ${summary.verdict}${summary.reason ? ` (${summary.reason})` : ''} · aggregate ${summary.aggregate} · advanceMs ${summary.advanceMs} · U ${summary.U} · Um ${summary.Um} · usable ${summary.usableCount}/${plannedStarts}`);

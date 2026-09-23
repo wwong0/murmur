@@ -98,7 +98,7 @@ export function rawGet(target) {
 // ---------------------------------------------------------------------------
 
 export class Peer {
-  constructor(url, label) {
+  constructor(url, label, wsOptions) {
     this.label = label;
     this.url = url;
     this.received = [];
@@ -109,7 +109,7 @@ export class Peer {
     // against a server whose sweep cannot fire during it, so any ping counted
     // there was sent for the refusal.
     this.pings = 0;
-    this.ws = new WebSocket(url);
+    this.ws = new WebSocket(url, wsOptions);
     this.ws.on('ping', () => this.pings++);
     this.ws.on('message', (data) => this.received.push(JSON.parse(data.toString('utf8'))));
     this.ws.on('close', (code) => {
@@ -123,8 +123,8 @@ export class Peer {
     });
   }
 
-  static async open(url, label) {
-    const peer = new Peer(url, label);
+  static async open(url, label, wsOptions) {
+    const peer = new Peer(url, label, wsOptions);
     await peer.opened;
     return peer;
   }
@@ -331,15 +331,15 @@ function newScope() {
   const room = nextRoom();
   const owned = [];
 
-  async function peer(label, url = WS) {
-    const p = await Peer.open(url, label);
+  async function peer(label, url = WS, wsOptions) {
+    const p = await Peer.open(url, label, wsOptions);
     owned.push(p);
     return p;
   }
 
   async function member(label, role = 'viewer', opts = {}) {
-    const { url = WS, tabId = label, room: inRoom = room, ...rest } = opts;
-    const p = await peer(label, url);
+    const { url = WS, tabId = label, room: inRoom = room, wsOptions, ...rest } = opts;
+    const p = await peer(label, url, wsOptions);
     const reply = await p.join({ room: inRoom, tabId, role, ...rest });
     assertEqual(reply.type, TYPE_JOINED, `${label} should have been admitted (${JSON.stringify(reply.payload)})`);
     return p;

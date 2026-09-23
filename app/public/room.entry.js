@@ -124,11 +124,163 @@ function setStatus(text, { final = false } = {}) {
   terminal = final;
 }
 
+function addSubscriberFailure(label, error) {
+  addNotice(`${label} failed: ${error?.message ?? error}`, { warn: true });
+}
+
+function onEnvelope(type, label, handler) {
+  return client.on(type, (value) => {
+    try {
+      return Promise.resolve(handler(value)).catch((error) => addSubscriberFailure(label, error));
+    } catch (error) {
+      addSubscriberFailure(label, error);
+      return undefined;
+    }
+  });
+}
+
+function onEvent(name, label, handler) {
+  return client.onEvent(name, (value) => {
+    try {
+      return Promise.resolve(handler(value)).catch((error) => addSubscriberFailure(label, error));
+    } catch (error) {
+      addSubscriberFailure(label, error);
+      return undefined;
+    }
+  });
+}
+
+function closeHostPeer(viewerId) {
+  const entry = hostPeers.get(viewerId);
+  if (!entry) return;
+  hostPeers.delete(viewerId);
+  try { entry.detach?.(); } catch (error) { addSubscriberFailure('host link detach', error); }
+  try { entry.pc.close(); } catch (error) { addSubscriberFailure('host link close', error); }
+}
+
+function closeHostPeers() {
+  for (const viewerId of [...hostPeers.keys()]) closeHostPeer(viewerId);
+}
+
+function closeDepartedHostPeers(roster) {
+  const present = new Set((roster ?? []).map((member) => member.clientId));
+  for (const viewerId of hostPeers.keys()) {
+    if (!present.has(viewerId)) closeHostPeer(viewerId);
+  }
+}
+
+function rtcConfig() {
+  return {
+    iceServers,
+    iceTransportPolicy: params.get('iceTransportPolicy') === 'relay' ? 'relay' : 'all',
+  };
+}
+
+function hostSource() {
+  return async (path) => {
+    if (!nativeFetch) throw new Error('native fetch is unavailable');
+    const response = await nativeFetch(new URL(path, location.href), { headers: { 'x-app-tab': tabId }, cache: 'no-store' });
+    return { status: response.status, bytes: new Uint8Array(await response.arrayBuffer()) };
+  };
+}
+
+async function answerHostOffer(env) {
+  if (delivery !== 'host' || client.role !== 'host') return;
+  const viewerId = env.from;
+  const payload = env.payload ?? {};
+  if (typeof viewerId !== 'string' || typeof payload.linkId !== 'string' || typeof payload.sdp !== 'string') {
+    throw new TypeError('host-link-offer is malformed');
+  }
+  closeHostPeer(viewerId);
+  const pc = new RTCPeerConnection(rtcConfig());
+  const viewerTag = client.roster.find((member) => member.clientId === viewerId)?.tabId ?? null;
+  const entry = { pc, linkId: payload.linkId, viewerTag, detach: null };
+  hostPeers.set(viewerId, entry);
+  pc.addEventListener('icecandidate', (event) => {
+    if (!event.candidate || hostPeers.get(viewerId) !== entry) return;
+    const candidate = typeof event.candidate.toJSON === 'function' ? event.candidate.toJSON() : event.candidate;
+    client.send({ type: 'host-link-ice', to: viewerId, payload: { linkId: entry.linkId, candidate } });
+  });
+  pc.addEventListener('datachannel', (event) => {
+    if (hostPeers.get(viewerId) !== entry || !hostOrigin) return;
+    entry.detach?.();
+    entry.detach = hostOrigin.attach(event.channel, { viewerTag: entry.viewerTag });
+  });
+  await pc.setRemoteDescription({ type: 'offer', sdp: payload.sdp });
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  client.send({ type: 'host-link-answer', to: viewerId, payload: { linkId: entry.linkId, sdp: answer.sdp ?? answer } });
+}
+
+async function routeHostIce(env) {
+  if (delivery !== 'host' || client.role !== 'host') return;
+  const entry = hostPeers.get(env.from);
+  if (!entry || env.payload?.linkId !== entry.linkId) return;
+  await entry.pc.addIceCandidate(env.payload.candidate);
+}
+
+async function installHostSide() {
+  if (hostSideInstalled) return;
+  await loadHostTransport();
+  hostOrigin = createHostOrigin({
+    readSource: hostSource(),
+    clock: {
+      now: () => performance.now(),
+      setTimeout: (fn, ms) => setTimeout(fn, ms),
+      clearTimeout: (handle) => clearTimeout(handle),
+    },
+  });
+  onEnvelope('host-link-offer', 'host-link offer', answerHostOffer);
+  onEnvelope('host-link-ice', 'host-link ICE', routeHostIce);
+  hostSideInstalled = true;
+}
+
+async function installViewerLink() {
+  if (delivery !== 'host' || role !== 'viewer') return;
+  if (typeof RTCPeerConnection !== 'function') throw new Error('RTCPeerConnection is unavailable');
+  if (!nativeFetch) throw new Error('native fetch is unavailable');
+  await loadHostTransport();
+  let lastState = null;
+  link = createHostLink({
+    client,
+    RTCPeerConnection,
+    rtcConfig: rtcConfig(),
+    onChange: (snapshot) => {
+      if (snapshot.state !== lastState) {
+        lastState = snapshot.state;
+        addNotice(`host link: ${snapshot.state}`);
+      }
+      schedulePollStart(0);
+    },
+  });
+  window.fetch = link.createShimFetch({ realFetch: nativeFetch, baseUrl: location.href });
+  window.XMLHttpRequest = link.createShimXhr({ RealXHR: window.XMLHttpRequest, baseUrl: location.href });
+}
+
 // ---------------------------------------------------------------------------
 // Room client
 // ---------------------------------------------------------------------------
 
 const client = createRoomClient({ url, room, tabId, role });
+let delivery = 'host';
+let iceServers = [];
+let link = null;
+let hostOrigin = null;
+const hostPeers = new Map();
+const nativeFetch = typeof window.fetch === 'function' ? window.fetch.bind(window) : null;
+let createHostLink = null;
+let createHostOrigin = null;
+let hostSideInstalled = false;
+
+async function loadHostTransport() {
+  if (createHostLink && createHostOrigin) return;
+  const [linkModule, originModule] = await Promise.all([
+    import('./lib/host-link.mjs'),
+    import('./lib/host-origin.mjs'),
+  ]);
+  createHostLink = linkModule.createHostLink;
+  createHostOrigin = originModule.createHostOrigin;
+}
 
 client.onEvent('status', ({ connected }) => {
   setStatus(connected ? `connected (room "${room}", tab "${tabId}", role "${role}")` : 'disconnected');
@@ -143,6 +295,10 @@ client.onEvent('reconnecting', ({ inMs }) => {
 client.onEvent('joined', (joined) => {
   // The role reported is the one the server gave this membership, not the one
   // the query string asked for.
+  if (delivery === 'host' && joined.role === 'host') closeHostPeers();
+  if (delivery === 'host' && joined.role === 'host' && nativeFetch) {
+    installHostSide().catch((error) => addSubscriberFailure('host transport', error));
+  }
   addNotice(`joined as ${joined.clientId} (${joined.role})`);
   renderRoster(joined.roster);
   schedulePollStart(0);
@@ -183,6 +339,7 @@ client.onEvent('gap', ({ expected, actual }) => {
 
 client.on('presence', (env) => {
   const body = readBody(env);
+  if (delivery === 'host' && client.role === 'host') closeDepartedHostPeers(body.roster);
   addNotice(`presence: ${body.event} — ${body.member?.tabId ?? body.member?.clientId}`);
   renderRoster(body.roster);
   schedulePollStart(0);
@@ -533,7 +690,12 @@ function pollStart() {
   checkReady();
   const state = acquisition.state;
   const nowSharedMs = clockSync.sharedNow();
-  const result = start.poll({ nowSharedMs, resolved: acquisition.snapshot.resolved, state });
+  const result = start.poll({
+    nowSharedMs,
+    resolved: acquisition.snapshot.resolved,
+    state,
+    linkOpen: link ? link.snapshot().state === 'open' : true,
+  });
   telemetry.record('poll', {
     nowSharedMs,
     resolved: result.resolved,
@@ -619,6 +781,10 @@ window.__app = {
   startTiming: (afterSeq = 0) => telemetry.read(afterSeq),
   pitch: () => treatment.pitch(),
   treatmentEvidence: (maxEvents) => treatment.drainEvidence(maxEvents),
+  delivery: () => delivery,
+  hostLink: () => (link ? link.snapshot() : null),
+  hostCounters: () => (hostOrigin ? hostOrigin.snapshot() : null),
+  hostReceipts: (afterSeq = 0) => (link ? link.receipts(afterSeq) : null),
   playback: () => ({
     ...start.state(),
     callbacks: sampler.callbacks,
@@ -629,4 +795,25 @@ window.__app = {
   timeline: () => acquisition.snapshot,
 };
 
-client.connect();
+async function startApp() {
+  try {
+    const settingsResponse = typeof window.fetch === 'function'
+      ? await window.fetch('/app-settings', { cache: 'no-store' })
+      : { ok: true, json: async () => ({ delivery: 'host', iceServers: [] }) };
+    if (!settingsResponse.ok) throw new Error(`HTTP ${settingsResponse.status}`);
+    const settings = await settingsResponse.json();
+    if (!settings || (settings.delivery !== 'host' && settings.delivery !== 'http') || !Array.isArray(settings.iceServers)) {
+      throw new TypeError('invalid application settings');
+    }
+    delivery = settings.delivery;
+    iceServers = settings.iceServers;
+    if (delivery === 'host' && typeof window.fetch === 'function') await loadHostTransport();
+    if (delivery === 'host' && role === 'viewer' && typeof window.fetch === 'function') await installViewerLink();
+    client.connect();
+  } catch (error) {
+    setStatus(`settings unavailable: ${error?.message ?? error}`, { final: true });
+    addNotice(`settings unavailable: ${error?.message ?? error}`, { warn: true });
+  }
+}
+
+void startApp();

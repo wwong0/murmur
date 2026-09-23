@@ -1,12 +1,10 @@
 // scripts/check/suites/liveness.mjs — the ws-ping sweep that buries half-open
 // connections.
 //
-// PLAN.md's change 2 review notes the gap this suite still has: only an UPPER
-// bound on the sweep's patience is asserted here. A sweep that terminated on the
-// first unanswered ping would pass everything below, and 1b's "Challenged and
-// left standing" rests on the sweep being patient. Change 7a owns closing that.
+// The lower-bound gap in the sweep's patience is closed here: one missed pong
+// followed by a pong must leave the member standing two ticks later.
 
-import { check, assert, assertEqual } from '../harness.mjs';
+import { check, assert, assertEqual, memberOf, rosterOfRoom, sleep } from '../harness.mjs';
 import { LIVENESS_MS } from '../fixtures.mjs';
 import { TYPE_PRESENCE } from '../../../public/lib/envelope.mjs';
 
@@ -41,5 +39,49 @@ export default async function livenessSuite() {
       elapsed < LIVENESS_MS * 3 + 1000,
       `removed after ${elapsed}ms, expected within three ${LIVENESS_MS}ms intervals`
     );
+  });
+
+  await check('liveness: one missed ping followed by a pong leaves the member standing', async ({ member, room }) => {
+    // Mutation: changing the server's missedPings >= 2 termination threshold
+    // to >= 1 made this lower-bound check red while the existing upper-bound
+    // check stayed green; restore the threshold before the final green run.
+    const watcher = await member('watcher-lower-bound', 'host', { tabId: 'WL' });
+    const ghost = await member('one-miss', 'viewer', { tabId: 'OM', wsOptions: { autoPong: false } });
+    await watcher.next((e) => e.type === TYPE_PRESENCE && e.payload.event === 'join');
+    assertEqual(ghost.ws._autoPong, false, 'the lower-bound peer disables automatic pongs');
+
+    let secondPingMissed = null;
+    let secondPingState = null;
+    let phase = 'prime';
+    let scenarioPings = 0;
+    const fourth = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('one-miss: did not receive a fourth ping')), LIVENESS_MS * 8);
+      ghost.ws.on('ping', () => {
+        if (phase === 'prime') {
+          ghost.ws.pong();
+          return;
+        }
+        scenarioPings += 1;
+        if (scenarioPings === 2) {
+          const state = memberOf(room, ghost.clientId)?.ws?._connState ?? null;
+          secondPingMissed = state?.missedPings ?? null;
+          secondPingState = state ? { missedPings: state.missedPings, awaitingPong: state.awaitingPong } : null;
+        }
+        if (scenarioPings > 1) ghost.ws.pong();
+        if (scenarioPings === 4) {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+    });
+    await sleep(LIVENESS_MS * 2 + 10);
+    const primingDeadline = Date.now() + LIVENESS_MS * 2;
+    while (memberOf(room, ghost.clientId)?.ws?._connState?.awaitingPong && Date.now() < primingDeadline) await sleep(5);
+    phase = 'scenario';
+    await fourth;
+    assertEqual(secondPingMissed, 1, `the second ping observes one missed pong before answering (${JSON.stringify({ scenarioPings, ghostPings: ghost.pings, state: secondPingState })})`);
+    assertEqual(ghost.closed, false, 'the one-miss socket remains open');
+    assert(rosterOfRoom(room).some((entry) => entry.clientId === ghost.clientId), 'the one-miss member remains in the roster');
+    await watcher.none((e) => e.type === TYPE_PRESENCE && e.payload.event === 'leave' && e.payload.member?.clientId === ghost.clientId, LIVENESS_MS);
   });
 }

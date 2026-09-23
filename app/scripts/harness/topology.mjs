@@ -15,12 +15,14 @@ import { fileURLToPath } from 'node:url';
 
 import { attach } from '../cdp.mjs';
 import { applyQdiscs, clearCondition, defaultExec, dockerExec, networkSubnet, resolveInterface } from '../../harness/apply-qdisc.mjs';
+import { requireDelivery } from '../delivery-pin.mjs';
 
 const HARNESS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'harness');
 const COMPOSE_FILE = path.join(HARNESS_DIR, 'compose.yaml');
 
 export const PROJECT = 'wa6a';
 export const MEDIA_NETWORK = 'wa-media';
+export const CONTROL_NETWORK = 'wa-control';
 export const ORIGIN_HOST_URL = 'http://127.0.0.1:8110';
 // The MEDIA alias, never the bare service name: `origin` resolves to both of
 // the origin's addresses and a client that picked the control one would fetch
@@ -89,6 +91,38 @@ async function agentPost(tag, pathname, body = {}) {
   const value = await response.json();
   if (!response.ok) throw new Error(`agent ${tag} ${pathname}: ${value.error ?? response.status}`);
   return value;
+}
+
+function controlUdpDrop({ container, ifName, subnet = null, exec = defaultExec }) {
+  const qdisc = ['tc', 'qdisc', 'add', 'dev', ifName, 'clsact'];
+  exec(['docker', 'exec', container, ...qdisc]);
+  const filters = [
+    ['ingress', 'ip', 'match', 'ip', 'protocol', '17', '0xff'],
+    ['ingress', 'ipv6', 'match', 'ip6', 'protocol', '17', '0xff'],
+    ['egress', 'ip', 'match', 'ip', 'protocol', '17', '0xff'],
+    ['egress', 'ipv6', 'match', 'ip6', 'protocol', '17', '0xff'],
+  ].map(([direction, family, match, ipFamily, protocol, number, mask]) => [
+    'tc', 'filter', 'add', 'dev', ifName, direction, 'protocol', family, 'u32', match, ipFamily, protocol, number, mask, 'action', 'drop',
+  ]);
+  for (const argv of filters) exec(['docker', 'exec', container, ...argv]);
+  const readBack = {};
+  for (const direction of ['ingress', 'egress']) {
+    readBack[direction] = dockerExec(container, ['tc', '-s', 'filter', 'show', 'dev', ifName, direction], exec);
+    // tc prints the u32 match in hex: UDP is 0x11 in the IPv4 protocol byte
+    // (offset 8) and in the IPv6 next-header byte (offset 4).
+    const blocks = readBack[direction].split(/\n\s*\n/);
+    for (const [family, match] of [['ip', 'match 00110000/00ff0000 at 8'], ['ipv6', 'match 00001100/0000ff00 at 4']]) {
+      const found = blocks.some((block) => block.includes(`filter protocol ${family} `) && block.includes(match) && block.includes('gact action drop'));
+      if (!found) throw new Error(`control UDP drop filter ${direction}/${family} did not read back on ${ifName}`);
+    }
+  }
+  return { ifName, subnet, argv: [qdisc, ...filters], readBack };
+}
+
+function readLoopbackCounter(container, exec = defaultExec) {
+  const value = Number(dockerExec(container, ['cat', '/sys/class/net/lo/statistics/tx_bytes'], exec).trim());
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`invalid loopback tx_bytes for ${container}`);
+  return { atMs: Date.now(), txBytes: value };
 }
 
 export function imageDigests(exec = defaultExec) {
@@ -215,7 +249,7 @@ export function readSinkCount({ container, exec = defaultExec } = {}) {
  * run before any client starts (executor-spec.md §3, Boundaries).
  */
 export function createComposeTopology({ project = PROJECT, exec = defaultExec, originUrl = ORIGIN_HOST_URL, samplerIntervalMs = 125, down = true } = {}) {
-  const state = { containers: {}, origin: null, sampler: null, backgroundLoad: null, subnets: new Map(), runDir: null };
+  const state = { containers: {}, origin: null, control: null, controlUdpDrop: null, sampler: null, backgroundLoad: null, subnets: new Map(), runDir: null };
 
   return {
     state,
@@ -224,17 +258,35 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
 
     async prepare({ condition, runDir }) {
       state.runDir = runDir;
-      compose(['up', '-d', '--no-build', ...serviceNames(condition.clients)], { project, exec });
+      const services = serviceNames(condition.clients);
+      const previousDelivery = process.env.WA_DELIVERY;
+      process.env.WA_DELIVERY = condition.delivery;
+      try {
+        compose(['up', '-d', '--no-build', ...services], { project, exec });
+      } finally {
+        if (previousDelivery === undefined) delete process.env.WA_DELIVERY;
+        else process.env.WA_DELIVERY = previousDelivery;
+      }
       state.containers = composeContainers(project, exec);
-      const missing = serviceNames(condition.clients).filter((name) => !state.containers[name]);
+      const missing = services.filter((name) => !state.containers[name]);
       if (missing.length) throw new Error(`compose did not start: ${missing.join(', ')}`);
       await waitForOrigin(originUrl);
+      await requireDelivery(originUrl, condition.delivery);
 
       const subnet = networkSubnet(MEDIA_NETWORK, exec, project);
       state.subnets.set(MEDIA_NETWORK, subnet);
       state.origin = resolveInterface(state.containers.origin, subnet, exec);
 
+      if (condition.delivery === 'host') {
+        const controlSubnet = networkSubnet(CONTROL_NETWORK, exec, project);
+        state.subnets.set(CONTROL_NETWORK, controlSubnet);
+        state.control = resolveInterface(state.containers.origin, controlSubnet, exec);
+        state.controlUdpDrop = controlUdpDrop({ container: state.containers.origin, ifName: state.control.ifName, subnet: controlSubnet, exec });
+        exec(['docker', 'exec', '-d', '-e', 'APP_TAG=c00', state.containers.origin, 'sh', '-c', 'cd /app && node harness/client-agent.mjs > /tmp/host-agent.log 2>&1']);
+      }
+
       const agents = {};
+      if (condition.delivery === 'host') agents.c00 = await waitForAgent('c00');
       for (let index = 1; index <= condition.clients; index++) {
         const tag = `c${String(index).padStart(2, '0')}`;
         agents[tag] = await waitForAgent(tag);
@@ -252,11 +304,14 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
         sampler: state.sampler,
         backgroundLoad: state.backgroundLoad,
         content,
+        ...(state.controlUdpDrop ? { controlUdpDrop: state.controlUdpDrop } : {}),
         regime: {
           ...condition,
           images: imageDigests(exec),
           chromeVersion: [...versions][0] ?? null,
-          chromeFlags: Object.values(agents)[0]?.flags ?? null,
+          chromeFlags: condition.delivery === 'host'
+            ? Object.fromEntries(Object.entries(agents).map(([tag, agent]) => [tag, agent.flags ?? null]))
+            : Object.values(agents)[0]?.flags ?? null,
           agents,
           samplerIntervalMs,
           originInterface: state.origin,
@@ -270,6 +325,13 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
 
     async teardown({ condition }) {
       const report = { stopped: [], cleared: [], down: false };
+      if (state.controlUdpDrop) {
+        report.controlUdpDrop = {
+          ifName: state.controlUdpDrop.ifName,
+          ingress: dockerExec(state.containers.origin, ['tc', '-s', 'filter', 'show', 'dev', state.controlUdpDrop.ifName, 'ingress'], exec),
+          egress: dockerExec(state.containers.origin, ['tc', '-s', 'filter', 'show', 'dev', state.controlUdpDrop.ifName, 'egress'], exec),
+        };
+      }
       if (state.containers.origin) {
         report.stopped.push(stopInContainer(state.containers.origin, 'sample-link.mjs', exec));
         report.stopped.push(stopInContainer(state.containers.origin, 'background-load.mjs', exec));
@@ -287,6 +349,11 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
       }
       if (state.runDir) fs.writeFileSync(path.join(state.runDir, 'teardown.json'), `${JSON.stringify(report, null, 2)}\n`);
       return report;
+    },
+
+    async readLoopbackCounter() {
+      if (!state.containers.origin) throw new Error('origin is not prepared');
+      return readLoopbackCounter(state.containers.origin, exec);
     },
 
     async clientFactory({ tag }) {

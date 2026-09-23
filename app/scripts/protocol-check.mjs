@@ -41,6 +41,8 @@ import harnessRefusalsSuite from './check/suites/harness-refusals.mjs';
 import harnessCadenceSuite from './check/suites/harness-cadence.mjs';
 import harnessPollShapeSuite from './check/suites/harness-poll-shape.mjs';
 import harnessRecordsSuite from './check/suites/harness-records.mjs';
+import harnessConditionsSuite from './check/suites/harness-conditions.mjs';
+import hostOriginRefusalsSuite from './check/suites/host-origin-refusals.mjs';
 import harnessStartRequalSuite from './check/suites/harness-start-requal.mjs';
 import harnessDriftRunnerSuite from './check/suites/harness-drift-runner.mjs';
 import joinSuite from './check/suites/join.mjs';
@@ -51,9 +53,18 @@ import presenceSuite from './check/suites/presence.mjs';
 import timeEchoSuite from './check/suites/time-echo.mjs';
 import robustnessSuite from './check/suites/robustness.mjs';
 import livenessSuite from './check/suites/liveness.mjs';
+import settingsSuite from './check/suites/settings.mjs';
 import roomClientSuite from './check/suites/room-client.mjs';
 import clockSuite from './check/suites/clock.mjs';
 import clockSyncSuite from './check/suites/clock-sync.mjs';
+import segmentProtocolSuite from './check/suites/segment-protocol.mjs';
+import segmentFlowSuite from './check/suites/segment-flow.mjs';
+import hostLinkSuite from './check/suites/host-link.mjs';
+import hostOriginSuite from './check/suites/host-origin.mjs';
+import hostAccountingSuite from './check/suites/host-accounting.mjs';
+import hostReceiptsSuite from './check/suites/host-receipts.mjs';
+import hostOriginFiguresSuite from './check/suites/host-origin-figures.mjs';
+import hostOriginBarsSuite from './check/suites/host-origin-bars.mjs';
 import roomTimelineSuite from './check/suites/room-timeline.mjs';
 import playbackStateSuite from './check/suites/playback-state.mjs';
 import playbackStateRulesSuite from './check/suites/playback-state-rules.mjs';
@@ -100,6 +111,8 @@ for (const suite of [
   harnessCadenceSuite,
   harnessPollShapeSuite,
   harnessRecordsSuite,
+  harnessConditionsSuite,
+  hostOriginRefusalsSuite,
   harnessStartRequalSuite,
   harnessDriftRunnerSuite,
   joinSuite,
@@ -110,9 +123,18 @@ for (const suite of [
   timeEchoSuite,
   robustnessSuite,
   livenessSuite,
+  settingsSuite,
   roomClientSuite,
   clockSuite,
   clockSyncSuite,
+  segmentProtocolSuite,
+  segmentFlowSuite,
+  hostLinkSuite,
+  hostOriginSuite,
+  hostAccountingSuite,
+  hostReceiptsSuite,
+  hostOriginFiguresSuite,
+  hostOriginBarsSuite,
   roomTimelineSuite,
   playbackStateSuite,
   playbackStateRulesSuite,

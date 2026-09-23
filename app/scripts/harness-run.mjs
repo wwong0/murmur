@@ -8,7 +8,7 @@ import { recomputeRunDirectory } from './harness-figures.mjs';
 import { isPublishedFigure } from './figures/publication.mjs';
 import { attachClockJoinRecorder, attachTabTakenDetector, boundaryExpression, createRequestRecorder, installStallRecorder, pollExpression } from './harness/cdp-records.mjs';
 import { maybeInjectDisturbance } from './harness/disturbance.mjs';
-import { qualifyCdpBytes as defaultQualifyCdpBytes } from './harness/qualification.mjs';
+import { qualifyCdpBytes as defaultQualifyCdpBytes, qualifyLinkReceipts as defaultQualifyLinkReceipts } from './harness/qualification.mjs';
 import { evaluateRefusals } from './harness/refusals.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -64,8 +64,9 @@ function safeName(name) {
   return name.replaceAll('/', '-').replaceAll(':', '-');
 }
 
-function defaultRunDir(conditionName) {
-  return path.join(RESULTS_DIR, `6a-${safeName(conditionName)}-${new Date().toISOString().replaceAll(':', '-')}`);
+function defaultRunDir(conditionName, condition = conditionForName(conditionName)) {
+  const prefix = condition.delivery === 'host' ? '7a2' : '6a';
+  return path.join(RESULTS_DIR, `${prefix}-${safeName(conditionName)}-${new Date().toISOString().replaceAll(':', '-')}`);
 }
 
 function tagsFor(condition) {
@@ -106,7 +107,7 @@ export function placeWindow(condition, clientsReadyAtMs) {
   };
 }
 
-function initialManifest(condition, runDir, startedAt, tags) {
+function initialManifest(condition, runDir, startedAt, tags, hostTag = null) {
   // Provisional until the clients are ready; `placeWindow` re-places it then.
   const { clientsReadyAtMs: _provisional, ...window } = placeWindow(condition, startedAt);
   return {
@@ -119,7 +120,8 @@ function initialManifest(condition, runDir, startedAt, tags) {
     condition: JSON.parse(JSON.stringify(condition)),
     declaredClientTags: tags,
     clientTags: tags,
-    clients: clientDeclaration(tags, tags.map((tag, index) => index === 0 ? 'host' : 'viewer')),
+    clients: clientDeclaration(hostTag ? [hostTag, ...tags] : tags, hostTag ? ['host', ...tags.map(() => 'viewer')] : tags.map((tag, index) => index === 0 ? 'host' : 'viewer')),
+    ...(hostTag ? { originTab: { tag: hostTag, role: 'host', container: 'origin' } } : {}),
     window,
     content: JSON.parse(JSON.stringify(condition.content)),
     regime: JSON.parse(JSON.stringify(condition)),
@@ -169,11 +171,27 @@ function failedCdpQualification(reason) {
   return { status: 'failed', reason };
 }
 
+export function requireDeclaredDelivery(condition, name = condition?.name) {
+  if (condition?.delivery !== 'http' && condition?.delivery !== 'host') {
+    throw new Error(`condition ${name} declares no delivery path`);
+  }
+}
+
 async function qualifyFirstClient(tab, originContainer, qualifier) {
   if (!originContainer) return failedCdpQualification('qualification-unavailable:origin-container');
   if (!tab) return failedCdpQualification('qualification-unavailable:first-client-tab');
   try {
     return await qualifier(tab, { originContainer }) ?? failedCdpQualification('qualification-failed:no-result');
+  } catch (error) {
+    return failedCdpQualification(`qualification-error:${error?.message ?? String(error)}`);
+  }
+}
+
+async function qualifyFirstLink(viewerTab, hostTab, originContainer, qualifier) {
+  if (!originContainer) return failedCdpQualification('qualification-unavailable:origin-container');
+  if (!viewerTab || !hostTab) return failedCdpQualification('qualification-unavailable:host-or-viewer-tab');
+  try {
+    return await qualifier(viewerTab, hostTab, { originContainer }) ?? failedCdpQualification('qualification-failed:no-result');
   } catch (error) {
     return failedCdpQualification(`qualification-error:${error?.message ?? String(error)}`);
   }
@@ -204,6 +222,12 @@ async function prepareClient(session, url, deadline) {
   return recorder;
 }
 
+async function prepareHostClient(session, url, deadline) {
+  await session.tab.send('Page.enable');
+  await session.tab.send('Page.navigate', { url });
+  await deadline.waitFor(`host ${session.tag}`, () => session.tab.evaluate('Boolean(window.__app && __app.hostCounters())'), Boolean, 30_000, 100);
+}
+
 function startLoop(task, everyMs, onError) {
   let stopped = false;
   const promise = (async () => {
@@ -228,23 +252,38 @@ async function fetchSnapshot(originUrl) {
   return response.json();
 }
 
-export async function captureBoundary(kind, sessions, originUrl, manifest, manifestFile, ndjson, snapshotReader = fetchSnapshot) {
+export async function captureBoundary(kind, sessions, originUrl, manifest, manifestFile, ndjson, snapshotReader = fetchSnapshot, options = {}) {
   const snapshots = {};
   for (const session of sessions) {
     const value = await session.tab.evaluate(boundaryExpression());
     snapshots[session.tag] = value;
     manifest.clients[session.tag].boundaries[kind] = value;
+    if (options.hostSession && kind === 'end') manifest.clients[session.tag].hostLinkEnd = await session.tab.evaluate('__app.hostLink()');
   }
-  const origin = await snapshotReader(originUrl);
+  const room = await snapshotReader(originUrl);
+  const origin = options.hostSession
+    ? await options.hostSession.tab.evaluate('__app.hostCounters()')
+    : room;
+  if (options.hostSession && !origin) throw new Error(`host counter snapshot missing at ${kind} boundary`);
   fs.writeFileSync(path.join(path.dirname(manifestFile.path), `origin-counters-${kind}.json`), `${JSON.stringify(origin, null, 2)}\n`);
+  if (options.hostSession) {
+    fs.writeFileSync(path.join(path.dirname(manifestFile.path), `room-counters-${kind}.json`), `${JSON.stringify(room, null, 2)}\n`);
+    const loopback = await options.loopbackReader();
+    fs.writeFileSync(path.join(path.dirname(manifestFile.path), `origin-loopback-${kind}.json`), `${JSON.stringify(loopback, null, 2)}\n`);
+    if (kind === 'end' && options.startInstanceId !== undefined && origin.instanceId !== options.startInstanceId) {
+      throw new Error('host counter instanceId changed during run');
+    }
+    if (kind === 'start') options.startInstanceId = origin.instanceId;
+    if (!Number.isFinite(origin.atMs)) throw new Error(`host counter snapshot has no finite atMs at ${kind} boundary`);
+  }
   if (kind === 'start') manifest.window.startMs = origin.atMs;
   else manifest.window.endMs = origin.atMs;
   manifest.window[`${kind}SnapshotAtMs`] = origin.atMs;
   manifestFile.write();
-  return { snapshots, origin };
+  return { snapshots, origin, room };
 }
 
-export async function drainClient(session, ndjson, atMs = Date.now()) {
+export async function drainClient(session, ndjson, atMs = Date.now(), options = {}) {
   if (session.lastDrainAt !== null) {
     session.maxDrainGapMs = Math.max(session.maxDrainGapMs, atMs - session.lastDrainAt);
   }
@@ -259,11 +298,22 @@ export async function drainClient(session, ndjson, atMs = Date.now()) {
     ndjson.append(`client-${session.tag}.drift.ndjson`, [record]);
   }
   if (Number.isFinite(latestSeq)) session.cursor = Math.max(session.cursor, latestSeq);
+  if (options.hostLink) {
+    const result = await session.tab.evaluate(`__app.hostReceipts(${session.receiptCursor ?? 0})`);
+    const latestReceiptSeq = Number(result?.latestSeq);
+    if (Number.isFinite(latestReceiptSeq) && latestReceiptSeq < (session.receiptCursor ?? 0)) session.receiptLogReset = true;
+    const missed = Number(result?.missed);
+    if (Number.isFinite(missed)) session.receiptLogMissed = Math.max(session.receiptLogMissed ?? 0, missed);
+    for (const receipt of Array.isArray(result?.records) ? result.records : []) {
+      ndjson.append(`client-${session.tag}.receipts.ndjson`, [receipt]);
+    }
+    if (Number.isFinite(latestReceiptSeq)) session.receiptCursor = Math.max(session.receiptCursor ?? 0, latestReceiptSeq);
+  }
   return result;
 }
 
-function queuedDrain(session, ndjson, atMs = Date.now()) {
-  session.drainChain = (session.drainChain ?? Promise.resolve()).then(() => drainClient(session, ndjson, atMs));
+function queuedDrain(session, ndjson, atMs = Date.now(), options = {}) {
+  session.drainChain = (session.drainChain ?? Promise.resolve()).then(() => drainClient(session, ndjson, atMs, options));
   return session.drainChain;
 }
 
@@ -357,7 +407,16 @@ export function settleFinalization({ decision, manifestFile, runDir, recomputed,
   }
 }
 
-function evidenceFor(sessions, originStart, originEnd, manifest) {
+function readNdjsonFile(filePath) {
+  try {
+    return fs.readFileSync(filePath, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+  } catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
+function evidenceFor(sessions, originStart, originEnd, manifest, runDir, hostEvidence = {}) {
   return {
     condition: manifest.condition,
     window: manifest.window,
@@ -372,9 +431,23 @@ function evidenceFor(sessions, originStart, originEnd, manifest) {
       pageReset: session.pageReset === true,
       maxDriftDrainGapMs: session.maxDrainGapMs,
       tabCollision: session.tabCollision,
+      ...(manifest.condition?.delivery === 'host' ? {
+        receiptMissed: session.receiptLogMissed ?? 0,
+        receiptReset: session.receiptLogReset === true,
+      } : {}),
     }])),
     cdpQualification: manifest.cdpQualification,
     cadence: manifest.cadence,
+    ...(manifest.condition?.delivery === 'host' ? {
+      roomStart: hostEvidence.roomStart,
+      roomEnd: hostEvidence.roomEnd,
+      roomFinal: hostEvidence.roomFinal,
+      linkSamples: readNdjsonFile(path.join(runDir, 'origin-link.ndjson')),
+      receiptHealth: Object.fromEntries(sessions.map((session) => [session.tag, {
+        missed: session.receiptLogMissed ?? 0,
+        reset: session.receiptLogReset === true,
+      }])),
+    } : {}),
   };
 }
 
@@ -385,23 +458,27 @@ async function disposeSession(session) {
   if (session.dispose) await session.dispose();
 }
 
-export async function runHarness({ conditionName, condition = conditionForName(conditionName), runDir = defaultRunDir(conditionName), originUrl, clientOriginUrl = originUrl, topology = section3Topology(), clientFactory = noClientFactory, establishCadence = defaultEstablishCadence, qualifyCdpBytes = defaultQualifyCdpBytes } = {}) {
+export async function runHarness({ conditionName, condition = conditionForName(conditionName), runDir = defaultRunDir(conditionName, condition), originUrl, clientOriginUrl = originUrl, topology = section3Topology(), clientFactory = noClientFactory, establishCadence = defaultEstablishCadence, qualifyCdpBytes = defaultQualifyCdpBytes, qualifyLinkReceipts = defaultQualifyLinkReceipts } = {}) {
+  requireDeclaredDelivery(condition, conditionName ?? condition.name);
   if (condition.backgroundLoadProtocol === 'udp' && condition.backgroundLoadMbps == null) {
     throw new Error(`UDP background load requires a declared rate for condition ${condition.name}`);
   }
   const startedAt = Date.now();
   const tags = tagsFor(condition);
-  const roles = tags.map((tag, index) => index === 0 ? 'host' : 'viewer');
+  const hostMode = condition.delivery === 'host';
+  const hostTag = hostMode ? 'c00' : null;
+  const roles = hostMode ? tags.map(() => 'viewer') : tags.map((tag, index) => index === 0 ? 'host' : 'viewer');
   const prepared = prepareRunDirectory({ appDir: APP_DIR, resultsDir: RESULTS_DIR, runDir });
-  const manifestFile = createManifestFile({ runDir: prepared.runDir, initial: initialManifest(condition, prepared.runDir, startedAt, tags) });
+  const manifestFile = createManifestFile({ runDir: prepared.runDir, initial: initialManifest(condition, prepared.runDir, startedAt, tags, hostTag) });
   const ndjson = createNdjson(prepared.runDir);
   ndjson.write('origin-link.ndjson', []);
-  for (const tag of tags) for (const name of streamNames(tag)) ndjson.write(name, []);
+  for (const tag of (hostTag ? [hostTag, ...tags] : tags)) for (const name of streamNames(tag)) ndjson.write(name, []);
   manifestFile.write();
   const maxWallMs = Math.max(60_000, condition.runLengthMs + STARTUP_ALLOWANCE_MS);
   const deadline = createDeadline({ startedAt, maxWallMs });
   const room = `harness-${crypto.randomUUID()}`;
-  const sessions = tags.map((tag, index) => ({ tag, role: roles[index], records: [], polls: [], driftLogMissed: 0, cursor: 0, maxDrainGapMs: 0, lastDrainAt: null, stallEpoch: crypto.randomUUID(), tabCollision: false, endPlayback: null }));
+  const hostSession = hostMode ? { tag: hostTag, role: 'host', records: [], polls: [], driftLogMissed: 0, cursor: 0, maxDrainGapMs: 0, lastDrainAt: null, stallEpoch: crypto.randomUUID(), tabCollision: false, endPlayback: null } : null;
+  const sessions = tags.map((tag, index) => ({ tag, role: roles[index], records: [], polls: [], driftLogMissed: 0, cursor: 0, maxDrainGapMs: 0, lastDrainAt: null, stallEpoch: crypto.randomUUID(), tabCollision: false, endPlayback: null, receiptCursor: 0, receiptLogMissed: 0, receiptLogReset: false }));
   const loops = [];
   let monitor = null;
   let failure = null;
@@ -409,6 +486,8 @@ export async function runHarness({ conditionName, condition = conditionForName(c
   let originStart;
   let originEnd;
   let injectionHarnessMs = null;
+  const hostEvidence = {};
+  const boundaryOptions = hostSession ? { hostSession, loopbackReader: () => topology.readLoopbackCounter() } : {};
   try {
     const preparedTopology = await topology.prepare({ condition, runDir: prepared.runDir, manifest: manifestFile.get() });
     manifestFile.merge({ topology: { status: 'prepared', ...preparedTopology } });
@@ -420,6 +499,13 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     if (!originUrl) throw new Error('origin URL is required for a harness run');
     monitor = startOriginMonitor({ healthUrl: `${originUrl}/room.html`, deadlineAt: deadline.deadlineAt, maxWallMs, onFailure: (event) => manifestFile.merge({ originFailure: event }), requestTimeoutMs: condition.monitorRequestTimeoutMs });
     monitor.promise.catch((error) => { failure ??= error; });
+    if (hostSession) {
+      const hostUrl = `${clientOriginUrl}/room.html?room=${encodeURIComponent(room)}&role=host&tab=${hostTag}`;
+      const acquired = await clientFactory({ tag: hostTag, role: 'host', room, url: hostUrl, condition, runDir: prepared.runDir });
+      Object.assign(hostSession, acquired);
+      if (!hostSession.tab) throw new Error('host tab is unavailable');
+      await prepareHostClient(hostSession, hostUrl, deadline);
+    }
     for (const [index, session] of sessions.entries()) {
       const clientUrl = `${clientOriginUrl}/room.html?room=${encodeURIComponent(room)}&role=${session.role}&tab=${session.tag}`;
       const acquired = await clientFactory({ tag: session.tag, role: session.role, room, url: clientUrl, condition, runDir: prepared.runDir });
@@ -431,7 +517,9 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       }
       await prepareClient(session, clientUrl, deadline);
       if (index === 0) {
-        const qualification = await qualifyFirstClient(session.tab, preparedTopology.containers?.origin, qualifyCdpBytes);
+        const qualification = hostSession
+          ? await qualifyFirstLink(session.tab, hostSession.tab, preparedTopology.containers?.origin, qualifyLinkReceipts)
+          : await qualifyFirstClient(session.tab, preparedTopology.containers?.origin, qualifyCdpBytes);
         manifestFile.set(mergeVerifiedContext(manifestFile.get(), { cdpQualification: qualification }));
         manifestFile.write();
       }
@@ -451,7 +539,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
         session.polls.push(value);
         ndjson.append(`client-${session.tag}.poll.ndjson`, [value]);
       }, POLL_INTERVAL_MS, (error) => { failure ??= error; });
-      const drain = startLoop(() => queuedDrain(session, ndjson), DRAIN_INTERVAL_MS, (error) => { failure ??= error; });
+      const drain = startLoop(() => queuedDrain(session, ndjson, Date.now(), { hostLink: hostMode }), DRAIN_INTERVAL_MS, (error) => { failure ??= error; });
       loops.push(poll, drain);
     }
     await waitUntil(deadline, manifestFile.get().window.startMs);
@@ -463,23 +551,29 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       fs.writeFileSync(path.join(prepared.runDir, 'disturbance.json'), `${JSON.stringify(disturbance, null, 2)}\n`);
       manifestFile.write();
     }
-    const startBoundary = await captureBoundary('start', sessions, originUrl, manifestFile.get(), manifestFile, ndjson);
+    const startBoundary = await captureBoundary('start', sessions, originUrl, manifestFile.get(), manifestFile, ndjson, fetchSnapshot, boundaryOptions);
     originStart = startBoundary.origin;
+    if (hostMode) hostEvidence.roomStart = startBoundary.room;
     await waitUntil(deadline, manifestFile.get().window.endMs);
-    const endBoundary = await captureBoundary('end', sessions, originUrl, manifestFile.get(), manifestFile, ndjson);
+    const endBoundary = await captureBoundary('end', sessions, originUrl, manifestFile.get(), manifestFile, ndjson, fetchSnapshot, boundaryOptions);
     originEnd = endBoundary.origin;
+    if (hostMode) hostEvidence.roomEnd = endBoundary.room;
     for (const session of sessions) session.endPlayback = endBoundary.snapshots[session.tag]?.playback;
     if (condition.disturbance && injectionHarnessMs !== null) {
       await waitUntil(deadline, injectionHarnessMs + condition.disturbance.observationMs + 2000);
     }
-    await Promise.all(sessions.map((session) => queuedDrain(session, ndjson)));
+    await Promise.all(sessions.map((session) => queuedDrain(session, ndjson, Date.now(), { hostLink: hostMode })));
+    if (hostMode) {
+      hostEvidence.roomFinal = await fetchSnapshot(originUrl);
+      fs.writeFileSync(path.join(prepared.runDir, 'room-counters-final.json'), `${JSON.stringify(hostEvidence.roomFinal, null, 2)}\n`);
+    }
   } catch (error) {
     failure ??= error;
   } finally {
     for (const loop of loops) loop.stop();
     await Promise.all(loops.map((loop) => loop.promise.catch(() => {})));
     if (monitor) await stopOriginMonitor(monitor);
-    for (const session of sessions) {
+    for (const session of (hostSession ? [hostSession, ...sessions] : sessions)) {
       try {
         const requests = session.recorder?.flush() ?? [];
         if (requests.length) ndjson.append(`client-${session.tag}.requests.ndjson`, requests);
@@ -524,7 +618,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     manifestFile.write();
     recomputed = recomputeRunDirectory(prepared.runDir);
     const publicationContext = { ...manifestFile.get(), ...recomputed.figures, declaredClientTags: tags };
-    evaluation = evaluateRefusals({ ...evidenceFor(sessions, originStart, originEnd, manifestFile.get()), publicationContext });
+    evaluation = evaluateRefusals({ ...evidenceFor(sessions, originStart, originEnd, manifestFile.get(), prepared.runDir, hostEvidence), publicationContext });
     const decision = decideFinalization({
       evaluation,
       recomputed,

@@ -25,6 +25,7 @@ const REPO_DIR = path.resolve(APP_DIR, '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
 const REGISTER = path.join(RESULTS_DIR, 'RUNS-6a.json');
 const REGISTER_6B = path.join(RESULTS_DIR, 'RUNS-6b.json');
+const REGISTER_7A2 = path.join(RESULTS_DIR, 'RUNS-7a2.json');
 
 // OQ5's owner writes this file. No stage of this change may, and the rule is
 // worth an assertion because the temptation is strongest at the end, when the
@@ -95,6 +96,25 @@ export default async function harnessRecordsSuite() {
       .map((entry) => entry.name));
     for (const name of onDisk) assert(listed.has(name), `retained run ${name} is described in the 6b register`);
     for (const name of listed) assert(onDisk.has(name), `6b register entry ${name} names a directory that exists`);
+    for (const entry of register.runs) {
+      assert(typeof entry.evidenceOf === 'string' && entry.evidenceOf.length > 0, `${entry.directory} says what it is evidence of`);
+      assert(entry.publishes === true || entry.publishes === false, `${entry.directory} says whether it publishes`);
+      assert(typeof entry.condition === 'string' && entry.condition.length > 0, `${entry.directory} names its condition`);
+    }
+  });
+
+  await check('harness records: every retained 7a2 run directory is in the register, and every register entry exists', async () => {
+    if (!fs.existsSync(REGISTER_7A2)) {
+      assert(true, 'no 7a2 register yet â€” section 8.3 has not run in this tree');
+      return;
+    }
+    const register = JSON.parse(fs.readFileSync(REGISTER_7A2, 'utf8'));
+    const listed = new Set(register.runs.map((entry) => entry.directory));
+    const onDisk = new Set(fs.readdirSync(RESULTS_DIR, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith('7a2-'))
+      .map((entry) => entry.name));
+    for (const name of onDisk) assert(listed.has(name), `retained run ${name} is described in the 7a2 register`);
+    for (const name of listed) assert(onDisk.has(name), `7a2 register entry ${name} names a directory that exists`);
     for (const entry of register.runs) {
       assert(typeof entry.evidenceOf === 'string' && entry.evidenceOf.length > 0, `${entry.directory} says what it is evidence of`);
       assert(entry.publishes === true || entry.publishes === false, `${entry.directory} says whether it publishes`);

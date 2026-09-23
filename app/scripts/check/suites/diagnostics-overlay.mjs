@@ -376,18 +376,20 @@ export default async function diagnosticsOverlaySuite() {
     assert(DRIFT_LINE_RE.test(line), 'drift text matches the published pattern');
   });
 
-  await check('diagnostics overlay: the drift line names paused, preparing with retargets, and missing state', async () => {
-    // The three statuses differ only in the fields the scheduled start sets for them.
+  await check('diagnostics overlay: the drift line names paused, preparing, missing state, and host link', async () => {
+    // The four statuses differ only in the fields the scheduled start sets for them.
     const base = { playing: false, missing: null, waiting: null, retargets: 2 };
     const statuses = [
       { ...base, waiting: 'room-paused' },
       { ...base, waiting: 'preparing' },
       { ...base, missing: 'playback-state' },
+      { ...base, missing: 'host-link' },
     ];
     const lines = statuses.map((playbackState) => makeOverlay({ playbackState }).overlay.lines().drift);
     assertEqual(lines[0], 'drift: not playing — room paused', 'paused');
     assertEqual(lines[1], 'drift: not playing — preparing start (retargets 2)', 'preparing with its retargets');
     assertEqual(lines[2], 'drift: not playing — waiting for playback-state', 'missing state');
+    assertEqual(lines[3], 'drift: not playing — waiting for host-link', 'missing host link');
   });
 
   await check('diagnostics overlay: an in-threshold hold with no correction renders an acting shape (O1 input)', async () => {

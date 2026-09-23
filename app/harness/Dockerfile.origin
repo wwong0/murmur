@@ -13,11 +13,7 @@
 # rate is read from the media every run and no constant is substituted for it
 # (executor-spec.md §10), so the reader has to be where the file is.
 
-FROM node:24-bookworm-slim
-
-RUN apt-get update \
- && apt-get install -y --no-install-recommends iproute2 iputils-ping ca-certificates ffmpeg \
- && rm -rf /var/lib/apt/lists/*
+FROM wa6a-client:latest
 
 WORKDIR /app
 
@@ -31,6 +27,8 @@ RUN npm run build
 ENV APP_MEDIA_DIR=/media
 ENV APP_PORT=8100
 ENV APP_HOST=0.0.0.0
+ENV APP_CHROME=/usr/bin/google-chrome
+ENV APP_BROWSER_PLATFORM=linux
 
 EXPOSE 8100
 CMD ["node", "harness/origin-entry.mjs"]

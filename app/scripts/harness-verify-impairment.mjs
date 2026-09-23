@@ -24,6 +24,7 @@ import { CLIENT_ORIGIN_URL, MEDIA_NETWORK, PROJECT, cdpPortFor, composeDown, com
 import { qualifyCdpBytes } from './harness/qualification.mjs';
 import { attach } from './cdp.mjs';
 import { conditionForName } from './harness-run.mjs';
+import { requireDelivery } from './delivery-pin.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -330,6 +331,7 @@ export async function runArms({ arms = ARM_ORDER, runDir, project = PROJECT, exe
   let tab = null;
   try {
     const containers = composeUp({ project, exec, clients: 1 });
+    await requireDelivery('http://127.0.0.1:8110', 'http');
     const subnet = networkSubnet(MEDIA_NETWORK, exec, project);
     const originMedia = resolveInterface(containers.origin, subnet, exec);
     const clientMedia = resolveInterface(containers.c01, subnet, exec);

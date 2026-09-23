@@ -1,5 +1,6 @@
-// Bounded lead measurement runner. It owns one fresh Chrome profile and
-// publishes only evidence that has passed the reducer in lead-measurement.mjs.
+// Bounded lead measurement runner. Start the server with APP_DELIVERY=http;
+// it owns one fresh Chrome profile and publishes only evidence that has passed
+// the reducer in lead-measurement.mjs.
 
 import { execFileSync, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -30,6 +31,7 @@ import {
   reduceEvidence,
   TICK_BACKSTOP_MS,
 } from './lead-measurement.mjs';
+import { requireDelivery } from './delivery-pin.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -397,6 +399,7 @@ async function main() {
     if (simulationCase) {
       await runSimulation();
     } else {
+      await requireDelivery(ORIGIN, 'http');
       await acquireBrowserEvidence();
     }
     const summary = publishEvidence();
