@@ -134,12 +134,12 @@ function startSampler({ container, ifName, runDir, intervalMs = 125, exec = defa
   return { command: argv[2], intervalMs, ifName, container };
 }
 
-function startBackgroundLoad({ container, mbps, runDir, exec = defaultExec }) {
+function startBackgroundLoad({ container, mbps, protocol = 'tcp', runDir, exec = defaultExec }) {
   if (mbps === null || mbps === undefined || mbps === 0) return { started: false, mbps: mbps ?? null };
   const report = `${containerRunDir(runDir)}/background-load.json`;
   const argv = [
     'sh', '-c',
-    `cd /app && nohup node harness/background-load.mjs --to=sink:9500 --mbps=${mbps} --granularity-ms=10 --report=${report} > /tmp/background-load.log 2>&1 &`,
+    `cd /app && nohup node harness/background-load.mjs --to=sink:9500 --mbps=${mbps} --protocol=${protocol} --granularity-ms=10 --report=${report} > /tmp/background-load.log 2>&1 &`,
   ];
   exec(['docker', 'exec', '-d', container, ...argv]);
   return { started: true, mbps, report, command: argv[2] };
@@ -204,7 +204,7 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
       if (versions.size > 1) throw new Error(`clients run ${versions.size} browser builds: ${[...versions].join(' | ')}`);
 
       state.sampler = startSampler({ container: state.containers.origin, ifName: state.origin.ifName, runDir, intervalMs: samplerIntervalMs, exec });
-      state.backgroundLoad = startBackgroundLoad({ container: state.containers.origin, mbps: condition.backgroundLoadMbps, runDir, exec });
+      state.backgroundLoad = startBackgroundLoad({ container: state.containers.origin, mbps: condition.backgroundLoadMbps, protocol: condition.backgroundLoadProtocol ?? 'tcp', runDir, exec });
 
       const content = { ...condition.content, ...readContentFrameRate(state.containers.origin, exec) };
       return {

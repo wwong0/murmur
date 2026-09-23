@@ -26,7 +26,59 @@ const BYTE_FIELDS = Object.freeze([
   'content.frameRate',
 ]);
 
-export const REQUIRED_CONTEXT_FIELDS = Object.freeze({ byte: BYTE_FIELDS });
+export const DRIFT_FIELDS = Object.freeze([
+  'condition.name',
+  'condition.capacityMbps',
+  'condition.runLengthMs',
+  'window.startMs',
+  'window.endMs',
+  'window.excludedPrefixMs',
+  'window.measureWindowMs',
+  'content.frameRate',
+  'uplinkUtilisationMean',
+  'uplinkUtilisationPeak',
+  'capacityBitsPerSecond',
+  'qdiscBacklogBytesMean',
+  'qdiscOverlimitsInWindow',
+  'qdiscBacklogNonzeroFraction',
+  'standingQueueDelayMsP50NearestRank',
+  'standingQueueDelayMsP99',
+  'clockHalfWidthMsP50ByClient',
+  'clockHalfWidthMsP99ByClient',
+  'clockDelayTermMsP50ByClient',
+  'clockDelayTermMsP99ByClient',
+  'clockAgeTermMsP50ByClient',
+  'clockAgeTermMsP99ByClient',
+  'controllerBandMsP50ByClient',
+  'controllerBandMsP99ByClient',
+  'controllerStoppingThresholdMsP50ByClient',
+  'controllerStoppingThresholdMsP99ByClient',
+  'thresholdUsableFractionByClient',
+  'settlingByClient',
+  'presentIntervalMsByClient',
+  'cadenceClassificationByClient',
+  'instrumentFloorMsP50',
+  'instrumentFloorMsP99',
+  'floorDelayTermMsP50',
+  'floorDelayTermMsP99',
+  'floorAgeTermMsP50',
+  'floorAgeTermMsP99',
+  'floorPresentIntervalMs',
+  'pairwiseDriftAbsMsMedian',
+  'pairwiseDriftAbsMsP99',
+  'criterionVerdict',
+  'realtimeFactorByClient',
+  'droppedFrameFractionByClient',
+  'evaluationSkipsByClient',
+  'clockBestDelayMsP50ByClient',
+  'clockBestDelayMsP95ByClient',
+  'clockBestDelayMsP99ByClient',
+  'echoRoundTripMsP50ByClient',
+  'echoRoundTripMsP95ByClient',
+  'echoRoundTripMsP99ByClient',
+]);
+
+export const REQUIRED_CONTEXT_FIELDS = Object.freeze({ byte: BYTE_FIELDS, drift: DRIFT_FIELDS });
 
 function getPath(object, path) {
   return path.split('.').reduce((value, key) => value?.[key], object);
@@ -79,11 +131,40 @@ function missingFields(kind, context, figure) {
   for (const field of fields) {
     const direct = missingField(field, context, figure);
     if (direct) return direct;
-    if (field === 'realtimeFactorByClient' || field === 'stallCountByClient') {
+    if (field.endsWith('ByClient')) {
       const values = lookup(field, context, figure);
       for (const tag of declaredTags(context, figure)) {
         if (absent(values?.[tag])) return `${field}[${tag}]`;
       }
+    }
+    if (field === 'settlingByClient') {
+      const values = lookup(field, context, figure);
+      for (const tag of declaredTags(context, figure)) {
+        const value = values?.[tag];
+        if (!value || (value.settlingMs !== null && !Number.isFinite(value.settlingMs))
+          || typeof value.mode !== 'string' || typeof value.thresholdUsable !== 'boolean') {
+          return `${field}[${tag}]`;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function settlingCorrectionCount(tag, context, figure, settling) {
+  return settling?.correctionsApplied
+    ?? context.correctionsAppliedByClient?.[tag]
+    ?? figure.correctionsAppliedByClient?.[tag]
+    ?? context.clients?.[tag]?.polls?.at(-1)?.controller?.correctionsApplied
+    ?? figure.clients?.[tag]?.polls?.at(-1)?.controller?.correctionsApplied;
+}
+
+function settlingRefusal(context, figure) {
+  const values = lookup('settlingByClient', context, figure);
+  for (const tag of declaredTags(context, figure)) {
+    const settling = values?.[tag];
+    if (settling?.settlingMs === 0 && settlingCorrectionCount(tag, context, figure, settling) === 0) {
+      return 'settling-zero-without-correction';
     }
   }
   return null;
@@ -105,6 +186,10 @@ export function requiredContextFields(kind, context = {}) {
 export function publish(kind, figure = {}, context = {}) {
   const missing = missingFields(kind, context, figure);
   if (missing) return { published: false, missing };
+  if (kind === 'drift') {
+    const settling = settlingRefusal(context, figure);
+    if (settling) return { published: false, missing: settling };
+  }
   const accountingMethod = context.byteAccountingMethod ?? figure.byteAccountingMethod;
   if (kind === 'byte' && accountingMethod === RECEIPT_COHORT_METHOD) {
     if (figure.byteAccountingMethod !== RECEIPT_COHORT_METHOD) return { published: false, missing: 'byteAccountingMethod' };
@@ -136,7 +221,7 @@ function csvCell(value) {
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
-function requirePublished(figure) {
+export function requirePublished(figure) {
   if (!isPublishedFigure(figure)) throw new Error('CSV requires a published figure');
 }
 

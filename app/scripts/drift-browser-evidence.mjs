@@ -80,6 +80,23 @@ export function qualifyingFit(fit, minimumRecords, minimumSpanMs, standardErrorP
     && fit.endpointCrosscheck?.driftWithinBar === true;
 }
 
+/** Shared fit populations; D6 must not let its second filter drift from this one. */
+export function qualifyingSaturatedAndPlateauFits({ fits = [], bars = DEFAULT_BARS } = {}) {
+  const saturatedFits = fits.filter((fit) => qualifyingFit(
+    fit,
+    bars.MIN_STRETCH_RECORDS,
+    bars.MIN_STRETCH_SPAN_MS,
+    bars.MAX_STRETCH_SLOPE_SE_PPM,
+  ) && Math.abs(fit.medianRate - (1 + MAX_RATE_DEVIATION)) <= bars.RATE_STEADY_TOLERANCE);
+  const plateauFits = fits.filter((fit) => qualifyingFit(
+    fit,
+    bars.MIN_RESIDUAL_RECORDS,
+    bars.MIN_RESIDUAL_SPAN_MS,
+    bars.MAX_RESIDUAL_SLOPE_SE_PPM,
+  ) && fit.medianRate < 1 + MAX_RATE_DEVIATION - bars.RATE_STEADY_TOLERANCE);
+  return { saturatedFits, plateauFits };
+}
+
 /**
  * Whether the run retained enough to support the residual figures, read back
  * from the manifest and the NDJSON it names. `runDir` is a parameter because the
@@ -95,18 +112,7 @@ export function evaluateSufficiency(manifestPath, runDir) {
     const samples = captures.map((capture) => ({ atMs: capture.atMs, ...capture.controller }));
     const stretches = steadyCommandStretches(samples, bars);
     const fits = stretchSlopes({ stretches, records, bars });
-    const saturatedFits = fits.filter((fit) => qualifyingFit(
-      fit,
-      bars.MIN_STRETCH_RECORDS,
-      bars.MIN_STRETCH_SPAN_MS,
-      bars.MAX_STRETCH_SLOPE_SE_PPM,
-    ) && Math.abs(fit.medianRate - (1 + MAX_RATE_DEVIATION)) <= bars.RATE_STEADY_TOLERANCE);
-    const plateauFits = fits.filter((fit) => qualifyingFit(
-      fit,
-      bars.MIN_RESIDUAL_RECORDS,
-      bars.MIN_RESIDUAL_SPAN_MS,
-      bars.MAX_RESIDUAL_SLOPE_SE_PPM,
-    ) && fit.medianRate < 1 + MAX_RATE_DEVIATION - bars.RATE_STEADY_TOLERANCE);
+    const { saturatedFits, plateauFits } = qualifyingSaturatedAndPlateauFits({ fits, bars });
     const recordMinimumMet = records.length >= bars.MIN_RESIDUAL_RECORDS;
     const spanMinimumMet = plateauFits.length > 0;
     const missed = window.counts?.missed;

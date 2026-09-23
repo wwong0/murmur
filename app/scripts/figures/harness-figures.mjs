@@ -305,13 +305,26 @@ function linkFigures(samples, window, capacityBitsPerSecond) {
     const deltaT = (entry.atMs ?? entry.at ?? entry.timeMs) - (entries[index].atMs ?? entries[index].at ?? entries[index].timeMs);
     return deltaT > 0 ? ((entry.txBytes ?? entry.tx_bytes) - (entries[index].txBytes ?? entries[index].tx_bytes)) * 8 / ((deltaT / 1000) * capacityBitsPerSecond) : NaN;
   }).filter(finite);
-  const backlog = entries.map((entry) => entry.qdisc?.backlogBytes ?? entry.backlogBytes ?? entry.qdiscBacklogBytes).filter(finite);
+  const backlogValues = entries.map((entry) => entry.qdisc?.backlogBytes ?? entry.backlogBytes ?? entry.qdiscBacklogBytes);
+  if (backlogValues.some((value) => value < 0)) throw new RangeError('qdisc backlog cannot be negative');
+  const backlog = backlogValues.filter(finite);
   const qdiscFirst = first.qdisc ?? first;
   const qdiscLast = last.qdisc ?? last;
+  const queueFields = backlogValues.every(finite) ? (() => {
+    const delays = backlog.map((value) => value * 8 / capacityBitsPerSecond * 1000).sort((a, b) => a - b);
+    return {
+      qdiscBacklogNonzeroFraction: backlog.filter((value) => value > 0).length / backlog.length,
+      qdiscBacklogBytesP99: percentile([...backlog].sort((a, b) => a - b), 0.99),
+      standingQueueDelayMsP50NearestRank: percentile(delays, 0.5),
+      standingQueueDelayMsP99: percentile(delays, 0.99),
+    };
+  })() : {};
   return {
     uplinkUtilisationMean: rate,
     uplinkUtilisationPeak: intervalRates.length ? Math.max(...intervalRates) : rate,
+    capacityBitsPerSecond,
     ...(backlog.length ? { qdiscBacklogBytesMean: backlog.reduce((sum, value) => sum + value, 0) / backlog.length, qdiscBacklogBytesPeak: Math.max(...backlog) } : {}),
+    ...queueFields,
     qdiscDropsInWindow: difference(qdiscLast, qdiscFirst, 'drops'),
     qdiscOverlimitsInWindow: difference(qdiscLast, qdiscFirst, 'overlimits'),
   };

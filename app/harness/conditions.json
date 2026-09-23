@@ -209,6 +209,373 @@
         "driftLogMissedMax": 0
       },
       "feeds": ["impairment-delay200", "media-rtt-190-to-260-ms", "cdp-rtt-within-5-ms-of-uncapped"]
+    },
+    "cap100": {
+      "name": "shakedown/cap100",
+      "publishes": false,
+      "clients": 1,
+      "capacityMbps": 100,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": { "rate": "100mbit", "burst": "320kbit", "latency": "400ms" }
+        }
+      ],
+      "backgroundLoadMbps": null,
+      "runLengthMs": 0,
+      "excludedPrefixMs": 0,
+      "measureWindowMs": 0,
+      "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "peerFractionAbsMax": 0.02,
+        "originClientAgreementAbsMax": 0.02,
+        "driftLogMissedMax": 0
+      },
+      "feeds": ["impairment-cap100", "goodput-85-to-105-mbps"]
+    },
+    "loss5-cap100": {
+      "name": "shakedown/loss5-cap100",
+      "publishes": false,
+      "clients": 1,
+      "capacityMbps": 100,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": { "rate": "100mbit", "burst": "320kbit", "latency": "400ms" }
+        },
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "netem",
+          "order": 2,
+          "params": { "loss": "5%" }
+        },
+        {
+          "container": "client",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "netem",
+          "order": 1,
+          "params": { "loss": "5%" }
+        }
+      ],
+      "backgroundLoadMbps": null,
+      "runLengthMs": 0,
+      "excludedPrefixMs": 0,
+      "measureWindowMs": 0,
+      "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "peerFractionAbsMax": 0.02,
+        "originClientAgreementAbsMax": 0.02,
+        "driftLogMissedMax": 0
+      },
+      "feeds": ["impairment-loss5-cap100", "loss-3-to-7-percent-each-direction", "udp-capacity-85-to-105-mbps", "qdisc-handles-10-root-20-parent-10-1"]
+    },
+    "filler-udp-loss": {
+      "name": "shakedown/filler-udp-loss",
+      "publishes": false,
+      "clients": 2,
+      "capacityMbps": 10,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": { "rate": "10mbit", "burst": "32kbit", "latency": "400ms" }
+        },
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "netem",
+          "order": 2,
+          "params": { "loss": "5%" }
+        }
+      ],
+      "backgroundLoadMbps": 12,
+      "backgroundLoadProtocol": "udp",
+      "figureKinds": [],
+      "disturbance": null,
+      "runLengthMs": 90000,
+      "excludedPrefixMs": 30000,
+      "measureWindowMs": 60000,
+      "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "peerFractionAbsMax": 0.02,
+        "originClientAgreementAbsMax": 0.02,
+        "driftLogMissedMax": 0
+      },
+      "feeds": ["rig-verification", "udp-filler-standing-queue-p50-nearest-rank-at-least-200-ms", "sink-udp-bytes-positive"]
+    },
+    "filler-tcp-loss": {
+      "name": "shakedown/filler-tcp-loss",
+      "publishes": false,
+      "clients": 2,
+      "capacityMbps": 10,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": { "rate": "10mbit", "burst": "32kbit", "latency": "400ms" }
+        },
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "netem",
+          "order": 2,
+          "params": { "loss": "5%" }
+        }
+      ],
+      "backgroundLoadMbps": 12,
+      "backgroundLoadProtocol": "tcp",
+      "figureKinds": [],
+      "disturbance": null,
+      "runLengthMs": 90000,
+      "excludedPrefixMs": 30000,
+      "measureWindowMs": 60000,
+      "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "peerFractionAbsMax": 0.02,
+        "originClientAgreementAbsMax": 0.02,
+        "driftLogMissedMax": 0
+      },
+      "feeds": ["rig-verification", "tcp-filler-contrast-for-d1"]
+    },
+    "drift-qual": {
+      "name": "shakedown/drift-qual",
+      "publishes": false,
+      "clients": 2,
+      "capacityMbps": 100,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": { "rate": "100mbit", "burst": "320kbit", "latency": "400ms" }
+        }
+      ],
+      "backgroundLoadMbps": null,
+      "backgroundLoadProtocol": null,
+      "figureKinds": ["drift"],
+      "criterion": { "statistic": "median", "targetMs": 40 },
+      "disturbance": {
+        "kind": "local-pause-play",
+        "clients": ["c02"],
+        "pauseMs": 250,
+        "at": "measure-window-start",
+        "observationMs": 20000
+      },
+      "runLengthMs": 90000,
+      "excludedPrefixMs": 30000,
+      "measureWindowMs": 60000,
+      "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "peerFractionAbsMax": 0.02,
+        "originClientAgreementAbsMax": 0.02,
+        "driftLogMissedMax": 0
+      },
+      "feeds": ["runner-qualification-6b"]
+    },
+    "udp-sweep-87": {
+      "name": "shakedown/udp-sweep-87",
+      "publishes": false,
+      "clients": 5,
+      "capacityMbps": 100,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": { "rate": "100mbit", "burst": "320kbit", "latency": "400ms" }
+        }
+      ],
+      "backgroundLoadMbps": 87,
+      "backgroundLoadProtocol": "udp",
+      "figureKinds": [],
+      "disturbance": null,
+      "runLengthMs": 300000,
+      "excludedPrefixMs": 120000,
+      "measureWindowMs": 180000,
+      "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "peerFractionAbsMax": 0.02,
+        "originClientAgreementAbsMax": 0.02,
+        "driftLogMissedMax": 0
+      },
+      "feeds": ["saturated-calibration-sweep"]
+    },
+    "udp-sweep-90": {
+      "name": "shakedown/udp-sweep-90",
+      "publishes": false,
+      "clients": 5,
+      "capacityMbps": 100,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": { "rate": "100mbit", "burst": "320kbit", "latency": "400ms" }
+        }
+      ],
+      "backgroundLoadMbps": 90,
+      "backgroundLoadProtocol": "udp",
+      "figureKinds": [],
+      "disturbance": null,
+      "runLengthMs": 300000,
+      "excludedPrefixMs": 120000,
+      "measureWindowMs": 180000,
+      "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "peerFractionAbsMax": 0.02,
+        "originClientAgreementAbsMax": 0.02,
+        "driftLogMissedMax": 0
+      },
+      "feeds": ["saturated-calibration-sweep"]
+    },
+    "udp-sweep-93": {
+      "name": "shakedown/udp-sweep-93",
+      "publishes": false,
+      "clients": 5,
+      "capacityMbps": 100,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": { "rate": "100mbit", "burst": "320kbit", "latency": "400ms" }
+        }
+      ],
+      "backgroundLoadMbps": 93,
+      "backgroundLoadProtocol": "udp",
+      "figureKinds": [],
+      "disturbance": null,
+      "runLengthMs": 300000,
+      "excludedPrefixMs": 120000,
+      "measureWindowMs": 180000,
+      "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "peerFractionAbsMax": 0.02,
+        "originClientAgreementAbsMax": 0.02,
+        "driftLogMissedMax": 0
+      },
+      "feeds": ["saturated-calibration-sweep"]
+    },
+    "udp-sweep-96": {
+      "name": "shakedown/udp-sweep-96",
+      "publishes": false,
+      "clients": 5,
+      "capacityMbps": 100,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": { "rate": "100mbit", "burst": "320kbit", "latency": "400ms" }
+        }
+      ],
+      "backgroundLoadMbps": 96,
+      "backgroundLoadProtocol": "udp",
+      "figureKinds": [],
+      "disturbance": null,
+      "runLengthMs": 300000,
+      "excludedPrefixMs": 120000,
+      "measureWindowMs": 180000,
+      "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "peerFractionAbsMax": 0.02,
+        "originClientAgreementAbsMax": 0.02,
+        "driftLogMissedMax": 0
+      },
+      "feeds": ["saturated-calibration-sweep"]
+    },
+    "udp-sweep-99": {
+      "name": "shakedown/udp-sweep-99",
+      "publishes": false,
+      "clients": 5,
+      "capacityMbps": 100,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": { "rate": "100mbit", "burst": "320kbit", "latency": "400ms" }
+        }
+      ],
+      "backgroundLoadMbps": 99,
+      "backgroundLoadProtocol": "udp",
+      "figureKinds": [],
+      "disturbance": null,
+      "runLengthMs": 300000,
+      "excludedPrefixMs": 120000,
+      "measureWindowMs": 180000,
+      "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "peerFractionAbsMax": 0.02,
+        "originClientAgreementAbsMax": 0.02,
+        "driftLogMissedMax": 0
+      },
+      "feeds": ["saturated-calibration-sweep"]
     }
   },
   "baseline-nop2p": {
@@ -270,5 +637,188 @@
       "driftLogMissedMax": 0
     },
     "feeds": ["criteria-2-baseline-10", "criteria-3-baseline-10", "oq1"]
+  },
+  "healthy": {
+    "name": "healthy",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 100,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": { "rate": "100mbit", "burst": "320kbit", "latency": "400ms" }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "backgroundLoadProtocol": null,
+    "figureKinds": ["drift"],
+    "criterion": { "statistic": "median", "targetMs": 40 },
+    "disturbance": null,
+    "runLengthMs": 300000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 180000,
+    "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "peerFractionAbsMax": 0.02,
+      "originClientAgreementAbsMax": 0.02,
+      "driftLogMissedMax": 0
+    },
+    "feeds": ["criterion-1-median", "transport-rule-baseline"]
+  },
+  "loss5-headroom": {
+    "name": "loss5-headroom",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 100,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": { "rate": "100mbit", "burst": "320kbit", "latency": "400ms" }
+      },
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "netem",
+        "order": 2,
+        "params": { "loss": "5%" }
+      },
+      {
+        "container": "client",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "netem",
+        "order": 1,
+        "params": { "loss": "5%" }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "backgroundLoadProtocol": null,
+    "figureKinds": ["drift"],
+    "criterion": { "statistic": "p99", "targetMs": 100 },
+    "transportRule": {
+      "delayTermFactor": 2,
+      "voidUtilisationMeanMax": 0.5,
+      "voidRealtimeFactorMin": 0.98,
+      "p99TargetMs": 100
+    },
+    "joinBurstBars": { "firstEstimateMsMax": 400, "abandonedProbesMax": 1 },
+    "disturbance": null,
+    "runLengthMs": 300000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 180000,
+    "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "peerFractionAbsMax": 0.02,
+      "originClientAgreementAbsMax": 0.02,
+      "driftLogMissedMax": 0
+    },
+    "feeds": ["criterion-1-p99", "transport-rule", "join-burst"]
+  },
+  "saturated": {
+    "name": "saturated",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 100,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": { "rate": "100mbit", "burst": "320kbit", "latency": "400ms" }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "backgroundLoadProtocol": "udp",
+    "backgroundLoadCalibration": {
+      "status": "pending",
+      "bars": {
+        "standingQueueDelayMsP50NearestRankMin": 200,
+        "uplinkUtilisationMeanMin": 0.95,
+        "realtimeFactorMin": 0.98
+      },
+      "grid": [
+        "shakedown/udp-sweep-87",
+        "shakedown/udp-sweep-90",
+        "shakedown/udp-sweep-93",
+        "shakedown/udp-sweep-96",
+        "shakedown/udp-sweep-99"
+      ],
+      "chosenMbps": null,
+      "runDirs": []
+    },
+    "figureKinds": ["drift"],
+    "criterion": { "statistic": "p99", "targetMs": 100 },
+    "disturbance": null,
+    "runLengthMs": 300000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 180000,
+    "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "peerFractionAbsMax": 0.02,
+      "originClientAgreementAbsMax": 0.02,
+      "driftLogMissedMax": 0
+    },
+    "feeds": ["queue-diagnostic"]
+  },
+  "healthy-disturbed": {
+    "name": "healthy-disturbed",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 100,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": { "rate": "100mbit", "burst": "320kbit", "latency": "400ms" }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "backgroundLoadProtocol": null,
+    "figureKinds": [],
+    "disturbance": {
+      "kind": "local-pause-play",
+      "clients": ["c02", "c03"],
+      "pauseMs": 250,
+      "at": "measure-window-start",
+      "observationMs": 180000
+    },
+    "runLengthMs": 300000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 180000,
+    "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "peerFractionAbsMax": 0.02,
+      "originClientAgreementAbsMax": 0.02,
+      "driftLogMissedMax": 0
+    },
+    "feeds": ["playback-requalification", "maximum-rate-evidence"]
   }
 }

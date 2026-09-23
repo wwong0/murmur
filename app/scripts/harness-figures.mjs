@@ -4,7 +4,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computeFigures, guardRegimes } from './figures/harness-figures.mjs';
+import { pairwiseDrift } from './figures/pairwise-drift.mjs';
+import { driftContext, driftFigure } from './figures/drift-context.mjs';
+import { startResiduals, stepFits, maxRateEvidence, maxRateCompletion } from './figures/start-requalification.mjs';
 import { bytesByClientCsv, publish, utilisationCsv } from './figures/publication.mjs';
+import { driftSeriesCsv, driftSvg } from './figures/drift-plot.mjs';
 
 function readJson(filePath, fallback = undefined) {
   if (!filePath) return fallback;
@@ -48,6 +52,7 @@ function clientStreams(runDir, manifest) {
     const declaration = manifest.clients?.[tag] ?? {};
     return [tag, {
       ...declaration,
+      starts: declaration.boundaries?.end?.playback?.starts ?? [],
       records: readNdjson(recordsFile),
       polls: readNdjson(pollFile),
       requests: readNdjson(requestFile),
@@ -62,6 +67,8 @@ export function readRunDirectory(runDir) {
   const originEnd = counterFrom(readJson(path.join(runDir, 'origin-counters-end.json')));
   const window = manifest.window ?? manifest.measureWindow;
   const context = manifest.context ?? manifest;
+  const tags = manifest.declaredClientTags ?? manifest.clientTags ?? manifest.condition?.clientTags
+    ?? Object.keys(manifest.clients ?? {});
   const input = {
     byteAccountingMethod: manifest.byteAccountingMethod,
     window,
@@ -71,9 +78,12 @@ export function readRunDirectory(runDir) {
     declaredClientTags: manifest.declaredClientTags ?? manifest.clientTags,
     content: manifest.content,
     condition: manifest.condition,
+    disturbance: manifest.disturbance ?? null,
     context,
     capacityBitsPerSecond: manifest.condition?.capacityBitsPerSecond ?? (manifest.condition?.capacityMbps * 1_000_000),
     linkSamples: readNdjson(path.join(runDir, 'origin-link.ndjson')),
+    clockJoin: Object.fromEntries([...new Set(tags)].map((tag) => [tag,
+      readJson(path.join(runDir, `client-${tag}.clock-join.json`))])),
   };
   return { manifest, input, storedFigures: readJson(firstFile(runDir, ['published-figures.json', 'figures.json']), undefined) };
 }
@@ -87,11 +97,66 @@ export function recomputeRunDirectory(runDir) {
     bytesByClient: bytesByClientCsv(publishedByte),
     utilisation: utilisationCsv(publishedByte),
   };
-  return {
+  const report = {
     figures, publishedByte, csv,
     accountingMethod: figures.byteAccountingMethod ?? 'legacy-origin-close-vs-client-receipt',
     regime: guardRegimes([{ ...retained.input, name: retained.manifest.condition?.name }]),
   };
+  const figureKinds = retained.manifest.condition?.figureKinds;
+  if (Array.isArray(figureKinds) && figureKinds.includes('drift')) {
+    const contextFields = driftContext({
+      clients: retained.input.clients,
+      tags: retained.input.declaredClientTags,
+      window: retained.input.window,
+      manifest: retained.manifest,
+      clockJoin: retained.input.clockJoin,
+    });
+    const pairwise = pairwiseDrift({
+      clients: retained.input.clients,
+      tags: retained.input.declaredClientTags,
+      window: retained.input.window,
+      frameRate: retained.input.content?.frameRate,
+      presentIntervalMsByClient: contextFields.presentIntervalMsByClient,
+      targets: retained.input.condition?.criterion,
+    });
+    const drift = driftFigure({
+      figures,
+      pairwise,
+      context: { ...context, ...contextFields },
+      condition: retained.input.condition,
+      window: retained.input.window,
+      content: retained.input.content,
+    });
+    const publishedDrift = publish('drift', drift, { ...context, ...contextFields });
+    report.publishedDrift = publishedDrift;
+    if (publishedDrift.published !== false) {
+      report.driftCsv = driftSeriesCsv(publishedDrift);
+      report.driftSvg = driftSvg(publishedDrift);
+    }
+  }
+  if (Array.isArray(figureKinds)) {
+    const clients = retained.input.clients;
+    const tags = retained.input.declaredClientTags;
+    const starts = startResiduals({ clients, tags, content: retained.input.content });
+    const fits = stepFits({ clients, tags, content: retained.input.content });
+    const requalification = { startResiduals: starts, stepFits: fits };
+    const disturbance = retained.input.disturbance;
+    if (disturbance?.results && typeof disturbance.results === 'object') {
+      const evidence = Object.fromEntries(Object.entries(disturbance.results).map(([tag, result]) => [tag,
+        maxRateEvidence({
+          records: clients[tag]?.records,
+          polls: clients[tag]?.polls,
+          disturbance: { ...result, observationMs: disturbance.observationMs },
+          driftLogMissed: clients[tag]?.driftLogMissed,
+          bars: retained.input.condition?.bars,
+        })
+      ]));
+      requalification.maxRateEvidence = evidence;
+      requalification.maxRateCompletion = maxRateCompletion(evidence);
+    }
+    report.requalification = requalification;
+  }
+  return report;
 }
 
 function main() {

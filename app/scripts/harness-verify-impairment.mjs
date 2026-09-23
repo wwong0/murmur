@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 
 import { percentile } from '../public/lib/frame-drift.mjs';
 import { prepareRunDirectory } from './runner/core.mjs';
-import { applyQdiscs, clearInterface, defaultExec, dockerExec, networkSubnet, resolveInterface } from '../harness/apply-qdisc.mjs';
+import { applyQdiscs, clearInterface, defaultExec, dockerExec, networkSubnet, parseQdiscLines, resolveInterface } from '../harness/apply-qdisc.mjs';
 import { CLIENT_ORIGIN_URL, MEDIA_NETWORK, PROJECT, cdpPortFor, composeDown, composeUp, imageDigests } from './harness/topology.mjs';
 import { qualifyCdpBytes } from './harness/qualification.mjs';
 import { attach } from './cdp.mjs';
@@ -37,6 +37,7 @@ export const ARM_ORDER = ['uncapped', 'cap10', 'loss5', 'loss5-origin-only', 'de
 export const BARS = Object.freeze({
   goodputMinMbps: 50,
   cappedGoodputMbps: [8.5, 10.5],
+  cap100GoodputMbps: [85, 105],
   cleanLossMaxFraction: 0.005,
   impairedLossFraction: [0.03, 0.07],
   cleanMediaRttP50MaxMs: 5,
@@ -150,6 +151,67 @@ async function readWhenWritten(container, file, timeoutMs, exec) {
   throw new Error(`${container}:${file} never appeared within ${timeoutMs}ms — ${lastError?.message.split('\n')[0]}`);
 }
 
+function sinkReports(container, exec) {
+  let text;
+  try {
+    text = exec(['docker', 'logs', '--tail', '100', container]);
+  } catch {
+    return [];
+  }
+  return String(text).split('\n').flatMap((line) => {
+    try {
+      const value = JSON.parse(line);
+      return Number.isFinite(value.atMs) && Number.isFinite(value.udpBytes) ? [value] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+async function measureUdpCapacity({ origin, sink, exec = defaultExec }) {
+  const before = sinkReports(sink, exec);
+  // TCP under loss backs off before the bucket is measured; UDP isolates the capacity (6b design.md D1).
+  dockerExec(origin, ['node', 'harness/background-load.mjs', '--to=sink:9500', '--mbps=150', '--protocol=udp', '--granularity-ms=10', '--max-ms=10000', '--report=/tmp/udp-capacity.json'], exec);
+  const sender = JSON.parse(dockerExec(origin, ['cat', '/tmp/udp-capacity.json'], exec));
+  const until = Date.now() + 5_000;
+  let after = sinkReports(sink, exec);
+  while (!after.some((entry) => entry.atMs >= sender.endedAtMs) && Date.now() < until) {
+    await sleep(100);
+    after = sinkReports(sink, exec);
+  }
+  const start = [...before, ...after]
+    .filter((entry) => entry.atMs <= sender.startedAtMs)
+    .sort((left, right) => left.atMs - right.atMs)
+    .at(-1);
+  const end = after
+    .filter((entry) => entry.atMs >= sender.endedAtMs)
+    .sort((left, right) => left.atMs - right.atMs)[0];
+  if (!start || !end) throw new Error('UDP capacity: sink reports do not bracket the bounded sender interval');
+  const udpBytesDelta = end.udpBytes - start.udpBytes;
+  if (udpBytesDelta < 0) throw new RangeError(`UDP capacity: sink udpBytes moved backwards (${start.udpBytes} to ${end.udpBytes})`);
+  return {
+    sender,
+    start,
+    end,
+    udpBytesDelta,
+    elapsedMs: end.atMs - start.atMs,
+    mbps: (udpBytesDelta * 8 * 1000) / (10_000 * 1e6),
+  };
+}
+
+function readOriginImpairment({ container, ifName, exec = defaultExec }) {
+  const text = dockerExec(container, ['tc', '-s', 'qdisc', 'show', 'dev', ifName], exec);
+  const lines = parseQdiscLines(text);
+  const root = lines.find((entry) => entry.kind === 'tbf' && entry.handle === '10:' && entry.parent === 'root');
+  const child = lines.find((entry) => entry.kind === 'netem' && entry.handle === '20:' && entry.parent === '10:1');
+  const limitMatch = child?.line.match(/\blimit\s+(\d+)/);
+  return {
+    root,
+    child,
+    childLimit: limitMatch ? Number(limitMatch[1]) : null,
+  };
+}
+
 /**
  * The codec, and an actual decode. `canPlayType` alone would pass against a
  * build that claims H.264 and decodes nothing, which is exactly what a Chromium
@@ -168,7 +230,7 @@ export async function verifyCodecAndDecode(tab, { origin = CLIENT_ORIGIN_URL, wi
 // --- the arms ------------------------------------------------------------
 
 async function armMeasurements(name, context) {
-  const { containers, originMedia, clientMedia, tab } = context;
+  const { containers, originMedia, clientMedia, tab, exec = defaultExec } = context;
   const client = containers.c01;
   const origin = containers.origin;
 
@@ -188,10 +250,21 @@ async function armMeasurements(name, context) {
       cdpQualification: await qualifyCdpBytes(tab, { originContainer: origin }),
     };
   }
+  if (name === 'cap100') {
+    return { goodput: measureGoodput(client, { exec }) };
+  }
   if (name === 'loss5' || name === 'loss5-origin-only') {
     return {
       lossOriginToClient: await measureUdpLoss({ fromContainer: origin, toContainer: client, toAddress: clientMedia.address, port: 9603 }),
       lossClientToOrigin: await measureUdpLoss({ fromContainer: client, toContainer: origin, toAddress: originMedia.address, port: 9604 }),
+    };
+  }
+  if (name === 'loss5-cap100') {
+    return {
+      lossOriginToClient: await measureUdpLoss({ fromContainer: origin, toContainer: client, toAddress: clientMedia.address, port: 9603, exec }),
+      lossClientToOrigin: await measureUdpLoss({ fromContainer: client, toContainer: origin, toAddress: originMedia.address, port: 9604, exec }),
+      originImpairment: readOriginImpairment({ container: origin, ifName: originMedia.ifName, exec }),
+      udpCapacity: await measureUdpCapacity({ origin, sink: containers.sink, exec }),
     };
   }
   return { ping: measurePing(client, originMedia.address), cdpRtt: await measureCdpRtt(tab) };
@@ -217,6 +290,9 @@ export function evaluateArm(name, measured, previous = {}) {
     assertions.push(assertion('CDP byte mapping equals the known file size on both paths',
       measured.cdpQualification.status === 'passed', measured.cdpQualification));
   }
+  if (name === 'cap100') {
+    assertions.push(within('goodput is at the declared 100 Mbps cap, two-sided', measured.goodput.mbps, BARS.cap100GoodputMbps));
+  }
   if (name === 'loss5') {
     assertions.push(withinFraction('origin to client loss is 3-7%', lossOf(measured.lossOriginToClient), BARS.impairedLossFraction));
     assertions.push(withinFraction('client to origin loss is 3-7%', lossOf(measured.lossClientToOrigin), BARS.impairedLossFraction));
@@ -225,6 +301,17 @@ export function evaluateArm(name, measured, previous = {}) {
     assertions.push(withinFraction('origin to client loss is 3-7%', lossOf(measured.lossOriginToClient), BARS.impairedLossFraction));
     assertions.push(withinFraction('client to origin loss stays at most 0.5% — the direction nothing was applied to',
       lossOf(measured.lossClientToOrigin), [0, BARS.cleanLossMaxFraction]));
+  }
+  if (name === 'loss5-cap100') {
+    assertions.push(withinFraction('origin to client loss is 3-7%', lossOf(measured.lossOriginToClient), BARS.impairedLossFraction));
+    assertions.push(withinFraction('client to origin loss is 3-7%', lossOf(measured.lossClientToOrigin), BARS.impairedLossFraction));
+    const impairment = measured.originImpairment;
+    assertions.push(assertion('origin read-back has tbf 10: at root and netem 20: under 10:1',
+      Boolean(impairment?.root && impairment?.child), { root: impairment?.root ?? null, child: impairment?.child ?? null }));
+    assertions.push(assertion('netem child limit is recorded from tc -s qdisc',
+      Number.isInteger(impairment?.childLimit) && impairment.childLimit > 0, { childLimit: impairment?.childLimit ?? null }));
+    assertions.push(within('UDP sink capacity reaches the 100 Mbps bucket, two-sided', measured.udpCapacity.mbps, BARS.cap100GoodputMbps,
+      { udpBytesDelta: measured.udpCapacity.udpBytesDelta, elapsedMs: measured.udpCapacity.elapsedMs }));
   }
   if (name === 'delay200') {
     assertions.push(within('media round trip p50 carries the declared delay', measured.ping.p50, BARS.delayedMediaRttP50Ms));
@@ -248,7 +335,7 @@ export async function runArms({ arms = ARM_ORDER, runDir, project = PROJECT, exe
     const clientMedia = resolveInterface(containers.c01, subnet, exec);
     await waitForClient();
     tab = await attach(cdpPortFor('c01'), 'about:blank', { label: 'c01' });
-    const context = { containers, originMedia, clientMedia, tab };
+    const context = { containers, originMedia, clientMedia, tab, exec };
 
     for (const name of arms) {
       const condition = conditionForName(`shakedown/${name}`);

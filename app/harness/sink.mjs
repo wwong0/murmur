@@ -1,3 +1,4 @@
+import dgram from 'node:dgram';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,10 +26,18 @@ function parseArgs(argv) {
 async function run(options) {
   const startedAtMs = Date.now();
   let totalBytes = 0;
+  let udpBytes = 0;
+  let udpDatagrams = 0;
   let connections = 0;
   let previousBytes = 0;
   let previousReportAtMs = startedAtMs;
   const sockets = new Set();
+  const udpSocket = dgram.createSocket('udp4');
+  udpSocket.on('message', (chunk) => {
+    udpBytes += chunk.length;
+    udpDatagrams += 1;
+  });
+  udpSocket.on('error', () => {});
   const server = net.createServer((socket) => {
     sockets.add(socket);
     socket.once('close', () => sockets.delete(socket));
@@ -79,16 +88,22 @@ async function run(options) {
     });
   });
 
-  await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(options.port, '0.0.0.0', resolve);
-  });
+  await Promise.all([
+    new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(options.port, '0.0.0.0', resolve);
+    }),
+    new Promise((resolve, reject) => {
+      udpSocket.once('error', reject);
+      udpSocket.bind(options.port, '0.0.0.0', resolve);
+    }),
+  ]);
 
   const report = () => {
     const atMs = Date.now();
     const elapsedMs = Math.max(1, atMs - previousReportAtMs);
     const bytesPerSecond = ((totalBytes - previousBytes) * 1000) / elapsedMs;
-    console.log(JSON.stringify({ atMs, connections, totalBytes, bytesPerSecond }));
+    console.log(JSON.stringify({ atMs, connections, totalBytes, bytesPerSecond, udpBytes, udpDatagrams }));
     previousBytes = totalBytes;
     previousReportAtMs = atMs;
   };
@@ -97,7 +112,14 @@ async function run(options) {
     const stop = () => {
       clearInterval(timer);
       for (const socket of sockets) socket.destroy();
-      server.close(() => resolve());
+      let closed = false;
+      const finish = () => {
+        if (closed) return;
+        closed = true;
+        resolve();
+      };
+      try { udpSocket.close(finish); } catch { finish(); }
+      server.close(finish);
     };
     process.once('SIGTERM', stop);
     process.once('SIGINT', stop);

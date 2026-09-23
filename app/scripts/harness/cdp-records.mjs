@@ -16,6 +16,35 @@ export function isTabTakenNetworkFrame(params) {
   return message?.type === 'error' && code === 'tab-taken';
 }
 
+export function attachClockJoinRecorder(tab) {
+  const joined = [];
+  const echoSent = [];
+  const echoReplies = [];
+  const stamp = (params) => finite(params?.timestamp) ? { cdpMs: params.timestamp * 1000 } : null;
+  const off = [
+    tab.on('Network.webSocketFrameReceived', (params) => {
+      const message = framePayload(params);
+      const at = stamp(params);
+      if (!at) return;
+      if (message?.type === 'joined') joined.push(at);
+      if (joined.length && message?.type === 'echo-reply' && echoReplies.length < 20) echoReplies.push(at);
+    }),
+    tab.on('Network.webSocketFrameSent', (params) => {
+      const message = framePayload(params);
+      const at = stamp(params);
+      if (at && joined.length && message?.type === 'echo' && echoSent.length < 20) echoSent.push(at);
+    }),
+  ];
+  return {
+    snapshot() {
+      return { timebase: 'cdp-monotonic', joined: joined.map((entry) => ({ ...entry })), echoSent: echoSent.map((entry) => ({ ...entry })), echoReplies: echoReplies.map((entry) => ({ ...entry })) };
+    },
+    dispose() {
+      for (const remove of off) remove();
+    },
+  };
+}
+
 export function attachTabTakenDetector(tab, onCollision) {
   return tab.on('Network.webSocketFrameReceived', (params) => {
     if (isTabTakenNetworkFrame(params)) onCollision(params);

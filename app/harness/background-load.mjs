@@ -1,13 +1,15 @@
 import fs from 'node:fs';
+import dgram from 'node:dgram';
 import net from 'node:net';
 import path from 'node:path';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 
-const USAGE = 'node harness/background-load.mjs --to=<host:port> --mbps=<number|null> [--granularity-ms=<ms>] [--max-ms=<ms>] [--report=<path>]';
+const USAGE = 'node harness/background-load.mjs --to=<host:port> --mbps=<number|null> [--protocol=tcp|udp] [--granularity-ms=<ms>] [--max-ms=<ms>] [--report=<path>]';
+export const UDP_PAYLOAD_BYTES = 1400;
 
-function parseArgs(argv) {
-  const allowed = new Set(['to', 'mbps', 'granularity-ms', 'max-ms', 'report']);
+export function parseArgs(argv) {
+  const allowed = new Set(['to', 'mbps', 'granularity-ms', 'max-ms', 'report', 'protocol']);
   const values = {};
   for (const arg of argv) {
     if (!arg.startsWith('--') || !arg.includes('=')) throw new Error(`invalid argument "${arg}"; use ${USAGE}`);
@@ -23,7 +25,21 @@ function parseArgs(argv) {
   if (!Number.isFinite(granularityMs) || granularityMs <= 0) throw new Error('--granularity-ms must be greater than zero');
   const maxMs = values['max-ms'] === undefined ? null : Number(values['max-ms']);
   if (maxMs !== null && (!Number.isFinite(maxMs) || maxMs < 0)) throw new Error('--max-ms must be finite and non-negative');
-  return { to: values.to, mbps, granularityMs, maxMs, report: values.report ?? null };
+  const protocol = values.protocol ?? 'tcp';
+  if (protocol !== 'tcp' && protocol !== 'udp') throw new Error('--protocol must be tcp or udp');
+  return { to: values.to, mbps, granularityMs, maxMs, protocol, report: values.report ?? null };
+}
+
+// Carrying sub-datagram bytes prevents paced UDP from underfilling each tick (6b design.md D1).
+export function udpPacingTick({ mbps, granularityMs, remainderBytes = 0, payloadBytes = UDP_PAYLOAD_BYTES }) {
+  if (!Number.isFinite(mbps) || mbps < 0) throw new RangeError('mbps must be a finite non-negative number');
+  if (!Number.isFinite(granularityMs) || granularityMs <= 0) throw new RangeError('granularityMs must be greater than zero');
+  if (!Number.isFinite(remainderBytes) || remainderBytes < 0) throw new RangeError('remainderBytes must be finite and non-negative');
+  if (!Number.isInteger(payloadBytes) || payloadBytes <= 0) throw new RangeError('payloadBytes must be a positive integer');
+  const bytesPerTick = mbps * 1e6 / 8 * granularityMs / 1000;
+  const availableBytes = remainderBytes + bytesPerTick;
+  const datagrams = Math.floor(availableBytes / payloadBytes);
+  return { bytesPerTick, datagrams, remainderBytes: availableBytes - datagrams * payloadBytes };
 }
 
 function parseEndpoint(value) {
@@ -46,11 +62,18 @@ function waitUntil(monotonicStart, targetMs) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, targetMs - elapsedMs)));
 }
 
+function recordUdpError(state, error) {
+  const code = error?.code ?? 'UNKNOWN';
+  state.sendErrors[code] = (state.sendErrors[code] ?? 0) + 1;
+}
+
 async function run(options) {
   const startedAtMs = Date.now();
   const monotonicStart = process.hrtime.bigint();
   const state = {
     bytesWritten: 0,
+    datagramsSent: 0,
+    sendErrors: {},
     drainWaits: 0,
     errors: [],
     endedAtMs: null,
@@ -65,8 +88,10 @@ async function run(options) {
   const makeReport = () => {
     const endedAtMs = state.endedAtMs ?? Date.now();
     const elapsedMs = Math.max(1, endedAtMs - startedAtMs);
-    return {
+    const report = {
       mbps: options.mbps,
+      protocol: options.protocol,
+      payloadBytes: options.protocol === 'udp' ? UDP_PAYLOAD_BYTES : null,
       granularityMs: options.granularityMs,
       startedAtMs,
       endedAtMs,
@@ -75,6 +100,11 @@ async function run(options) {
       drainWaits: state.drainWaits,
       errors: state.errors,
     };
+    if (options.protocol === 'udp') {
+      report.datagramsSent = state.datagramsSent;
+      report.sendErrors = state.sendErrors;
+    }
+    return report;
   };
   const finalize = (code = 0) => {
     if (state.finished) return;
@@ -86,7 +116,10 @@ async function run(options) {
 
   const stopForSignal = () => {
     state.stopping = true;
-    if (socket) socket.destroy();
+    if (socket) {
+      if (options.protocol === 'udp') socket.close();
+      else socket.destroy();
+    }
   };
   process.once('SIGTERM', stopForSignal);
   process.once('SIGINT', stopForSignal);
@@ -97,6 +130,47 @@ async function run(options) {
   }
 
   const endpoint = parseEndpoint(options.to);
+  if (options.protocol === 'udp') {
+    socket = dgram.createSocket('udp4');
+    socket.on('error', (error) => recordUdpError(state, error));
+    await new Promise((resolve, reject) => {
+      socket.once('listening', resolve);
+      socket.once('error', reject);
+      socket.bind(0, '0.0.0.0');
+    });
+    const payload = Buffer.alloc(UDP_PAYLOAD_BYTES);
+    let remainderBytes = 0;
+    let tick = options.granularityMs;
+    while (!state.stopping) {
+      if (options.maxMs !== null && tick > options.maxMs) break;
+      await waitUntil(monotonicStart, tick);
+      if (state.stopping) break;
+      const pacing = udpPacingTick({ mbps: options.mbps, granularityMs: options.granularityMs, remainderBytes });
+      remainderBytes = pacing.remainderBytes;
+      for (let index = 0; index < pacing.datagrams; index++) {
+        try {
+          socket.send(payload, endpoint.port, endpoint.host, (error) => {
+            if (error) recordUdpError(state, error);
+            else {
+              state.datagramsSent += 1;
+              state.bytesWritten += payload.length;
+            }
+          });
+        } catch (error) {
+          recordUdpError(state, error);
+        }
+      }
+      tick += options.granularityMs;
+    }
+    state.stopping = true;
+    if (socket) {
+      await new Promise((resolve) => {
+        try { socket.close(resolve); } catch { resolve(); }
+      });
+    }
+    finalize(0);
+    return;
+  }
   socket = net.createConnection(endpoint);
   let socketError = null;
   socket.on('error', (error) => {

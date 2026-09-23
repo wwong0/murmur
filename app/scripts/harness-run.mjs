@@ -6,7 +6,8 @@ import { createDeadline, createManifestFile, createNdjson, prepareRunDirectory, 
 import { startOriginMonitor, stopOriginMonitor } from './runner/origin-monitor.mjs';
 import { recomputeRunDirectory } from './harness-figures.mjs';
 import { isPublishedFigure } from './figures/publication.mjs';
-import { attachTabTakenDetector, boundaryExpression, createRequestRecorder, installStallRecorder, pollExpression } from './harness/cdp-records.mjs';
+import { attachClockJoinRecorder, attachTabTakenDetector, boundaryExpression, createRequestRecorder, installStallRecorder, pollExpression } from './harness/cdp-records.mjs';
+import { maybeInjectDisturbance } from './harness/disturbance.mjs';
 import { qualifyCdpBytes as defaultQualifyCdpBytes } from './harness/qualification.mjs';
 import { evaluateRefusals } from './harness/refusals.mjs';
 
@@ -130,6 +131,7 @@ function initialManifest(conditionName, condition, runDir, startedAt, tags) {
     regime: JSON.parse(JSON.stringify(condition)),
     cadence: null,
     cdpQualification: null,
+    disturbance: condition.disturbance ?? null,
     topology: { status: 'pending', qdiscs: condition.qdiscs },
     cleanup: { status: 'pending' },
     failures: [],
@@ -144,6 +146,13 @@ async function waitUntil(deadline, atMs) {
   while (Date.now() < atMs) {
     deadline.check('run');
     await sleep(Math.min(1000, Math.max(1, atMs - Date.now())));
+  }
+}
+
+async function waitUntilAfter(deadline, atMs) {
+  while (Date.now() <= atMs) {
+    deadline.check('run');
+    await sleep(Math.min(1000, Math.max(1, atMs + 1 - Date.now())));
   }
 }
 
@@ -201,6 +210,7 @@ async function prepareClient(session, url, deadline) {
   const pageClock = await tab.evaluate('({ wallMs: Date.now(), performanceNowMs: performance.now() })');
   recorder.setPageMapping(pageClock);
   session.removeCollisionListener = attachTabTakenDetector(tab, () => { session.tabCollision = true; });
+  session.clockJoinRecorder = attachClockJoinRecorder(tab);
   await tab.send('Page.navigate', { url });
   await deadline.waitFor(`client ${session.tag}`, () => tab.evaluate('Boolean(document.body && window.__app)'), Boolean, 30_000, 100);
   await tab.evaluate(installStallRecorder(session.stallEpoch));
@@ -270,28 +280,40 @@ function queuedDrain(session, ndjson, atMs = Date.now()) {
   return session.drainChain;
 }
 
-export function decideFinalization({ evaluation, recomputed, failure = null, recomputeError = null, retainedOverflow = false, cleanupFailure = null } = {}) {
+export function decideFinalization({ evaluation, recomputed, figureKinds, failure = null, recomputeError = null, retainedOverflow = false, cleanupFailure = null } = {}) {
+  const hasKinds = Array.isArray(figureKinds);
+  const byteAllowed = !hasKinds || figureKinds.includes('byte');
+  const driftAllowed = hasKinds && figureKinds.includes('drift');
+  const publishedByte = isPublishedFigure(recomputed?.publishedByte);
+  const publishedDrift = isPublishedFigure(recomputed?.publishedDrift);
+  const byteEligible = evaluation?.figures?.byte
+    ?? (!evaluation?.refused && !evaluation?.runRefused);
+  const eligibleByte = () => byteAllowed && byteEligible && publishedByte;
+  const eligibleDrift = () => driftAllowed && evaluation?.figures?.drift === true
+    && !evaluation?.runRefused && publishedDrift;
   if (failure || recomputeError || retainedOverflow) {
-    return { status: 'aborted', outcome: 'failed', exitCode: 1, writeByte: false, reason: 'instrument-failure' };
+    return { status: 'aborted', outcome: 'failed', exitCode: 1, writeByte: false, writeDrift: false, reason: 'instrument-failure' };
   }
   if (evaluation?.runRefused) {
     return {
       status: 'refused',
       outcome: 'refused',
       exitCode: 1,
-      writeByte: evaluation.figures?.byte === true && isPublishedFigure(recomputed?.publishedByte),
+      writeByte: eligibleByte(),
+      writeDrift: false,
       reason: 'run-refusal',
     };
   }
   if (cleanupFailure) {
-    return { status: 'aborted', outcome: 'failed', exitCode: 1, writeByte: false, reason: 'cleanup-failure' };
+    return { status: 'aborted', outcome: 'failed', exitCode: 1, writeByte: false, writeDrift: false, reason: 'cleanup-failure' };
   }
   if (evaluation?.refused) {
     return {
       status: 'complete',
       outcome: 'pass',
       exitCode: 0,
-      writeByte: evaluation.figures?.byte === true && isPublishedFigure(recomputed?.publishedByte),
+      writeByte: eligibleByte(),
+      writeDrift: eligibleDrift(),
       reason: 'publication-refusal',
     };
   }
@@ -299,13 +321,14 @@ export function decideFinalization({ evaluation, recomputed, failure = null, rec
     status: 'complete',
     outcome: 'pass',
     exitCode: 0,
-    writeByte: isPublishedFigure(recomputed?.publishedByte),
+    writeByte: eligibleByte(),
+    writeDrift: eligibleDrift(),
     reason: 'published',
   };
 }
 
 function clearPublishedOutputs(runDir) {
-  for (const name of ['published-figures.json', 'bytes-by-client.csv', 'utilisation.csv']) {
+  for (const name of ['published-figures.json', 'bytes-by-client.csv', 'utilisation.csv', 'published-drift.json', 'drift-series.csv', 'drift.svg']) {
     fs.rmSync(path.join(runDir, name), { force: true });
   }
 }
@@ -313,27 +336,41 @@ function clearPublishedOutputs(runDir) {
 export function settleFinalization({ decision, manifestFile, runDir, recomputed, evaluation, cleanupFailure, startedAt, retained, writeFile = fs.writeFileSync, renameFile = fs.renameSync }) {
   const temporary = [];
   try {
+    const outputs = [];
     if (decision.writeByte) {
       if (!isPublishedFigure(recomputed?.publishedByte)) throw new Error('byte output is not a published figure');
       if (!recomputed.csv) throw new Error('published byte figure has no CSV output');
-      const outputs = [
+      outputs.push(...[
         ['published-figures.json', `${JSON.stringify(recomputed.publishedByte, null, 2)}\n`],
         ['bytes-by-client.csv', recomputed.csv.bytesByClient],
         ['utilisation.csv', recomputed.csv.utilisation],
-      ];
-      for (const [name, contents] of outputs) {
-        const tempPath = path.join(runDir, `.${name}.${crypto.randomUUID()}.tmp`);
-        temporary.push(tempPath);
-        writeFile(tempPath, contents);
-      }
-      for (const [name] of outputs) renameFile(temporary.shift(), path.join(runDir, name));
+      ]);
     }
+    if (decision.writeDrift) {
+      if (!isPublishedFigure(recomputed?.publishedDrift)) throw new Error('drift output is not a published figure');
+      if (recomputed.driftCsv === undefined || recomputed.driftSvg === undefined) throw new Error('published drift figure has no plot output');
+      outputs.push(...[
+        ['published-drift.json', `${JSON.stringify(recomputed.publishedDrift, null, 2)}\n`],
+        ['drift-series.csv', recomputed.driftCsv],
+        ['drift.svg', recomputed.driftSvg],
+      ]);
+    }
+    for (const [name, contents] of outputs) {
+      const tempPath = path.join(runDir, `.${name}.${crypto.randomUUID()}.tmp`);
+      temporary.push(tempPath);
+      writeFile(tempPath, contents);
+    }
+    for (const [name] of outputs) renameFile(temporary.shift(), path.join(runDir, name));
+    const figures = {};
+    if (decision.writeByte) figures.byte = recomputed.publishedByte;
+    if (decision.writeDrift) figures.drift = recomputed.publishedDrift;
     manifestFile.merge({
       status: decision.status,
       outcome: decision.outcome,
       refusalReasons: evaluation?.reasons ?? [],
       figureEligibility: evaluation?.figures ?? {},
-      figures: decision.writeByte ? { byte: recomputed.publishedByte } : {},
+      figures,
+      ...(recomputed?.publishedDrift?.published === false ? { driftPublication: recomputed.publishedDrift } : {}),
       cleanup: cleanupFailure ? { status: 'failed', error: cleanupFailure.message } : { status: 'complete' },
       failures: cleanupFailure ? [cleanupFailure.message] : [],
       runEndedAt: new Date().toISOString(),
@@ -381,12 +418,16 @@ function evidenceFor(sessions, originStart, originEnd, manifest) {
 
 async function disposeSession(session) {
   session.removeCollisionListener?.();
+  session.clockJoinRecorder?.dispose();
   session.recorder?.dispose();
   if (session.dispose) await session.dispose();
 }
 
 export async function runHarness({ conditionName, runDir = defaultRunDir(conditionName), originUrl, clientOriginUrl = originUrl, topology = section3Topology(), clientFactory = noClientFactory, establishCadence = defaultEstablishCadence, qualifyCdpBytes = defaultQualifyCdpBytes } = {}) {
   const condition = conditionForName(conditionName);
+  if (condition.backgroundLoadProtocol === 'udp' && condition.backgroundLoadMbps == null) {
+    throw new Error(`UDP background load requires a declared rate for condition ${condition.name}`);
+  }
   const startedAt = Date.now();
   const tags = tagsFor(condition);
   const roles = tags.map((tag, index) => index === 0 ? 'host' : 'viewer');
@@ -406,6 +447,7 @@ export async function runHarness({ conditionName, runDir = defaultRunDir(conditi
   let cleanupFailure = null;
   let originStart;
   let originEnd;
+  let injectionHarnessMs = null;
   try {
     const preparedTopology = await topology.prepare({ condition, runDir: prepared.runDir, manifest: manifestFile.get() });
     manifestFile.merge({ topology: { status: 'prepared', ...preparedTopology } });
@@ -452,12 +494,23 @@ export async function runHarness({ conditionName, runDir = defaultRunDir(conditi
       loops.push(poll, drain);
     }
     await waitUntil(deadline, manifestFile.get().window.startMs);
+    if (condition.disturbance) {
+      const injection = await maybeInjectDisturbance(sessions, condition.disturbance);
+      injectionHarnessMs = injection.injectionHarnessMs;
+      const disturbance = { ...condition.disturbance, ...injection };
+      manifestFile.merge({ disturbance });
+      fs.writeFileSync(path.join(prepared.runDir, 'disturbance.json'), `${JSON.stringify(disturbance, null, 2)}\n`);
+      manifestFile.write();
+    }
     const startBoundary = await captureBoundary('start', sessions, originUrl, manifestFile.get(), manifestFile, ndjson);
     originStart = startBoundary.origin;
     await waitUntil(deadline, manifestFile.get().window.endMs);
     const endBoundary = await captureBoundary('end', sessions, originUrl, manifestFile.get(), manifestFile, ndjson);
     originEnd = endBoundary.origin;
     for (const session of sessions) session.endPlayback = endBoundary.snapshots[session.tag]?.playback;
+    if (condition.disturbance && injectionHarnessMs !== null) {
+      await waitUntilAfter(deadline, injectionHarnessMs + condition.disturbance.observationMs + 2000);
+    }
     await Promise.all(sessions.map((session) => queuedDrain(session, ndjson)));
   } catch (error) {
     failure ??= error;
@@ -470,6 +523,10 @@ export async function runHarness({ conditionName, runDir = defaultRunDir(conditi
         const requests = session.recorder?.flush() ?? [];
         if (requests.length) ndjson.append(`client-${session.tag}.requests.ndjson`, requests);
         if (session.echoRecords?.length) ndjson.append(`client-${session.tag}.echo.ndjson`, session.echoRecords);
+        if (session.clockJoinRecorder) {
+          fs.writeFileSync(path.join(prepared.runDir, `client-${session.tag}.clock-join.json`),
+            `${JSON.stringify(session.clockJoinRecorder.snapshot(), null, 2)}\n`);
+        }
         manifestFile.merge({ clients: { ...manifestFile.get().clients, [session.tag]: {
           ...manifestFile.get().clients[session.tag],
           requestTimebase: 'measure-window',
@@ -504,7 +561,12 @@ export async function runHarness({ conditionName, runDir = defaultRunDir(conditi
     recomputed = recomputeRunDirectory(prepared.runDir);
     const publicationContext = { ...manifestFile.get(), ...recomputed.figures, declaredClientTags: tags };
     evaluation = evaluateRefusals({ ...evidenceFor(sessions, originStart, originEnd, manifestFile.get()), publicationContext });
-    const decision = decideFinalization({ evaluation, recomputed, cleanupFailure });
+    const decision = decideFinalization({
+      evaluation,
+      recomputed,
+      figureKinds: manifestFile.get().condition?.figureKinds,
+      cleanupFailure,
+    });
     const report = { ...recomputed, refusal: evaluation, finalization: decision };
     settleFinalization({ decision, manifestFile, runDir: prepared.runDir, recomputed, evaluation, cleanupFailure, startedAt, retained });
     fs.writeFileSync(path.join(prepared.runDir, 'refusal-report.json'), `${JSON.stringify(report, null, 2)}\n`);
