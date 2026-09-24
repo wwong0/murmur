@@ -42,6 +42,13 @@ function branchFiles() {
   } catch {
     return null;
   }
+  // HEAD already in main — `main` itself, or a branch with nothing of its own —
+  // has no branch commits to read. That is not the empty read the size guard
+  // below exists to catch.
+  try {
+    git(['merge-base', '--is-ancestor', 'HEAD', 'main']);
+    return 'on-main';
+  } catch {}
   // `main...HEAD` and not `main..HEAD`: the two-dot form re-reports every file
   // main has moved on to since this branch left it, which is not this branch's
   // doing and would make the assertion fail for someone else's commit.
@@ -54,6 +61,10 @@ export default async function harnessRecordsSuite() {
     const files = branchFiles();
     if (files === null) {
       assert(true, 'not a git work tree — the branch history cannot be read and the rule is not evaluated here');
+      return;
+    }
+    if (files === 'on-main') {
+      assert(true, 'HEAD is contained in main — there is no branch here and the rule is not evaluated');
       return;
     }
     assert(files.size > 0, 'the branch has commits to check, so a pass means the file was absent and not that nothing was read');
