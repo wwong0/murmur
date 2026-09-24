@@ -10,7 +10,7 @@ export const RATE_WINDOW_MS = 1000;
 const CONTROL_TYPES = new Set(['req', 'abort', 'head', 'end', 'err']);
 const textEncoder = new TextEncoder();
 
-function asBytes(value) {
+export function asBytes(value) {
   if (value instanceof ArrayBuffer) return new Uint8Array(value);
   if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
   throw new TypeError('segment payload must be an ArrayBuffer or view');
@@ -84,18 +84,17 @@ export function sliceForRange(total, range) {
   return { status: 206, start: range.start, end, length: end - range.start + 1 };
 }
 
-function setting(settings, camel, upper, fallback) {
-  const value = settings?.[camel] ?? settings?.[upper];
-  return Number.isFinite(value) ? value : fallback;
+function setting(settings, name, fallback) {
+  return Number.isFinite(settings?.[name]) ? settings[name] : fallback;
 }
 
 export function createChannelSender({ channel, clock, settings = {}, onClosed = null, onCredited = null }) {
   const config = {
-    chunkPayloadBytes: setting(settings, 'chunkPayloadBytes', 'CHUNK_PAYLOAD_BYTES', CHUNK_PAYLOAD_BYTES),
-    firstByteBudgetMs: setting(settings, 'firstByteBudgetMs', 'FIRST_BYTE_BUDGET_MS', FIRST_BYTE_BUDGET_MS),
-    bufferFloorBytes: setting(settings, 'bufferFloorBytes', 'BUFFER_FLOOR_BYTES', BUFFER_FLOOR_BYTES),
-    drainPollMs: setting(settings, 'drainPollMs', 'DRAIN_POLL_MS', DRAIN_POLL_MS),
-    rateWindowMs: setting(settings, 'rateWindowMs', 'RATE_WINDOW_MS', RATE_WINDOW_MS),
+    chunkPayloadBytes: setting(settings, 'chunkPayloadBytes', CHUNK_PAYLOAD_BYTES),
+    firstByteBudgetMs: setting(settings, 'firstByteBudgetMs', FIRST_BYTE_BUDGET_MS),
+    bufferFloorBytes: setting(settings, 'bufferFloorBytes', BUFFER_FLOOR_BYTES),
+    drainPollMs: setting(settings, 'drainPollMs', DRAIN_POLL_MS),
+    rateWindowMs: setting(settings, 'rateWindowMs', RATE_WINDOW_MS),
   };
   const bodies = new Map();
   const order = [];
@@ -159,7 +158,7 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
     waiting = false;
     if (timer !== null) clock.clearTimeout(timer);
     timer = null;
-    channel.removeEventListener('bufferedamountlow', onLow);
+    channel.removeEventListener('bufferedamountlow', wake);
   }
 
   function notifyClosed(error) {
@@ -209,7 +208,6 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
 
   function admit() {
     while (!closed && bodies.size > 0 && channel.bufferedAmount < currentBound()) {
-      if (order.length === 0) break;
       let selected = null;
       for (let scan = 0; scan < order.length; scan++) {
         const index = (roundRobin + scan) % order.length;
@@ -247,21 +245,12 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
   function scheduleWake() {
     if (closed || waiting || (bodies.size === 0 && channel.bufferedAmount === 0)) return;
     waiting = true;
-    channel.addEventListener('bufferedamountlow', onLow);
-    timer = clock.setTimeout(onTimer, config.drainPollMs);
+    channel.addEventListener('bufferedamountlow', wake);
+    timer = clock.setTimeout(wake, config.drainPollMs);
   }
 
-  function wakeNow() {
-    cancelWait();
-    runWake();
-  }
-
-  function onLow() {
-    cancelWait();
-    runWake();
-  }
-
-  function onTimer() {
+  // The buffer-low event, the drain poll and a new body all wake the same way.
+  function wake() {
     cancelWait();
     runWake();
   }
@@ -280,7 +269,7 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
       const body = { id, bytes: payload, offset: 0, seq: 0 };
       bodies.set(id, body);
       order.push(id);
-      wakeNow();
+      wake();
       if (payload.byteLength === 0 && bodies.has(id)) {
         if (sendControl({ t: 'end', id })) removeBody(id);
       }

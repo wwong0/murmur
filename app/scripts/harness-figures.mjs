@@ -19,7 +19,7 @@ function readJson(filePath, fallback = undefined) {
   }
 }
 
-function readNdjson(filePath) {
+export function readNdjson(filePath) {
   if (!filePath) return undefined;
   try {
     return fs.readFileSync(filePath, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));

@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createDeadline, createManifestFile, createNdjson, prepareRunDirectory, retainedBytes, runFinally } from './runner/core.mjs';
 import { startOriginMonitor, stopOriginMonitor } from './runner/origin-monitor.mjs';
-import { recomputeRunDirectory } from './harness-figures.mjs';
+import { readNdjson, recomputeRunDirectory } from './harness-figures.mjs';
 import { isPublishedFigure } from './figures/publication.mjs';
 import { attachClockJoinRecorder, attachTabTakenDetector, boundaryExpression, createRequestRecorder, installStallRecorder, pollExpression } from './harness/cdp-records.mjs';
 import { maybeInjectDisturbance } from './harness/disturbance.mjs';
@@ -73,6 +73,22 @@ function tagsFor(condition) {
   return Array.from({ length: condition.clients }, (_, index) => `c${String(index + 1).padStart(2, '0')}`);
 }
 
+// Who joins a run. An http run's first client is the host; a host run adds the
+// origin-side host tab c00, and every client is a viewer.
+function runMembers(condition) {
+  const tags = tagsFor(condition);
+  if (condition.delivery !== 'host') {
+    const roles = tags.map((tag, index) => index === 0 ? 'host' : 'viewer');
+    return { hostTag: null, tags, roles, declaredTags: tags, declaredRoles: roles };
+  }
+  const roles = tags.map(() => 'viewer');
+  return { hostTag: 'c00', tags, roles, declaredTags: ['c00', ...tags], declaredRoles: ['host', ...roles] };
+}
+
+function newSession(tag, role) {
+  return { tag, role, records: [], polls: [], driftLogMissed: 0, cursor: 0, maxDrainGapMs: 0, lastDrainAt: null, stallEpoch: crypto.randomUUID(), tabCollision: false, endPlayback: null };
+}
+
 function clientDeclaration(tags, roles) {
   return Object.fromEntries(tags.map((tag, index) => [tag, {
     tag,
@@ -107,7 +123,7 @@ export function placeWindow(condition, clientsReadyAtMs) {
   };
 }
 
-function initialManifest(condition, runDir, startedAt, tags, hostTag = null) {
+function initialManifest(condition, runDir, startedAt, { tags, hostTag, declaredTags, declaredRoles }) {
   // Provisional until the clients are ready; `placeWindow` re-places it then.
   const { clientsReadyAtMs: _provisional, ...window } = placeWindow(condition, startedAt);
   return {
@@ -120,7 +136,7 @@ function initialManifest(condition, runDir, startedAt, tags, hostTag = null) {
     condition: JSON.parse(JSON.stringify(condition)),
     declaredClientTags: tags,
     clientTags: tags,
-    clients: clientDeclaration(hostTag ? [hostTag, ...tags] : tags, hostTag ? ['host', ...tags.map(() => 'viewer')] : tags.map((tag, index) => index === 0 ? 'host' : 'viewer')),
+    clients: clientDeclaration(declaredTags, declaredRoles),
     ...(hostTag ? { originTab: { tag: hostTag, role: 'host', container: 'origin' } } : {}),
     window,
     content: JSON.parse(JSON.stringify(condition.content)),
@@ -219,10 +235,9 @@ export function readyTopology(prepared, qdiscs, condition) {
 
 /**
  * How long a viewer's page may take to become ready. A host run's later viewers
- * load the bundle over the shaped link the earlier viewers' host-link streams
- * already fill, so 30 s aborted the capped arm on c05 (7a2 tasks.md, Current
- * status). The wait is before `placeWindow`, so no figure sees it; each
- * client's actual wait is recorded as `pageReadyMs`.
+ * load the bundle over a shaped link the earlier viewers already fill, and 30 s
+ * aborted a capped arm (7a2 design.md D3). The wait is before `placeWindow`, so
+ * no figure sees it; each client's wait is recorded as `pageReadyMs`.
  */
 export function clientReadyTimeoutMs(condition) {
   return condition?.delivery === 'host' ? 120_000 : 30_000;
@@ -432,15 +447,6 @@ export function settleFinalization({ decision, manifestFile, runDir, recomputed,
   }
 }
 
-function readNdjsonFile(filePath) {
-  try {
-    return fs.readFileSync(filePath, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
-  } catch (error) {
-    if (error.code === 'ENOENT') return [];
-    throw error;
-  }
-}
-
 function evidenceFor(sessions, originStart, originEnd, manifest, runDir, hostEvidence = {}) {
   return {
     condition: manifest.condition,
@@ -467,7 +473,7 @@ function evidenceFor(sessions, originStart, originEnd, manifest, runDir, hostEvi
       roomStart: hostEvidence.roomStart,
       roomEnd: hostEvidence.roomEnd,
       roomFinal: hostEvidence.roomFinal,
-      linkSamples: readNdjsonFile(path.join(runDir, 'origin-link.ndjson')),
+      linkSamples: readNdjson(path.join(runDir, 'origin-link.ndjson')) ?? [],
       receiptHealth: Object.fromEntries(sessions.map((session) => [session.tag, {
         missed: session.receiptLogMissed ?? 0,
         reset: session.receiptLogReset === true,
@@ -489,21 +495,21 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     throw new Error(`UDP background load requires a declared rate for condition ${condition.name}`);
   }
   const startedAt = Date.now();
-  const tags = tagsFor(condition);
-  const hostMode = condition.delivery === 'host';
-  const hostTag = hostMode ? 'c00' : null;
-  const roles = hostMode ? tags.map(() => 'viewer') : tags.map((tag, index) => index === 0 ? 'host' : 'viewer');
+  const members = runMembers(condition);
+  const { hostTag, tags, roles } = members;
+  const hostMode = hostTag !== null;
   const prepared = prepareRunDirectory({ appDir: APP_DIR, resultsDir: RESULTS_DIR, runDir });
-  const manifestFile = createManifestFile({ runDir: prepared.runDir, initial: initialManifest(condition, prepared.runDir, startedAt, tags, hostTag) });
+  const manifestFile = createManifestFile({ runDir: prepared.runDir, initial: initialManifest(condition, prepared.runDir, startedAt, members) });
   const ndjson = createNdjson(prepared.runDir);
   ndjson.write('origin-link.ndjson', []);
-  for (const tag of (hostTag ? [hostTag, ...tags] : tags)) for (const name of streamNames(tag)) ndjson.write(name, []);
+  for (const tag of members.declaredTags) for (const name of streamNames(tag)) ndjson.write(name, []);
   manifestFile.write();
   const maxWallMs = Math.max(60_000, condition.runLengthMs + STARTUP_ALLOWANCE_MS);
   const deadline = createDeadline({ startedAt, maxWallMs });
   const room = `harness-${crypto.randomUUID()}`;
-  const hostSession = hostMode ? { tag: hostTag, role: 'host', records: [], polls: [], driftLogMissed: 0, cursor: 0, maxDrainGapMs: 0, lastDrainAt: null, stallEpoch: crypto.randomUUID(), tabCollision: false, endPlayback: null } : null;
-  const sessions = tags.map((tag, index) => ({ tag, role: roles[index], records: [], polls: [], driftLogMissed: 0, cursor: 0, maxDrainGapMs: 0, lastDrainAt: null, stallEpoch: crypto.randomUUID(), tabCollision: false, endPlayback: null, receiptCursor: 0, receiptLogMissed: 0, receiptLogReset: false }));
+  const hostSession = hostMode ? newSession(hostTag, 'host') : null;
+  const sessions = tags.map((tag, index) => ({ ...newSession(tag, roles[index]), receiptCursor: 0, receiptLogMissed: 0, receiptLogReset: false }));
+  const allSessions = hostSession ? [hostSession, ...sessions] : sessions;
   const loops = [];
   let monitor = null;
   let failure = null;
@@ -598,7 +604,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     for (const loop of loops) loop.stop();
     await Promise.all(loops.map((loop) => loop.promise.catch(() => {})));
     if (monitor) await stopOriginMonitor(monitor);
-    for (const session of (hostSession ? [hostSession, ...sessions] : sessions)) {
+    for (const session of allSessions) {
       try {
         const requests = session.recorder?.flush() ?? [];
         if (requests.length) ndjson.append(`client-${session.tag}.requests.ndjson`, requests);

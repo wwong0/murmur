@@ -2,6 +2,7 @@
 // module can be exercised without a page, a filesystem, or a real peer.
 
 import {
+  asBytes,
   createChannelSender,
   parseControl,
   sliceForRange,
@@ -12,13 +13,7 @@ const MEDIA_PREFIX = '/media/';
 const MAP_LINE_RE = /^#EXT-X-MAP:.*$/gm;
 const MAP_URI_RE = /URI="([^"]+)"/;
 const BYTERANGE_RE = /\bBYTERANGE\s*=/i;
-
-function asBytes(value) {
-  if (value instanceof Uint8Array) return value;
-  if (value instanceof ArrayBuffer) return new Uint8Array(value);
-  if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-  throw new TypeError('host source bytes must be a Uint8Array or ArrayBuffer');
-}
+const BAD_GATEWAY = Object.freeze({ status: 502, bytes: new Uint8Array() });
 
 function uint32(value) {
   return Number.isInteger(value) && value >= 0 && value <= 0xffffffff;
@@ -150,42 +145,29 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
       active.set(control.id, entry);
       Promise.resolve()
         .then(() => read(control.path))
-        .then((source) => {
-          if (detached || entry.aborted) return;
-          const bytes = asBytes(source.bytes);
-          const range = control.range && typeof control.range === 'object' ? control.range : null;
-          const slice = source.status === 200 ? sliceForRange(bytes.byteLength, range) : { status: source.status, start: 0, end: -1, length: 0 };
-          const head = { t: 'head', id: control.id, rid: nextRid(), status: slice.status, length: slice.length };
-          if (slice.status === 206) head.total = bytes.byteLength;
-          if (sender.sendControl(head)) accounting.open({
-            channelKey,
-            id: control.id,
-            rid: head.rid,
-            path: control.path,
-            viewerTag,
-            expected: head.length,
-          });
-          if (source.status === 200 && slice.status === 200 || slice.status === 206) {
-            sender.start(control.id, bytes.subarray(slice.start, slice.start + slice.length));
-          } else {
-            sender.start(control.id, new Uint8Array());
-          }
-          if (head.length === 0) accounting.settleIfDone(channelKey, control.id, sender.pendingFrames(control.id));
-        }, () => {
-          if (detached || entry.aborted) return;
-          const head = { t: 'head', id: control.id, rid: nextRid(), status: 502, length: 0 };
-          if (sender.sendControl(head)) accounting.open({
-            channelKey,
-            id: control.id,
-            rid: head.rid,
-            path: control.path,
-            viewerTag,
-            expected: head.length,
-          });
-          sender.start(control.id, new Uint8Array());
-          accounting.settleIfDone(channelKey, control.id, sender.pendingFrames(control.id));
-        });
+        .then((source) => respond(control, entry, source), () => respond(control, entry, BAD_GATEWAY));
     };
+
+    // Every answer, a failed read included, is a head and a body; a non-2xx
+    // slice is empty, so its body is only the `end`.
+    function respond(control, entry, source) {
+      if (detached || entry.aborted) return;
+      const bytes = asBytes(source.bytes);
+      const range = control.range && typeof control.range === 'object' ? control.range : null;
+      const slice = source.status === 200 ? sliceForRange(bytes.byteLength, range) : { status: source.status, start: 0, end: -1, length: 0 };
+      const head = { t: 'head', id: control.id, rid: nextRid(), status: slice.status, length: slice.length };
+      if (slice.status === 206) head.total = bytes.byteLength;
+      if (sender.sendControl(head)) accounting.open({
+        channelKey,
+        id: control.id,
+        rid: head.rid,
+        path: control.path,
+        viewerTag,
+        expected: head.length,
+      });
+      sender.start(control.id, bytes.subarray(slice.start, slice.start + slice.length));
+      if (head.length === 0) accounting.settleIfDone(channelKey, control.id, sender.pendingFrames(control.id));
+    }
 
     channel.addEventListener('message', onMessage);
     const detach = () => {

@@ -35,6 +35,12 @@ function failedFetch() {
   return new TypeError('Failed to fetch');
 }
 
+function contentRange(range, head) {
+  const start = range?.start ?? 0;
+  const end = range?.end === null || range?.end === undefined ? start + head.length - 1 : range.end;
+  return `bytes ${start}-${end}/${head.total ?? '*'}`;
+}
+
 /** Build the fetch replacement without installing it on a global. */
 export function createShimFetch({ link, realFetch, baseUrl } = {}) {
   if (!link || typeof link.request !== 'function') throw new TypeError('createShimFetch: link is required');
@@ -97,11 +103,7 @@ export function createShimFetch({ link, realFetch, baseUrl } = {}) {
         onHead(head) {
           if (aborted || ended) return;
           const headers = new Headers({ 'Content-Length': String(head.length) });
-          if (head.status === 206) {
-            const start = range?.start ?? 0;
-            const end = range?.end === null || range?.end === undefined ? start + head.length - 1 : range.end;
-            headers.set('Content-Range', `bytes ${start}-${end}/${head.total ?? '*'}`);
-          }
+          if (head.status === 206) headers.set('Content-Range', contentRange(range, head));
           settled = true;
           resolveResponse(new Response(stream, { status: head.status, headers }));
         },
@@ -144,11 +146,10 @@ function fire(target, type, extra = {}) {
 }
 
 class LinkXhr {
-  constructor(link, path, url, method = 'GET', rejectMethod = false) {
+  constructor(link, path, rejectMethod) {
     this._link = link;
     this._path = path;
-    this._url = url;
-    this._method = method;
+    this._url = '';
     this._rejectMethod = rejectMethod;
     this._headers = new Map();
     this._responseHeaders = new Map();
@@ -205,7 +206,6 @@ class LinkXhr {
   }
 
   open(method, url) {
-    this._method = String(method || 'GET').toUpperCase();
     this._url = String(url);
     this._state(OPENED);
   }
@@ -235,12 +235,7 @@ class LinkXhr {
     this.responseURL = this._url;
     this._length = head.length;
     this._responseHeaders.set('content-length', String(head.length));
-    if (head.status === 206) {
-      const range = parseRange(this._headers.get('range'));
-      const start = range?.start ?? 0;
-      const end = range?.end === null || range?.end === undefined ? start + head.length - 1 : range.end;
-      this._responseHeaders.set('content-range', `bytes ${start}-${end}/${head.total ?? '*'}`);
-    }
+    if (head.status === 206) this._responseHeaders.set('content-range', contentRange(parseRange(this._headers.get('range')), head));
     this._state(HEADERS_RECEIVED);
   }
 
@@ -306,19 +301,17 @@ export function createShimXhr({ link, RealXHR, baseUrl } = {}) {
   class ShimXMLHttpRequest {
     constructor() {
       this._backing = null;
-      this._isLink = false;
       this._pendingHeaders = [];
       this._pendingResponseType = '';
       this._pendingProperties = new Map();
       this._pendingListeners = [];
     }
 
-    _use(backing, isLink) {
+    _use(backing) {
       this._backing = backing;
-      this._isLink = isLink;
       if (this._pendingResponseType) backing.responseType = this._pendingResponseType;
       for (const [name, value] of this._pendingProperties) backing[name] = value;
-      // A listener added before open is replayed, not copied as a field (D1-2).
+      // A listener added before open is replayed, not copied as a field (7a d1-findings D1-2).
       for (const [type, fn, options] of this._pendingListeners) backing.addEventListener(type, fn, options);
     }
 
@@ -328,24 +321,13 @@ export function createShimXhr({ link, RealXHR, baseUrl } = {}) {
 
     open(method, url, ...rest) {
       const target = mediaTarget(url, baseUrl);
-      const isMedia = Boolean(target);
-      const isGet = String(method || 'GET').toUpperCase() === 'GET';
-      if (isMedia && isGet) {
-        const backing = new LinkXhr(link, target.pathname, new URL(url, baseUrl).href);
-        this._use(backing, true);
-        backing.open(method, new URL(url, baseUrl).href, ...rest);
-        this._replayHeaders();
-      } else if (isMedia) {
-        const backing = new LinkXhr(link, target.pathname, new URL(url, baseUrl).href, String(method || 'GET').toUpperCase(), true);
-        this._use(backing, true);
-        backing.open(method, new URL(url, baseUrl).href, ...rest);
-        this._replayHeaders();
-      } else {
-        const backing = new Real();
-        this._use(backing, false);
-        backing.open(method, url, ...rest);
-        this._replayHeaders();
-      }
+      // A media request of any method goes to the link, which fails a non-GET.
+      const backing = target
+        ? new LinkXhr(link, target.pathname, String(method || 'GET').toUpperCase() !== 'GET')
+        : new Real();
+      this._use(backing);
+      backing.open(method, target ? target.href : url, ...rest);
+      this._replayHeaders();
     }
 
     setRequestHeader(name, value) {
@@ -386,13 +368,6 @@ export function createShimXhr({ link, RealXHR, baseUrl } = {}) {
       },
     });
   }
-  // Replay listeners assigned before open after the backing is selected.
-  const originalUse = ShimXMLHttpRequest.prototype._use;
-  ShimXMLHttpRequest.prototype._use = function use(backing, isLink) {
-    originalUse.call(this, backing, isLink);
-    for (const [type, fn, options] of this._pendingProperties.get('_listeners') ?? []) backing.addEventListener(type, fn, options);
-  };
-
   ShimXMLHttpRequest.UNSENT = UNSENT;
   ShimXMLHttpRequest.OPENED = OPENED;
   ShimXMLHttpRequest.HEADERS_RECEIVED = HEADERS_RECEIVED;

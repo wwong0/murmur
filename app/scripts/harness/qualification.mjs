@@ -68,6 +68,17 @@ export function validateCdpQualification(record) {
   };
 }
 
+// The four byte counts agree, the viewer saw the response finish and the host
+// did not record it aborted. Each caller coerces its own inputs first.
+function linkReceiptsAgree({ statSizeBytes, fetchedBytes, receiptBodyBytes, hostDeliveredBytes, receipt, hostRecord }) {
+  return [fetchedBytes, receiptBodyBytes, hostDeliveredBytes, statSizeBytes].every(finite)
+    && fetchedBytes === receiptBodyBytes
+    && receiptBodyBytes === hostDeliveredBytes
+    && hostDeliveredBytes === statSizeBytes
+    && receipt?.finished === true
+    && hostRecord?.aborted === false;
+}
+
 async function waitForOpen(tab, timeoutMs = 30_000) {
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
@@ -98,12 +109,7 @@ export async function qualifyLinkReceipts(viewerTab, hostTab, { originContainer,
   }
   const receiptBodyBytes = Number(receipt?.bodyBytes);
   const hostDeliveredBytes = Number(hostRecord?.delivered);
-  const passed = [fetchedBytes, receiptBodyBytes, hostDeliveredBytes, statSizeBytes].every(finite)
-    && fetchedBytes === receiptBodyBytes
-    && receiptBodyBytes === hostDeliveredBytes
-    && hostDeliveredBytes === statSizeBytes
-    && receipt?.finished === true
-    && hostRecord?.aborted === false;
+  const passed = linkReceiptsAgree({ statSizeBytes, fetchedBytes, receiptBodyBytes, hostDeliveredBytes, receipt, hostRecord });
   return {
     status: passed ? 'passed' : 'failed',
     segment,
@@ -126,12 +132,7 @@ export function validateLinkReceiptQualification(record) {
   const hostDeliveredBytes = record?.hostDeliveredBytes == null ? NaN : Number(record.hostDeliveredBytes);
   const attempted = record !== null && record !== undefined;
   const valid = record?.status === 'passed'
-    && [statSizeBytes, fetchedBytes, receiptBodyBytes, hostDeliveredBytes].every(finite)
-    && fetchedBytes === receiptBodyBytes
-    && receiptBodyBytes === hostDeliveredBytes
-    && hostDeliveredBytes === statSizeBytes
-    && record?.receipt?.finished === true
-    && record?.hostRecord?.aborted === false;
+    && linkReceiptsAgree({ statSizeBytes, fetchedBytes, receiptBodyBytes, hostDeliveredBytes, receipt: record?.receipt, hostRecord: record?.hostRecord });
   return {
     valid,
     reason: valid ? null : LINK_RECEIPT_QUALIFICATION_REASON,

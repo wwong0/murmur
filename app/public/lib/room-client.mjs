@@ -282,8 +282,8 @@ export function createRoomClient(config) {
       checkOrder(env.seq);
     }
     // The roster is the latest one the server sent, not the join snapshot: a
-    // host resolves a later joiner's tag from it (7a2 ⚑ F1). Only the server's
-    // own presence counts — a member can relay an envelope typed `presence`.
+    // host resolves a later joiner's tag from it (7a2 design.md D1, observation).
+    // Only the server's own presence counts — a member can relay one.
     if (env.type === TYPE_PRESENCE && env.from === ADDR_SERVER) {
       const roster = readBody(env).roster;
       if (Array.isArray(roster)) state.roster = roster;

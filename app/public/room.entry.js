@@ -139,17 +139,6 @@ function onEnvelope(type, label, handler) {
   });
 }
 
-function onEvent(name, label, handler) {
-  return client.onEvent(name, (value) => {
-    try {
-      return Promise.resolve(handler(value)).catch((error) => addSubscriberFailure(label, error));
-    } catch (error) {
-      addSubscriberFailure(label, error);
-      return undefined;
-    }
-  });
-}
-
 function closeHostPeer(viewerId) {
   const entry = hostPeers.get(viewerId);
   if (!entry) return;
@@ -176,12 +165,10 @@ function rtcConfig() {
   };
 }
 
-function hostSource() {
-  return async (path) => {
-    if (!nativeFetch) throw new Error('native fetch is unavailable');
-    const response = await nativeFetch(new URL(path, location.href), { headers: { 'x-app-tab': tabId }, cache: 'no-store' });
-    return { status: response.status, bytes: new Uint8Array(await response.arrayBuffer()) };
-  };
+async function readHostSource(path) {
+  if (!nativeFetch) throw new Error('native fetch is unavailable');
+  const response = await nativeFetch(new URL(path, location.href), { headers: { 'x-app-tab': tabId }, cache: 'no-store' });
+  return { status: response.status, bytes: new Uint8Array(await response.arrayBuffer()) };
 }
 
 async function answerHostOffer(env) {
@@ -223,7 +210,7 @@ async function installHostSide() {
   if (hostSideInstalled) return;
   await loadHostTransport();
   hostOrigin = createHostOrigin({
-    readSource: hostSource(),
+    readSource: readHostSource,
     clock: {
       now: () => performance.now(),
       setTimeout: (fn, ms) => setTimeout(fn, ms),
@@ -235,11 +222,8 @@ async function installHostSide() {
   hostSideInstalled = true;
 }
 
-async function installViewerLink() {
-  if (delivery !== 'host' || role !== 'viewer') return;
+function installViewerLink() {
   if (typeof RTCPeerConnection !== 'function') throw new Error('RTCPeerConnection is unavailable');
-  if (!nativeFetch) throw new Error('native fetch is unavailable');
-  await loadHostTransport();
   let lastState = null;
   link = createHostLink({
     client,
@@ -295,9 +279,9 @@ client.onEvent('reconnecting', ({ inMs }) => {
 client.onEvent('joined', (joined) => {
   // The role reported is the one the server gave this membership, not the one
   // the query string asked for.
-  if (delivery === 'host' && joined.role === 'host') closeHostPeers();
-  if (delivery === 'host' && joined.role === 'host' && nativeFetch) {
-    installHostSide().catch((error) => addSubscriberFailure('host transport', error));
+  if (delivery === 'host' && joined.role === 'host') {
+    closeHostPeers();
+    if (nativeFetch) installHostSide().catch((error) => addSubscriberFailure('host transport', error));
   }
   addNotice(`joined as ${joined.clientId} (${joined.role})`);
   renderRoster(joined.roster);
@@ -339,7 +323,7 @@ client.onEvent('gap', ({ expected, actual }) => {
 
 client.on('presence', (env) => {
   const body = readBody(env);
-  // A member can relay an envelope typed `presence`; only the server's closes peers (D1-1).
+  // A member can relay an envelope typed `presence`; only the server's closes peers (7a d1-findings D1-1).
   if (env.from === ADDR_SERVER && delivery === 'host' && client.role === 'host') closeDepartedHostPeers(body.roster);
   addNotice(`presence: ${body.event} — ${body.member?.tabId ?? body.member?.clientId}`);
   renderRoster(body.roster);
@@ -798,7 +782,7 @@ window.__app = {
 
 async function startApp() {
   try {
-    // No fetch means no settings: the page does not guess a delivery (D1-4).
+    // No fetch means no settings: the page does not guess a delivery (7a d1-findings D1-4).
     if (typeof window.fetch !== 'function') throw new Error('fetch is unavailable');
     const settingsResponse = await window.fetch('/app-settings', { cache: 'no-store' });
     if (!settingsResponse.ok) throw new Error(`HTTP ${settingsResponse.status}`);
@@ -808,8 +792,10 @@ async function startApp() {
     }
     delivery = settings.delivery;
     iceServers = settings.iceServers;
-    if (delivery === 'host' && typeof window.fetch === 'function') await loadHostTransport();
-    if (delivery === 'host' && role === 'viewer' && typeof window.fetch === 'function') await installViewerLink();
+    if (delivery === 'host') {
+      await loadHostTransport();
+      if (role === 'viewer') installViewerLink();
+    }
     client.connect();
   } catch (error) {
     setStatus(`settings unavailable: ${error?.message ?? error}`, { final: true });

@@ -848,20 +848,25 @@ export function startRoomServer(opts = {}) {
   return { httpServer, wss, rooms, close, ready, mediaDir, livenessMs, serverNow, counters };
 }
 
-// Run directly: `npm start`.
-if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+/** The server's options as `npm start` and the origin container read them from the environment. */
+export function optionsFromEnv(env = process.env) {
   let iceServers = [];
-  if (process.env.APP_ICE_SERVERS !== undefined) {
-    iceServers = JSON.parse(process.env.APP_ICE_SERVERS);
+  if (env.APP_ICE_SERVERS !== undefined) {
+    iceServers = JSON.parse(env.APP_ICE_SERVERS);
     if (!Array.isArray(iceServers)) throw new TypeError('APP_ICE_SERVERS must be a JSON array');
   }
-  const server = startRoomServer({
-    port: process.env.APP_PORT ? Number(process.env.APP_PORT) : undefined,
-    mediaDir: process.env.APP_MEDIA_DIR,
-    livenessMs: process.env.APP_LIVENESS_INTERVAL_MS ? Number(process.env.APP_LIVENESS_INTERVAL_MS) : undefined,
-    delivery: process.env.APP_DELIVERY,
+  return {
+    port: env.APP_PORT ? Number(env.APP_PORT) : undefined,
+    mediaDir: env.APP_MEDIA_DIR,
+    livenessMs: env.APP_LIVENESS_INTERVAL_MS ? Number(env.APP_LIVENESS_INTERVAL_MS) : undefined,
+    delivery: env.APP_DELIVERY,
     iceServers,
-  });
+  };
+}
+
+// Run directly: `npm start`.
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  const server = startRoomServer(optionsFromEnv());
   process.on('SIGINT', () => {
     console.log('[room] SIGINT received, closing');
     server.close().then(() => process.exit(0));

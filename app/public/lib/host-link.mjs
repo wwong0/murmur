@@ -238,25 +238,16 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
     const onError = (event) => {
       if (!tornDown) fail(event?.error ?? new Error('data channel error'));
     };
-    channel.addEventListener('message', onMessage);
-    channel.addEventListener('close', onClose);
-    channel.addEventListener('error', onError);
-    detachChannel = () => {
-      channel.removeEventListener('message', onMessage);
-      channel.removeEventListener('close', onClose);
-      channel.removeEventListener('error', onError);
-    };
     const onOpen = () => {
       if (tornDown) return;
       state.openedAtMs = time();
       setState('open');
       void readRelayFlag();
     };
-    channel.addEventListener('open', onOpen);
-    const previousDetach = detachChannel;
+    const listeners = { message: onMessage, close: onClose, error: onError, open: onOpen };
+    for (const [type, fn] of Object.entries(listeners)) candidate.addEventListener(type, fn);
     detachChannel = () => {
-      previousDetach();
-      channel.removeEventListener('open', onOpen);
+      for (const [type, fn] of Object.entries(listeners)) candidate.removeEventListener(type, fn);
     };
     if (channel.readyState === 'open') onOpen();
   }
@@ -340,7 +331,7 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
   client.on('host-link-answer', incomingAnswer);
   client.on('host-link-ice', incomingIce);
   // Only the server's presence names the host: a member can relay an envelope
-  // typed `presence` (D1-1).
+  // typed `presence` (7a d1-findings D1-1).
   client.on('presence', (env) => {
     if (env?.from === ADDR_SERVER) discover(env);
   });
@@ -416,4 +407,3 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
   };
 }
 
-export { createShimFetch, createShimXhr };
