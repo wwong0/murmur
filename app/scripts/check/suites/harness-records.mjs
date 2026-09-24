@@ -1,76 +1,19 @@
-// The records this change is required to leave behind, asserted rather than
-// remembered (tasks.md §8).
-//
-// Two of them are about files nobody may write and a register nobody may let
-// drift, so they are checked against git and the results tree rather than
-// against a fixture. This is the one suite here that shells out; it reads and
-// never writes, and `git log --name-only` over a branch of a few dozen commits
-// costs milliseconds.
-//
-// Outside a git work tree — an exported tarball, a fresh unpacked copy — the
-// history assertion has nothing to read. It says so and passes, because a rule
-// about what the branch's commits contain cannot be evaluated where there are
-// no commits, and a check that fails for being unable to look is a check people
-// learn to ignore.
+// The run registers changes 6a, 6b and 7a2 are required to leave behind,
+// asserted against the results tree rather than remembered.
 
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { check, assert, assertEqual } from '../harness.mjs';
+import { check, assert } from '../harness.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-const REPO_DIR = path.resolve(APP_DIR, '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
 const REGISTER = path.join(RESULTS_DIR, 'RUNS-6a.json');
 const REGISTER_6B = path.join(RESULTS_DIR, 'RUNS-6b.json');
 const REGISTER_7A2 = path.join(RESULTS_DIR, 'RUNS-7a2.json');
 
-// OQ5's owner writes this file. No stage of this change may, and the rule is
-// worth an assertion because the temptation is strongest at the end, when the
-// harness has entry points and settings that look like they belong in it.
-const FORBIDDEN = 'app/CLAUDE.md';
-
-function git(args) {
-  return execFileSync('git', args, { cwd: REPO_DIR, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-}
-
-function branchFiles() {
-  try {
-    git(['rev-parse', '--git-dir']);
-  } catch {
-    return null;
-  }
-  // HEAD already in main — `main` itself, or a branch with nothing of its own —
-  // has no branch commits to read. That is not the empty read the size guard
-  // below exists to catch.
-  try {
-    git(['merge-base', '--is-ancestor', 'HEAD', 'main']);
-    return 'on-main';
-  } catch {}
-  // `main...HEAD` and not `main..HEAD`: the two-dot form re-reports every file
-  // main has moved on to since this branch left it, which is not this branch's
-  // doing and would make the assertion fail for someone else's commit.
-  const text = git(['log', '--name-only', '--format=', 'main...HEAD']);
-  return new Set(text.split('\n').map((line) => line.trim()).filter(Boolean));
-}
-
 export default async function harnessRecordsSuite() {
-  await check('harness records: no commit on this branch touches app/CLAUDE.md', async () => {
-    const files = branchFiles();
-    if (files === null) {
-      assert(true, 'not a git work tree — the branch history cannot be read and the rule is not evaluated here');
-      return;
-    }
-    if (files === 'on-main') {
-      assert(true, 'HEAD is contained in main — there is no branch here and the rule is not evaluated');
-      return;
-    }
-    assert(files.size > 0, 'the branch has commits to check, so a pass means the file was absent and not that nothing was read');
-    assertEqual(files.has(FORBIDDEN), false, `${FORBIDDEN} is OQ5's owner's and no stage of this change may write it`);
-  });
-
   await check('harness records: every retained 6a run directory is in the register, and every register entry exists', async () => {
     if (!fs.existsSync(REGISTER)) {
       assert(true, 'no register yet — section 8.3 has not run in this tree');

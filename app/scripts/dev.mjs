@@ -1,11 +1,14 @@
 // scripts/dev.mjs
 //
 // The normal way to run the app while developing (`npm run dev`). One
-// process does two things:
+// process watches the bundle and owns the room server; the tracker is a
+// separate child because it speaks a different protocol.
+//
+// This process does two things:
 //   1. Runs esbuild in watch mode using the exact same bundler config as
 //      scripts/build.mjs (imported, not duplicated — see that file for why
 //      that matters).
-//   2. Starts the room server (server/room-server.mjs).
+//   2. Starts the tracker and room server.
 //
 // Why watch mode lives here and not just "run build.mjs then start the
 // server": the page loads public/room.bundle.js, not the source modules
@@ -17,57 +20,91 @@
 // and deliberately rejected — the fix is to make staleness not happen, not
 // to announce it.)
 //
-// server/room-server.mjs is written by a parallel change and does not exist
-// yet. The import is guarded: if it's missing, dev.mjs prints a note and
-// keeps the watcher running rather than crashing, so this script is usable
-// (for bundling) before that file lands.
-//
 // Node 24, ESM.
 
+import { spawn } from 'node:child_process';
 import * as esbuild from 'esbuild';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { buildOptions, makeBuildId } from './build.mjs';
+import { optionsFromEnv, startRoomServer } from '../server/room-server.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const APP_DIR = path.resolve(__dirname, '..');
-const ROOM_SERVER_PATH = path.join(APP_DIR, 'server', 'room-server.mjs');
+const TRACKER_PORT = 8101;
+const APP_TRACKER_URL = `ws://127.0.0.1:${TRACKER_PORT}`;
+const TRACKER_SCRIPT = path.join(APP_DIR, 'node_modules', 'bittorrent-tracker', 'bin', 'cmd.js');
 
-/** Try to start the room server by importing it. Missing file is a warning, not a crash. */
-async function startRoomServer() {
-  const url = pathToFileURL(ROOM_SERVER_PATH).href;
-  try {
-    await import(url);
-    console.log('[dev] room server started (server/room-server.mjs)');
-  } catch (err) {
-    if (err?.code === 'ERR_MODULE_NOT_FOUND') {
-      console.log('[dev] server/room-server.mjs does not exist yet — skipping server startup (bundler watch is still running).');
-      return;
-    }
-    console.error('[dev] room server failed to start:');
-    console.error(err);
-  }
+let buildContext = null;
+let roomServer = null;
+let tracker = null;
+let shuttingDown = false;
+
+function startTracker() {
+  const child = spawn(process.execPath, [
+    TRACKER_SCRIPT,
+    '--ws',
+    '--port', String(TRACKER_PORT),
+    '--http-hostname', '127.0.0.1',
+    '--quiet',
+  ], { stdio: 'inherit' });
+  const exited = new Promise((resolve) => {
+    child.once('error', (error) => resolve({ error }));
+    child.once('exit', (code, signal) => resolve({ code, signal }));
+  });
+  return { child, exited };
+}
+
+function trackerFailure(result) {
+  if (result.error) return `tracker failed to start: ${result.error.message}`;
+  return `tracker exited early (code ${result.code ?? 'null'}, signal ${result.signal ?? 'none'})`;
+}
+
+async function shutdown(exitCode) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  process.exitCode = exitCode;
+  if (roomServer) await roomServer.close();
+  if (buildContext) await buildContext.dispose();
+  if (tracker && tracker.exitCode === null) tracker.kill();
 }
 
 async function main() {
   const buildId = makeBuildId();
-  const ctx = await esbuild.context(buildOptions(buildId));
-  await ctx.watch();
+  buildContext = await esbuild.context(buildOptions(buildId));
+  await buildContext.watch();
   console.log('[dev] esbuild watch mode active — edits under public/ rebuild room.bundle.js automatically, no manual rebuild needed.');
   console.log(`[dev] build id: ${buildId}`);
 
-  await startRoomServer();
+  const trackerState = startTracker();
+  tracker = trackerState.child;
+  const earlyExit = await Promise.race([
+    trackerState.exited,
+    new Promise((resolve) => setImmediate(() => resolve(null))),
+  ]);
+  if (earlyExit) throw new Error(trackerFailure(earlyExit));
+
+  roomServer = startRoomServer(optionsFromEnv({ ...process.env, APP_TRACKER_URL }));
+  console.log('[dev] room server started (server/room-server.mjs)');
+
+  trackerState.exited.then(async (result) => {
+    if (shuttingDown) return;
+    console.error(`[dev] ${trackerFailure(result)}`);
+    await shutdown(1);
+    process.exit(1);
+  });
 
   process.on('SIGINT', async () => {
     console.log('\n[dev] shutting down (SIGINT)...');
-    await ctx.dispose();
+    await shutdown(0);
     process.exit(0);
   });
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error('[dev] fatal error:');
   console.error(err);
+  await shutdown(1);
   process.exit(1);
 });

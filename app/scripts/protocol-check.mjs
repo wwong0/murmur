@@ -65,6 +65,9 @@ import hostAccountingSuite from './check/suites/host-accounting.mjs';
 import hostReceiptsSuite from './check/suites/host-receipts.mjs';
 import hostOriginFiguresSuite from './check/suites/host-origin-figures.mjs';
 import hostOriginBarsSuite from './check/suites/host-origin-bars.mjs';
+import peerBytesSuite from './check/suites/peer-bytes.mjs';
+import peerEngineConfigSuite from './check/suites/peer-engine-config.mjs';
+import peerExchangeEntrySuite from './check/suites/peer-exchange-entry.mjs';
 import roomTimelineSuite from './check/suites/room-timeline.mjs';
 import playbackStateSuite from './check/suites/playback-state.mjs';
 import playbackStateRulesSuite from './check/suites/playback-state-rules.mjs';
@@ -136,6 +139,9 @@ for (const suite of [
   hostReceiptsSuite,
   hostOriginFiguresSuite,
   hostOriginBarsSuite,
+  peerBytesSuite,
+  peerEngineConfigSuite,
+  peerExchangeEntrySuite,
   roomTimelineSuite,
   playbackStateSuite,
   playbackStateRulesSuite,

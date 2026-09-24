@@ -68,3 +68,7 @@ app/results/4e-duration-*/console.log
 # and by tooling that launches them.
 debug.log
 .tmp/
+
+# A coordinator chain's scratch: its state file, briefs and run logs. The durable
+# record is the change folder; docs/workflow/coordinator.md is how to coordinate.
+.coordinator/

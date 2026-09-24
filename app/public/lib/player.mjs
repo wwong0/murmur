@@ -11,8 +11,10 @@
 // global DOM objects directly — enforced by app/scripts/check-structure.mjs.
 
 import Hls from 'hls.js';
+import { HlsJsP2PEngine } from 'p2p-media-loader-hlsjs';
 
 const DEFAULT_SRC = '/media/master.m3u8';
+const HlsP2P = HlsJsP2PEngine.injectMixin(Hls);
 
 /**
  * @param {object} config
@@ -53,15 +55,29 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientT
    * loading. THIS IS NOT A SEEK: nothing here writes `currentTime`, and the
    * position is chosen before anything is playing (3b design.md D1).
    *
-   * @param {{startPositionMs?: number|null}} [at]  null loads wherever hls.js would
+   * @param {{startPositionMs?: number|null, p2p?: {core: object, onEngine: Function}|null}} [at]
    */
-  function load({ startPositionMs = null } = {}) {
+  function load({ startPositionMs = null, p2p = null } = {}) {
     const startPosition = Number.isFinite(startPositionMs) ? startPositionMs / 1000 : -1;
+    if (hls) {
+      hls.destroy();
+      hls = null;
+    }
     if (Hls.isSupported()) {
       // `startPosition` LAST. It is this call's argument, chosen by the load
       // rule; `hlsConfig` is construction-time config, and letting it silently
       // win would put playback somewhere no decision named.
-      hls = new Hls({ ...playerConfig, startPosition });
+      const HlsConstructor = p2p ? HlsP2P : Hls;
+      hls = new HlsConstructor({
+        ...playerConfig,
+        startPosition,
+        ...(p2p ? {
+          p2p: {
+            core: p2p.core,
+            onHlsJsCreated: (instance) => p2p.onEngine(instance.p2pEngine),
+          },
+        } : {}),
+      });
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) {
           emitError({ fatal: true, type: data.type, details: data.details, error: data.error });

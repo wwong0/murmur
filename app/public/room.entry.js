@@ -11,6 +11,8 @@
 import { createRoomClient } from './lib/room-client.mjs';
 import { ADDR_SERVER, newReclaimSecret, readBody } from './lib/envelope.mjs';
 import { createPlayer } from './lib/player.mjs';
+import { createPeerBytes } from './lib/peer-bytes.mjs';
+import { peerEngineConfig } from './lib/peer-engine-config.mjs';
 import { createClockSync, websocketProbe } from './lib/clock-sync.mjs';
 import { createRoomTimeline } from './lib/room-timeline.mjs';
 import { createDriftLog } from './lib/frame-drift.mjs';
@@ -248,6 +250,10 @@ function installViewerLink() {
 const client = createRoomClient({ url, room, tabId, role });
 let delivery = 'host';
 let iceServers = [];
+let trackerUrl = null;
+let peerExchange = null;
+const peerBytesPublisher = createPeerBytes();
+let peerBytesRead = () => ({ attribution: null, peerExchange: 'off', peerId: null, peerIds: [] });
 let link = null;
 let hostOrigin = null;
 const hostPeers = new Map();
@@ -652,7 +658,18 @@ function execute(result) {
       const epochMs = action.seamEpochMs;
       readiness = { attemptId: action.attemptId, needsSeeked: action.kind === 'park', prerequisiteSeen: false };
       recordAction(action, { startAtSharedMs: result.startAtSharedMs, seamEpochMs: epochMs }, () => {
-        if (action.kind === 'load') treatment.open(() => player.load({ startPositionMs: action.positionMs }), 'load');
+        if (action.kind === 'load') {
+          const p2p = delivery === 'host' && typeof trackerUrl === 'string' && client.role !== 'host'
+            ? {
+                core: peerEngineConfig({ roomId: room, trackerUrl, iceServers }).core,
+                onEngine: (engine) => {
+                  peerBytesPublisher.attach(engine);
+                  peerBytesRead = (afterSeq = 0) => peerBytesPublisher.read(afterSeq);
+                },
+              }
+            : null;
+          treatment.open(() => player.load({ startPositionMs: action.positionMs, p2p }), 'load');
+        }
         else player.park(action.positionMs);
       });
       if (action.kind === 'load') addNotice(`playback opened at ${(action.positionMs / 1000).toFixed(2)}s`);
@@ -770,6 +787,8 @@ window.__app = {
   hostLink: () => (link ? link.snapshot() : null),
   hostCounters: () => (hostOrigin ? hostOrigin.snapshot() : null),
   hostReceipts: (afterSeq = 0) => (link ? link.receipts(afterSeq) : null),
+  peerExchange: () => peerExchange,
+  peerBytes: (afterSeq = 0) => peerBytesRead(afterSeq),
   playback: () => ({
     ...start.state(),
     callbacks: sampler.callbacks,
@@ -787,11 +806,20 @@ async function startApp() {
     const settingsResponse = await window.fetch('/app-settings', { cache: 'no-store' });
     if (!settingsResponse.ok) throw new Error(`HTTP ${settingsResponse.status}`);
     const settings = await settingsResponse.json();
-    if (!settings || (settings.delivery !== 'host' && settings.delivery !== 'http') || !Array.isArray(settings.iceServers)) {
+    if (!settings || (settings.delivery !== 'host' && settings.delivery !== 'http') || !Array.isArray(settings.iceServers) || (settings.trackerUrl !== null && typeof settings.trackerUrl !== 'string')) {
       throw new TypeError('invalid application settings');
     }
     delivery = settings.delivery;
     iceServers = settings.iceServers;
+    trackerUrl = settings.trackerUrl;
+    peerExchange = delivery !== 'host'
+      ? 'off'
+      : client.role === 'host'
+        ? 'host'
+        : typeof trackerUrl === 'string' ? 'on' : 'off';
+    // A viewer publishes the stub until its engine is attached, so no reading
+    // before load says attribution is unavailable.
+    peerBytesRead = () => ({ attribution: null, peerExchange, peerId: null, peerIds: [] });
     if (delivery === 'host') {
       await loadHostTransport();
       if (role === 'viewer') installViewerLink();

@@ -228,7 +228,7 @@ export const IDLE_START_STATE = Object.freeze({
  * `videoOptions` whose writes land in the same ordered event list as the
  * page's own. `onLoad`/`onPark` receive the element's control.
  */
-export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', onPark, onLoad, settings = { delivery: 'http', iceServers: [] }, globals = {} } = {}) {
+export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', onPark, onLoad, settings = { delivery: 'http', iceServers: [] }, role = 'viewer', globals = {} } = {}) {
   let pinnedNowMs = null;
   const events = [];
   const intervals = [];
@@ -243,7 +243,7 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     clock: { offsetMs: null, halfWidthMs: null, sampleCount: 0, counters: { reanchors: 0 } },
     sharedNowMs: null,
     clientId: null,
-    role: 'viewer',
+    role,
     roster: [],
     clientEvents: new Map(),
     clientHandlers: new Map(),
@@ -263,7 +263,7 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     crypto: globalThis.crypto,
     // The page's settings read; `settings: null` leaves the page without fetch.
     fetch: settings && (async (resource) => (String(resource) === '/app-settings'
-      ? { ok: true, status: 200, json: async () => settings }
+      ? { ok: true, status: 200, json: async () => ({ trackerUrl: null, ...settings }) }
       : { ok: false, status: 404, json: async () => null, arrayBuffer: async () => new ArrayBuffer(0) })),
     location: { search, protocol: 'http:', host: '127.0.0.1:8100' },
     history,

@@ -63,6 +63,14 @@ const DEFAULT_MEDIA_DIR = path.resolve(APP_DIR, '..', 'step0', 'content');
 // design.md, "Challenged and left standing", before shortening it.
 const DEFAULT_LIVENESS_MS = 5000;
 
+function normalizeTrackerUrl(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || (!value.startsWith('ws://') && !value.startsWith('wss://'))) {
+    throw new TypeError('trackerUrl must be a ws:// or wss:// URL');
+  }
+  return value;
+}
+
 const MIME = {
   '.m3u8': 'application/vnd.apple.mpegurl',
   '.m4s': 'video/mp4',
@@ -203,7 +211,7 @@ function msUntilNameReleased(member, livenessMs) {
  * short liveness interval and a temporary media root, in-process, without
  * spawning anything.
  *
- * @param {{port?: number, host?: string, mediaDir?: string, livenessMs?: number, quiet?: boolean, delivery?: 'host'|'http', iceServers?: object[]}} [opts]
+ * @param {{port?: number, host?: string, mediaDir?: string, livenessMs?: number, quiet?: boolean, delivery?: 'host'|'http', iceServers?: object[], trackerUrl?: string|null}} [opts]
  */
 export function startRoomServer(opts = {}) {
   const host = opts.host ?? DEFAULT_HOST;
@@ -215,6 +223,10 @@ export function startRoomServer(opts = {}) {
   const delivery = opts.delivery ?? 'host';
   if (delivery !== 'host' && delivery !== 'http') {
     throw new TypeError(`delivery must be "host" or "http", got ${JSON.stringify(delivery)}`);
+  }
+  const trackerUrl = normalizeTrackerUrl(opts.trackerUrl);
+  if (trackerUrl !== null && delivery === 'http') {
+    throw new TypeError('APP_TRACKER_URL is set but APP_DELIVERY is "http"; peer exchange requires delivery "host"');
   }
   const iceServers = opts.iceServers ?? [];
   if (!Array.isArray(iceServers)) throw new TypeError('iceServers must be an array');
@@ -428,7 +440,7 @@ export function startRoomServer(opts = {}) {
 
     if (req.method === 'GET' && pathname === '/app-settings') {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-      res.end(JSON.stringify({ delivery, iceServers }));
+      res.end(JSON.stringify({ delivery, iceServers, trackerUrl }));
       return;
     }
 
@@ -861,6 +873,7 @@ export function optionsFromEnv(env = process.env) {
     livenessMs: env.APP_LIVENESS_INTERVAL_MS ? Number(env.APP_LIVENESS_INTERVAL_MS) : undefined,
     delivery: env.APP_DELIVERY,
     iceServers,
+    trackerUrl: normalizeTrackerUrl(env.APP_TRACKER_URL),
   };
 }
 
