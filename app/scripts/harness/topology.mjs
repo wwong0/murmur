@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { attach } from '../cdp.mjs';
 import { applyQdiscs, clearCondition, defaultExec, dockerExec, networkSubnet, resolveInterface } from '../../harness/apply-qdisc.mjs';
 import { requireDelivery } from '../delivery-pin.mjs';
+import { armFor } from './arms.mjs';
 
 const HARNESS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'harness');
 const COMPOSE_FILE = path.join(HARNESS_DIR, 'compose.yaml');
@@ -278,39 +279,48 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
     clientOriginUrl: CLIENT_ORIGIN_URL,
 
     async prepare({ condition, runDir }) {
+      const arm = armFor(condition);
       state.runDir = runDir;
       const services = serviceNames(condition.clients);
       const previousDelivery = process.env.WA_DELIVERY;
+      const previousTrackerPort = process.env.WA_TRACKER_PORT;
       process.env.WA_DELIVERY = condition.delivery;
+      if (condition.peerExchange === true) process.env.WA_TRACKER_PORT = '8101';
+      else delete process.env.WA_TRACKER_PORT;
       try {
         compose(['up', '-d', '--no-build', ...services], { project, exec });
       } finally {
         if (previousDelivery === undefined) delete process.env.WA_DELIVERY;
         else process.env.WA_DELIVERY = previousDelivery;
+        if (previousTrackerPort === undefined) delete process.env.WA_TRACKER_PORT;
+        else process.env.WA_TRACKER_PORT = previousTrackerPort;
       }
       state.containers = composeContainers(project, exec);
       const missing = services.filter((name) => !state.containers[name]);
       if (missing.length) throw new Error(`compose did not start: ${missing.join(', ')}`);
       await waitForOrigin(originUrl);
-      await requireDelivery(originUrl, condition.delivery);
+      await requireDelivery(originUrl, condition.delivery, {
+        trackerUrl: condition.peerExchange === true ? 'ws://origin-media:8101' : null,
+      });
 
       const subnet = networkSubnet(MEDIA_NETWORK, exec, project);
       state.subnets.set(MEDIA_NETWORK, subnet);
       state.origin = resolveInterface(state.containers.origin, subnet, exec);
 
-      if (condition.delivery === 'host') {
-        const controlSubnet = networkSubnet(CONTROL_NETWORK, exec, project);
-        state.subnets.set(CONTROL_NETWORK, controlSubnet);
-        state.control = resolveInterface(state.containers.origin, controlSubnet, exec);
-        state.controlUdpDrop = controlUdpDrop({ container: state.containers.origin, ifName: state.control.ifName, subnet: controlSubnet, exec });
-        const gateway = networkGateway(MEDIA_NETWORK, exec, project);
-        state.mediaDefaultRoute = Object.fromEntries(['origin', ...services.filter((name) => /^c\d+$/.test(name))]
-          .map((name) => [name, mediaDefaultRoute({ container: state.containers[name], subnet, gateway, exec })]));
-        exec(['docker', 'exec', '-d', '-e', 'APP_TAG=c00', state.containers.origin, 'sh', '-c', 'cd /app && node harness/client-agent.mjs > /tmp/host-agent.log 2>&1']);
-      }
-
-      const agents = {};
-      if (condition.delivery === 'host') agents.c00 = await waitForAgent('c00');
+      const agents = await arm.prepareTopology(state, {
+        condition,
+        services,
+        exec,
+        project,
+        controlNetwork: CONTROL_NETWORK,
+        mediaNetwork: MEDIA_NETWORK,
+        networkSubnet: (networkName, runner) => networkSubnet(networkName, runner, project),
+        networkGateway: (networkName, runner) => networkGateway(networkName, runner, project),
+        controlUdpDrop,
+        mediaDefaultRoute,
+        resolveInterface,
+        waitForAgent,
+      });
       for (let index = 1; index <= condition.clients; index++) {
         const tag = `c${String(index).padStart(2, '0')}`;
         agents[tag] = await waitForAgent(tag);
@@ -328,14 +338,12 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
         sampler: state.sampler,
         backgroundLoad: state.backgroundLoad,
         content,
-        ...(state.controlUdpDrop ? { controlUdpDrop: state.controlUdpDrop, mediaDefaultRoute: state.mediaDefaultRoute } : {}),
+        ...arm.topologyEvidence(state),
         regime: {
           ...condition,
           images: imageDigests(exec),
           chromeVersion: [...versions][0] ?? null,
-          chromeFlags: condition.delivery === 'host'
-            ? Object.fromEntries(Object.entries(agents).map(([tag, agent]) => [tag, agent.flags ?? null]))
-            : Object.values(agents)[0]?.flags ?? null,
+          chromeFlags: arm.chromeFlags(agents),
           agents,
           samplerIntervalMs,
           originInterface: state.origin,

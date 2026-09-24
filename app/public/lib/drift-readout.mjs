@@ -10,7 +10,14 @@
 // Under public/lib/: no DOM, no page access.
 
 import { REFUSAL_REASONS } from './frame-drift.mjs';
-import { WAITING_PAUSED, WAITING_PREPARING, WAITING_REFUSED } from './playback-start.mjs';
+import {
+  MISSING_CLOCK,
+  MISSING_HOST_LINK,
+  MISSING_STATE,
+  WAITING_PAUSED,
+  WAITING_PREPARING,
+  WAITING_REFUSED,
+} from './playback-start.mjs';
 
 /** The scheduled start's status as words (change 5 design.md D6): a missing input first. */
 function notPlayingReason({ missing, waiting, retargets }) {
@@ -31,6 +38,28 @@ export const signed = (ms) => `${ms >= 0 ? '+' : ''}${ms.toFixed(1)}ms`;
  */
 export const DRIFT_LINE_RE =
   /^drift: [+-]\d+\.\d+ms · rolling window over the last (\d+) frames: median [+-]\d+\.\d+ms, p99 [+-]\d+\.\d+ms$/;
+
+const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const MISSING_RE = [MISSING_CLOCK, MISSING_STATE, MISSING_HOST_LINK].map(escapeRegex).join('|');
+// The text notPlayingReason renders for WAITING_PAUSED, WAITING_PREPARING and
+// WAITING_REFUSED; the drift suite renders each one against this.
+const WAITING_RE = ['room paused', 'preparing start \\(retargets \\d+\\)', 'start refused, click the page to start'].join('|');
+const REFUSAL_RE = REFUSAL_REASONS.map(escapeRegex).join('|');
+
+export const DRIFT_LINE_NOT_PLAYING_RE = new RegExp(
+  `^drift: not playing — (?:waiting for (?:${MISSING_RE})|${WAITING_RE}|no reason published)$`,
+);
+export const DRIFT_LINE_NO_RECORDS_RE = new RegExp(
+  `^drift: no new records — (nothing recorded yet|no frames offered — rVFC is silent|(?:${REFUSAL_RE}) rising \\(\\d+ total\\))$`,
+);
+
+export function driftLineForm(line) {
+  if (typeof line !== 'string') return null;
+  if (DRIFT_LINE_RE.test(line)) return 'recording';
+  if (DRIFT_LINE_NOT_PLAYING_RE.test(line)) return 'not-playing';
+  if (DRIFT_LINE_NO_RECORDS_RE.test(line)) return 'no-new-records';
+  return null;
+}
 
 /**
  * Which counter is rising, fastest first. The log charges every offered frame

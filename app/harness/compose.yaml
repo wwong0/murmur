@@ -62,6 +62,7 @@ services:
       APP_PORT: '8100'
       APP_HOST: 0.0.0.0
       APP_DELIVERY: ${WA_DELIVERY:-http}
+      APP_TRACKER_PORT: ${WA_TRACKER_PORT:-}
     volumes:
       - ../../step0/content:/media:ro
       - ../results:/results

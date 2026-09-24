@@ -38,10 +38,14 @@ import harnessDriftPlotSuite from './check/suites/harness-drift-plot.mjs';
 import harnessByteCohortSuite from './check/suites/harness-byte-cohort.mjs';
 import receiptCohortSuite from './check/suites/receipt-cohort.mjs';
 import harnessRefusalsSuite from './check/suites/harness-refusals.mjs';
+import harnessArmsSuite from './check/suites/harness-arms.mjs';
 import harnessCadenceSuite from './check/suites/harness-cadence.mjs';
 import harnessPollShapeSuite from './check/suites/harness-poll-shape.mjs';
 import harnessRecordsSuite from './check/suites/harness-records.mjs';
 import harnessConditionsSuite from './check/suites/harness-conditions.mjs';
+import harnessPeerConditionsSuite from './check/suites/harness-peer-conditions.mjs';
+import peerFiguresSuite from './check/suites/peer-figures.mjs';
+import peerChecksSuite from './check/suites/peer-checks.mjs';
 import hostOriginRefusalsSuite from './check/suites/host-origin-refusals.mjs';
 import harnessStartRequalSuite from './check/suites/harness-start-requal.mjs';
 import harnessDriftRunnerSuite from './check/suites/harness-drift-runner.mjs';
@@ -65,9 +69,13 @@ import hostAccountingSuite from './check/suites/host-accounting.mjs';
 import hostReceiptsSuite from './check/suites/host-receipts.mjs';
 import hostOriginFiguresSuite from './check/suites/host-origin-figures.mjs';
 import hostOriginBarsSuite from './check/suites/host-origin-bars.mjs';
+import fetchShimBarsSuite from './check/suites/fetch-shim-bars.mjs';
 import peerBytesSuite from './check/suites/peer-bytes.mjs';
+import bytesReadoutSuite from './check/suites/bytes-readout.mjs';
 import peerEngineConfigSuite from './check/suites/peer-engine-config.mjs';
 import peerExchangeEntrySuite from './check/suites/peer-exchange-entry.mjs';
+import peerExchangeBarsSuite from './check/suites/peer-exchange-bars.mjs';
+import positionOffsetSuite from './check/suites/position-offset.mjs';
 import roomTimelineSuite from './check/suites/room-timeline.mjs';
 import playbackStateSuite from './check/suites/playback-state.mjs';
 import playbackStateRulesSuite from './check/suites/playback-state-rules.mjs';
@@ -112,10 +120,14 @@ for (const suite of [
   harnessByteCohortSuite,
   receiptCohortSuite,
   harnessRefusalsSuite,
+  harnessArmsSuite,
   harnessCadenceSuite,
   harnessPollShapeSuite,
   harnessRecordsSuite,
   harnessConditionsSuite,
+  harnessPeerConditionsSuite,
+  peerFiguresSuite,
+  peerChecksSuite,
   hostOriginRefusalsSuite,
   harnessStartRequalSuite,
   harnessDriftRunnerSuite,
@@ -139,9 +151,13 @@ for (const suite of [
   hostReceiptsSuite,
   hostOriginFiguresSuite,
   hostOriginBarsSuite,
+  fetchShimBarsSuite,
   peerBytesSuite,
+  bytesReadoutSuite,
   peerEngineConfigSuite,
   peerExchangeEntrySuite,
+  peerExchangeBarsSuite,
+  positionOffsetSuite,
   roomTimelineSuite,
   playbackStateSuite,
   playbackStateRulesSuite,

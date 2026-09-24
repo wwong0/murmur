@@ -629,6 +629,40 @@
         "driftLogMissedMax": 0
       },
       "feeds": ["saturated-calibration-sweep"]
+    },
+    "p2p-qual": {
+      "name": "shakedown/p2p-qual",
+      "delivery": "host",
+      "publishes": false,
+      "clients": 3,
+      "capacityMbps": 10,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": { "rate": "10mbit", "burst": "32kbit", "latency": "400ms" }
+        }
+      ],
+      "backgroundLoadMbps": null,
+      "runLengthMs": 90000,
+      "excludedPrefixMs": 30000,
+      "measureWindowMs": 60000,
+      "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "driftLogMissedMax": 0,
+        "responseCutShortMaxBytes": 1129000,
+        "conservationChannelBytes": 131071,
+        "conservationRelativeMax": 0.05
+      },
+      "peerExchange": true,
+      "positionOffsetMsByClient": { "c01": 0, "c02": 30000, "c03": 60000 },
+      "feeds": ["7b2-runner-qualification"]
     }
   },
   "hostorigin-nop2p": {
@@ -937,5 +971,75 @@
       "driftLogMissedMax": 0
     },
     "feeds": ["playback-requalification", "maximum-rate-evidence"]
+  },
+  "p2p-naive": {
+    "name": "p2p-naive",
+    "delivery": "host",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 10,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": { "rate": "10mbit", "burst": "32kbit", "latency": "400ms" }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "runLengthMs": 300000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 180000,
+    "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "driftLogMissedMax": 0,
+      "responseCutShortMaxBytes": 1129000,
+      "conservationChannelBytes": 131071,
+      "conservationRelativeMax": 0.05
+    },
+    "peerExchange": true,
+    "positionOffsetMsByClient": { "c01": 0, "c02": 0, "c03": 0, "c04": 0, "c05": 0 },
+    "figureKinds": ["byte", "drift"],
+    "feeds": ["7b2-naive-measurement"]
+  },
+  "p2p-scattered": {
+    "name": "p2p-scattered",
+    "delivery": "host",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 10,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": { "rate": "10mbit", "burst": "32kbit", "latency": "400ms" }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "runLengthMs": 300000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 180000,
+    "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "driftLogMissedMax": 0,
+      "responseCutShortMaxBytes": 1129000,
+      "conservationChannelBytes": 131071,
+      "conservationRelativeMax": 0.05,
+      "controlFloorMin": 0.5
+    },
+    "peerExchange": true,
+    "positionOffsetMsByClient": { "c01": 0, "c02": 30000, "c03": 60000, "c04": 90000, "c05": 120000 },
+    "feeds": ["7b2-scattered-control"]
   }
 }

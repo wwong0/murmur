@@ -1,26 +1,7 @@
 import { missingFields } from '../figures/publication.mjs';
-import { CDP_QUALIFICATION_REASON, LINK_RECEIPT_QUALIFICATION_REASON, validateCdpQualification, validateLinkReceiptQualification } from './qualification.mjs';
+import { CDP_QUALIFICATION_REASON } from './qualification.mjs';
 import { evaluateByteControl } from './byte-control.mjs';
-import { viewerHttpLeak, uplinkVersusDelivered } from '../figures/host-origin-checks.mjs';
-
-export const REFUSAL_SCOPE = Object.freeze({
-  neverPlayed: Object.freeze(['byte', 'drift']),
-  noRecords: Object.freeze(['drift']),
-  coverage: Object.freeze(['drift']),
-  evicted: Object.freeze(['drift']),
-  driftEvidence: Object.freeze(['drift']),
-  qualityEvidence: Object.freeze(['byte', 'drift']),
-  droppedFrames: Object.freeze(['byte', 'drift']),
-  unattributed: Object.freeze(['byte']),
-  tabCollision: Object.freeze(['byte', 'drift']),
-  runDirectory: Object.freeze([]),
-  publication: Object.freeze(['byte']),
-  cdpQualification: Object.freeze(['byte']),
-  hostLeak: Object.freeze(['byte']),
-  hostUplink: Object.freeze(['byte']),
-  receiptHealth: Object.freeze(['byte']),
-  cadence: Object.freeze(['byte', 'drift']),
-});
+import { armFor, REFUSAL_SCOPE } from './arms.mjs';
 
 export const REFUSAL_REASONS = Object.freeze([
   'client-never-began-playback',
@@ -48,6 +29,23 @@ export const REFUSAL_REASONS = Object.freeze([
   'peer-byte-control-above-declared-bar',
   'origin-client-agreement-unavailable',
   'origin-client-agreement-above-declared-bar',
+  'peer-exchange-inactive',
+  'peer-attribution-unavailable',
+  'peer-log-discarded-records',
+  'peer-log-reset',
+  'peer-anomaly-records',
+  'peer-cohort-empty',
+  'peer-conservation-tolerance-unbounded',
+  'peer-check-failed:response-agreement',
+  'peer-check-failed:segment-sum',
+  'peer-check-failed:peer-id-membership',
+  'peer-check-failed:conservation',
+  'peer-check-not-exercised:response-agreement',
+  'peer-check-not-exercised:segment-sum',
+  'peer-check-not-exercised:peer-id-membership',
+  'peer-check-not-exercised:conservation',
+  'position-offset-mismatch',
+  'build-mismatch',
 ]);
 
 const PUBLICATION_ONLY_REASONS = new Set([CDP_QUALIFICATION_REASON]);
@@ -246,36 +244,8 @@ export function evaluateRefusals(input = {}) {
 
   reasons.push(...evaluateByteControl({ bars, tags, figures: input.publicationContext ?? {} }));
 
-  if (condition.publishes === true || input.requireCdpQualification === true) {
-    const qualification = condition.delivery === 'host'
-      ? validateLinkReceiptQualification(input.cdpQualification)
-      : validateCdpQualification(input.cdpQualification);
-    if (!qualification.valid) {
-      addReason(reasons, condition.delivery === 'host' ? LINK_RECEIPT_QUALIFICATION_REASON : CDP_QUALIFICATION_REASON, REFUSAL_SCOPE.cdpQualification, {
-        field: 'cdpQualification',
-        figure: 'byte',
-        evidence: qualification,
-      });
-    }
-  }
-
-  if (condition.delivery === 'host') {
-    const leak = viewerHttpLeak({ roomFinal: input.roomFinal, viewerTags: tags });
-    for (const entry of leak.leaked) addReason(reasons, 'viewer-media-over-http', REFUSAL_SCOPE.hostLeak, entry);
-    if (leak.unattributedBytes !== 0) addReason(reasons, 'viewer-media-over-http', REFUSAL_SCOPE.hostLeak, { tag: null, bytes: leak.unattributedBytes });
-
-    const uplink = uplinkVersusDelivered({ linkSamples: input.linkSamples, window, originStart: start, originEnd: end });
-    if (uplink.txBytes === null || uplink.deliveredMediaBytes === null) {
-      addReason(reasons, 'host-uplink-evidence-unavailable', REFUSAL_SCOPE.hostUplink, { uplink });
-    } else if (uplink.txBytes < uplink.deliveredMediaBytes) {
-      addReason(reasons, 'host-uplink-below-delivered', REFUSAL_SCOPE.hostUplink, uplink);
-    }
-    for (const tag of tags) {
-      const health = input.receiptHealth?.[tag] ?? {};
-      if (Number(health.missed) > 0) addReason(reasons, 'receipt-log-discarded-records', REFUSAL_SCOPE.receiptHealth, { tag, missed: health.missed });
-      if (health.reset === true) addReason(reasons, 'receipt-log-reset', REFUSAL_SCOPE.receiptHealth, { tag });
-    }
-  }
+  const arm = armFor(condition);
+  arm.refusals(input, (reason, scope, detail) => addReason(reasons, reason, scope, detail));
 
   const uniqueReasonSet = [...new Set(reasons.map((entry) => entry.reason))];
   const duplicateReasons = reasons.map((entry) => entry.reason).filter((reason, index, all) => all.indexOf(reason) !== index);

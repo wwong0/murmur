@@ -57,6 +57,21 @@ export function readPlaybackState(value) {
   return freezeState(value);
 }
 
+export function offsetView(state, offsetMs) {
+  if (!Number.isFinite(offsetMs) || !Number.isInteger(offsetMs)) {
+    throw new TypeError('offsetMs must be a finite integer');
+  }
+  if (offsetMs === 0) return state;
+  if (state === null) return null;
+  return Object.freeze({
+    ...state,
+    current: Object.freeze({ ...state.current, mediaMs: state.current.mediaMs + offsetMs }),
+    previous: state.previous === null
+      ? null
+      : Object.freeze({ ...state.previous, mediaMs: state.previous.mediaMs + offsetMs }),
+  });
+}
+
 function mappingAt(state, sharedMs) {
   if (!state || !Number.isFinite(sharedMs) || !validMapping(state.current)
     || !(state.previous === null || validMapping(state.previous))) return null;

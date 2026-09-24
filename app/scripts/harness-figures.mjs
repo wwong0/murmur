@@ -9,6 +9,8 @@ import { driftContext, driftFigure } from './figures/drift-context.mjs';
 import { startResiduals, stepFits, maxRateEvidence, maxRateCompletion } from './figures/start-requalification.mjs';
 import { bytesByClientCsv, publish, utilisationCsv } from './figures/publication.mjs';
 import { driftSeriesCsv, driftSvg } from './figures/drift-plot.mjs';
+import { armFor } from './harness/arms.mjs';
+import { PEER_ATTEMPT_COHORT_METHOD } from './figures/peer-figures.mjs';
 
 function readJson(filePath, fallback = undefined) {
   try {
@@ -34,29 +36,20 @@ function counterFrom(value) {
 }
 
 function clientStreams(runDir, manifest) {
-  const files = fs.readdirSync(runDir);
-  const hostDelivery = manifest.condition?.delivery === 'host';
-  const tags = manifest.declaredClientTags ?? manifest.clientTags ?? manifest.condition?.clientTags
-    ?? files.map((name) => name.match(/^client-(.+)\.(?:drift|poll|requests|echo)\.ndjson$/)?.[1]).filter(Boolean);
-  return Object.fromEntries([...new Set(tags)].map((tag) => {
-    const safe = tag;
-    const recordsFile = path.join(runDir, `client-${safe}.drift.ndjson`);
-    const pollFile = path.join(runDir, `client-${safe}.poll.ndjson`);
-    const requestFile = path.join(runDir, `client-${safe}.requests.ndjson`);
-    const receiptFile = path.join(runDir, `client-${safe}.receipts.ndjson`);
-    const echoFile = path.join(runDir, `client-${safe}.echo.ndjson`);
-    const declaration = manifest.clients?.[tag] ?? {};
-    const httpRequests = hostDelivery ? readNdjson(requestFile) : undefined;
-    return [tag, {
-      ...declaration,
-      starts: declaration.boundaries?.end?.playback?.starts ?? [],
-      records: readNdjson(recordsFile),
-      polls: readNdjson(pollFile),
-      requests: hostDelivery ? readNdjson(receiptFile) : readNdjson(requestFile),
-      ...(hostDelivery ? { httpRequests } : {}),
-      echoRecords: readNdjson(echoFile),
-    }];
-  }));
+  return armFor(manifest.condition).clientStreams(runDir, manifest, {
+    names: fs.readdirSync(runDir),
+    readNdjson,
+    join: path.join,
+  });
+}
+
+function peerContent(manifest) {
+  if (manifest.condition?.peerExchange !== true) return manifest.content;
+  const manifestPath = manifest.content?.manifestPath
+    ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../step0/content/content-manifest.json');
+  const contentManifest = readJson(manifestPath);
+  if (!Array.isArray(contentManifest?.segmentSizes)) throw new Error('content segmentSizes are unavailable');
+  return { ...manifest.content, segmentSizes: contentManifest.segmentSizes };
 }
 
 export function readRunDirectory(runDir) {
@@ -68,13 +61,14 @@ export function readRunDirectory(runDir) {
   const tags = manifest.declaredClientTags ?? manifest.clientTags ?? manifest.condition?.clientTags
     ?? Object.keys(manifest.clients ?? {});
   const input = {
-    byteAccountingMethod: manifest.byteAccountingMethod,
+    byteAccountingMethod: manifest.condition?.peerExchange === true
+      ? 'peer-attempt-cohort-v1' : manifest.byteAccountingMethod,
     window,
     originStart,
     originEnd,
     clients: clientStreams(runDir, manifest),
     declaredClientTags: manifest.declaredClientTags ?? manifest.clientTags,
-    content: manifest.content,
+    content: peerContent(manifest),
     condition: manifest.condition,
     disturbance: manifest.disturbance ?? null,
     context,
@@ -82,6 +76,8 @@ export function readRunDirectory(runDir) {
     linkSamples: readNdjson(path.join(runDir, 'origin-link.ndjson')),
     clockJoin: Object.fromEntries([...new Set(tags)].map((tag) => [tag,
       readJson(path.join(runDir, `client-${tag}.clock-join.json`))])),
+    // Peer checks and host waste exclude the qualification's response by its ids.
+    ...(manifest.condition?.peerExchange === true ? { cdpQualification: manifest.cdpQualification } : {}),
   };
   return { manifest, input };
 }

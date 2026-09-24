@@ -212,6 +212,20 @@ export function boundaryExpression() {
   })()`;
 }
 
+export function peerPageReadingExpression() {
+  return `(() => {
+    const bytes = typeof __app.peerBytes === 'function' ? __app.peerBytes(0) : null;
+    return {
+      buildId: typeof __app.buildId === 'string' ? __app.buildId : null,
+      peerExchange: typeof __app.peerExchange === 'function' ? __app.peerExchange() : null,
+      positionOffset: typeof __app.positionOffset === 'function' ? __app.positionOffset() : null,
+      peerBytes: bytes && typeof bytes === 'object'
+        ? { attribution: bytes.attribution ?? null, peerId: bytes.peerId ?? null }
+        : null,
+    };
+  })()`;
+}
+
 export function installStallRecorder(epoch) {
   return `(() => {
     const state = { epoch: ${JSON.stringify(epoch)}, count: 0, lastAtMs: 0, installedAtMs: performance.now() };

@@ -2,6 +2,8 @@
 
 import { median, percentile } from '../../public/lib/frame-drift.mjs';
 import { computeReceiptCohort } from './receipt-cohort.mjs';
+import { computePeerFigures, PEER_ATTEMPT_COHORT_METHOD } from './peer-figures.mjs';
+import { computePeerChecks } from './peer-checks.mjs';
 
 export const PEER_FRACTION_ABS_MAX = 0.02;
 
@@ -356,6 +358,7 @@ export function computeFigures(input = {}) {
   const clients = input.clients ?? {};
   const tags = tagsFrom(input, clients);
   const method = input.byteAccountingMethod ?? input.context?.byteAccountingMethod;
+  if (method === PEER_ATTEMPT_COHORT_METHOD) return computePeerRunFigures(input);
   if (method !== undefined && method !== null && method !== 'client-receipt-cohort-v1') {
     throw new Error(`unknown byte accounting method: ${method}`);
   }
@@ -413,6 +416,44 @@ export function computeFigures(input = {}) {
   const disagreements = tags.filter((tag) => finite(result.realtimeFactorByClient[tag]) && finite(result.realtimeFactorFromFrameQualityByClient[tag])
     && Math.abs(result.realtimeFactorByClient[tag] - result.realtimeFactorFromFrameQualityByClient[tag]) > 0.05);
   if (disagreements.length) result.realtimeFactorDisagreement = disagreements;
+  return stripUnavailable(result);
+}
+
+const PEER_AUXILIARY_FIELDS = [
+  'realtimeFactorByClient', 'realtimeFactorFromFrameQualityByClient', 'stallCountByClient',
+  'droppedFrameFractionByClient', 'presentedFramesByClient', 'coverageRatioByClient',
+  'evaluationSkipsByClient', 'pollIntervalMsP50', 'pollIntervalMsP95', 'pollIntervalMsMax',
+  'clockBestDelayMsP50ByClient', 'clockBestDelayMsP95ByClient', 'clockBestDelayMsP99ByClient',
+  'clockLossFraction', 'echoRoundTripMsP50ByClient', 'echoRoundTripMsP95ByClient',
+  'echoRoundTripMsP99ByClient', 'echoLossFraction', 'uplinkUtilisationMean',
+  'uplinkUtilisationPeak', 'capacityBitsPerSecond', 'qdiscBacklogBytesMean',
+  'qdiscBacklogBytesPeak', 'qdiscDropsInWindow', 'qdiscOverlimitsInWindow',
+  'qdiscBacklogNonzeroFraction', 'qdiscBacklogBytesP99', 'standingQueueDelayMsP50NearestRank',
+  'standingQueueDelayMsP99',
+];
+
+function withoutVersion(value) {
+  if (!value || typeof value !== 'object') return value;
+  if (value.counters) return { ...value, counters: { ...value.counters, responseAccountingVersion: undefined } };
+  return { ...value, responseAccountingVersion: undefined };
+}
+
+function peerAuxiliaryFigures(input) {
+  const context = input.context ? { ...input.context, byteAccountingMethod: undefined } : undefined;
+  const legacy = computeFigures({ ...input, byteAccountingMethod: undefined, context,
+    originEnd: withoutVersion(input.originEnd ?? input.origin?.end) });
+  return Object.fromEntries(PEER_AUXILIARY_FIELDS
+    .filter((field) => legacy[field] !== undefined).map((field) => [field, legacy[field]]));
+}
+
+function computePeerRunFigures(input) {
+  const figures = computePeerFigures(input);
+  const checks = computePeerChecks(input, input.condition?.bars ?? {});
+  const toleranceReasons = checks.flatMap((check) => check.toleranceRefusals ?? [])
+    .map(() => 'peer-conservation-tolerance-unbounded');
+  const result = { ...peerAuxiliaryFigures(input), ...figures, peerChecks: checks,
+    peerRefusalReasons: [...(figures.peerRefusalReasons ?? []), ...toleranceReasons] };
+  // A peer run still has the ordinary quality/drift figures, but no legacy byte columns.
   return stripUnavailable(result);
 }
 

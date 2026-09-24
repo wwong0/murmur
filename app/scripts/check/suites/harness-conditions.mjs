@@ -119,7 +119,7 @@ export default async function harnessConditionsSuite() {
     const absent = [...baseEntries.keys()].filter((name) => !currentEntries.has(name));
     assertEqual(JSON.stringify(absent), JSON.stringify([]), 'no base condition disappeared');
     const added = [...currentEntries.keys()].filter((name) => !baseEntries.has(name));
-    assertEqual(JSON.stringify(added.sort()), JSON.stringify(['hostorigin-nop2p', 'hostorigin-uncapped', 'shakedown/hostorigin-qual']), 'only §5.5 conditions are new');
+    assertEqual(JSON.stringify(added.sort()), JSON.stringify(['hostorigin-nop2p', 'hostorigin-uncapped', 'p2p-naive', 'p2p-scattered', 'shakedown/hostorigin-qual', 'shakedown/p2p-qual']), 'only declared change conditions are new');
   });
 
   await check('harness conditions: host arms enumerate their frozen field equalities', async () => {

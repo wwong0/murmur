@@ -15,6 +15,7 @@ import { createPeerBytes } from './lib/peer-bytes.mjs';
 import { peerEngineConfig } from './lib/peer-engine-config.mjs';
 import { createClockSync, websocketProbe } from './lib/clock-sync.mjs';
 import { createRoomTimeline } from './lib/room-timeline.mjs';
+import { offsetView } from './lib/playback-state.mjs';
 import { createDriftLog } from './lib/frame-drift.mjs';
 import { createDriftController } from './lib/drift-controller.mjs';
 import { initializePlaybackTreatment } from './lib/playback-treatment.mjs';
@@ -31,6 +32,19 @@ import { MAX_FUTURE_MS, PREPARE_LEAD_MS, PRESENTATION_ADVANCE_MS, TRANSITION_LEA
 import { runTickSteps } from './lib/tick-steps.mjs';
 
 const BUILD_ID = __BUILD_ID__;
+
+const POSITION_OFFSET_MAX_MS = 600_000;
+const suppliedPositionOffsetMs = globalThis.__waPositionOffsetMs;
+const positionOffset = suppliedPositionOffsetMs === undefined
+  ? { ms: 0, error: null }
+  : !Number.isSafeInteger(suppliedPositionOffsetMs)
+    ? { ms: null, error: 'position-offset-must-be-a-safe-integer' }
+    : suppliedPositionOffsetMs < 0
+      ? { ms: null, error: 'position-offset-must-be-non-negative' }
+      : suppliedPositionOffsetMs > POSITION_OFFSET_MAX_MS
+        ? { ms: null, error: `position-offset-must-be-at-most-${POSITION_OFFSET_MAX_MS}` }
+        : { ms: suppliedPositionOffsetMs, error: null };
+const offsetMs = positionOffset.ms ?? 0;
 
 console.log('[app] build', BUILD_ID);
 
@@ -60,6 +74,20 @@ if (!suppliedRoom) {
 const startTiming = params.get('startTiming') === '1';
 const telemetry = createStartTelemetry({ enabled: startTiming });
 
+// The telemetry schema drops fields it does not declare, so the offset is added
+// where the ring is published. It is fixed for the page's life.
+function startTimingWithOffset(afterSeq) {
+  const reading = telemetry.read(afterSeq);
+  if (!reading.enabled) return reading;
+  return {
+    ...reading,
+    events: reading.events.map((event) => event.kind === 'action'
+      && ['load', 'park', 'play'].includes(event.action)
+      ? { ...event, positionOffsetMs: offsetMs }
+      : event),
+  };
+}
+
 const wsScheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const url = `${wsScheme}//${window.location.host}/ws`;
 
@@ -71,6 +99,7 @@ const video = document.getElementById('video');
 const statusLine = document.getElementById('status-line');
 const clockLine = document.getElementById('clock-line');
 const driftLine = document.getElementById('drift-line');
+const bytesLine = document.getElementById('bytes-line');
 const controllerLine = document.getElementById('controller-line');
 const rosterEl = document.getElementById('roster');
 const noticesEl = document.getElementById('notices');
@@ -254,6 +283,7 @@ let trackerUrl = null;
 let peerExchange = null;
 const peerBytesPublisher = createPeerBytes();
 let peerBytesRead = () => ({ attribution: null, peerExchange: 'off', peerId: null, peerIds: [] });
+let peerEngine = null;
 let link = null;
 let hostOrigin = null;
 const hostPeers = new Map();
@@ -396,7 +426,9 @@ const acquisition = createPlaybackAcquisition({
   report: (where, error) => addNotice(`playback state ${where} failed: ${error?.message ?? error}`, { warn: true }),
 });
 
-const timeline = createRoomTimeline({ readState: () => acquisition.state });
+const viewState = () => offsetView(acquisition.state, offsetMs);
+const timeline = createRoomTimeline({ readState: viewState });
+const roomTimeline = createRoomTimeline({ readState: () => acquisition.state });
 
 function controlsReady(kind) {
   const state = acquisition.state;
@@ -429,7 +461,7 @@ function issue(kind, args) {
 function seekBy(deltaMs) {
   const now = clockSync.sharedNow();
   if (!Number.isFinite(now)) return;
-  const positionMs = timeline.mediaMsAt(now + TRANSITION_LEAD_MS);
+  const positionMs = roomTimeline.mediaMsAt(now + TRANSITION_LEAD_MS);
   if (Number.isFinite(positionMs)) issue('seek', { positionMs: positionMs + deltaMs });
 }
 
@@ -663,6 +695,7 @@ function execute(result) {
             ? {
                 core: peerEngineConfig({ roomId: room, trackerUrl, iceServers }).core,
                 onEngine: (engine) => {
+                  peerEngine = engine;
                   peerBytesPublisher.attach(engine);
                   peerBytesRead = (afterSeq = 0) => peerBytesPublisher.read(afterSeq);
                 },
@@ -689,8 +722,9 @@ function schedulePollStart(delayMs) {
 }
 
 function pollStart() {
+  if (positionOffset.error !== null) return;
   checkReady();
-  const state = acquisition.state;
+  const state = viewState();
   const nowSharedMs = clockSync.sharedNow();
   const result = start.poll({
     nowSharedMs,
@@ -727,7 +761,13 @@ document.addEventListener('click', () => {
 // The diagnostics overlay
 // ---------------------------------------------------------------------------
 
-const overlay = createDiagnosticsOverlay({ clock: clockSync, controller: { state: controllerView }, log: driftLog, playback: start });
+const overlay = createDiagnosticsOverlay({
+  clock: clockSync,
+  controller: { state: controllerView },
+  bytes: { read: () => peerBytesRead() },
+  log: driftLog,
+  playback: start,
+});
 
 // ON THE TICK, NOT ON A CLOCK EVENT: the half-width widens with age between
 // samples, so a repaint tied to new samples alone freezes a growing number.
@@ -735,6 +775,7 @@ function paintOverlay() {
   const lines = overlay.lines();
   clockLine.textContent = lines.clock;
   driftLine.textContent = lines.drift;
+  bytesLine.textContent = lines.bytes;
   controllerLine.textContent = lines.controller;
 }
 
@@ -770,6 +811,7 @@ window.__app = {
   room,
   tabId,
   clock: () => clockSync.read(),
+  positionOffset: () => ({ ...positionOffset }),
   drift: (afterSeq = 0) => driftLog.read({ afterSeq }),
   // THE CANONICAL ROLLING WINDOW. Published so no consumer has to re-derive a
   // median from `drift().records` and get a second one — the browser pass did,
@@ -780,7 +822,7 @@ window.__app = {
   // overwritten by this one rather than colliding visibly.
   controller: controllerView,
   // Measurement instrumentation, inert without `startTiming=1` (§11.2).
-  startTiming: (afterSeq = 0) => telemetry.read(afterSeq),
+  startTiming: (afterSeq = 0) => startTimingWithOffset(afterSeq),
   pitch: () => treatment.pitch(),
   treatmentEvidence: (maxEvents) => treatment.drainEvidence(maxEvents),
   delivery: () => delivery,
@@ -788,6 +830,7 @@ window.__app = {
   hostCounters: () => (hostOrigin ? hostOrigin.snapshot() : null),
   hostReceipts: (afterSeq = 0) => (link ? link.receipts(afterSeq) : null),
   peerExchange: () => peerExchange,
+  peerEngineConfig: () => (peerEngine ? peerEngine.getConfig().core : null),
   peerBytes: (afterSeq = 0) => peerBytesRead(afterSeq),
   playback: () => ({
     ...start.state(),

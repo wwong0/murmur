@@ -10,6 +10,7 @@
 // Under public/lib/: no DOM, no page access.
 
 import { createDriftReadout, signed } from './drift-readout.mjs';
+import { bytesText } from './bytes-readout.mjs';
 import { CLOSE_BUDGET_MS, MAX_STOPPING_THRESHOLD_MS } from './drift-controller.mjs';
 
 export const CLOCK_LINE_NO_ESTIMATE = 'clock: no estimate yet';
@@ -144,13 +145,20 @@ function controllerText(state) {
   return `${head} ${tail}`;
 }
 
-export function createDiagnosticsOverlay({ clock, controller, log, playback }) {
+function readBytes(source) {
+  if (typeof source === 'function') return source();
+  if (source && typeof source.read === 'function') return source.read();
+  return { attribution: null, peerExchange: 'off', peerId: null, peerIds: [] };
+}
+
+export function createDiagnosticsOverlay({ clock, controller, bytes, log, playback }) {
   const driftReadout = createDriftReadout({ log, playback });
 
   function lines() {
     return {
       clock: clockText(clock.read()),
       controller: controllerText(controller.state()),
+      bytes: bytesText(readBytes(bytes)),
       // LAST, and once: the only call here that consumes, so a throw above it would spend a window unpainted.
       drift: driftReadout.text(),
     };

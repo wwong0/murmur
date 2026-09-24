@@ -64,7 +64,7 @@ import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep, dispose
 import { assertServedBundle, prepareRunDirectory } from './runner/core.mjs';
 import { INTEGRATION_SCHEMA, createRecorder, pitchReference } from './drift-capture.mjs';
 import { auditClient, integrationSummary, readClientEvidence } from './product-integration-evidence.mjs';
-import { DRIFT_LINE_RE } from '../public/lib/drift-readout.mjs';
+import { DRIFT_LINE_RE, driftLineForm } from '../public/lib/drift-readout.mjs';
 import { D8_COMMAND_THRESHOLD, MAX_RATE_DEVIATION, MIN_RECORDS, RATE_EPSILON } from '../public/lib/drift-controller.mjs';
 import { CLOCK_LINE_RE, CONTROLLER_LINE_HELD_RE, CONTROLLER_LINE_ACTING_RE } from '../public/lib/diagnostics-overlay.mjs';
 // The arithmetic and the verdicts, next door and pure — this file is the
@@ -88,6 +88,9 @@ import { inSyncWithoutCorrection } from './settle-wait.mjs';
 import { TRANSITION_LEAD_MS } from '../public/lib/playback-leads.mjs';
 import { WAITING_PAUSED } from '../public/lib/playback-start.mjs';
 import { seamEpochAgreement, startResidual } from './start-residual.mjs';
+import { evaluatePeerExchange } from './figures/peer-exchange-bars.mjs';
+import { PEER_PAGE_READING } from './peer-exchange-probe.mjs';
+import { Core } from '../node_modules/p2p-media-loader-core/lib/core.js';
 
 const PASS_STARTED_AT = Date.now();
 const PORT = 9223;
@@ -218,6 +221,7 @@ function readContentFrameRate() {
 const URL_A = `${ORIGIN}/room.html?room=demo&role=host&tab=A`;
 const URL_B = `${ORIGIN}/room.html?room=demo&role=viewer&tab=B`;
 const URL_V = `${ORIGIN}/room.html?room=demo&role=viewer&tab=V`;
+const URL_P = `${ORIGIN}/room.html?room=demo&role=viewer&tab=P`;
 // The treatment's event history, on the two measured windows only; the later
 // route windows keep the normal page.
 const URL_A_MEASURED = `${URL_A}&treatmentEvidence=1`;
@@ -925,7 +929,7 @@ try {
     for (const reading of readings) {
       const text = (reading.driftText ?? '').trim();
       const match = DRIFT_LINE_RE.exec(text);
-      if (match === null || Number(match[1]) <= 0) console.log(`  ${label} drift line non-match (${reading.paused ? 'not playing' : 'no new records'}): ${JSON.stringify(reading.driftText)}`);
+      if (match === null || Number(match[1]) <= 0) console.log(`  ${label} drift line non-match (${driftLineForm(text)}): ${JSON.stringify(reading.driftText)}`);
       console.log(`  ${label} controller line beside seam state: ${JSON.stringify({ line: reading.controllerText, mode: seam.controller?.mode, reason: seam.controller?.reason, rate: seam.controller?.rate, estimateMs: seam.controller?.estimateMs, bandMs: seam.controller?.bandMs, spreadMs: seam.controller?.spreadMs, halfWidthMs: seam.controller?.halfWidthMs, measurementLimit: seam.controller?.measurementLimit, actuatorAllowanceMs: seam.controller?.actuatorAllowanceMs, requiredStoppingThresholdMs: seam.controller?.requiredStoppingThresholdMs, stoppingThresholdMs: seam.controller?.stoppingThresholdMs, thresholdUsable: seam.controller?.thresholdUsable, fastestCloseMs: seam.controller?.fastestCloseMs, windowRecords: seam.controller?.windowRecords })}`);
     }
     expect(`3.8 ${label}'s controller line uses the acting shape`, actingMatches.length > 0, JSON.stringify(distinct('controllerText')));
@@ -940,6 +944,40 @@ try {
   expect('7.1 both windows have played on past where they opened', advA > 1000 && advB > 1000, `A +${(advA / 1000).toFixed(1)}s past its start, B +${(advB / 1000).toFixed(1)}s`);
   expect('7.1 both rosters show two members', pa.members.length === 2 && pb.members.length === 2, `A=${pa.members.length} B=${pb.members.length}`);
   expect('7.1 rosters agree', JSON.stringify(pa.members.slice().sort()) === JSON.stringify(pb.members.slice().sort()));
+
+  console.log('\n--- 5.1: a late-joining viewer and peer exchange (7b D7) ---');
+  // B has played far longer than D7's 20 s head start, so P is the late joiner.
+  // P closes before T7, which observes A and B only.
+  const peerSettings = await (await fetch(`${ORIGIN}/app-settings`, { cache: 'no-store' })).json();
+  const p = await attach('P/view', URL_P);
+  const pStart = (await pollUntil(() => p.evaluate(PEER_PAGE_READING), (reading) => reading?.playback?.playing === true, { everyMs: 500, deadlineAt: Date.now() + 60_000 })).value;
+  await sleep(2000);
+  const pAdvanced = await p.evaluate(PEER_PAGE_READING);
+  expect('5.1 the late joiner plays and advances 2 s', (pAdvanced.currentTime - pStart.currentTime) >= 2, `${pStart.currentTime} → ${pAdvanced.currentTime}`);
+  const peerDeadline = Date.now() + 90_000;
+  let peerReading = null;
+  do {
+    peerReading = { rooms: [{ roomId: 'demo', host: await a.evaluate(PEER_PAGE_READING), viewers: [await b.evaluate(PEER_PAGE_READING), await p.evaluate(PEER_PAGE_READING)] }] };
+    if (peerReading.rooms[0].viewers.some((page) => page.peerBytes?.kept?.peerBytes > 0)) break;
+    await sleep(Math.min(1000, Math.max(1, peerDeadline - Date.now())));
+  } while (Date.now() < peerDeadline);
+  fs.writeFileSync(path.join(RUN_DIR, 'peer-exchange-readings.json'), `${JSON.stringify(peerReading, null, 2)}\n`);
+  const peerBars = evaluatePeerExchange({
+    ...peerReading,
+    defaults: {
+      defaultStreamConfig: Core.DEFAULT_STREAM_CONFIG,
+      defaultCommonConfig: Core.DEFAULT_COMMON_CORE_CONFIG,
+      trackerUrl: peerSettings.trackerUrl,
+      iceServers: peerSettings.iceServers,
+    },
+  });
+  for (const key of ['B1', 'B3', 'B4', 'B5', 'B8']) {
+    const bar = peerBars.byKey[key];
+    expect(`5.1 ${key} peer-exchange bar passes`, bar?.pass === true, JSON.stringify(bar));
+  }
+  await cdpHttp(`/json/close/${p.targetId}`);
+  const rosterBack = (await pollUntil(() => a.evaluate(PROBE), (probe) => probe.members.length === 2, { everyMs: 500, deadlineAt: Date.now() + 15_000 })).value;
+  expect('5.1 closing the late joiner returns the room to two members', rosterBack.members.length === 2, JSON.stringify(rosterBack.members));
 
   console.log('\n--- T7: model check and hardware questions ---');
   const observationStates = await observeWindows([{ label: 'A', tab: a, recorder: recorderA }, { label: 'B', tab: b, recorder: recorderB }], OBSERVE_MS);

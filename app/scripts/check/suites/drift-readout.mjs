@@ -10,8 +10,22 @@
 
 import { check, assert, assertEqual } from '../harness.mjs';
 import { createDriftLog } from '../../../public/lib/frame-drift.mjs';
-import { createDriftReadout, DRIFT_LINE_RE } from '../../../public/lib/drift-readout.mjs';
-import { MISSING_CLOCK, MISSING_STATE, WAITING_PAUSED, WAITING_PREPARING, WAITING_REFUSED } from '../../../public/lib/playback-start.mjs';
+import {
+  createDriftReadout,
+  DRIFT_LINE_NO_RECORDS_RE,
+  DRIFT_LINE_NOT_PLAYING_RE,
+  DRIFT_LINE_RE,
+  driftLineForm,
+} from '../../../public/lib/drift-readout.mjs';
+import { REFUSAL_REASONS } from '../../../public/lib/frame-drift.mjs';
+import {
+  MISSING_CLOCK,
+  MISSING_HOST_LINK,
+  MISSING_STATE,
+  WAITING_PAUSED,
+  WAITING_PREPARING,
+  WAITING_REFUSED,
+} from '../../../public/lib/playback-start.mjs';
 
 /** The load rule's status, as the read-out consumes it — set directly by each check. */
 function fakePlayback(state = { playing: false, missing: MISSING_CLOCK }) {
@@ -91,5 +105,72 @@ export default async function driftReadoutSuite() {
     // median over all five, not over the one.
     log.add(drifted(8));
     assertEqual(readout.text(), 'drift: +8.0ms · rolling window over the last 5 frames: median +8.0ms, p99 +100.0ms', 'the window covers every record held, not only the new ones');
+  });
+
+  await check('drift read-out: every silent form has only its own published shape', async () => {
+    const missing = [MISSING_CLOCK, MISSING_STATE, MISSING_HOST_LINK];
+    const waiting = [WAITING_PAUSED, WAITING_PREPARING, WAITING_REFUSED];
+    const notPlaying = [
+      ...missing.map((reason) => {
+        const { playback, readout } = rig();
+        playback.held.state = { playing: false, missing: reason, waiting: null, retargets: 3 };
+        return readout.text();
+      }),
+      ...waiting.map((reason) => {
+        const { playback, readout } = rig();
+        playback.held.state = { playing: false, missing: null, waiting: reason, retargets: 3 };
+        return readout.text();
+      }),
+      (() => {
+        const { playback, readout } = rig();
+        playback.held.state = { playing: false, missing: null, waiting: null, retargets: 3 };
+        return readout.text();
+      })(),
+    ];
+    const noRecords = [
+      (() => {
+        const { log, playback, readout } = rig();
+        playback.held.state = { playing: true, missing: null };
+        const line = readout.text();
+        return { log, playback, readout, line };
+      })(),
+      ...REFUSAL_REASONS.map((reason) => {
+        const { log, playback, readout } = rig();
+        playback.held.state = { playing: true, missing: null };
+        readout.text();
+        log.add({ ok: false, reason });
+        return { log, playback, readout, line: readout.text() };
+      }),
+    ];
+    noRecords.push((() => {
+      const { playback, readout } = rig();
+      playback.held.state = { playing: true, missing: null };
+      readout.text();
+      return { line: readout.text() };
+    })());
+    const recording = (() => {
+      const { log, playback, readout } = rig();
+      playback.held.state = { playing: true, missing: null };
+      log.add(drifted(4));
+      return readout.text();
+    })();
+
+    for (const line of notPlaying) {
+      assert(DRIFT_LINE_NOT_PLAYING_RE.test(line), `not-playing shape accepts ${line}`);
+      assert(!DRIFT_LINE_NO_RECORDS_RE.test(line), `not-playing shape refuses no-records form ${line}`);
+      assert(!DRIFT_LINE_RE.test(line), `silent line is not recording: ${line}`);
+      assertEqual(driftLineForm(line), 'not-playing', 'form classifier names not-playing');
+    }
+    for (const { line } of noRecords) {
+      assert(DRIFT_LINE_NO_RECORDS_RE.test(line), `no-records shape accepts ${line}`);
+      assert(!DRIFT_LINE_NOT_PLAYING_RE.test(line), `no-records shape refuses not-playing form ${line}`);
+      assert(!DRIFT_LINE_RE.test(line), `silent line is not recording: ${line}`);
+      assertEqual(driftLineForm(line), 'no-new-records', 'form classifier names no-new-records');
+    }
+    assertEqual(recording, 'drift: +4.0ms · rolling window over the last 1 frames: median +4.0ms, p99 +4.0ms', 'recording fixture is a real record');
+    assert(DRIFT_LINE_RE.test(recording), 'recording fixture matches the recording shape');
+    assert(!DRIFT_LINE_NOT_PLAYING_RE.test(recording), 'recording fixture refuses not-playing shape');
+    assert(!DRIFT_LINE_NO_RECORDS_RE.test(recording), 'recording fixture refuses no-records shape');
+    assertEqual(driftLineForm(recording), 'recording', 'form classifier names recording');
   });
 }

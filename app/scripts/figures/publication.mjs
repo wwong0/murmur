@@ -4,6 +4,7 @@ import { evaluateByteControl } from '../harness/byte-control.mjs';
 
 const PUBLICATION = Symbol('published-figure');
 const RECEIPT_COHORT_METHOD = 'client-receipt-cohort-v1';
+const PEER_ATTEMPT_COHORT_METHOD = 'peer-attempt-cohort-v1';
 
 const RECEIPT_COHORT_FIELDS = Object.freeze([
   ['hostUploadMultiplier', (value) => Number.isFinite(value) && value >= 0],
@@ -20,6 +21,32 @@ const BYTE_FIELDS = Object.freeze([
   'window.startSnapshotAtMs',
   'window.endSnapshotAtMs',
   'originWasteFraction',
+  'realtimeFactorByClient',
+  'stallCountByClient',
+  'content.identity',
+  'content.frameRate',
+]);
+
+const PEER_BYTE_FIELDS = Object.freeze([
+  'condition.name',
+  'condition.capacityMbps',
+  'window.startMs',
+  'window.endMs',
+  'window.startSnapshotAtMs',
+  'window.endSnapshotAtMs',
+  'byteAccountingMethod',
+  'keptHostBytesByClient',
+  'keptPeerBytesByClient',
+  'peerFractionByClient',
+  'peerFractionAggregate',
+  'mediaBytesDeliveredInWindow',
+  'distinctSegmentBytesInWindow',
+  'distinctSegmentsCompletedInWindow',
+  'hostUploadMultiplier',
+  'hostWasteFraction',
+  'hostWasteBytes',
+  'hostDeliveredBytesSettledInWindow',
+  'peerWasteBytesByClient',
   'realtimeFactorByClient',
   'stallCountByClient',
   'content.identity',
@@ -78,7 +105,15 @@ export const DRIFT_FIELDS = Object.freeze([
   'echoRoundTripMsP99ByClient',
 ]);
 
-export const REQUIRED_CONTEXT_FIELDS = Object.freeze({ byte: BYTE_FIELDS, drift: DRIFT_FIELDS });
+export const REQUIRED_CONTEXT_FIELDS = Object.freeze({ byte: BYTE_FIELDS, drift: DRIFT_FIELDS,
+  peerByte: PEER_BYTE_FIELDS });
+
+function fieldsFor(kind, context = {}, figure = {}) {
+  if (kind === 'byte' && (context.byteAccountingMethod ?? figure.byteAccountingMethod) === PEER_ATTEMPT_COHORT_METHOD) {
+    return PEER_BYTE_FIELDS;
+  }
+  return REQUIRED_CONTEXT_FIELDS[kind] ?? [];
+}
 
 function getPath(object, path) {
   return path.split('.').reduce((value, key) => value?.[key], object);
@@ -126,8 +161,7 @@ function missingField(path, context, figure) {
 }
 
 export function missingFields(kind, context, figure = {}) {
-  const fields = REQUIRED_CONTEXT_FIELDS[kind];
-  if (!fields) throw new Error(`unknown figure kind: ${kind}`);
+  const fields = fieldsFor(kind, context, figure);
   for (const field of fields) {
     const direct = missingField(field, context, figure);
     if (direct) return direct;
@@ -178,7 +212,7 @@ function missingReceiptCohortField(figure) {
 }
 
 export function requiredContextFields(kind, context = {}) {
-  const fields = [...(REQUIRED_CONTEXT_FIELDS[kind] ?? [])];
+  const fields = [...fieldsFor(kind, context)];
   const tags = declaredTags(context, {});
   return fields.flatMap((field) => (field.endsWith('ByClient') ? tags.map((tag) => `${field}[${tag}]`) : [field]));
 }
@@ -227,6 +261,13 @@ export function requirePublished(figure) {
 
 export function bytesByClientCsv(figure) {
   requirePublished(figure);
+  if (figure.byteAccountingMethod === PEER_ATTEMPT_COHORT_METHOD) {
+    const tags = Object.keys(figure.peerFractionByClient ?? {});
+    const header = ['tag', 'keptHostBytes', 'keptPeerBytes', 'peerFraction', 'peerWasteBytes'];
+    const rows = tags.map((tag) => [tag, figure.keptHostBytesByClient?.[tag], figure.keptPeerBytesByClient?.[tag],
+      figure.peerFractionByClient?.[tag], figure.peerWasteBytesByClient?.[tag]]);
+    return [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n') + '\n';
+  }
   const tags = Object.keys(figure.peerByteFractionByClient ?? {});
   const header = ['tag', 'originMediaBytes', 'clientReceivedMediaBytes', 'peerByteFraction', 'originVsClientDifferenceBytes', 'originVsClientDifferenceFraction', 'abortedQueuedResidualBytes'];
   const rows = tags.map((tag) => [
