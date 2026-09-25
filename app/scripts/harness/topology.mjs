@@ -183,9 +183,7 @@ function containerRunDir(runDir) {
 }
 
 export function probePathsFromContainers(containers, condition) {
-  const clientTags = Array.from({ length: condition.clients }, (_, index) => `c${String(index + 1).padStart(2, '0')}`);
-  const tags = condition.delivery === 'host' ? ['c00', ...clientTags] : clientTags;
-  return Object.fromEntries(tags.map((tag) => {
+  return Object.fromEntries(armFor(condition).members(condition).declaredTags.map((tag) => {
     const container = tag === 'c00' ? containers.origin : containers[tag];
     if (!container) throw new Error(`probe path has no prepared container for ${tag}`);
     return [tag, {

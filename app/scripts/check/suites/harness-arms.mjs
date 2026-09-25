@@ -101,9 +101,29 @@ export default async function harnessArmsSuite() {
     assertEqual(session.peerReadyReading.peerExchange, 'on', 'ready reading is on');
   });
 
+  await check('harness arms: a host run places its window after cadence, a peer run before its playback wait', async () => {
+    const opened = async (condition) => {
+      const steps = [];
+      const body = {};
+      await armFor(condition).openWindow({
+        sessions: [{ tag: 'c01', role: 'viewer', tab: { evaluate: async () => ({ playing: true }) } }],
+        condition,
+        establishCadence: async () => { steps.push('cadence'); return { source: 'constructed' }; },
+        manifestFile: { merge: (value) => { steps.push(...Object.keys(value)); Object.assign(body, value); }, write() { steps.push('write'); } },
+        placeWindow: () => ({ startMs: 0 }),
+        drainAll: async () => { steps.push('drain'); },
+      });
+      return { steps, body };
+    };
+    const host = await opened({ delivery: 'host', clients: 1 });
+    assertEqual(JSON.stringify(host.steps), JSON.stringify(['cadence', 'cadence', 'window']), 'host: cadence, then cadence and window merged');
+    const peer = await opened({ delivery: 'host', peerExchange: true, clients: 1 });
+    assertEqual(JSON.stringify(peer.steps), JSON.stringify(['window', 'drain', 'startWait', 'write', 'drain', 'cadence', 'cadence']),
+      'peer: window, the drained wait, its record, a drain, then cadence');
+    assertEqual(peer.body.startWait.playingAtMs.c01 !== null, true, 'the playing viewer is recorded');
+  });
+
   await check('harness peer arm: playback wait records late starts inside its deadline', async () => {
-    assertEqual(armFor({ delivery: 'host' }).playbackWaitBeforeCadence, false, 'host cadence sequence is unchanged');
-    assertEqual(armFor({ delivery: 'host', peerExchange: true }).playbackWaitBeforeCadence, true, 'peer cadence waits before probing');
     let clock = 0;
     const calls = { c01: 0, c02: 0 };
     const sessions = ['c01', 'c02'].map((tag) => ({ tag, role: 'viewer', tab: {

@@ -28,7 +28,9 @@ import {
   ACQUISITION_REQUEST_TIMEOUT_MS,
   createPlaybackAcquisition,
 } from './lib/playback-acquisition.mjs';
-import { MAX_FUTURE_MS, PREPARE_LEAD_MS, PRESENTATION_ADVANCE_MS, TRANSITION_LEAD_MS } from './lib/playback-leads.mjs';
+import {
+  LATE_START_REPARK_MS, MAX_FUTURE_MS, MAX_LATE_REPARKS, PREPARE_LEAD_MS, PRESENTATION_ADVANCE_MS, TRANSITION_LEAD_MS,
+} from './lib/playback-leads.mjs';
 import { runTickSteps } from './lib/tick-steps.mjs';
 
 const BUILD_ID = __BUILD_ID__;
@@ -282,7 +284,9 @@ let iceServers = [];
 let trackerUrl = null;
 let peerExchange = null;
 const peerBytesPublisher = createPeerBytes();
-let peerBytesRead = () => ({ attribution: null, peerExchange: 'off', peerId: null, peerIds: [] });
+// A viewer publishes this stub until its engine is attached, so no reading
+// before load says attribution is unavailable.
+let peerBytesRead = () => ({ attribution: null, peerExchange: peerExchange ?? 'off', peerId: null, peerIds: [] });
 let peerEngine = null;
 let link = null;
 let hostOrigin = null;
@@ -516,7 +520,12 @@ const controllerView = () => treatment.view(controller.state());
 // The scheduled start (D6) and the window drop at every start and park (D7)
 // ---------------------------------------------------------------------------
 
-const start = createPlaybackStart({ prepareLeadMs: PREPARE_LEAD_MS, presentationAdvanceMs: PRESENTATION_ADVANCE_MS });
+const start = createPlaybackStart({
+  prepareLeadMs: PREPARE_LEAD_MS,
+  presentationAdvanceMs: PRESENTATION_ADVANCE_MS,
+  reparkAfterMs: LATE_START_REPARK_MS,
+  maxReparks: MAX_LATE_REPARKS,
+});
 const STARTS_KEPT = 32;
 const starts = [];
 let startTimer = null;
@@ -618,6 +627,10 @@ function recordAction(action, fields, dispatch) {
       startAtSharedMs: null,
       latenessMs: null,
       seamEpochMs: null,
+      reparkOf: action.reparkOf ?? null,
+      reparks: action.reparks ?? null,
+      abandonedLatenessMs: action.abandonedLatenessMs ?? null,
+      firstStartAtSharedMs: action.firstStartAtSharedMs ?? null,
       ...fields,
       elementPausedBefore,
       elementCurrentTimeMs,
@@ -645,6 +658,8 @@ function play(action) {
     // The seam's own epoch, so acceptance can check it against the room's
     // (§15 item 4) without re-deriving it from the advanced park.
     epochMs: seamEpochMs,
+    reparks: action.reparks,
+    firstStartAtSharedMs: action.firstStartAtSharedMs,
   });
   if (starts.length > STARTS_KEPT) starts.shift();
   sampler.start();
@@ -860,9 +875,6 @@ async function startApp() {
       : client.role === 'host'
         ? 'host'
         : typeof trackerUrl === 'string' ? 'on' : 'off';
-    // A viewer publishes the stub until its engine is attached, so no reading
-    // before load says attribution is unavailable.
-    peerBytesRead = () => ({ attribution: null, peerExchange, peerId: null, peerIds: [] });
     if (delivery === 'host') {
       await loadHostTransport();
       if (role === 'viewer') installViewerLink();

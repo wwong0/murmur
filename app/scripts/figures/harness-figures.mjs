@@ -3,7 +3,7 @@
 import { median, percentile } from '../../public/lib/frame-drift.mjs';
 import { computeReceiptCohort } from './receipt-cohort.mjs';
 import { computePeerFigures, PEER_ATTEMPT_COHORT_METHOD } from './peer-figures.mjs';
-import { computePeerChecks } from './peer-checks.mjs';
+import { computePeerChecks, pairResponseEvidence } from './peer-checks.mjs';
 import { peerSpacing } from './peer-spacing.mjs';
 
 export const PEER_FRACTION_ABS_MAX = 0.02;
@@ -448,8 +448,9 @@ function peerAuxiliaryFigures(input) {
 }
 
 function computePeerRunFigures(input) {
-  const figures = computePeerFigures(input);
-  const checks = computePeerChecks(input, input.condition?.bars ?? {});
+  const pairing = pairResponseEvidence(input);
+  const figures = computePeerFigures(input, pairing);
+  const checks = computePeerChecks(input, input.condition?.bars ?? {}, pairing);
   const toleranceReasons = checks.flatMap((check) => check.toleranceRefusals ?? [])
     .map(() => 'peer-conservation-tolerance-unbounded');
   const spacing = peerSpacing({ clients: input.clients, tags: tagsFrom(input, input.clients ?? {}),

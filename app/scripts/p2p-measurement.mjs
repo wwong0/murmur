@@ -6,7 +6,7 @@ import { recomputeRunDirectory } from './harness-figures.mjs';
 import { naiveMeasurement } from './figures/p2p-measurement.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const OUTPUT = path.join(APP_DIR, 'results', '7b2-naive-measurement.json');
+const DEFAULT_OUTPUT = '7b2-naive-measurement.json';
 
 function valueFor(name, argv = process.argv.slice(2)) {
   const prefix = `--${name}=`;
@@ -21,17 +21,19 @@ function runInput(directory) {
 }
 
 export function main(argv = process.argv.slice(2)) {
-  if (fs.existsSync(OUTPUT)) throw new Error(`refusing to overwrite ${OUTPUT}`);
+  // A later measurement is written beside the one it supersedes, never over it.
+  const output = path.join(APP_DIR, 'results', path.basename(valueFor('out', argv) ?? DEFAULT_OUTPUT));
+  if (fs.existsSync(output)) throw new Error(`refusing to overwrite ${output}`);
   const controlName = valueFor('control', argv);
   const naiveNames = valueFor('naive', argv)?.split(',').filter(Boolean) ?? [];
   if (!controlName || naiveNames.length !== 3) {
-    throw new Error('usage: node scripts/p2p-measurement.mjs --control=<dir> --naive=<d1>,<d2>,<d3>');
+    throw new Error('usage: node scripts/p2p-measurement.mjs --control=<dir> --naive=<d1>,<d2>,<d3> [--out=<file>]');
   }
   const measurement = naiveMeasurement({
     control: runInput(controlName),
     naive: naiveNames.map(runInput),
   });
-  fs.writeFileSync(OUTPUT, `${JSON.stringify(measurement, null, 2)}\n`);
+  fs.writeFileSync(output, `${JSON.stringify(measurement, null, 2)}\n`);
   if (!measurement.published) process.exitCode = 1;
   return measurement;
 }

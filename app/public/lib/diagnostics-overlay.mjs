@@ -145,20 +145,16 @@ function controllerText(state) {
   return `${head} ${tail}`;
 }
 
-function readBytes(source) {
-  if (typeof source === 'function') return source();
-  if (source && typeof source.read === 'function') return source.read();
-  return { attribution: null, peerExchange: 'off', peerId: null, peerIds: [] };
-}
+const NO_PEER_BYTES = { read: () => ({ attribution: null, peerExchange: 'off', peerId: null, peerIds: [] }) };
 
-export function createDiagnosticsOverlay({ clock, controller, bytes, log, playback }) {
+export function createDiagnosticsOverlay({ clock, controller, bytes = NO_PEER_BYTES, log, playback }) {
   const driftReadout = createDriftReadout({ log, playback });
 
   function lines() {
     return {
       clock: clockText(clock.read()),
       controller: controllerText(controller.state()),
-      bytes: bytesText(readBytes(bytes)),
+      bytes: bytesText(bytes.read()),
       // LAST, and once: the only call here that consumes, so a throw above it would spend a window unpainted.
       drift: driftReadout.text(),
     };

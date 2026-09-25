@@ -32,7 +32,7 @@ function targetFor(state) {
   return { playing: false, effectiveMs: current.atSharedMs, positionMs: current.mediaMs };
 }
 
-export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 } = {}) {
+export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0, reparkAfterMs = Infinity, maxReparks = 0 } = {}) {
   if (!Number.isFinite(prepareLeadMs) || prepareLeadMs < 0) {
     throw new TypeError('prepareLeadMs must be a finite non-negative number');
   }
@@ -41,6 +41,13 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 }
   // the upper bound keeps an advance below S's own preparation lead.
   if (!Number.isFinite(presentationAdvanceMs) || presentationAdvanceMs < advanceLow || presentationAdvanceMs > advanceHigh) {
     throw new TypeError(`presentationAdvanceMs must be a finite number in [${advanceLow}, ${advanceHigh}]`);
+  }
+  // Off by default: Infinity never re-parks, and the entry opts in (7b2 design.md D3).
+  if (typeof reparkAfterMs !== 'number' || Number.isNaN(reparkAfterMs) || reparkAfterMs < 0) {
+    throw new TypeError('reparkAfterMs must be a non-negative number or Infinity');
+  }
+  if (!Number.isInteger(maxReparks) || maxReparks < 0) {
+    throw new TypeError('maxReparks must be a non-negative integer');
   }
 
   let nextAttemptId = 1;
@@ -57,6 +64,7 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 }
   let opens = 0;
   let begun = 0;
   let retargets = 0;
+  let reparks = 0;
   let lastLatenessMs = null;
   let lastPlayError = null;
   let linkOpen = true;
@@ -82,6 +90,7 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 }
       opens,
       begun,
       retargets,
+      reparks,
       lastLatenessMs,
       lastPlayError,
       attemptId: attempt?.id ?? null,
@@ -118,7 +127,7 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 }
     }
   }
 
-  function newPlayingAttempt(state, target, nowSharedMs) {
+  function newPlayingAttempt(state, target, nowSharedMs, lineage = null) {
     const id = nextAttemptId++;
     const S = Math.max(target.effectiveMs, nowSharedMs + prepareLeadMs);
     // Both through the mapping's own arithmetic, never by adding the advance to
@@ -142,9 +151,12 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 }
       readyAtSharedMs: null,
       playDispatched: false,
       parked: true,
+      reparks: lineage?.reparks ?? 0,
+      firstStartAtSharedMs: lineage?.firstStartAtSharedMs ?? S,
     };
     pauseAction(actions, id);
     setupPosition(actions, id, mapping);
+    if (lineage) Object.assign(actions.at(-1), lineage);
     return result(actions, S);
   }
 
@@ -180,10 +192,23 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 }
     return parkPaused(target);
   }
 
-  function duePlaying(nowSharedMs) {
+  function duePlaying(state, nowSharedMs) {
     if (!attempt || !attempt.target.playing) return result([], null);
     if (attempt.playDispatched) return result([], null);
     if (attempt.readyAtSharedMs !== null) {
+      // Late beyond the bound: park again at the room's position for a fresh S
+      // rather than play from the stale park. Strict, and capped (7b2 design.md D3).
+      if (nowSharedMs - attempt.S > reparkAfterMs && attempt.reparks < maxReparks) {
+        const lineage = {
+          reparkOf: attempt.id,
+          reparks: attempt.reparks + 1,
+          abandonedLatenessMs: nowSharedMs - attempt.S,
+          firstStartAtSharedMs: attempt.firstStartAtSharedMs,
+        };
+        const replaced = newPlayingAttempt(state, attempt.target, nowSharedMs, lineage);
+        if (replaced.actions.length > 0) reparks += 1;
+        return replaced;
+      }
       attempt.playDispatched = true;
       elementPlaying = true;
       lastLatenessMs = nowSharedMs - attempt.S;
@@ -193,6 +218,8 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 }
         startAtSharedMs: attempt.S,
         latenessMs: lastLatenessMs,
         ...attempt.mapping,
+        reparks: attempt.reparks,
+        firstStartAtSharedMs: attempt.firstStartAtSharedMs,
       }], null);
     }
     return result([], null);
@@ -262,7 +289,7 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0 }
       return newPlayingAttempt(state, target, nowSharedMs);
     }
     if (nowSharedMs < attempt.S) return result([], attempt.S);
-    return duePlaying(nowSharedMs);
+    return duePlaying(state, nowSharedMs);
   }
 
   function ready(attemptId, observedSharedMs) {

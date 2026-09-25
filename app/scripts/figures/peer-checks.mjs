@@ -1,33 +1,8 @@
 // Independent checks for the peer-attempt byte accounting.
 
-import { attemptDispositions } from '../../public/lib/peer-bytes.mjs';
+import { cohortSegments, finite, inWindow, pathOf, recordsOf, responseRecords, safe, tagsOf } from './peer-evidence.mjs';
 
-const finite = (value) => Number.isFinite(value);
-const safe = (value) => Number.isSafeInteger(value) && value >= 0;
-const pathOf = (value) => String(value ?? '').split(/[?#]/, 1)[0];
 const mediaPath = (value) => /\/media\/.*\.m4s$/i.test(pathOf(value));
-
-function tagsOf(input) {
-  return input.declaredClientTags ?? input.clientTags ?? Object.keys(input.clients ?? {});
-}
-
-function recordsOf(client) {
-  return Array.isArray(client?.peerRecords) ? client.peerRecords : [];
-}
-
-function inWindow(value, window) {
-  return finite(value) && finite(window?.startMs) && finite(window?.endMs)
-    && value >= window.startMs && value < window.endMs;
-}
-
-function originSnapshot(value) {
-  return value?.counters ?? value ?? {};
-}
-
-function responseRecords(value) {
-  const records = originSnapshot(value).responseRecords;
-  return Array.isArray(records) ? records : [];
-}
 
 function receiptKey(receipt, index) {
   return receipt?.requestId ?? `receipt-${index}`;
@@ -164,13 +139,7 @@ export function pairResponseEvidence(input = {}) {
   return pairing;
 }
 
-function cohortSegments(client, window) {
-  return recordsOf(client).filter((record) => record?.kind === 'segment'
-    && inWindow(record.completedAtMs, window));
-}
-
-function responseAgreement(input, tolerances) {
-  const pairing = pairResponseEvidence(input);
+function responseAgreement(input, tolerances, pairing) {
   const failures = [];
   const excused = pairing.excused ?? [];
   const excusedKeys = new Set(excused.map((entry) => `${entry.tag}:${entry.requestId}`));
@@ -225,14 +194,13 @@ function responseAgreement(input, tolerances) {
   return { check: 'response-agreement', passed: failures.length === 0, failures, exercised, excused };
 }
 
-function segmentSum(input) {
-  const pairing = pairResponseEvidence(input);
+function segmentSum(input, pairing) {
   const failures = [];
   let exercised = false;
   for (const tag of tagsOf(input)) {
     const client = input.clients?.[tag] ?? {};
     const byAttempt = new Map((pairing.byClient[tag]?.pairs ?? []).map((pair) => [pair.attempt.attemptId, pair]));
-    for (const segment of cohortSegments(client, input.window)) {
+    for (const segment of cohortSegments(recordsOf(client), input.window)) {
       exercised = true;
       let total = 0;
       for (const attemptId of segment.keptAttemptIds ?? []) {
@@ -337,18 +305,12 @@ function conservation(input, tolerances) {
   return { check: 'conservation', passed: failures.length === 0, failures, exercised: true, toleranceRefusals };
 }
 
-export function computePeerChecks(input = {}, tolerances = {}) {
+export function computePeerChecks(input = {}, tolerances = {}, pairing = pairResponseEvidence(input)) {
   const bars = { ...(input.condition?.bars ?? {}), ...tolerances };
   return [
-    responseAgreement(input, bars),
-    segmentSum(input),
+    responseAgreement(input, bars, pairing),
+    segmentSum(input, pairing),
     peerIdMembership(input),
     conservation(input, bars),
   ];
 }
-
-export const runPeerChecks = computePeerChecks;
-export const checkResponseAgreement = responseAgreement;
-export const checkSegmentSum = segmentSum;
-export const checkPeerIdMembership = peerIdMembership;
-export const checkConservation = conservation;

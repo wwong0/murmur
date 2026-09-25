@@ -91,6 +91,7 @@ import driftConvergenceSuite from './check/suites/drift-convergence.mjs';
 import driftReportingSuite from './check/suites/drift-reporting.mjs';
 import driftSettlingSuite from './check/suites/drift-settling.mjs';
 import playbackStartSuite from './check/suites/playback-start.mjs';
+import playbackStartReparkSuite from './check/suites/playback-start-repark.mjs';
 import tickStepsSuite from './check/suites/tick-steps.mjs';
 import settleWaitSuite from './check/suites/settle-wait.mjs';
 import startResidualSuite from './check/suites/start-residual.mjs';
@@ -175,6 +176,7 @@ for (const suite of [
   driftReportingSuite,
   driftSettlingSuite,
   playbackStartSuite,
+  playbackStartReparkSuite,
   tickStepsSuite,
   settleWaitSuite,
   startResidualSuite,

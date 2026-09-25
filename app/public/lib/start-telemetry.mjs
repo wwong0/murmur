@@ -48,6 +48,7 @@ const KIND_FIELDS = Object.freeze({
     action: 'string', positionMs: 'number', scheduledPositionMs: 'number', advanceMs: 'number',
     seamEpochMs: 'number', startAtSharedMs: 'number', latenessMs: 'number', elementPausedBefore: 'boolean',
     elementCurrentTimeMs: 'number', dispatchedAtLocalMs: 'number', returnedAtLocalMs: 'number', threw: 'string',
+    reparkOf: 'number', reparks: 'number', abandonedLatenessMs: 'number', firstStartAtSharedMs: 'number',
   },
   'element-event': {
     type: 'string', readyState: 'number', paused: 'boolean', elementCurrentTimeMs: 'number',

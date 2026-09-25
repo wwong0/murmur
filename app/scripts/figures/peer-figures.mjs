@@ -1,25 +1,12 @@
 // Peer-attempt cohort arithmetic. Inputs are retained evidence, not live pages.
 
-import { attemptDispositions, keptBytes } from '../../public/lib/peer-bytes.mjs';
+import { attemptDispositions } from '../../public/lib/peer-bytes.mjs';
 import { pairResponseEvidence } from './peer-checks.mjs';
+import { cohortSegments, finite, inWindow, originSnapshot, pathOf, recordsOf, responseRecords, safe, sumBytes, tagsOf } from './peer-evidence.mjs';
 
 export const PEER_ATTEMPT_COHORT_METHOD = 'peer-attempt-cohort-v1';
 
-const finite = (value) => Number.isFinite(value);
-const safe = (value) => Number.isSafeInteger(value) && value >= 0;
-const pathOf = (value) => String(value ?? '').split(/[?#]/, 1)[0];
-
-function tagsOf(input) {
-  return input.declaredClientTags ?? input.clientTags ?? Object.keys(input.clients ?? {});
-}
-
-function recordsOf(client) {
-  return Array.isArray(client?.peerRecords) ? client.peerRecords : [];
-}
-
-function originSnapshot(value) {
-  return value?.counters ?? value ?? {};
-}
+const wasted = (disposition) => disposition === 'discarded' || disposition === 'abandoned';
 
 function difference(after, before, field) {
   const right = Number(originSnapshot(after)?.[field]);
@@ -28,19 +15,9 @@ function difference(after, before, field) {
   return right - left;
 }
 
-function inWindow(value, window) {
-  return finite(value) && finite(window?.startMs) && finite(window?.endMs)
-    && value >= window.startMs && value < window.endMs;
-}
-
 function segmentIndex(path) {
   const match = pathOf(path).match(/\/seg-(\d+)\.m4s$/i);
   return match ? Number(match[1]) : null;
-}
-
-// The same completion cohort peer-checks.mjs reads; a second rule would split them.
-function cohortForClient(records, window) {
-  return records.filter((segment) => segment?.kind === 'segment' && inWindow(segment.completedAtMs, window));
 }
 
 function segmentLengths(input, cohorts) {
@@ -86,26 +63,20 @@ function hostResponseSet(input, pairing) {
   return { responses: [...byResponseId.values()], pairs, excused };
 }
 
-function responseRecords(value) {
-  const records = originSnapshot(value).responseRecords;
-  return Array.isArray(records) ? records : [];
-}
-
 function peerWaste(records, dispositions, window) {
-  return records.filter((record) => record?.kind === 'attempt' && record.source === 'p2p'
-    && inWindow(record.endMs, window)
-    && (dispositions.get(record.attemptId) === 'discarded' || dispositions.get(record.attemptId) === 'abandoned'))
-    .reduce((sum, record) => sum + (safe(record.bytes) ? record.bytes : 0), 0);
+  return sumBytes(records.filter((record) => record?.kind === 'attempt' && record.source === 'p2p'
+    && inWindow(record.endMs, window) && wasted(dispositions.get(record.attemptId))), 'bytes');
 }
 
-export function computePeerFigures(input = {}) {
+export function computePeerFigures(input = {}, pairing = pairResponseEvidence(input)) {
   const tags = tagsOf(input);
   const window = input.window;
   const recordsByTag = Object.fromEntries(tags.map((tag) => [tag, recordsOf(input.clients?.[tag])]));
+  // attemptDispositions throws on a record set that claims an attempt twice —
+  // the publisher's whole-record invariant, held on this recompute path too.
   const dispositions = Object.fromEntries(tags.map((tag) => [tag, attemptDispositions(recordsByTag[tag])]));
-  const cohorts = Object.fromEntries(tags.map((tag) => [tag, cohortForClient(recordsByTag[tag], window)]));
+  const cohorts = Object.fromEntries(tags.map((tag) => [tag, cohortSegments(recordsByTag[tag], window)]));
   const lengths = segmentLengths(input, cohorts);
-  const pairing = pairResponseEvidence(input);
   const keptHostBytesByClient = {};
   const keptPeerBytesByClient = {};
   const peerFractionByClient = {};
@@ -115,14 +86,10 @@ export function computePeerFigures(input = {}) {
   for (const tag of tags) {
     const records = recordsByTag[tag];
     const cohortIds = new Set(cohorts[tag].flatMap((segment) => segment.keptAttemptIds ?? []));
-    const host = records.filter((record) => record?.kind === 'attempt' && cohortIds.has(record.attemptId)
-      && dispositions[tag].get(record.attemptId) === 'kept' && record.source === 'http')
-      .reduce((sum, record) => sum + (safe(record.bytes) ? record.bytes : 0), 0);
-    const peer = records.filter((record) => record?.kind === 'attempt' && cohortIds.has(record.attemptId)
-      && dispositions[tag].get(record.attemptId) === 'kept' && record.source === 'p2p')
-      .reduce((sum, record) => sum + (safe(record.bytes) ? record.bytes : 0), 0);
-    // Keep the publisher's whole-record invariant in this recompute path.
-    keptBytes(records);
+    const kept = records.filter((record) => record?.kind === 'attempt' && cohortIds.has(record.attemptId)
+      && dispositions[tag].get(record.attemptId) === 'kept');
+    const host = sumBytes(kept.filter((record) => record.source === 'http'), 'bytes');
+    const peer = sumBytes(kept.filter((record) => record.source === 'p2p'), 'bytes');
     keptHostBytesByClient[tag] = host;
     keptPeerBytesByClient[tag] = peer;
     const total = host + peer;
@@ -134,16 +101,13 @@ export function computePeerFigures(input = {}) {
   const distinctSegmentBytesInWindow = [...lengths.values()].reduce((sum, value) => sum + value, 0);
   const mediaBytesDeliveredInWindow = difference(input.originEnd, input.originStart, 'mediaBytesDelivered');
   const hostResponses = hostResponseSet(input, pairing);
-  const hostDeliveredBytesSettledInWindow = hostResponses.responses
-    .reduce((sum, response) => sum + (safe(response.delivered) ? response.delivered : 0), 0);
-  const hostWasteBytes = hostResponses.responses.reduce((sum, response) => {
-    const pair = hostResponses.pairs.get(response.originResponseId);
-    const disposition = pair && dispositions[pair.tag]?.get(pair.attempt.attemptId);
-    return sum + (disposition === 'discarded' || disposition === 'abandoned'
-      ? (safe(response.delivered) ? response.delivered : 0) : 0);
-  }, 0) + hostResponses.excused.reduce((sum, response) => sum + (safe(response.delivered) ? response.delivered : 0), 0);
+  const hostDeliveredBytesSettledInWindow = sumBytes(hostResponses.responses, 'delivered');
   const hostExcusedResponses = hostResponses.excused.length;
-  const hostExcusedBytes = hostResponses.excused.reduce((sum, response) => sum + (safe(response.delivered) ? response.delivered : 0), 0);
+  const hostExcusedBytes = sumBytes(hostResponses.excused, 'delivered');
+  const hostWasteBytes = sumBytes(hostResponses.responses.filter((response) => {
+    const pair = hostResponses.pairs.get(response.originResponseId);
+    return wasted(pair && dispositions[pair.tag]?.get(pair.attempt.attemptId));
+  }), 'delivered') + hostExcusedBytes;
   const peerCohortEmpty = tags.some((tag) => peerFractionByClient[tag] === null) || lengths.size === 0;
   return {
     byteAccountingMethod: PEER_ATTEMPT_COHORT_METHOD,
@@ -167,5 +131,3 @@ export function computePeerFigures(input = {}) {
     peerRefusalReasons: peerCohortEmpty ? ['peer-cohort-empty'] : [],
   };
 }
-
-export const peerFigures = computePeerFigures;
