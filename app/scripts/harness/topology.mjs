@@ -182,6 +182,20 @@ function containerRunDir(runDir) {
   return `/results/${path.basename(runDir)}`;
 }
 
+export function probePathsFromContainers(containers, condition) {
+  const clientTags = Array.from({ length: condition.clients }, (_, index) => `c${String(index + 1).padStart(2, '0')}`);
+  const tags = condition.delivery === 'host' ? ['c00', ...clientTags] : clientTags;
+  return Object.fromEntries(tags.map((tag) => {
+    const container = tag === 'c00' ? containers.origin : containers[tag];
+    if (!container) throw new Error(`probe path has no prepared container for ${tag}`);
+    return [tag, {
+      container,
+      clockProbesCrossShapedUplink: container !== containers.origin,
+      peerLinksShaped: false,
+    }];
+  }));
+}
+
 function startSampler({ container, ifName, runDir, intervalMs = 125, exec = defaultExec }) {
   const argv = [
     'sh', '-c',
@@ -334,6 +348,7 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
       const content = { ...condition.content, ...readContentFrameRate(state.containers.origin, exec) };
       return {
         containers: state.containers,
+        probePaths: probePathsFromContainers(state.containers, condition),
         originInterface: state.origin,
         sampler: state.sampler,
         backgroundLoad: state.backgroundLoad,

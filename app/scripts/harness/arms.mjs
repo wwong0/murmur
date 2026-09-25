@@ -3,6 +3,7 @@ import path from 'node:path';
 import { validateCdpQualification, validateLinkReceiptQualification, CDP_QUALIFICATION_REASON, LINK_RECEIPT_QUALIFICATION_REASON } from './qualification.mjs';
 import { peerPageReadingExpression } from './cdp-records.mjs';
 import { viewerHttpLeak, uplinkVersusDelivered } from '../figures/host-origin-checks.mjs';
+import { CEILING_MS } from '../harness-cadence.mjs';
 
 export const REFUSAL_SCOPE = Object.freeze({
   neverPlayed: Object.freeze(['byte', 'drift']),
@@ -21,6 +22,7 @@ export const REFUSAL_SCOPE = Object.freeze({
   hostUplink: Object.freeze(['byte']),
   receiptHealth: Object.freeze(['byte']),
   cadence: Object.freeze(['byte', 'drift']),
+  startWait: Object.freeze(['byte', 'drift']),
   peerExchange: Object.freeze(['byte']),
   peerAttribution: Object.freeze(['byte']),
   peerLog: Object.freeze(['byte']),
@@ -33,6 +35,7 @@ export const REFUSAL_SCOPE = Object.freeze({
 });
 
 const finite = (value) => Number.isFinite(value);
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function tagsFor(condition) {
   return Array.from({ length: condition.clients }, (_, index) => `c${String(index + 1).padStart(2, '0')}`);
@@ -137,6 +140,8 @@ function baseArm({ hostTag, runDirPrefix, readyTimeoutMs }) {
     readyTopology: (topology) => topology,
     chromeFlags: (agents) => Object.values(agents)[0]?.flags ?? null,
     prepareClientOptions: () => ({}),
+    playbackWaitBeforeCadence: false,
+    async waitForPlayback() { return null; },
     async openSessions() { return null; },
     async drain(session, ndjson, atMs, drainClient) { return drainClient(session, ndjson, atMs); },
     clientStreams: (runDir, manifest, files) => clientStreams(runDir, manifest, files, false, false),
@@ -332,8 +337,13 @@ function peerClientOptions({ condition, manifestFile }) {
         source: `globalThis.__waPositionOffsetMs = ${JSON.stringify(offset)};`,
       });
     },
-    afterReady: async (session) => {
-      if (session.role === 'viewer') await peerReadyReading(session, manifestFile)();
+    afterReady: async (session, { deadline, readyTimeoutMs } = {}) => {
+      if (session.role !== 'viewer') return;
+      if (deadline && readyTimeoutMs !== undefined) {
+        await deadline.waitFor(`peer settings ${session.tag}`,
+          () => session.tab.evaluate('__app.peerExchange()'), (value) => value !== null, readyTimeoutMs, 100);
+      }
+      await peerReadyReading(session, manifestFile)();
     },
   };
 }
@@ -389,7 +399,28 @@ function peerBoundaryReading(session, reading) {
 const PEER_ARM = Object.freeze({
   ...HOST_ARM,
   runDirPrefix: '7b2',
+  playbackWaitBeforeCadence: true,
   prepareClientOptions: peerClientOptions,
+  // Drains while it waits: a viewer playing since readiness would otherwise fill its
+  // drift ring before the drain loops start (scattered attempt 2, c01).
+  async waitForPlayback({ sessions, window, deadline, now = Date.now, sleep = wait, drain = async () => {}, drainEveryMs = 15_000 }) {
+    const deadlineMs = window.startMs - CEILING_MS;
+    await drain();
+    let drainedAt = now();
+    const playingAtMs = Object.fromEntries(sessions.map((session) => [session.tag, null]));
+    const read = async (session) => {
+      const playback = await session.tab.evaluate('__app.playback()');
+      if (playingAtMs[session.tag] === null && playback?.playing === true) playingAtMs[session.tag] = now();
+    };
+    while (true) {
+      for (const session of sessions) if (playingAtMs[session.tag] === null) await read(session);
+      if (Object.values(playingAtMs).every((value) => value !== null) || now() >= deadlineMs) break;
+      deadline?.check('playback wait');
+      if (now() - drainedAt >= drainEveryMs) { await drain(); drainedAt = now(); }
+      await sleep(Math.min(100, Math.max(1, deadlineMs - now())));
+    }
+    return { deadlineMs, playingAtMs };
+  },
   async captureBoundaryExtras(kind, { room, sessions, manifestFile, runDir, ndjson, options }) {
     const extras = await HOST_ARM.captureBoundaryExtras(kind, { room, sessions, manifestFile, runDir, options });
     const clients = {};
@@ -400,15 +431,17 @@ const PEER_ARM = Object.freeze({
     options.fs.writeFileSync(`${runDir}/peer-boundary-${kind}.json`, `${JSON.stringify({ clients }, null, 2)}\n`);
     return extras;
   },
-  async finalEvidence({ originUrl, fetchSnapshot, runDir, files, sessions, ndjson }) {
+  async finalEvidence({ originUrl, fetchSnapshot, runDir, files, sessions, ndjson, condition, deadline }) {
     const extras = await HOST_ARM.finalEvidence({ originUrl, fetchSnapshot, runDir, files });
     const viewers = sessions.filter((entry) => entry.role === 'viewer');
     const capture = async (name) => {
       const startedAtMs = Date.now();
       const clients = {};
       for (const session of viewers) {
+        const readStartedAtMs = Date.now();
         const reading = await readPeerLog(session, ndjson);
-        clients[session.tag] = peerTotals(reading);
+        const readEndedAtMs = Date.now();
+        clients[session.tag] = { ...peerTotals(reading), readStartedAtMs, readEndedAtMs };
       }
       const endedAtMs = Date.now();
       const value = { startedAtMs, endedAtMs, clients };
@@ -416,6 +449,14 @@ const PEER_ARM = Object.freeze({
       return value;
     };
     const peerTotalsA = await capture('a');
+    const gap = Number(condition?.bars?.conservationDeliveryGapMs ?? 0);
+    const afterA = peerTotalsA.endedAtMs + (finite(gap) && gap >= 0 ? gap : 0);
+    if (deadline) {
+      await deadline.waitFor('peer delivery gap', () => Date.now(), (value) => value >= afterA,
+        Math.max(1_000, afterA - Date.now() + 1_000), 50);
+    } else if (Date.now() < afterA) {
+      await wait(afterA - Date.now());
+    }
     const peerTotalsB = await capture('b');
     for (const session of viewers) {
       session.peerTotalsA = peerTotalsA.clients[session.tag];

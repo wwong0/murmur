@@ -262,7 +262,7 @@ async function prepareClient(session, url, deadline, readyTimeoutMs = 30_000, op
   await tab.send('Page.navigate', { url });
   await deadline.waitFor(`client ${session.tag}`, () => tab.evaluate('Boolean(document.body && window.__app)'), Boolean, readyTimeoutMs, 100);
   session.pageReadyMs = Date.now() - navigatedAt;
-  await options.afterReady?.(session);
+  await options.afterReady?.(session, { deadline, readyTimeoutMs });
   await tab.evaluate(installStallRecorder(session.stallEpoch));
   return recorder;
 }
@@ -454,6 +454,7 @@ function evidenceFor(sessions, originStart, originEnd, manifest, runDir, hostEvi
     }])),
     cdpQualification: manifest.cdpQualification,
     cadence: manifest.cadence,
+    startWait: manifest.startWait ?? null,
   };
   return { ...base, ...arm.evidence(sessions, hostEvidence, runDir) };
 }
@@ -542,8 +543,20 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     // Before the measure window, and its failure ends the run: a regime whose
     // cadence cannot be established cannot produce a criterion-1 figure this
     // project may quote (design.md D6).
-    const cadence = await establishCadence(sessions, { condition, deadline });
-    manifestFile.merge({ cadence, window: placeWindow(condition, Date.now()) });
+    let cadence;
+    if (arm.playbackWaitBeforeCadence) {
+      const window = placeWindow(condition, Date.now());
+      manifestFile.merge({ window });
+      const drainAll = () => Promise.all(sessions.map((session) => queuedDrain(session, ndjson, arm, Date.now())));
+      manifestFile.merge({ startWait: await arm.waitForPlayback({ sessions, condition, window, deadline, drain: drainAll, drainEveryMs: DRAIN_INTERVAL_MS }) });
+      manifestFile.write();
+      await drainAll();
+      cadence = await establishCadence(sessions, { condition, deadline });
+      manifestFile.merge({ cadence });
+    } else {
+      cadence = await establishCadence(sessions, { condition, deadline });
+      manifestFile.merge({ cadence, window: placeWindow(condition, Date.now()) });
+    }
     manifestFile.write();
 
     for (const session of sessions) {
@@ -576,7 +589,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       await waitUntil(deadline, injectionHarnessMs + condition.disturbance.observationMs + 2000);
     }
     await Promise.all(sessions.map((session) => queuedDrain(session, ndjson, arm, Date.now())));
-    Object.assign(hostEvidence, await arm.finalEvidence({ originUrl, fetchSnapshot, runDir: prepared.runDir, sessions, ndjson, files: {
+    Object.assign(hostEvidence, await arm.finalEvidence({ originUrl, fetchSnapshot, runDir: prepared.runDir, sessions, ndjson, condition, deadline, files: {
       writeJson(filePath, value) { fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`); },
     } }));
   } catch (error) {

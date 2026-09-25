@@ -1,6 +1,7 @@
 import { assert, assertEqual, check } from '../harness.mjs';
 import { evaluateByteControl } from '../../harness/byte-control.mjs';
 import { armFor, REFUSAL_SCOPE } from '../../harness/arms.mjs';
+import { evaluateRefusals } from '../../harness/refusals.mjs';
 import { conditionForName, conditions } from '../../harness-run.mjs';
 
 const peer = conditions['p2p-naive'];
@@ -81,7 +82,7 @@ export default async function harnessPeerConditionsSuite() {
     assert(barError?.message.includes('peer-condition-declares-peer-fraction-bar'), 'peer fraction bar is refused');
     loadCandidate(barTwin);
     assertTopLevelEqualExcept(invalidBar, barTwin, ['bars'], 'peer bar twin');
-    for (const field of ['recordCoverageMin', 'droppedFrameFractionMax', 'driftLogMissedMax', 'responseCutShortMaxBytes', 'conservationChannelBytes', 'conservationRelativeMax']) {
+    for (const field of ['recordCoverageMin', 'droppedFrameFractionMax', 'driftLogMissedMax', 'responseCutShortMaxBytes', 'conservationChannelBytes', 'conservationRelativeMax', 'conservationDeliveryGapMs']) {
       assertEqual(invalidBar.bars[field], barTwin.bars[field], `peer bar twin keeps bars.${field}`);
     }
     assertEqual(invalidBar.bars.peerFractionAbsMax, 0.02, 'peer bar twin changes only peerFractionAbsMax');
@@ -113,7 +114,7 @@ export default async function harnessPeerConditionsSuite() {
     for (const name of ['p2p-naive', 'p2p-scattered']) assertTopLevelEqualExcept(source, conditions[name], excluded, `${name} source`);
     assertEqual(JSON.stringify(Object.keys(peer.bars).sort()), JSON.stringify([
       'conservationChannelBytes', 'conservationRelativeMax', 'driftLogMissedMax',
-      'droppedFrameFractionMax', 'recordCoverageMin', 'responseCutShortMaxBytes',
+      'droppedFrameFractionMax', 'recordCoverageMin', 'responseCutShortMaxBytes', 'conservationDeliveryGapMs',
     ].sort()), 'p2p-naive has exactly D4 bars');
     const { controlFloorMin, ...scatteredBars } = conditions['p2p-scattered'].bars;
     assertEqual(controlFloorMin, 0.5, 'p2p-scattered declares the control floor');
@@ -176,5 +177,23 @@ export default async function harnessPeerConditionsSuite() {
     assert(buildReason, 'build mismatch fires');
     assertEqual(JSON.stringify(buildReason.scope), JSON.stringify(['byte', 'drift']), 'build mismatch scopes byte and drift');
     assertEqual(refusal(validEvidence()).some((entry) => entry.reason === 'build-mismatch'), false, 'build mismatch twin stays silent');
+  });
+
+  await check('harness peer arm: a late viewer is refused by name at the playback deadline', async () => {
+    const result = evaluateRefusals({
+      condition: { publishes: false, bars: {} }, declaredClientTags: ['c01', 'c02'],
+      clients: { c01: {}, c02: {} },
+      startWait: { deadlineMs: 1000, playingAtMs: { c01: 900, c02: null } },
+    });
+    const found = result.reasons.find((entry) => entry.reason === 'client-did-not-start');
+    assert(found, 'late viewer refusal fires');
+    assertEqual(found.tag, 'c02', 'late viewer tag is named');
+    assertEqual(JSON.stringify(found.scope), JSON.stringify(['byte', 'drift']), 'late viewer refusal scopes both figures');
+    const twin = evaluateRefusals({
+      condition: { publishes: false, bars: {} }, declaredClientTags: ['c01', 'c02'],
+      clients: { c01: {}, c02: {} },
+      startWait: { deadlineMs: 1000, playingAtMs: { c01: 900, c02: 950 } },
+    });
+    assertEqual(twin.reasons.some((entry) => entry.reason === 'client-did-not-start'), false, 'all-playing twin stays silent');
   });
 }

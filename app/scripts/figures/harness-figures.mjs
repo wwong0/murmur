@@ -4,6 +4,7 @@ import { median, percentile } from '../../public/lib/frame-drift.mjs';
 import { computeReceiptCohort } from './receipt-cohort.mjs';
 import { computePeerFigures, PEER_ATTEMPT_COHORT_METHOD } from './peer-figures.mjs';
 import { computePeerChecks } from './peer-checks.mjs';
+import { peerSpacing } from './peer-spacing.mjs';
 
 export const PEER_FRACTION_ABS_MAX = 0.02;
 
@@ -451,7 +452,9 @@ function computePeerRunFigures(input) {
   const checks = computePeerChecks(input, input.condition?.bars ?? {});
   const toleranceReasons = checks.flatMap((check) => check.toleranceRefusals ?? [])
     .map(() => 'peer-conservation-tolerance-unbounded');
-  const result = { ...peerAuxiliaryFigures(input), ...figures, peerChecks: checks,
+  const spacing = peerSpacing({ clients: input.clients, tags: tagsFrom(input, input.clients ?? {}),
+    condition: input.condition, window: input.window });
+  const result = { ...peerAuxiliaryFigures(input), ...figures, ...spacing, peerChecks: checks,
     peerRefusalReasons: [...(figures.peerRefusalReasons ?? []), ...toleranceReasons] };
   // A peer run still has the ordinary quality/drift figures, but no legacy byte columns.
   return stripUnavailable(result);

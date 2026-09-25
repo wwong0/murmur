@@ -113,13 +113,22 @@ export function recomputeRunDirectory(runDir) {
       presentIntervalMsByClient: contextFields.presentIntervalMsByClient,
       targets: retained.input.condition?.criterion,
     });
+    const pairwiseForPublication = retained.input.condition?.peerExchange === true
+      && !retained.input.condition?.criterion
+      ? { ...pairwise, criterionVerdict: { verdict: 'not-drawn', reason: 'design.md D5' } }
+      : pairwise;
     // The context is the drift fields alone: the manifest's lifecycle keys are
     // written after this recompute, so a figure carrying them could not equal a
     // later one. Publication reads the assembled figure (d1-findings.md F1).
     const drift = driftFigure({
       figures,
-      pairwise,
-      context: contextFields,
+      pairwise: pairwiseForPublication,
+      context: {
+        ...contextFields,
+        ...(retained.input.condition?.peerExchange === true ? {
+          topology: { probePaths: retained.manifest.topology?.probePaths },
+        } : {}),
+      },
       condition: retained.input.condition,
       window: retained.input.window,
       content: retained.input.content,

@@ -45,6 +45,75 @@ function receiptsFor(client, qualificationRequestId) {
     .map(({ receipt, index }) => ({ receipt, key: receiptKey(receipt, index) }));
 }
 
+function allReceipts(input) {
+  return tagsOf(input).flatMap((tag) => {
+    const requests = Array.isArray(input.clients?.[tag]?.requests) ? input.clients[tag].requests : [];
+    return requests.map((receipt, index) => ({ tag, receipt, key: receiptKey(receipt, index) }))
+      .filter(({ receipt }) => mediaPath(receipt?.url));
+  });
+}
+
+function responseIdParts(value) {
+  const match = typeof value === 'string' && value.match(/^(.*):(\d+)$/);
+  return match ? { prefix: match[1], sequence: Number(match[2]) } : null;
+}
+
+function excusedResponseEvidence(input, pairing) {
+  const receipts = pairing.allReceipts ?? allReceipts(input);
+  const carried = new Set(receipts.map(({ receipt }) => receipt?.originResponseId).filter(Boolean));
+  const started = new Set(responseRecords(input.originStart).map((record) => record?.originResponseId));
+  const candidates = responseRecords(input.originEnd).filter((response) => {
+    const kind = response?.kind;
+    return (kind === 'segment' || kind === 'media') && response.aborted === true
+      && response.originResponseId && !started.has(response.originResponseId)
+      && !carried.has(response.originResponseId);
+  });
+  const eligible = [];
+  for (const tag of tagsOf(input)) {
+    for (const pair of pairing.byClient[tag]?.pairs ?? []) {
+      const receipt = pair.receipt;
+      if (receipt.originResponseId !== null || receipt.canceled !== true || receipt.bodyBytes !== 0
+        || pair.attempt.bytes !== 0) continue;
+      const matching = candidates.filter((response) => response.clientTag === tag
+        && pathOf(response.urlPath) === pathOf(receipt.url)
+        && overlaps(response, pair.attempt, receipts));
+      for (const response of matching) eligible.push({ tag, pair, response });
+    }
+  }
+  const byReceipt = new Map();
+  const byResponse = new Map();
+  for (const entry of eligible) {
+    const receiptKeyValue = `${entry.tag}:${entry.pair.receiptKey}`;
+    byReceipt.set(receiptKeyValue, [...(byReceipt.get(receiptKeyValue) ?? []), entry]);
+    byResponse.set(entry.response.originResponseId, [...(byResponse.get(entry.response.originResponseId) ?? []), entry]);
+  }
+  return eligible
+    .filter((entry) => byReceipt.get(`${entry.tag}:${entry.pair.receiptKey}`)?.length === 1
+      && byResponse.get(entry.response.originResponseId)?.length === 1)
+    .map((entry) => ({
+      tag: entry.tag,
+      requestId: entry.pair.receipt.requestId,
+      originResponseId: entry.response.originResponseId,
+      delivered: entry.response.delivered,
+    }));
+}
+
+function overlaps(response, receipt, receipts) {
+  const responseId = responseIdParts(response.originResponseId);
+  if (!responseId) return false;
+  const bracket = receipts
+    .map(({ receipt: other }) => ({ receipt: other, id: responseIdParts(other?.originResponseId) }))
+    .filter(({ id }) => id?.prefix === responseId.prefix);
+  const lowerValues = bracket.filter(({ id }) => id.sequence < responseId.sequence)
+    .map(({ receipt: other }) => other.startMs).filter(finite);
+  const upperValues = bracket.filter(({ id }) => id.sequence > responseId.sequence)
+    .map(({ receipt: other }) => other.headMs).filter(finite);
+  if (!lowerValues.length || !upperValues.length) return false;
+  const lower = Math.max(...lowerValues);
+  const upper = Math.min(...upperValues);
+  return lower <= receipt.endMs && upper >= receipt.startMs;
+}
+
 function hostByResponseId(input) {
   const result = new Map();
   for (const record of responseRecords(input.originEnd)) {
@@ -90,7 +159,9 @@ export function pairResponseEvidence(input = {}) {
     const unmatchedAttempts = attempts.filter((attempt) => !used.has(attempt.attemptId));
     byClient[tag] = { receipts, attempts, pairs, unmatchedReceipts, unmatchedAttempts };
   }
-  return { byClient, host };
+  const pairing = { byClient, host, allReceipts: allReceipts(input) };
+  pairing.excused = excusedResponseEvidence(input, pairing);
+  return pairing;
 }
 
 function cohortSegments(client, window) {
@@ -101,6 +172,8 @@ function cohortSegments(client, window) {
 function responseAgreement(input, tolerances) {
   const pairing = pairResponseEvidence(input);
   const failures = [];
+  const excused = pairing.excused ?? [];
+  const excusedKeys = new Set(excused.map((entry) => `${entry.tag}:${entry.requestId}`));
   let exercised = false;
   for (const tag of tagsOf(input)) {
     const entry = pairing.byClient[tag] ?? { receipts: [], attempts: [], pairs: [], unmatchedReceipts: [], unmatchedAttempts: [] };
@@ -109,6 +182,7 @@ function responseAgreement(input, tolerances) {
     const cohortKeys = new Set(cohortReceipts.map(({ receipt, key }) => `${key}:${receipt.originResponseId ?? ''}`));
     const cohortPairs = entry.pairs.filter((pair) => cohortKeys.has(`${pair.receiptKey}:${pair.receipt.originResponseId ?? ''}`));
     for (const { receipt, key } of cohortReceipts) {
+      if (excusedKeys.has(`${tag}:${receipt.requestId ?? key}`)) continue;
       const pair = cohortPairs.find((candidate) => candidate.receiptKey === key);
       if (!pair) {
         failures.push({ tag, type: 'receipt-unpaired', requestId: receipt.requestId });
@@ -148,7 +222,7 @@ function responseAgreement(input, tolerances) {
       }
     }
   }
-  return { check: 'response-agreement', passed: failures.length === 0, failures, exercised };
+  return { check: 'response-agreement', passed: failures.length === 0, failures, exercised, excused };
 }
 
 function segmentSum(input) {
@@ -213,6 +287,11 @@ function conservation(input, tolerances) {
   const failures = [];
   const toleranceRefusals = [];
   const totals = Object.fromEntries(tags.map((tag) => [tag, input.clients?.[tag] ?? {}]));
+  const gap = Number(tolerances.conservationDeliveryGapMs);
+  if (!finite(gap) || gap < 0) {
+    failures.push({ type: 'delivery-gap-unrecorded' });
+    return { check: 'conservation', passed: false, failures, exercised: false, toleranceRefusals };
+  }
   const complete = tags.length > 1 && tags.every((tag) => {
     const client = totals[tag];
     return client.peerTotalsA?.peerId && client.peerTotalsB?.peerId
@@ -229,14 +308,24 @@ function conservation(input, tolerances) {
     const senderB = totals[sender].peerTotalsB;
     const receiverA = totals[receiver].peerTotalsA;
     const receiverB = totals[receiver].peerTotalsB;
+    const readGap = Number(receiverB.readStartedAtMs) - Number(senderA.readEndedAtMs);
+    if (!finite(readGap)) {
+      failures.push({ type: 'delivery-gap-unrecorded', sender, receiver, readGap });
+      continue;
+    }
+    if (readGap < gap) {
+      failures.push({ type: 'delivery-gap-short', sender, receiver, requiredMs: gap, actualMs: readGap });
+      continue;
+    }
     const U_A = totalAt(senderA, 'uploadBytes', receiverA.peerId);
     const U_B = totalAt(senderB, 'uploadBytes', receiverB.peerId);
     const D_A = totalAt(receiverA, 'chunkBytes.p2p', senderA.peerId);
     const D_B = totalAt(receiverB, 'chunkBytes.p2p', senderA.peerId);
     const closes = recordsOf(totals[receiver]).filter((record) => record?.kind === 'peer'
       && record.event === 'close' && record.peerId === senderA.peerId).length;
-    const T = Number(tolerances.conservationChannelBytes) * (1 + closes);
-    const bound = Math.max(Number(tolerances.conservationChannelBytes),
+    const channelBytes = Number(tolerances.conservationChannelBytes);
+    const T = channelBytes * closes;
+    const bound = Math.max(channelBytes,
       Number(tolerances.conservationRelativeMax) * U_B);
     const detail = { sender, receiver, U_A, U_B, D_A, D_B, closes, T, bound };
     if (T > bound) {

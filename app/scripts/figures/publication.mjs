@@ -45,10 +45,15 @@ const PEER_BYTE_FIELDS = Object.freeze([
   'hostUploadMultiplier',
   'hostWasteFraction',
   'hostWasteBytes',
+  'hostExcusedResponses',
+  'hostExcusedBytes',
   'hostDeliveredBytesSettledInWindow',
   'peerWasteBytesByClient',
   'realtimeFactorByClient',
   'stallCountByClient',
+  'declaredOffsetMsByClient',
+  'startLatenessMsByClient',
+  'achievedSpacingMsByClient',
   'content.identity',
   'content.frameRate',
 ]);
@@ -111,6 +116,9 @@ export const REQUIRED_CONTEXT_FIELDS = Object.freeze({ byte: BYTE_FIELDS, drift:
 function fieldsFor(kind, context = {}, figure = {}) {
   if (kind === 'byte' && (context.byteAccountingMethod ?? figure.byteAccountingMethod) === PEER_ATTEMPT_COHORT_METHOD) {
     return PEER_BYTE_FIELDS;
+  }
+  if (kind === 'drift' && (context.condition?.peerExchange ?? figure.condition?.peerExchange) === true) {
+    return Object.freeze([...DRIFT_FIELDS, 'topology.probePaths']);
   }
   return REQUIRED_CONTEXT_FIELDS[kind] ?? [];
 }

@@ -81,7 +81,9 @@ function hostResponseSet(input, pairing) {
       if (pair.receipt.originResponseId) pairs.set(pair.receipt.originResponseId, pair);
     }
   }
-  return { responses: [...byResponseId.values()], pairs };
+  const excused = (pairing.excused ?? []).map((entry) => byResponseId.get(entry.originResponseId))
+    .filter(Boolean);
+  return { responses: [...byResponseId.values()], pairs, excused };
 }
 
 function responseRecords(value) {
@@ -139,7 +141,9 @@ export function computePeerFigures(input = {}) {
     const disposition = pair && dispositions[pair.tag]?.get(pair.attempt.attemptId);
     return sum + (disposition === 'discarded' || disposition === 'abandoned'
       ? (safe(response.delivered) ? response.delivered : 0) : 0);
-  }, 0);
+  }, 0) + hostResponses.excused.reduce((sum, response) => sum + (safe(response.delivered) ? response.delivered : 0), 0);
+  const hostExcusedResponses = hostResponses.excused.length;
+  const hostExcusedBytes = hostResponses.excused.reduce((sum, response) => sum + (safe(response.delivered) ? response.delivered : 0), 0);
   const peerCohortEmpty = tags.some((tag) => peerFractionByClient[tag] === null) || lengths.size === 0;
   return {
     byteAccountingMethod: PEER_ATTEMPT_COHORT_METHOD,
@@ -153,6 +157,8 @@ export function computePeerFigures(input = {}) {
     hostUploadMultiplier: distinctSegmentBytesInWindow > 0
       ? mediaBytesDeliveredInWindow / distinctSegmentBytesInWindow : null,
     hostWasteBytes,
+    hostExcusedResponses,
+    hostExcusedBytes,
     hostDeliveredBytesSettledInWindow,
     hostWasteFraction: hostDeliveredBytesSettledInWindow > 0
       ? hostWasteBytes / hostDeliveredBytesSettledInWindow : null,

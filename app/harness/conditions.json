@@ -658,7 +658,8 @@
         "driftLogMissedMax": 0,
         "responseCutShortMaxBytes": 1129000,
         "conservationChannelBytes": 131071,
-        "conservationRelativeMax": 0.05
+        "conservationRelativeMax": 0.05,
+        "conservationDeliveryGapMs": 3000
       },
       "peerExchange": true,
       "positionOffsetMsByClient": { "c01": 0, "c02": 30000, "c03": 60000 },
@@ -1000,7 +1001,8 @@
       "driftLogMissedMax": 0,
       "responseCutShortMaxBytes": 1129000,
       "conservationChannelBytes": 131071,
-      "conservationRelativeMax": 0.05
+      "conservationRelativeMax": 0.05,
+      "conservationDeliveryGapMs": 3000
     },
     "peerExchange": true,
     "positionOffsetMsByClient": { "c01": 0, "c02": 0, "c03": 0, "c04": 0, "c05": 0 },
@@ -1036,6 +1038,7 @@
       "responseCutShortMaxBytes": 1129000,
       "conservationChannelBytes": 131071,
       "conservationRelativeMax": 0.05,
+      "conservationDeliveryGapMs": 3000,
       "controlFloorMin": 0.5
     },
     "peerExchange": true,

@@ -74,4 +74,59 @@ export default async function harnessArmsSuite() {
       'receipt-log-reset',
     ]), 'host arm reasons');
   });
+
+  await check('harness peer arm: readiness waits for peer settings before reading', async () => {
+    let settingsReads = 0;
+    const session = {
+      tag: 'c01', role: 'viewer',
+      tab: { evaluate: async (expression) => {
+        if (expression === '__app.peerExchange()') return ++settingsReads < 3 ? null : 'on';
+        return {
+          buildId: 'build-a', peerExchange: settingsReads >= 3 ? 'on' : null,
+          positionOffset: { ms: 0, error: null }, peerBytes: { attribution: 'engine-request', peerId: 'p1' },
+        };
+      } },
+    };
+    const manifestBody = { clients: {} };
+    const manifestFile = { get: () => manifestBody, merge: Object.assign, write() {} };
+    const options = armFor({ delivery: 'host', peerExchange: true, clients: 1 })
+      .prepareClientOptions({ condition: { positionOffsetMsByClient: { c01: 0 } }, manifestFile });
+    const deadline = { waitFor: async (_label, read, done) => {
+      let value = await read();
+      while (!done(value)) value = await read();
+      return value;
+    } };
+    await options.afterReady(session, { deadline, readyTimeoutMs: 1000 });
+    assertEqual(settingsReads, 3, 'settings were read until non-null');
+    assertEqual(session.peerReadyReading.peerExchange, 'on', 'ready reading is on');
+  });
+
+  await check('harness peer arm: playback wait records late starts inside its deadline', async () => {
+    assertEqual(armFor({ delivery: 'host' }).playbackWaitBeforeCadence, false, 'host cadence sequence is unchanged');
+    assertEqual(armFor({ delivery: 'host', peerExchange: true }).playbackWaitBeforeCadence, true, 'peer cadence waits before probing');
+    let clock = 0;
+    const calls = { c01: 0, c02: 0 };
+    const sessions = ['c01', 'c02'].map((tag) => ({ tag, role: 'viewer', tab: {
+      evaluate: async () => ({ playing: ++calls[tag] >= (tag === 'c02' ? 3 : 1) }),
+    } }));
+    const result = await armFor({ delivery: 'host', peerExchange: true }).waitForPlayback({
+      sessions, window: { startMs: 31_050 }, now: () => clock,
+      sleep: async () => { clock += 500; },
+    });
+    assertEqual(result.deadlineMs, 1_050, 'playback deadline is the ceiling before the window');
+    assertEqual(result.playingAtMs.c01, 0, 'first viewer starts immediately');
+    assertEqual(result.playingAtMs.c02, 1_000, 'late viewer is observed on the third poll');
+  });
+
+  await check('harness peer arm: the playback wait drains at its start and every drain interval', async () => {
+    // One viewer never plays, so the wait runs to its deadline: 0 → 1 050 ms in 500 ms sleeps.
+    let clock = 0;
+    const drainedAt = [];
+    const sessions = [{ tag: 'c01', role: 'viewer', tab: { evaluate: async () => ({ playing: false }) } }];
+    await armFor({ delivery: 'host', peerExchange: true }).waitForPlayback({
+      sessions, window: { startMs: 31_050 }, now: () => clock,
+      sleep: async () => { clock += 500; }, drain: async () => { drainedAt.push(clock); }, drainEveryMs: 1_000,
+    });
+    assertEqual(JSON.stringify(drainedAt), JSON.stringify([0, 1_000]), 'drained at the start and after one interval');
+  });
 }

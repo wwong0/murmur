@@ -45,6 +45,8 @@ import harnessRecordsSuite from './check/suites/harness-records.mjs';
 import harnessConditionsSuite from './check/suites/harness-conditions.mjs';
 import harnessPeerConditionsSuite from './check/suites/harness-peer-conditions.mjs';
 import peerFiguresSuite from './check/suites/peer-figures.mjs';
+import p2pMeasurementSuite from './check/suites/p2p-measurement.mjs';
+import peerSpacingSuite from './check/suites/peer-spacing.mjs';
 import peerChecksSuite from './check/suites/peer-checks.mjs';
 import hostOriginRefusalsSuite from './check/suites/host-origin-refusals.mjs';
 import harnessStartRequalSuite from './check/suites/harness-start-requal.mjs';
@@ -127,6 +129,8 @@ for (const suite of [
   harnessConditionsSuite,
   harnessPeerConditionsSuite,
   peerFiguresSuite,
+  p2pMeasurementSuite,
+  peerSpacingSuite,
   peerChecksSuite,
   hostOriginRefusalsSuite,
   harnessStartRequalSuite,

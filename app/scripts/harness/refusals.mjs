@@ -19,6 +19,7 @@ export const REFUSAL_REASONS = Object.freeze([
   'server-refused-tab-id',
   'run-directory-exists',
   'client-cadence-unavailable',
+  'client-did-not-start',
   CDP_QUALIFICATION_REASON,
   'viewer-media-over-http',
   'host-uplink-below-delivered',
@@ -206,6 +207,14 @@ export function evaluateRefusals(input = {}) {
           figure: 'byte',
         });
       }
+    }
+  }
+
+  for (const tag of tags) {
+    if (input.startWait?.playingAtMs?.[tag] === null) {
+      addReason(reasons, 'client-did-not-start', REFUSAL_SCOPE.startWait, {
+        tag, deadlineMs: input.startWait.deadlineMs,
+      });
     }
   }
 
