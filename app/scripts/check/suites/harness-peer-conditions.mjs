@@ -116,8 +116,9 @@ export default async function harnessPeerConditionsSuite() {
       'conservationChannelBytes', 'conservationRelativeMax', 'driftLogMissedMax',
       'droppedFrameFractionMax', 'recordCoverageMin', 'responseCutShortMaxBytes', 'conservationDeliveryGapMs',
     ].sort()), 'p2p-naive has exactly D4 bars');
-    const { controlFloorMin, ...scatteredBars } = conditions['p2p-scattered'].bars;
+    const { controlFloorMin, responseSettleGapMs, ...scatteredBars } = conditions['p2p-scattered'].bars;
     assertEqual(controlFloorMin, 0.5, 'p2p-scattered declares the control floor');
+    assertEqual(responseSettleGapMs, 3000, 'p2p-scattered declares the 7c settle gap');
     assertEqual(JSON.stringify(scatteredBars), JSON.stringify(peer.bars), 'p2p-scattered has D4 bars besides the floor');
     // `drift` is the pairwise figure; without `byte` the byte figure is withheld.
     assertEqual(JSON.stringify(conditions['p2p-naive'].figureKinds), JSON.stringify(['byte', 'drift']), 'p2p-naive publishes byte and drift');
@@ -142,7 +143,7 @@ export default async function harnessPeerConditionsSuite() {
     const host = armFor(conditions['hostorigin-nop2p']);
     const peerArm = armFor(peer);
     assert(Object.isFrozen(peerArm), 'peer arm is frozen');
-    assertEqual(peerArm.runDirPrefix, '7b2', 'peer run prefix');
+    assertEqual(peerArm.runDirPrefix, '7c', 'peer run prefix');
     assertEqual(peerArm.hostTag, host.hostTag, 'peer arm retains host tab');
     assertEqual(peerArm.prepareTopology, host.prepareTopology, 'peer arm inherits topology preparation');
     assertEqual(peerArm.openSessions, host.openSessions, 'peer arm inherits host session');

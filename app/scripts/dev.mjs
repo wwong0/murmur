@@ -22,11 +22,11 @@
 //
 // Node 24, ESM.
 
-import { spawn } from 'node:child_process';
 import * as esbuild from 'esbuild';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildOptions, makeBuildId } from './build.mjs';
+import { startTracker } from './runner/tracker.mjs';
 import { optionsFromEnv, startRoomServer } from '../server/room-server.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -34,27 +34,11 @@ const __dirname = path.dirname(__filename);
 const APP_DIR = path.resolve(__dirname, '..');
 const TRACKER_PORT = 8101;
 const APP_TRACKER_URL = `ws://127.0.0.1:${TRACKER_PORT}`;
-const TRACKER_SCRIPT = path.join(APP_DIR, 'node_modules', 'bittorrent-tracker', 'bin', 'cmd.js');
 
 let buildContext = null;
 let roomServer = null;
 let tracker = null;
 let shuttingDown = false;
-
-function startTracker() {
-  const child = spawn(process.execPath, [
-    TRACKER_SCRIPT,
-    '--ws',
-    '--port', String(TRACKER_PORT),
-    '--http-hostname', '127.0.0.1',
-    '--quiet',
-  ], { stdio: 'inherit' });
-  const exited = new Promise((resolve) => {
-    child.once('error', (error) => resolve({ error }));
-    child.once('exit', (code, signal) => resolve({ code, signal }));
-  });
-  return { child, exited };
-}
 
 function trackerFailure(result) {
   if (result.error) return `tracker failed to start: ${result.error.message}`;
@@ -77,7 +61,13 @@ async function main() {
   console.log('[dev] esbuild watch mode active — edits under public/ rebuild room.bundle.js automatically, no manual rebuild needed.');
   console.log(`[dev] build id: ${buildId}`);
 
-  const trackerState = startTracker();
+  const trackerState = startTracker({
+    port: TRACKER_PORT,
+    hostname: '127.0.0.1',
+    stdio: 'inherit',
+    cwd: APP_DIR,
+    env: process.env,
+  });
   tracker = trackerState.child;
   const earlyExit = await Promise.race([
     trackerState.exited,

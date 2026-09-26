@@ -449,13 +449,17 @@ function peerAuxiliaryFigures(input) {
 
 function computePeerRunFigures(input) {
   const pairing = pairResponseEvidence(input);
-  const figures = computePeerFigures(input, pairing);
+  const auxiliary = peerAuxiliaryFigures(input);
+  const figures = computePeerFigures({ ...input,
+    uplinkUtilisationMean: auxiliary.uplinkUtilisationMean,
+    realtimeFactorByClient: auxiliary.realtimeFactorByClient,
+  }, pairing);
   const checks = computePeerChecks(input, input.condition?.bars ?? {}, pairing);
   const toleranceReasons = checks.flatMap((check) => check.toleranceRefusals ?? [])
     .map(() => 'peer-conservation-tolerance-unbounded');
   const spacing = peerSpacing({ clients: input.clients, tags: tagsFrom(input, input.clients ?? {}),
     condition: input.condition, window: input.window });
-  const result = { ...peerAuxiliaryFigures(input), ...figures, ...spacing, peerChecks: checks,
+  const result = { ...auxiliary, ...figures, ...spacing, peerChecks: checks,
     peerRefusalReasons: [...(figures.peerRefusalReasons ?? []), ...toleranceReasons] };
   // A peer run still has the ordinary quality/drift figures, but no legacy byte columns.
   return stripUnavailable(result);

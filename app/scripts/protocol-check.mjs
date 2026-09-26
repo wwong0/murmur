@@ -39,15 +39,21 @@ import harnessByteCohortSuite from './check/suites/harness-byte-cohort.mjs';
 import receiptCohortSuite from './check/suites/receipt-cohort.mjs';
 import harnessRefusalsSuite from './check/suites/harness-refusals.mjs';
 import harnessArmsSuite from './check/suites/harness-arms.mjs';
+import harnessArmRecomputeSuite from './check/suites/harness-arm-recompute.mjs';
 import harnessCadenceSuite from './check/suites/harness-cadence.mjs';
 import harnessPollShapeSuite from './check/suites/harness-poll-shape.mjs';
 import harnessRecordsSuite from './check/suites/harness-records.mjs';
+import trackerSpawnSuite from './check/suites/tracker-spawn.mjs';
 import harnessConditionsSuite from './check/suites/harness-conditions.mjs';
 import harnessPeerConditionsSuite from './check/suites/harness-peer-conditions.mjs';
+import harnessPeerTopologySuite from './check/suites/harness-peer-topology.mjs';
+import harnessPeerUploadSuite from './check/suites/harness-peer-upload.mjs';
 import peerFiguresSuite from './check/suites/peer-figures.mjs';
+import oneViewingSuite from './check/suites/one-viewing.mjs';
 import p2pMeasurementSuite from './check/suites/p2p-measurement.mjs';
 import peerSpacingSuite from './check/suites/peer-spacing.mjs';
 import peerChecksSuite from './check/suites/peer-checks.mjs';
+import peerSettleSuite from './check/suites/peer-settle.mjs';
 import hostOriginRefusalsSuite from './check/suites/host-origin-refusals.mjs';
 import harnessStartRequalSuite from './check/suites/harness-start-requal.mjs';
 import harnessDriftRunnerSuite from './check/suites/harness-drift-runner.mjs';
@@ -75,6 +81,7 @@ import fetchShimBarsSuite from './check/suites/fetch-shim-bars.mjs';
 import peerBytesSuite from './check/suites/peer-bytes.mjs';
 import bytesReadoutSuite from './check/suites/bytes-readout.mjs';
 import peerEngineConfigSuite from './check/suites/peer-engine-config.mjs';
+import engineWindowsSuite from './check/suites/engine-windows.mjs';
 import peerExchangeEntrySuite from './check/suites/peer-exchange-entry.mjs';
 import peerExchangeBarsSuite from './check/suites/peer-exchange-bars.mjs';
 import positionOffsetSuite from './check/suites/position-offset.mjs';
@@ -124,15 +131,21 @@ for (const suite of [
   receiptCohortSuite,
   harnessRefusalsSuite,
   harnessArmsSuite,
+  harnessArmRecomputeSuite,
   harnessCadenceSuite,
   harnessPollShapeSuite,
   harnessRecordsSuite,
+  trackerSpawnSuite,
   harnessConditionsSuite,
   harnessPeerConditionsSuite,
+  harnessPeerTopologySuite,
+  harnessPeerUploadSuite,
   peerFiguresSuite,
+  oneViewingSuite,
   p2pMeasurementSuite,
   peerSpacingSuite,
   peerChecksSuite,
+  peerSettleSuite,
   hostOriginRefusalsSuite,
   harnessStartRequalSuite,
   harnessDriftRunnerSuite,
@@ -160,6 +173,7 @@ for (const suite of [
   peerBytesSuite,
   bytesReadoutSuite,
   peerEngineConfigSuite,
+  engineWindowsSuite,
   peerExchangeEntrySuite,
   peerExchangeBarsSuite,
   positionOffsetSuite,

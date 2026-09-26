@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attach, CHROME, disposeChrome, FLAGS, sleep } from './cdp.mjs';
 import { assertServedBundle, createManifestFile, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
+import { startTracker as spawnTracker } from './runner/tracker.mjs';
 import { requireDelivery } from './delivery-pin.mjs';
 import { PEER_EXCHANGE_BARS, evaluatePeerExchange } from './figures/peer-exchange-bars.mjs';
 import { PEER_PAGE_READING } from './peer-exchange-probe.mjs';
@@ -19,7 +20,6 @@ const BUNDLE_PATH = path.join(APP_DIR, 'public', 'room.bundle.js');
 const SERVER_PORT = 8126;
 const TRACKER_PORT = 8127;
 const TRACKER_URL = `ws://127.0.0.1:${TRACKER_PORT}`;
-const TRACKER_SCRIPT = path.join(APP_DIR, 'node_modules', 'bittorrent-tracker', 'bin', 'cmd.js');
 const STARTED_AT = new Date();
 const RUN_NAME = `7b-peer-exchange-${STARTED_AT.toISOString().replaceAll(':', '-')}`;
 const RUN_DIR = path.join(RESULTS_DIR, RUN_NAME);
@@ -101,13 +101,13 @@ function captureOutput(child, name) {
 
 async function startTracker() {
   try { await portFree(TRACKER_PORT); } catch (error) { throw new Error(`refusing to run: tracker port ${TRACKER_PORT} is held (${error?.message ?? error})`); }
-  tracker = spawn(process.execPath, [
-    TRACKER_SCRIPT,
-    '--ws',
-    '--port', String(TRACKER_PORT),
-    '--http-hostname', '127.0.0.1',
-    '--quiet',
-  ], { cwd: APP_DIR, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  tracker = spawnTracker({
+    port: TRACKER_PORT,
+    hostname: '127.0.0.1',
+    cwd: APP_DIR,
+    env: process.env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).child;
   children.push(tracker);
   tracker.output = captureOutput(tracker, 'tracker.log');
   await waitForPort(TRACKER_PORT, tracker, 'tracker');

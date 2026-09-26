@@ -13,6 +13,7 @@ import { ADDR_SERVER, newReclaimSecret, readBody } from './lib/envelope.mjs';
 import { createPlayer } from './lib/player.mjs';
 import { createPeerBytes } from './lib/peer-bytes.mjs';
 import { peerEngineConfig } from './lib/peer-engine-config.mjs';
+import { validateEngineWindows } from './lib/engine-windows.mjs';
 import { createClockSync, websocketProbe } from './lib/clock-sync.mjs';
 import { createRoomTimeline } from './lib/room-timeline.mjs';
 import { offsetView } from './lib/playback-state.mjs';
@@ -47,6 +48,10 @@ const positionOffset = suppliedPositionOffsetMs === undefined
         ? { ms: null, error: `position-offset-must-be-at-most-${POSITION_OFFSET_MAX_MS}` }
         : { ms: suppliedPositionOffsetMs, error: null };
 const offsetMs = positionOffset.ms ?? 0;
+const suppliedEngineWindows = globalThis.__waEngineWindows;
+const engineWindows = suppliedEngineWindows === undefined
+  ? { windows: null, error: null }
+  : validateEngineWindows(suppliedEngineWindows);
 
 console.log('[app] build', BUILD_ID);
 
@@ -708,7 +713,7 @@ function execute(result) {
         if (action.kind === 'load') {
           const p2p = delivery === 'host' && typeof trackerUrl === 'string' && client.role !== 'host'
             ? {
-                core: peerEngineConfig({ roomId: room, trackerUrl, iceServers }).core,
+                core: peerEngineConfig({ roomId: room, trackerUrl, iceServers, windows: engineWindows.windows }).core,
                 onEngine: (engine) => {
                   peerEngine = engine;
                   peerBytesPublisher.attach(engine);
@@ -737,7 +742,7 @@ function schedulePollStart(delayMs) {
 }
 
 function pollStart() {
-  if (positionOffset.error !== null) return;
+  if (positionOffset.error !== null || engineWindows.error !== null) return;
   checkReady();
   const state = viewState();
   const nowSharedMs = clockSync.sharedNow();
@@ -827,6 +832,7 @@ window.__app = {
   tabId,
   clock: () => clockSync.read(),
   positionOffset: () => ({ ...positionOffset }),
+  engineWindows: () => ({ windows: engineWindows.windows ? { ...engineWindows.windows } : null, error: engineWindows.error }),
   drift: (afterSeq = 0) => driftLog.read({ afterSeq }),
   // THE CANONICAL ROLLING WINDOW. Published so no consumer has to re-derive a
   // median from `drift().records` and get a second one — the browser pass did,

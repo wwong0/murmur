@@ -1,6 +1,7 @@
 // Publication and CSV boundaries for harness figures.
 
 import { evaluateByteControl } from '../harness/byte-control.mjs';
+import { armFor } from '../harness/arms.mjs';
 
 const PUBLICATION = Symbol('published-figure');
 const RECEIPT_COHORT_METHOD = 'client-receipt-cohort-v1';
@@ -56,6 +57,16 @@ const PEER_BYTE_FIELDS = Object.freeze([
   'achievedSpacingMsByClient',
   'content.identity',
   'content.frameRate',
+]);
+
+const PEER_ONE_VIEWING_FIELDS = Object.freeze([
+  ...PEER_BYTE_FIELDS.filter((field) => field !== 'hostUploadMultiplier'),
+  'hostFetchOnceRatio',
+  'oneViewingBytesInWindow',
+  'multiplierDenominator',
+  'peerFractionSteady',
+  'steadyState',
+  'roomPositionSpreadMs',
 ]);
 
 export const DRIFT_FIELDS = Object.freeze([
@@ -115,10 +126,12 @@ export const REQUIRED_CONTEXT_FIELDS = Object.freeze({ byte: BYTE_FIELDS, drift:
 
 function fieldsFor(kind, context = {}, figure = {}) {
   if (kind === 'byte' && (context.byteAccountingMethod ?? figure.byteAccountingMethod) === PEER_ATTEMPT_COHORT_METHOD) {
-    return PEER_BYTE_FIELDS;
+    const denominator = context.multiplierDenominator ?? figure.multiplierDenominator ?? 'distinct-completed';
+    return denominator === 'one-viewing' ? PEER_ONE_VIEWING_FIELDS : PEER_BYTE_FIELDS;
   }
-  if (kind === 'drift' && (context.condition?.peerExchange ?? figure.condition?.peerExchange) === true) {
-    return Object.freeze([...DRIFT_FIELDS, 'topology.probePaths']);
+  if (kind === 'drift') {
+    const condition = context.condition ?? figure.condition;
+    return Object.freeze([...DRIFT_FIELDS, ...armFor(condition).driftRequiredFields]);
   }
   return REQUIRED_CONTEXT_FIELDS[kind] ?? [];
 }
@@ -244,6 +257,15 @@ export function publish(kind, figure = {}, context = {}) {
     if (missingReceiptField) return { published: false, missing: missingReceiptField };
   }
   if (kind === 'byte') {
+    const accountingMethod = context.byteAccountingMethod ?? figure.byteAccountingMethod;
+    const denominator = context.multiplierDenominator ?? figure.multiplierDenominator;
+    if (accountingMethod === PEER_ATTEMPT_COHORT_METHOD && denominator === 'one-viewing') {
+      const hasMultiplier = !absent(figure.hostUploadMultiplier);
+      const hasRefusal = !absent(figure.hostUploadMultiplierRefusal);
+      if (hasMultiplier === hasRefusal) {
+        return { published: false, missing: 'hostUploadMultiplier-or-refusal' };
+      }
+    }
     const reasons = evaluateByteControl({ bars: context.condition?.bars, tags: declaredTags(context, figure), figures: figure });
     if (reasons.length) return { published: false, missing: `${reasons[0].reason}:${reasons[0].tag}`, reasons };
   }

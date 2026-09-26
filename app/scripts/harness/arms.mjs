@@ -1,9 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { validateCdpQualification, validateLinkReceiptQualification, CDP_QUALIFICATION_REASON, LINK_RECEIPT_QUALIFICATION_REASON } from './qualification.mjs';
 import { peerPageReadingExpression } from './cdp-records.mjs';
 import { viewerHttpLeak, uplinkVersusDelivered } from '../figures/host-origin-checks.mjs';
 import { CEILING_MS } from '../harness-cadence.mjs';
+import { ENGINE_WINDOW_DEFAULTS } from './engine-windows.mjs';
 
 export const REFUSAL_SCOPE = Object.freeze({
   neverPlayed: Object.freeze(['byte', 'drift']),
@@ -30,7 +32,10 @@ export const REFUSAL_SCOPE = Object.freeze({
   peerCohort: Object.freeze(['byte']),
   peerCheck: Object.freeze(['byte']),
   peerTolerance: Object.freeze(['byte']),
+  responseSettle: Object.freeze(['byte']),
+  viewerInterface: Object.freeze(['byte']),
   positionOffset: Object.freeze(['byte', 'drift']),
+  engineWindows: Object.freeze(['byte', 'drift']),
   build: Object.freeze(['byte', 'drift']),
 });
 
@@ -58,6 +63,24 @@ function readJson(file) {
     if (error.code === 'ENOENT') return null;
     throw error;
   }
+}
+
+function recomputePeerContent(manifest) {
+  const manifestPath = manifest.content?.manifestPath
+    ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../step0/content/content-manifest.json');
+  const contentManifest = readJson(manifestPath);
+  if (!Array.isArray(contentManifest?.segmentSizes)) throw new Error('content segmentSizes are unavailable');
+  return { ...manifest.content, segmentSizes: contentManifest.segmentSizes };
+}
+
+function recomputePeerSegmentSeconds(manifest) {
+  const manifestPath = manifest.content?.manifestPath
+    ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../step0/content/content-manifest.json');
+  const contentManifest = readJson(manifestPath);
+  if (!finite(contentManifest?.segmentSeconds) || contentManifest.segmentSeconds <= 0) {
+    throw new Error('content segment seconds are unavailable');
+  }
+  return contentManifest.segmentSeconds;
 }
 
 function readNdjson(file) {
@@ -129,6 +152,14 @@ function baseArm({ hostTag, runDirPrefix, readyTimeoutMs }) {
     hostTag,
     runDirPrefix,
     byteAccountingMethod: 'client-receipt-cohort-v1',
+    recomputeContent: (manifest) => manifest.content,
+    recomputeSegmentSeconds: (manifest) => manifest.content?.segmentSeconds,
+    recomputeAccountingMethod: (manifest) => manifest.byteAccountingMethod,
+    recomputeInputExtras: () => ({}),
+    driftCriterionWhenUndeclared: null,
+    driftContextExtras: () => ({}),
+    driftRequiredFields: Object.freeze([]),
+    trackerPort: null,
     streams: Object.freeze(['drift', 'poll', 'requests', 'echo']),
     members: (condition) => members(condition, hostTag),
     clientReadyTimeoutMs: () => readyTimeoutMs,
@@ -328,8 +359,14 @@ function peerClientOptions({ condition, manifestFile }) {
     beforeNavigate: async (session) => {
       if (session.role !== 'viewer') return;
       const offset = condition.positionOffsetMsByClient?.[session.tag] ?? 0;
+      const source = [
+        `globalThis.__waPositionOffsetMs = ${JSON.stringify(offset)};`,
+        ...(Object.prototype.hasOwnProperty.call(condition, 'engineWindows')
+          ? [`globalThis.__waEngineWindows = ${JSON.stringify(condition.engineWindows)};`]
+          : []),
+      ].join('\n');
       await session.tab.send('Page.addScriptToEvaluateOnNewDocument', {
-        source: `globalThis.__waPositionOffsetMs = ${JSON.stringify(offset)};`,
+        source,
       });
     },
     afterReady: async (session, { deadline, readyTimeoutMs } = {}) => {
@@ -391,17 +428,111 @@ function peerBoundaryReading(session, reading) {
   };
 }
 
+function mainStreamWindows(config) {
+  const stream = config?.mainStream;
+  if (!stream || typeof stream !== 'object') return null;
+  return {
+    highDemandTimeWindow: stream.highDemandTimeWindow,
+    httpDownloadTimeWindow: stream.httpDownloadTimeWindow,
+    p2pDownloadTimeWindow: stream.p2pDownloadTimeWindow,
+  };
+}
+
+function sameEngineWindows(left, right) {
+  return Boolean(left && right
+    && left.highDemandTimeWindow === right.highDemandTimeWindow
+    && left.httpDownloadTimeWindow === right.httpDownloadTimeWindow
+    && left.p2pDownloadTimeWindow === right.p2pDownloadTimeWindow);
+}
+
+function peerLinkProbePaths(topology, condition) {
+  if (!topology.containers || !Array.isArray(topology.qdiscs)) return topology.probePaths;
+  const probePaths = { ...(topology.probePaths ?? {}) };
+  const records = Array.isArray(topology.qdiscs) ? topology.qdiscs : [];
+  for (const tag of clientTags(condition)) {
+    const record = records.find((candidate) => {
+      const rightContainer = candidate?.container === topology.containers?.[tag];
+      return rightContainer && candidate.network === 'wa-media'
+        && candidate.direction === 'egress' && candidate.discipline === 'tbf'
+        && candidate.readBack?.readings?.rate?.got !== null
+        && candidate.readBack?.readings?.rate?.got !== undefined;
+    });
+    probePaths[tag] = {
+      ...(probePaths[tag] ?? {}),
+      peerLinksShaped: Boolean(record),
+      peerLinkRateBitsPerSecond: record ? record.readBack.readings.rate.got : null,
+    };
+  }
+  return probePaths;
+}
+
+function cumulativePeerUpload(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { value: null, error: 'uploadBytes-unavailable' };
+  let total = 0;
+  for (const [peerId, bytes] of Object.entries(value)) {
+    if (!finite(bytes) || bytes < 0) return { value: null, error: `uploadBytes-invalid:${peerId}` };
+    total += bytes;
+  }
+  return { value: total, error: null };
+}
+
+function viewerLinkDelta(start, end, peerStart, peerEnd, tag) {
+  const detail = { tag, interfaceBytes: null, uploadBytes: null };
+  if (!start || !end || !finite(start.txBytes) || !finite(end.txBytes)) {
+    return { ...detail, available: false, error: 'viewer-link-reading-missing' };
+  }
+  const interfaceBytes = end.txBytes - start.txBytes;
+  if (interfaceBytes < 0) return { ...detail, available: false, error: 'viewer-link-delta-negative', interfaceBytes };
+  const before = cumulativePeerUpload(peerStart);
+  const after = cumulativePeerUpload(peerEnd);
+  if (before.error || after.error) {
+    return { ...detail, available: false, error: before.error ?? after.error, interfaceBytes };
+  }
+  const uploadBytes = after.value - before.value;
+  if (uploadBytes < 0) return { ...detail, available: false, error: 'peer-upload-delta-negative', interfaceBytes, uploadBytes };
+  return { available: true, tag, interfaceBytes, uploadBytes };
+}
+
+async function readEngineWindows(session, condition) {
+  let value = null;
+  try {
+    value = await session.tab.evaluate('({ config: __app.peerEngineConfig(), page: __app.engineWindows() })');
+  } catch {}
+  const declared = Object.prototype.hasOwnProperty.call(condition, 'engineWindows')
+    ? condition.engineWindows
+    : null;
+  return {
+    declared,
+    expected: declared ?? ENGINE_WINDOW_DEFAULTS,
+    inForce: mainStreamWindows(value?.config),
+    pageError: value?.page?.error ?? null,
+  };
+}
+
 const PEER_ARM = Object.freeze({
   ...HOST_ARM,
-  runDirPrefix: '7b2',
+  runDirPrefix: '7c',
   byteAccountingMethod: 'peer-attempt-cohort-v1',
+  multiplierDenominator: 'one-viewing',
+  recomputeContent: recomputePeerContent,
+  recomputeSegmentSeconds: recomputePeerSegmentSeconds,
+  recomputeAccountingMethod: () => PEER_ARM.byteAccountingMethod,
+  recomputeInputExtras: (manifest) => ({ cdpQualification: manifest.cdpQualification }),
+  driftCriterionWhenUndeclared: Object.freeze({ verdict: 'not-drawn', reason: 'design.md D5' }),
+  driftContextExtras: (manifest) => ({ topology: { probePaths: manifest.topology?.probePaths } }),
+  driftRequiredFields: Object.freeze(['topology.probePaths']),
+  trackerPort: '8101',
   streams: Object.freeze([...HOST_ARM.streams, 'peer-bytes']),
   prepareClientOptions: peerClientOptions,
+  readyTopology(topology, condition) {
+    const ready = HOST_ARM.readyTopology(topology, condition);
+    return { ...ready, probePaths: peerLinkProbePaths(ready, condition) };
+  },
   // The window is placed first and the viewers are waited into it, draining as
   // they go; cadence is established after the wait.
   async openWindow({ sessions, condition, deadline, establishCadence, manifestFile, placeWindow, drainAll, drainEveryMs }) {
     const window = placeWindow(condition, Date.now());
-    manifestFile.merge({ window });
+    manifestFile.merge({ window, multiplierDenominator: this.multiplierDenominator });
     manifestFile.merge({ startWait: await this.waitForPlayback({ sessions, condition, window, deadline, drain: drainAll, drainEveryMs }) });
     manifestFile.write();
     await drainAll();
@@ -429,15 +560,30 @@ const PEER_ARM = Object.freeze({
   },
   async captureBoundaryExtras(kind, context) {
     const extras = await HOST_ARM.captureBoundaryExtras(kind, context);
+    if (kind === 'start') {
+      const viewerLinks = await context.options.viewerLinkReader?.() ?? null;
+      writeJson(path.join(context.runDir, 'viewer-link-start.json'), viewerLinks);
+    }
     const clients = {};
     for (const session of context.sessions.filter((entry) => entry.role === 'viewer')) {
       const reading = await readPeerLog(session, context.ndjson);
+      if (kind === 'start') {
+        session.engineWindows = await readEngineWindows(session, context.manifestFile.get().condition);
+        context.manifestFile.merge({ clients: {
+          ...context.manifestFile.get().clients,
+          [session.tag]: {
+            ...context.manifestFile.get().clients[session.tag],
+            engineWindows: session.engineWindows,
+          },
+        } });
+      }
       clients[session.tag] = peerBoundaryReading(session, reading);
+      if (session.engineWindows) clients[session.tag].engineWindows = session.engineWindows;
     }
     writeJson(path.join(context.runDir, `peer-boundary-${kind}.json`), { clients });
     return extras;
   },
-  async finalEvidence({ originUrl, fetchSnapshot, runDir, sessions, ndjson, condition, deadline }) {
+  async finalEvidence({ originUrl, fetchSnapshot, runDir, sessions, ndjson, condition, deadline, originSession, drainAll, window, startInstanceId, viewerLinkReader }) {
     const extras = await HOST_ARM.finalEvidence({ originUrl, fetchSnapshot, runDir });
     const viewers = sessions.filter((entry) => entry.role === 'viewer');
     const capture = async (name) => {
@@ -468,16 +614,46 @@ const PEER_ARM = Object.freeze({
       session.peerTotalsA = peerTotalsA.clients[session.tag];
       session.peerTotalsB = peerTotalsB.clients[session.tag];
     }
-    return { ...extras, peerTotalsA, peerTotalsB };
+    const bar = condition?.bars ?? {};
+    const hasSettleGap = Object.prototype.hasOwnProperty.call(bar, 'responseSettleGapMs');
+    if (!hasSettleGap) return { ...extras, peerTotalsA, peerTotalsB };
+    const settleGapMs = Number(bar.responseSettleGapMs);
+    const settleAtMs = Number(window?.endMs) + settleGapMs;
+    if (!finite(settleGapMs) || settleGapMs < 0 || !finite(settleAtMs)) {
+      throw new Error('response settle gap is not a finite non-negative declared bar');
+    }
+    if (!originSession?.tab) throw new Error('host session is unavailable for settled response evidence');
+    if (deadline) {
+      await deadline.waitFor('response settle gap', () => Date.now(), (value) => value >= settleAtMs,
+        Math.max(1_000, settleAtMs - Date.now() + 1_000), 50);
+    } else if (Date.now() < settleAtMs) {
+      await wait(settleAtMs - Date.now());
+    }
+    const originSettled = await originSession.tab.evaluate('__app.hostCounters()');
+    if (!originSettled) throw new Error('settled host counter snapshot is unavailable');
+    if (startInstanceId !== undefined && originSettled.instanceId !== startInstanceId) {
+      throw new Error('host counter instanceId changed during run');
+    }
+    writeJson(path.join(runDir, 'origin-counters-settled.json'), originSettled);
+    const viewerLinks = await viewerLinkReader?.() ?? null;
+    writeJson(path.join(runDir, 'viewer-link-end.json'), viewerLinks);
+    await drainAll?.();
+    return { ...extras, peerTotalsA, peerTotalsB, originSettled, viewerLinks };
   },
   evidence(sessions, hostEvidence, runDir) {
     const base = HOST_ARM.evidence(sessions, hostEvidence, runDir);
     const viewers = sessions.filter((entry) => entry.role === 'viewer');
     return {
       ...base,
+      ...(hostEvidence.originSettled ? { originSettled: hostEvidence.originSettled } : {}),
       peerReadings: Object.fromEntries(viewers.map((session) => [session.tag, session.peerLatestReading ?? session.peerReadyReading ?? null])),
+      engineWindows: Object.fromEntries(viewers.map((session) => [session.tag, session.engineWindows ?? null])),
       peerLogHealth: Object.fromEntries(viewers.map((session) => [session.tag, session.peerLogHealth ?? null])),
       peerRecords: Object.fromEntries(viewers.map((session) => [session.tag, session.peerRecords ?? []])),
+      viewerLinkStart: readJson(path.join(runDir, 'viewer-link-start.json')),
+      viewerLinkEnd: readJson(path.join(runDir, 'viewer-link-end.json')),
+      peerBoundaryStart: readJson(path.join(runDir, 'peer-boundary-start.json')),
+      peerBoundaryEnd: readJson(path.join(runDir, 'peer-boundary-end.json')),
     };
   },
   // The ready reading predates the engine; the last drain's names it.
@@ -490,6 +666,7 @@ const PEER_ARM = Object.freeze({
       peerAttribution: session.peerLatestReading?.attribution ?? null,
       peerId: session.peerLatestReading?.peerId ?? null,
       peerLogHealth: session.peerLogHealth ?? null,
+      ...(session.engineWindows ? { engineWindows: session.engineWindows } : {}),
     };
   },
   async drain(session, ndjson, atMs, drainClient) {
@@ -501,7 +678,35 @@ const PEER_ARM = Object.freeze({
   refusals(input, addReason) {
     HOST_ARM.refusals(input, addReason);
     const condition = input.condition ?? {};
+    const bars = condition.bars ?? {};
+    if (Object.prototype.hasOwnProperty.call(bars, 'responseSettleGapMs')) {
+      const settled = input.originSettled;
+      const records = settled?.counters?.responseRecords ?? settled?.responseRecords;
+      if (!settled || !Array.isArray(records)) {
+        addReason('response-settle-evidence-unavailable', REFUSAL_SCOPE.responseSettle, { figure: 'byte' });
+      } else {
+        const atMs = Number(settled.atMs);
+        const endMs = Number((input.window ?? condition.window)?.endMs);
+        const gapMs = Number(bars.responseSettleGapMs);
+        if (!finite(atMs) || !finite(endMs) || !finite(gapMs) || atMs - endMs < gapMs) {
+          addReason('response-settle-gap-short', REFUSAL_SCOPE.responseSettle, {
+            atMs, endMs, requiredMs: gapMs, actualMs: atMs - endMs,
+          });
+        }
+      }
+    }
     const tags = clientTags(condition);
+    if (Object.prototype.hasOwnProperty.call(bars, 'responseSettleGapMs')) {
+      for (const tag of tags) {
+        const start = input.viewerLinkStart?.clients?.[tag];
+        const end = input.viewerLinkEnd?.clients?.[tag];
+        const peerStart = input.peerBoundaryStart?.clients?.[tag]?.uploadBytes;
+        const peerEnd = input.peerBoundaryEnd?.clients?.[tag]?.uploadBytes;
+        const detail = viewerLinkDelta(start, end, peerStart, peerEnd, tag);
+        if (!detail.available) addReason('viewer-interface-evidence-unavailable', REFUSAL_SCOPE.viewerInterface, detail);
+        else if (detail.interfaceBytes < detail.uploadBytes) addReason('peer-bytes-bypassed-shaped-link', REFUSAL_SCOPE.viewerInterface, detail);
+      }
+    }
     const readings = input.peerReadings ?? {};
     for (const tag of tags) {
       const reading = readings[tag];
@@ -517,6 +722,22 @@ const PEER_ARM = Object.freeze({
       if (health.reset === true) addReason('peer-log-reset', REFUSAL_SCOPE.peerLog, { tag });
       const anomalies = (input.peerRecords?.[tag] ?? []).filter((record) => record?.kind === 'anomaly');
       if (anomalies.length) addReason('peer-anomaly-records', REFUSAL_SCOPE.peerAnomaly, { tag, count: anomalies.length });
+    }
+    // Absent only on directories retained before 7c; a live run always carries the object.
+    const engineWindows = input.engineWindows;
+    const expectedWindows = Object.prototype.hasOwnProperty.call(condition, 'engineWindows')
+      ? condition.engineWindows : ENGINE_WINDOW_DEFAULTS;
+    for (const tag of engineWindows ? tags : []) {
+      const reading = engineWindows[tag];
+      if (reading?.pageError) {
+        addReason('engine-windows-invalid', REFUSAL_SCOPE.engineWindows, { tag, error: reading.pageError });
+      } else if (!reading || !reading.inForce) {
+        addReason('engine-windows-unavailable', REFUSAL_SCOPE.engineWindows, { tag });
+      } else if (!sameEngineWindows(reading.inForce, expectedWindows)) {
+        addReason('engine-windows-mismatch', REFUSAL_SCOPE.engineWindows, {
+          tag, expected: expectedWindows, inForce: reading.inForce,
+        });
+      }
     }
     const offsets = condition.positionOffsetMsByClient ?? {};
     for (const tag of tags) {

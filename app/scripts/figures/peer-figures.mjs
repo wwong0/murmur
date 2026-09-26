@@ -2,6 +2,7 @@
 
 import { attemptDispositions } from '../../public/lib/peer-bytes.mjs';
 import { pairResponseEvidence } from './peer-checks.mjs';
+import { bytesForStretch, computeOneViewing } from './one-viewing.mjs';
 import { cohortSegments, finite, inWindow, originSnapshot, pathOf, recordsOf, responseRecords, safe, sumBytes, tagsOf } from './peer-evidence.mjs';
 
 export const PEER_ATTEMPT_COHORT_METHOD = 'peer-attempt-cohort-v1';
@@ -68,6 +69,103 @@ function peerWaste(records, dispositions, window) {
     && inWindow(record.endMs, window) && wasted(dispositions.get(record.attemptId))), 'bytes');
 }
 
+function hasDriftEvidence(input, tags) {
+  return tags.every((tag) => Array.isArray(input.clients?.[tag]?.records)
+    && input.clients[tag].records.length > 0);
+}
+
+function offsetsFor(input, tags) {
+  const offsets = input.condition?.positionOffsetMsByClient ?? input.declaredOffsetMsByClient ?? {};
+  return Object.fromEntries(tags.map((tag) => [tag, offsets[tag] ?? 0]));
+}
+
+function completedBytes(segments) {
+  const byPath = new Map();
+  for (const segment of segments) {
+    const key = pathOf(segment.path);
+    if (!byPath.has(key)) byPath.set(key, segment.lengthBytes);
+  }
+  return [...byPath.values()].reduce((sum, bytes) => sum + bytes, 0);
+}
+
+function downloadRatios(input, tags, cohorts, oneViewing) {
+  const byClient = {};
+  for (const tag of tags) {
+    const bytes = completedBytes(cohorts[tag]);
+    const stretch = oneViewing.playedMediaMsByClient[tag];
+    // This calculation uses the viewer's own played positions, not the room
+    // stretch.
+    const segmentSizes = input.content?.segmentSizes ?? input.segmentSizes;
+    const playedStart = stretch.start;
+    const playedEnd = stretch.end;
+    const durationMs = (segmentSizes?.length ?? 0) * (input.segmentSeconds ?? 4) * 1000;
+    if (!finite(playedStart) || !finite(playedEnd) || playedEnd < playedStart
+      || playedStart < 0 || playedEnd > durationMs) {
+      throw new Error(`played-stretch-invalid:${tag}`);
+    }
+    const playedBytesForClient = bytesForStretch(playedStart, playedEnd, segmentSizes, input.segmentSeconds ?? 4);
+    byClient[tag] = playedBytesForClient > 0 ? bytes / playedBytesForClient : null;
+  }
+  return byClient;
+}
+
+function steadyState({ input, tags, figures, cohorts, oneViewing }) {
+  const bars = input.condition?.bars ?? {};
+  const declared = ['steadyUtilisationMax', 'steadyDownloadRatioMin',
+    'steadyDownloadRatioMax', 'steadyRealtimeMin'].every((name) => finite(bars[name]));
+  const utilisation = {
+    value: finite(figures.uplinkUtilisationMean) ? figures.uplinkUtilisationMean : null,
+    bar: declared ? bars.steadyUtilisationMax : null,
+  };
+  utilisation.pass = declared && finite(utilisation.value) && utilisation.value <= utilisation.bar;
+  const byClient = oneViewing ? downloadRatios(input, tags, cohorts, oneViewing) :
+    Object.fromEntries(tags.map((tag) => [tag, null]));
+  const downloadRatio = {
+    byClient,
+    bars: { min: declared ? bars.steadyDownloadRatioMin : null, max: declared ? bars.steadyDownloadRatioMax : null },
+  };
+  downloadRatio.pass = declared && tags.every((tag) => finite(byClient[tag])
+    && byClient[tag] >= downloadRatio.bars.min && byClient[tag] <= downloadRatio.bars.max);
+  const realtimeByClient = Object.fromEntries(tags.map((tag) => [tag,
+    finite(figures.realtimeFactorByClient?.[tag]) ? figures.realtimeFactorByClient[tag] : null]));
+  const realtime = {
+    byClient: realtimeByClient,
+    bar: declared ? bars.steadyRealtimeMin : null,
+  };
+  realtime.pass = declared && tags.every((tag) => finite(realtimeByClient[tag])
+    && realtimeByClient[tag] >= realtime.bar);
+  const legs = { utilisation, downloadRatio, realtime };
+  let reason = null;
+  if (!declared) reason = 'steady-state-bars-undeclared';
+  else if (!utilisation.pass) reason = 'steady-state-utilisation';
+  else if (!downloadRatio.pass) reason = 'steady-state-download-ratio';
+  else if (!realtime.pass) reason = 'steady-state-realtime';
+  return { steady: reason === null, legs, reason };
+}
+
+function refusalFor(steady) {
+  const failedLegs = Object.entries(steady.legs)
+    .filter(([, leg]) => leg.pass !== true)
+    .map(([name, leg]) => ({ leg: name, value: leg }));
+  return { reason: steady.reason, failedLegs, legs: steady.legs };
+}
+
+// A legacy directory without drift records publishes its distinct-completed figure alone.
+function oneViewingDetails(input, tags, multiplierDenominator) {
+  if (!hasDriftEvidence(input, tags)) {
+    if (multiplierDenominator === 'one-viewing') throw new Error('one-viewing-drift-evidence-unavailable');
+    return null;
+  }
+  return computeOneViewing({
+    clients: input.clients,
+    tags,
+    window: input.window,
+    offsets: offsetsFor(input, tags),
+    segmentSizes: input.content?.segmentSizes ?? input.segmentSizes,
+    segmentSeconds: input.segmentSeconds ?? 4,
+  });
+}
+
 export function computePeerFigures(input = {}, pairing = pairResponseEvidence(input)) {
   const tags = tagsOf(input);
   const window = input.window;
@@ -109,7 +207,12 @@ export function computePeerFigures(input = {}, pairing = pairResponseEvidence(in
     return wasted(pair && dispositions[pair.tag]?.get(pair.attempt.attemptId));
   }), 'delivered') + hostExcusedBytes;
   const peerCohortEmpty = tags.some((tag) => peerFractionByClient[tag] === null) || lengths.size === 0;
-  return {
+  const responseAgreement = pairing.unreceived?.report;
+  const hostFetchOnceRatio = distinctSegmentBytesInWindow > 0
+    ? mediaBytesDeliveredInWindow / distinctSegmentBytesInWindow : null;
+  const multiplierDenominator = input.multiplierDenominator ?? 'distinct-completed';
+  const oneViewing = oneViewingDetails(input, tags, multiplierDenominator);
+  const result = {
     byteAccountingMethod: PEER_ATTEMPT_COHORT_METHOD,
     keptHostBytesByClient,
     keptPeerBytesByClient,
@@ -118,16 +221,39 @@ export function computePeerFigures(input = {}, pairing = pairResponseEvidence(in
     mediaBytesDeliveredInWindow,
     distinctSegmentBytesInWindow,
     distinctSegmentsCompletedInWindow: lengths.size,
-    hostUploadMultiplier: distinctSegmentBytesInWindow > 0
-      ? mediaBytesDeliveredInWindow / distinctSegmentBytesInWindow : null,
+    hostUploadMultiplier: hostFetchOnceRatio,
+    hostFetchOnceRatio,
+    multiplierDenominator,
     hostWasteBytes,
     hostExcusedResponses,
     hostExcusedBytes,
     hostDeliveredBytesSettledInWindow,
     hostWasteFraction: hostDeliveredBytesSettledInWindow > 0
       ? hostWasteBytes / hostDeliveredBytesSettledInWindow : null,
+    ...(responseAgreement ? { hostResponsesUnreceived: responseAgreement } : {}),
     peerWasteBytesByClient,
     peerCohortEmpty,
     peerRefusalReasons: peerCohortEmpty ? ['peer-cohort-empty'] : [],
   };
+  if (oneViewing) {
+    const state = steadyState({ input, tags, figures: {
+      ...result,
+      uplinkUtilisationMean: input.uplinkUtilisationMean,
+      realtimeFactorByClient: input.realtimeFactorByClient,
+    }, cohorts, oneViewing });
+    result.oneViewingBytesInWindow = oneViewing.oneViewingBytesInWindow;
+    result.roomPositionSpreadMs = oneViewing.roomPositionSpreadMs;
+    result.peerFractionSteady = state.steady;
+    result.steadyState = state;
+    if (multiplierDenominator === 'one-viewing') {
+      if (state.steady) result.hostUploadMultiplier = mediaBytesDeliveredInWindow / oneViewing.oneViewingBytesInWindow;
+      else {
+        delete result.hostUploadMultiplier;
+        result.hostUploadMultiplierRefusal = refusalFor(state);
+      }
+    }
+  }
+  return result;
 }
+
+export { steadyState };

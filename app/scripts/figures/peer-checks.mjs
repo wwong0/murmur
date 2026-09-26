@@ -28,6 +28,14 @@ function allReceipts(input) {
   });
 }
 
+function settleDeclared(input) {
+  return Object.prototype.hasOwnProperty.call(input.condition?.bars ?? {}, 'responseSettleGapMs');
+}
+
+function settledRecords(input) {
+  return settleDeclared(input) ? responseRecords(input.originSettled) : responseRecords(input.originEnd);
+}
+
 function responseIdParts(value) {
   const match = typeof value === 'string' && value.match(/^(.*):(\d+)$/);
   return match ? { prefix: match[1], sequence: Number(match[2]) } : null;
@@ -37,7 +45,8 @@ function excusedResponseEvidence(input, pairing) {
   const receipts = pairing.allReceipts ?? allReceipts(input);
   const carried = new Set(receipts.map(({ receipt }) => receipt?.originResponseId).filter(Boolean));
   const started = new Set(responseRecords(input.originStart).map((record) => record?.originResponseId));
-  const candidates = responseRecords(input.originEnd).filter((response) => {
+  const settled = new Map(settledRecords(input).map((record) => [record?.originResponseId, record]));
+  const candidates = responseRecords(input.originEnd).map((response) => settled.get(response?.originResponseId) ?? response).filter((response) => {
     const kind = response?.kind;
     return (kind === 'segment' || kind === 'media') && response.aborted === true
       && response.originResponseId && !started.has(response.originResponseId)
@@ -91,10 +100,68 @@ function overlaps(response, receipt, receipts) {
 
 function hostByResponseId(input) {
   const result = new Map();
-  for (const record of responseRecords(input.originEnd)) {
+  for (const record of settledRecords(input)) {
     if (record?.originResponseId) result.set(record.originResponseId, record);
   }
   return result;
+}
+
+function qualificationIds(input) {
+  const receipt = input.cdpQualification?.receipt ?? {};
+  return new Set([receipt.requestId, receipt.originResponseId].filter(Boolean));
+}
+
+function inWindowReceipt(receipt, window) {
+  return inWindow(receipt?.endMs, window);
+}
+
+function responseAgrees(receipt, response, tolerances) {
+  if (!receipt || !response || !safe(receipt.bodyBytes) || !safe(response.delivered)) return false;
+  if (receipt.finished === true) return receipt.bodyBytes === response.delivered;
+  if (receipt.canceled === true) {
+    const delta = response.delivered - receipt.bodyBytes;
+    return delta >= 0 && delta <= Number(tolerances.responseCutShortMaxBytes);
+  }
+  return false;
+}
+
+function unreceivedResponses(input, pairing, tolerances) {
+  if (!settleDeclared(input)) return null;
+  const started = new Set(responseRecords(input.originStart).map((record) => record?.originResponseId));
+  const qualification = qualificationIds(input);
+  const carriedInWindow = new Set((pairing.allReceipts ?? allReceipts(input))
+    .filter(({ receipt }) => inWindowReceipt(receipt, input.window))
+    .map(({ receipt }) => receipt?.originResponseId)
+    .filter(Boolean));
+  const host = hostByResponseId(input);
+  const receipts = pairing.allReceipts ?? allReceipts(input);
+  const excused = new Map((pairing.excused ?? []).map((entry) => [entry.originResponseId, entry]));
+  const candidates = responseRecords(input.originEnd).filter((response) => {
+    return (response?.kind === 'segment' || response?.kind === 'media') && mediaPath(response?.urlPath)
+      && response?.originResponseId && !started.has(response.originResponseId)
+      && !qualification.has(response.originResponseId) && !carriedInWindow.has(response.originResponseId);
+  });
+  const report = { count: candidates.length, bytes: 0, excused: { count: 0, bytes: 0 }, laterReceived: { count: 0, bytes: 0 } };
+  const failures = [];
+  for (const candidate of candidates) {
+    const response = host.get(candidate.originResponseId) ?? candidate;
+    const bytes = safe(response?.delivered) ? response.delivered : 0;
+    report.bytes += bytes;
+    if (excused.has(candidate.originResponseId)) {
+      report.excused.count += 1;
+      report.excused.bytes += bytes;
+      continue;
+    }
+    const later = receipts.find(({ receipt }) => receipt?.originResponseId === candidate.originResponseId
+      && !inWindowReceipt(receipt, input.window) && responseAgrees(receipt, response, tolerances));
+    if (later) {
+      report.laterReceived.count += 1;
+      report.laterReceived.bytes += bytes;
+      continue;
+    }
+    failures.push({ type: 'host-response-unreceived', originResponseId: candidate.originResponseId, bytes });
+  }
+  return { report, failures };
 }
 
 function attemptsFor(client) {
@@ -136,6 +203,7 @@ export function pairResponseEvidence(input = {}) {
   }
   const pairing = { byClient, host, allReceipts: allReceipts(input) };
   pairing.excused = excusedResponseEvidence(input, pairing);
+  pairing.unreceived = unreceivedResponses(input, pairing, input.condition?.bars ?? {});
   return pairing;
 }
 
@@ -191,7 +259,14 @@ function responseAgreement(input, tolerances, pairing) {
       }
     }
   }
-  return { check: 'response-agreement', passed: failures.length === 0, failures, exercised, excused };
+  if (pairing.unreceived) {
+    exercised ||= pairing.unreceived.report.count > 0;
+    failures.push(...pairing.unreceived.failures);
+  }
+  return {
+    check: 'response-agreement', passed: failures.length === 0, failures, exercised, excused,
+    ...(pairing.unreceived ? { hostResponsesUnreceived: pairing.unreceived.report } : {}),
+  };
 }
 
 function segmentSum(input, pairing) {

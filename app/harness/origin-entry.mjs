@@ -4,8 +4,8 @@
 // `room-server.mjs` defaults to 127.0.0.1, which inside a container accepts
 // nothing from the client containers; the host is an option it already takes.
 
-import { spawn } from 'node:child_process';
 import { optionsFromEnv, startRoomServer } from '../server/room-server.mjs';
+import { startTracker } from '../scripts/runner/tracker.mjs';
 
 let server = null;
 let tracker = null;
@@ -14,17 +14,6 @@ let shuttingDown = false;
 function trackerFailure(result) {
   if (result.error) return `tracker failed to start: ${result.error.message}`;
   return `tracker exited early (code ${result.code ?? 'null'}, signal ${result.signal ?? 'none'})`;
-}
-
-function startTracker(port) {
-  const child = spawn(process.execPath, [
-    'node_modules/bittorrent-tracker/bin/cmd.js', '--ws', '--port', String(port), '--quiet',
-  ], { stdio: 'inherit' });
-  const exited = new Promise((resolve) => {
-    child.once('error', (error) => resolve({ error }));
-    child.once('exit', (code, signal) => resolve({ code, signal }));
-  });
-  return { child, exited };
 }
 
 async function shutdown(code) {
@@ -39,7 +28,13 @@ async function main() {
   const trackerPort = process.env.APP_TRACKER_PORT;
   let trackerState = null;
   if (trackerPort) {
-    trackerState = startTracker(trackerPort);
+    trackerState = startTracker({
+      port: trackerPort,
+      hostname: null,
+      stdio: 'inherit',
+      cwd: process.cwd(),
+      env: process.env,
+    });
     tracker = trackerState.child;
     const earlyExit = await Promise.race([
       trackerState.exited,

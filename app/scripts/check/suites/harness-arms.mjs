@@ -118,8 +118,8 @@ export default async function harnessArmsSuite() {
     const host = await opened({ delivery: 'host', clients: 1 });
     assertEqual(JSON.stringify(host.steps), JSON.stringify(['cadence', 'cadence', 'window']), 'host: cadence, then cadence and window merged');
     const peer = await opened({ delivery: 'host', peerExchange: true, clients: 1 });
-    assertEqual(JSON.stringify(peer.steps), JSON.stringify(['window', 'drain', 'startWait', 'write', 'drain', 'cadence', 'cadence']),
-      'peer: window, the drained wait, its record, a drain, then cadence');
+    assertEqual(JSON.stringify(peer.steps), JSON.stringify(['window', 'multiplierDenominator', 'drain', 'startWait', 'write', 'drain', 'cadence', 'cadence']),
+      'peer: window, denominator, the drained wait, its record, a drain, then cadence');
     assertEqual(peer.body.startWait.playingAtMs.c01 !== null, true, 'the playing viewer is recorded');
   });
 

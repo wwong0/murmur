@@ -147,6 +147,12 @@ function readLoopbackCounter(container, exec = defaultExec) {
   return { atMs: Date.now(), txBytes: value };
 }
 
+function readViewerLinkCounter(container, ifName, exec = defaultExec) {
+  const value = Number(dockerExec(container, ['cat', `/sys/class/net/${ifName}/statistics/tx_bytes`], exec).trim());
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`invalid viewer tx_bytes for ${container}/${ifName}`);
+  return { atMs: Date.now(), txBytes: value, interface: ifName, container };
+}
+
 export function imageDigests(exec = defaultExec) {
   const read = (image) => {
     try {
@@ -297,7 +303,7 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
       const previousDelivery = process.env.WA_DELIVERY;
       const previousTrackerPort = process.env.WA_TRACKER_PORT;
       process.env.WA_DELIVERY = condition.delivery;
-      if (condition.peerExchange === true) process.env.WA_TRACKER_PORT = '8101';
+      if (arm.trackerPort !== null) process.env.WA_TRACKER_PORT = arm.trackerPort;
       else delete process.env.WA_TRACKER_PORT;
       try {
         compose(['up', '-d', '--no-build', ...services], { project, exec });
@@ -312,7 +318,7 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
       if (missing.length) throw new Error(`compose did not start: ${missing.join(', ')}`);
       await waitForOrigin(originUrl);
       await requireDelivery(originUrl, condition.delivery, {
-        trackerUrl: condition.peerExchange === true ? 'ws://origin-media:8101' : null,
+        trackerUrl: arm.trackerPort === null ? null : `ws://origin-media:${arm.trackerPort}`,
       });
 
       const subnet = networkSubnet(MEDIA_NETWORK, exec, project);
@@ -399,6 +405,17 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
     async readLoopbackCounter() {
       if (!state.containers.origin) throw new Error('origin is not prepared');
       return readLoopbackCounter(state.containers.origin, exec);
+    },
+
+    async readViewerLinkCounters() {
+      const clients = {};
+      for (const tag of Object.keys(state.mediaDefaultRoute ?? {}).filter((name) => /^c\d+$/.test(name))) {
+        const route = state.mediaDefaultRoute[tag];
+        const container = state.containers[tag];
+        if (!container || !route?.ifName) throw new Error(`viewer media route is unavailable for ${tag}`);
+        clients[tag] = readViewerLinkCounter(container, route.ifName, exec);
+      }
+      return { clients };
     },
 
     async clientFactory({ tag }) {

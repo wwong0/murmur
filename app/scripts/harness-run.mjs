@@ -11,6 +11,7 @@ import { maybeInjectDisturbance } from './harness/disturbance.mjs';
 import { qualifyCdpBytes as defaultQualifyCdpBytes, qualifyLinkReceipts as defaultQualifyLinkReceipts } from './harness/qualification.mjs';
 import { evaluateRefusals } from './harness/refusals.mjs';
 import { armFor, clientTags } from './harness/arms.mjs';
+import { validateEngineWindows } from './harness/engine-windows.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -41,6 +42,8 @@ export function conditionValidationReason(condition = {}) {
   if (peer && Object.prototype.hasOwnProperty.call(condition.bars ?? {}, 'peerFractionAbsMax')) {
     return 'peer-condition-declares-peer-fraction-bar';
   }
+  if (Object.prototype.hasOwnProperty.call(condition, 'engineWindows')
+    && validateEngineWindows(condition.engineWindows).error) return 'engine-windows-invalid';
   if (!Object.prototype.hasOwnProperty.call(condition, 'positionOffsetMsByClient')) return null;
   const offsets = condition.positionOffsetMsByClient;
   if (!peer || !offsets || typeof offsets !== 'object' || Array.isArray(offsets)) return 'position-offset-invalid';
@@ -498,6 +501,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     allSessions = originSession ? [originSession, ...sessions] : sessions;
     boundaryOptions = arm.boundaryOptions(allSessions);
     boundaryOptions.loopbackReader = () => topology.readLoopbackCounter();
+    boundaryOptions.viewerLinkReader = () => topology.readViewerLinkCounters?.() ?? null;
     for (const [index, session] of sessions.entries()) {
       const clientUrl = `${clientOriginUrl}/room.html?room=${encodeURIComponent(room)}&role=${session.role}&tab=${session.tag}`;
       const acquired = await clientFactory({ tag: session.tag, role: session.role, room, url: clientUrl, condition, runDir: prepared.runDir });
@@ -565,7 +569,13 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       await waitUntil(deadline, injectionHarnessMs + condition.disturbance.observationMs + 2000);
     }
     await Promise.all(sessions.map((session) => queuedDrain(session, ndjson, arm, Date.now())));
-    Object.assign(hostEvidence, await arm.finalEvidence({ originUrl, fetchSnapshot, runDir: prepared.runDir, sessions, ndjson, condition, deadline }));
+    Object.assign(hostEvidence, await arm.finalEvidence({
+      originUrl, fetchSnapshot, runDir: prepared.runDir, sessions, ndjson, condition, deadline,
+      window: manifestFile.get().window, originSession: boundaryOptions.originSession,
+      startInstanceId: boundaryOptions.startInstanceId,
+      viewerLinkReader: boundaryOptions.viewerLinkReader,
+      drainAll: () => Promise.all(sessions.map((session) => queuedDrain(session, ndjson, arm, Date.now()))),
+    }));
   } catch (error) {
     failure ??= error;
   } finally {

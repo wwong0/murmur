@@ -10,7 +10,6 @@ import { startResiduals, stepFits, maxRateEvidence, maxRateCompletion } from './
 import { bytesByClientCsv, publish, utilisationCsv } from './figures/publication.mjs';
 import { driftSeriesCsv, driftSvg } from './figures/drift-plot.mjs';
 import { armFor } from './harness/arms.mjs';
-import { PEER_ATTEMPT_COHORT_METHOD } from './figures/peer-figures.mjs';
 
 function readJson(filePath, fallback = undefined) {
   try {
@@ -43,32 +42,27 @@ function clientStreams(runDir, manifest) {
   });
 }
 
-function peerContent(manifest) {
-  if (manifest.condition?.peerExchange !== true) return manifest.content;
-  const manifestPath = manifest.content?.manifestPath
-    ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../step0/content/content-manifest.json');
-  const contentManifest = readJson(manifestPath);
-  if (!Array.isArray(contentManifest?.segmentSizes)) throw new Error('content segmentSizes are unavailable');
-  return { ...manifest.content, segmentSizes: contentManifest.segmentSizes };
-}
-
 export function readRunDirectory(runDir) {
   const manifest = readJson(path.join(runDir, 'manifest.json'), {});
+  const arm = armFor(manifest.condition);
   const originStart = counterFrom(readJson(path.join(runDir, 'origin-counters-start.json')));
   const originEnd = counterFrom(readJson(path.join(runDir, 'origin-counters-end.json')));
+  const originSettled = counterFrom(readJson(path.join(runDir, 'origin-counters-settled.json')));
   const window = manifest.window;
   const context = manifest.context ?? manifest;
   const tags = manifest.declaredClientTags ?? manifest.clientTags ?? manifest.condition?.clientTags
     ?? Object.keys(manifest.clients ?? {});
   const input = {
-    byteAccountingMethod: manifest.condition?.peerExchange === true
-      ? 'peer-attempt-cohort-v1' : manifest.byteAccountingMethod,
+    byteAccountingMethod: arm.recomputeAccountingMethod(manifest),
     window,
     originStart,
     originEnd,
+    originSettled,
     clients: clientStreams(runDir, manifest),
     declaredClientTags: manifest.declaredClientTags ?? manifest.clientTags,
-    content: peerContent(manifest),
+    content: arm.recomputeContent(manifest),
+    segmentSeconds: arm.recomputeSegmentSeconds(manifest),
+    multiplierDenominator: manifest.multiplierDenominator ?? 'distinct-completed',
     condition: manifest.condition,
     disturbance: manifest.disturbance ?? null,
     context,
@@ -77,13 +71,14 @@ export function readRunDirectory(runDir) {
     clockJoin: Object.fromEntries([...new Set(tags)].map((tag) => [tag,
       readJson(path.join(runDir, `client-${tag}.clock-join.json`))])),
     // Peer checks and host waste exclude the qualification's response by its ids.
-    ...(manifest.condition?.peerExchange === true ? { cdpQualification: manifest.cdpQualification } : {}),
+    ...arm.recomputeInputExtras(manifest),
   };
   return { manifest, input };
 }
 
 export function recomputeRunDirectory(runDir) {
   const retained = readRunDirectory(runDir);
+  const arm = armFor(retained.input.condition);
   const figures = computeFigures(retained.input);
   const context = { ...retained.input.context, ...retained.manifest, ...figures };
   const publishedByte = publish('byte', figures, context);
@@ -113,9 +108,9 @@ export function recomputeRunDirectory(runDir) {
       presentIntervalMsByClient: contextFields.presentIntervalMsByClient,
       targets: retained.input.condition?.criterion,
     });
-    const pairwiseForPublication = retained.input.condition?.peerExchange === true
+    const pairwiseForPublication = arm.driftCriterionWhenUndeclared
       && !retained.input.condition?.criterion
-      ? { ...pairwise, criterionVerdict: { verdict: 'not-drawn', reason: 'design.md D5' } }
+      ? { ...pairwise, criterionVerdict: arm.driftCriterionWhenUndeclared }
       : pairwise;
     // The context is the drift fields alone: the manifest's lifecycle keys are
     // written after this recompute, so a figure carrying them could not equal a
@@ -125,9 +120,7 @@ export function recomputeRunDirectory(runDir) {
       pairwise: pairwiseForPublication,
       context: {
         ...contextFields,
-        ...(retained.input.condition?.peerExchange === true ? {
-          topology: { probePaths: retained.manifest.topology?.probePaths },
-        } : {}),
+        ...arm.driftContextExtras(retained.manifest),
       },
       condition: retained.input.condition,
       window: retained.input.window,

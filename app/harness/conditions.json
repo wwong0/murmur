@@ -1036,6 +1036,7 @@
       "droppedFrameFractionMax": 0.02,
       "driftLogMissedMax": 0,
       "responseCutShortMaxBytes": 1129000,
+      "responseSettleGapMs": 3000,
       "conservationChannelBytes": 131071,
       "conservationRelativeMax": 0.05,
       "conservationDeliveryGapMs": 3000,
