@@ -20,3 +20,14 @@ export function startTracker({ port, hostname = null, stdio, cwd, env } = {}) {
   });
   return { child, exited };
 }
+
+export function trackerFailure(result) {
+  if (result.error) return `tracker failed to start: ${result.error.message}`;
+  return `tracker exited early (code ${result.code ?? 'null'}, signal ${result.signal ?? 'none'})`;
+}
+
+/** Throws if the tracker has already exited by the next turn of the event loop. */
+export async function requireTrackerStarted({ exited }) {
+  const earlyExit = await Promise.race([exited, new Promise((resolve) => setImmediate(() => resolve(null)))]);
+  if (earlyExit) throw new Error(trackerFailure(earlyExit));
+}

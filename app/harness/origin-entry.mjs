@@ -5,16 +5,11 @@
 // nothing from the client containers; the host is an option it already takes.
 
 import { optionsFromEnv, startRoomServer } from '../server/room-server.mjs';
-import { startTracker } from '../scripts/runner/tracker.mjs';
+import { requireTrackerStarted, startTracker, trackerFailure } from '../scripts/runner/tracker.mjs';
 
 let server = null;
 let tracker = null;
 let shuttingDown = false;
-
-function trackerFailure(result) {
-  if (result.error) return `tracker failed to start: ${result.error.message}`;
-  return `tracker exited early (code ${result.code ?? 'null'}, signal ${result.signal ?? 'none'})`;
-}
 
 async function shutdown(code) {
   if (shuttingDown) return;
@@ -36,11 +31,7 @@ async function main() {
       env: process.env,
     });
     tracker = trackerState.child;
-    const earlyExit = await Promise.race([
-      trackerState.exited,
-      new Promise((resolve) => setImmediate(() => resolve(null))),
-    ]);
-    if (earlyExit) throw new Error(trackerFailure(earlyExit));
+    await requireTrackerStarted(trackerState);
   }
   const env = { ...process.env };
   if (trackerPort) env.APP_TRACKER_URL = `ws://origin-media:${trackerPort}`;

@@ -1,5 +1,7 @@
 // Pure classification for the registered 7c regime reading.
 
+import { median as medianOfSorted } from '../../public/lib/frame-drift.mjs';
+
 const finite = (value) => Number.isFinite(value);
 
 function uploadTotal(value, tag, boundary) {
@@ -45,9 +47,7 @@ function valuesOf(value) {
 }
 
 export function median(values) {
-  const order = valuesOf(values);
-  const middle = Math.floor(order.length / 2);
-  return order.length % 2 ? order[middle] : (order[middle - 1] + order[middle]) / 2;
+  return medianOfSorted(valuesOf(values));
 }
 
 // The register's label and the runner's retained verdict must agree: the recompute
@@ -129,38 +129,29 @@ function runSummary(entry) {
 
 function controlSummary(entries, reading, eligibleRuns) {
   const config = reading.control ?? {};
-  const candidates = entries.filter((entry) => accepted(entry) && conditionOf(entry) === config.condition);
-  for (const entry of candidates) {
-    const figures = figureOf(entry);
-    const peerFraction = figures.peerFractionAggregate;
-    const sameBuildAsEligible = eligibleRuns.every((run) => sameBuild(entry, run));
-    if (finite(peerFraction) && peerFraction >= config.peerFractionMin && sameBuildAsEligible) {
+  const candidates = entries.filter((entry) => accepted(entry) && conditionOf(entry) === config.condition)
+    .map((entry) => {
+      const figures = figureOf(entry);
+      const peerFraction = finite(figures.peerFractionAggregate) ? figures.peerFractionAggregate : null;
+      const sameBuildAsEligible = eligibleRuns.every((run) => sameBuild(entry, run));
       return {
-        directory: entry.directory ?? null,
-        condition: conditionOf(entry),
-        accepted: true,
-        peerFractionAggregate: peerFraction,
-        steady: figureOf(entry).steadyState?.steady === true,
-        legs: figureOf(entry).steadyState?.legs ?? null,
-        buildIds: buildIdsOf(entry),
-        qualifies: true,
+        summary: {
+          directory: entry.directory ?? null,
+          condition: conditionOf(entry),
+          accepted: true,
+          peerFractionAggregate: peerFraction,
+          steady: figures.steadyState?.steady === true,
+          legs: figures.steadyState?.legs ?? null,
+          buildIds: buildIdsOf(entry),
+        },
+        qualifies: peerFraction !== null && peerFraction >= config.peerFractionMin && sameBuildAsEligible,
+        sameBuildAsEligible,
       };
-    }
-  }
-  return candidates.map((entry) => {
-    const figures = figureOf(entry);
-    return {
-      directory: entry.directory ?? null,
-      condition: conditionOf(entry),
-      accepted: true,
-      peerFractionAggregate: finite(figures.peerFractionAggregate) ? figures.peerFractionAggregate : null,
-      steady: figureOf(entry).steadyState?.steady === true,
-      legs: figureOf(entry).steadyState?.legs ?? null,
-      buildIds: buildIdsOf(entry),
-      qualifies: false,
-      sameBuildAsEligible: eligibleRuns.every((run) => sameBuild(entry, run)),
-    };
-  });
+    });
+  // The first qualifying control is the control; otherwise every candidate is listed.
+  const control = candidates.find((candidate) => candidate.qualifies);
+  if (control) return { ...control.summary, qualifies: true };
+  return candidates.map(({ summary, sameBuildAsEligible }) => ({ ...summary, qualifies: false, sameBuildAsEligible }));
 }
 
 // The block committed in conditions.json before any measured run; nothing defaults.
@@ -179,7 +170,7 @@ export function classifyRegimesReading({ runs = [], reading } = {}) {
   const runsSummary = runsList.map(runSummary);
   const eligibleSummaries = runsSummary.filter((entry) => entry.eligible);
   if (eligibleSummaries.length > config.eligibleRunsMax) throw new Error('eligible-run-count-exceeds-max');
-  const eligibleEntries = runsList.filter((entry) => runSummary(entry).eligible);
+  const eligibleEntries = runsList.filter((_, index) => runsSummary[index].eligible);
   const control = controlSummary(runsList, config, eligibleEntries);
   const hasControl = Array.isArray(control) ? false : control?.qualifies === true;
   const enough = eligibleSummaries.length >= config.eligibleRunsMin;

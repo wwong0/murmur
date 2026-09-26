@@ -48,12 +48,11 @@ export function roomPositionForClient(client, tag, instant, declaredOffsetMs = 0
 
 /** Median room position and the spread used to detect disagreeing clocks. */
 export function roomPositionAt({ clients = {}, tags = Object.keys(clients), instant, offsets = {} } = {}) {
-  const positions = tags.map((tag) => roomPositionForClient(clients[tag], tag, instant, offsetFor(offsets, tag)))
-    .sort((left, right) => left - right);
+  const byClient = Object.fromEntries(tags.map((tag) => [tag,
+    roomPositionForClient(clients[tag], tag, instant, offsetFor(offsets, tag))]));
+  const positions = Object.values(byClient).sort((left, right) => left - right);
   if (!positions.length) throw new Error(`room has no viewers at:${instant}`);
-  return { positionMs: median(positions), spreadMs: positions.at(-1) - positions[0], byClient: Object.fromEntries(
-    tags.map((tag) => [tag, roomPositionForClient(clients[tag], tag, instant, offsetFor(offsets, tag))])
-  ) };
+  return { positionMs: median(positions), spreadMs: positions.at(-1) - positions[0], byClient };
 }
 
 /** Interpolate a viewer's media position at a host-page boundary. */

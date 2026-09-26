@@ -9,6 +9,11 @@ export function tagsOf(input) {
   return input.declaredClientTags ?? input.clientTags ?? Object.keys(input.clients ?? {});
 }
 
+/** A 7c peer condition: its settled host read, unreceived examination and bypass check apply. */
+export function declaresResponseSettle(condition) {
+  return Object.prototype.hasOwnProperty.call(condition?.bars ?? {}, 'responseSettleGapMs');
+}
+
 export function recordsOf(client) {
   return Array.isArray(client?.peerRecords) ? client.peerRecords : [];
 }

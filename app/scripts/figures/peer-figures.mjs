@@ -89,27 +89,24 @@ function completedBytes(segments) {
 }
 
 function downloadRatios(input, tags, cohorts, oneViewing) {
+  const segmentSizes = input.content?.segmentSizes ?? input.segmentSizes;
+  const segmentSeconds = input.segmentSeconds ?? 4;
+  const durationMs = (segmentSizes?.length ?? 0) * segmentSeconds * 1000;
   const byClient = {};
   for (const tag of tags) {
     const bytes = completedBytes(cohorts[tag]);
-    const stretch = oneViewing.playedMediaMsByClient[tag];
-    // This calculation uses the viewer's own played positions, not the room
-    // stretch.
-    const segmentSizes = input.content?.segmentSizes ?? input.segmentSizes;
-    const playedStart = stretch.start;
-    const playedEnd = stretch.end;
-    const durationMs = (segmentSizes?.length ?? 0) * (input.segmentSeconds ?? 4) * 1000;
-    if (!finite(playedStart) || !finite(playedEnd) || playedEnd < playedStart
-      || playedStart < 0 || playedEnd > durationMs) {
+    // The viewer's own played positions, not the room stretch.
+    const { start, end } = oneViewing.playedMediaMsByClient[tag];
+    if (!finite(start) || !finite(end) || end < start || start < 0 || end > durationMs) {
       throw new Error(`played-stretch-invalid:${tag}`);
     }
-    const playedBytesForClient = bytesForStretch(playedStart, playedEnd, segmentSizes, input.segmentSeconds ?? 4);
-    byClient[tag] = playedBytesForClient > 0 ? bytes / playedBytesForClient : null;
+    const playedBytes = bytesForStretch(start, end, segmentSizes, segmentSeconds);
+    byClient[tag] = playedBytes > 0 ? bytes / playedBytes : null;
   }
   return byClient;
 }
 
-function steadyState({ input, tags, figures, cohorts, oneViewing }) {
+export function steadyState({ input, tags, figures, cohorts, oneViewing }) {
   const bars = input.condition?.bars ?? {};
   const declared = ['steadyUtilisationMax', 'steadyDownloadRatioMin',
     'steadyDownloadRatioMax', 'steadyRealtimeMin'].every((name) => finite(bars[name]));
@@ -251,7 +248,6 @@ export function computePeerFigures(input = {}, pairing = pairResponseEvidence(in
     result.hostUploadMultiplierRefusal = { reason: 'one-viewing-unavailable', detail: oneViewing.unavailable };
   } else if (oneViewing) {
     const state = steadyState({ input, tags, figures: {
-      ...result,
       uplinkUtilisationMean: input.uplinkUtilisationMean,
       realtimeFactorByClient: input.realtimeFactorByClient,
     }, cohorts, oneViewing });
@@ -270,4 +266,3 @@ export function computePeerFigures(input = {}, pairing = pairResponseEvidence(in
   return result;
 }
 
-export { steadyState };

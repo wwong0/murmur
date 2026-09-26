@@ -1,6 +1,6 @@
 // Independent checks for the peer-attempt byte accounting.
 
-import { cohortSegments, finite, inWindow, pathOf, recordsOf, responseRecords, safe, tagsOf } from './peer-evidence.mjs';
+import { cohortSegments, declaresResponseSettle, finite, inWindow, pathOf, recordsOf, responseRecords, safe, tagsOf } from './peer-evidence.mjs';
 
 const mediaPath = (value) => /\/media\/.*\.m4s$/i.test(pathOf(value));
 
@@ -28,12 +28,8 @@ function allReceipts(input) {
   });
 }
 
-function settleDeclared(input) {
-  return Object.prototype.hasOwnProperty.call(input.condition?.bars ?? {}, 'responseSettleGapMs');
-}
-
 function settledRecords(input) {
-  return settleDeclared(input) ? responseRecords(input.originSettled) : responseRecords(input.originEnd);
+  return declaresResponseSettle(input.condition) ? responseRecords(input.originSettled) : responseRecords(input.originEnd);
 }
 
 function responseIdParts(value) {
@@ -126,15 +122,15 @@ function responseAgrees(receipt, response, tolerances) {
 }
 
 function unreceivedResponses(input, pairing, tolerances) {
-  if (!settleDeclared(input)) return null;
+  if (!declaresResponseSettle(input.condition)) return null;
   const started = new Set(responseRecords(input.originStart).map((record) => record?.originResponseId));
   const qualification = qualificationIds(input);
-  const carriedInWindow = new Set((pairing.allReceipts ?? allReceipts(input))
+  const receipts = pairing.allReceipts ?? allReceipts(input);
+  const carriedInWindow = new Set(receipts
     .filter(({ receipt }) => inWindowReceipt(receipt, input.window))
     .map(({ receipt }) => receipt?.originResponseId)
     .filter(Boolean));
   const host = hostByResponseId(input);
-  const receipts = pairing.allReceipts ?? allReceipts(input);
   const excused = new Map((pairing.excused ?? []).map((entry) => [entry.originResponseId, entry]));
   const candidates = responseRecords(input.originEnd).filter((response) => {
     return (response?.kind === 'segment' || response?.kind === 'media') && mediaPath(response?.urlPath)

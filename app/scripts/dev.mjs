@@ -26,7 +26,7 @@ import * as esbuild from 'esbuild';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildOptions, makeBuildId } from './build.mjs';
-import { startTracker } from './runner/tracker.mjs';
+import { requireTrackerStarted, startTracker, trackerFailure } from './runner/tracker.mjs';
 import { optionsFromEnv, startRoomServer } from '../server/room-server.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -39,11 +39,6 @@ let buildContext = null;
 let roomServer = null;
 let tracker = null;
 let shuttingDown = false;
-
-function trackerFailure(result) {
-  if (result.error) return `tracker failed to start: ${result.error.message}`;
-  return `tracker exited early (code ${result.code ?? 'null'}, signal ${result.signal ?? 'none'})`;
-}
 
 async function shutdown(exitCode) {
   if (shuttingDown) return;
@@ -69,11 +64,7 @@ async function main() {
     env: process.env,
   });
   tracker = trackerState.child;
-  const earlyExit = await Promise.race([
-    trackerState.exited,
-    new Promise((resolve) => setImmediate(() => resolve(null))),
-  ]);
-  if (earlyExit) throw new Error(trackerFailure(earlyExit));
+  await requireTrackerStarted(trackerState);
 
   roomServer = startRoomServer(optionsFromEnv({ ...process.env, APP_TRACKER_URL }));
   console.log('[dev] room server started (server/room-server.mjs)');

@@ -149,7 +149,6 @@ export default async function oneViewingSuite() {
     }
   });
 
-  // A throw here would skip refusal evaluation and hide client-did-not-start (d1-findings.md F1).
   await check('one viewing: a viewer with no drift record at a boundary refuses the multiplier by name', async () => {
     const input = {
       byteAccountingMethod: 'peer-attempt-cohort-v1',

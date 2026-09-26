@@ -70,17 +70,20 @@ function peerBytes(records, segments) {
   };
 }
 
-function realtimeFactor(client, tag, window, allowMissing) {
+// A span may open before a viewer's first drift record or close after its last.
+function playedOrNull(client, tag, instant, allowMissing) {
   try {
-    const start = playedMediaAt(client, tag, window.startMs);
-    const end = playedMediaAt(client, tag, window.endMs);
-    const wallMs = window.endMs - window.startMs;
-    if (!(wallMs > 0)) throw new Error(`qa-window-duration-invalid:${tag}`);
-    return (end - start) / wallMs;
+    return playedMediaAt(client, tag, instant);
   } catch (error) {
     if (allowMissing && /drift-record|drift boundary/.test(error.message)) return null;
     throw error;
   }
+}
+
+function realtimeFactor(played, window, tag) {
+  const wallMs = window.endMs - window.startMs;
+  if (!(wallMs > 0)) throw new Error(`qa-window-duration-invalid:${tag}`);
+  return (played.end - played.start) / wallMs;
 }
 
 function viewerFigure(input, tag, window, allowMissing) {
@@ -89,32 +92,22 @@ function viewerFigure(input, tag, window, allowMissing) {
   const segments = cohortSegments(records, window);
   const bytes = peerBytes(records, segments);
   const total = bytes.host + bytes.peer;
-  const playedStart = (() => {
-    try { return playedMediaAt(client, tag, window.startMs); } catch (error) {
-      if (allowMissing && /drift-record|drift boundary/.test(error.message)) return null;
-      throw error;
-    }
-  })();
-  const playedEnd = (() => {
-    try { return playedMediaAt(client, tag, window.endMs); } catch (error) {
-      if (allowMissing && /drift-record|drift boundary/.test(error.message)) return null;
-      throw error;
-    }
-  })();
+  const start = playedOrNull(client, tag, window.startMs, allowMissing);
+  const end = playedOrNull(client, tag, window.endMs, allowMissing);
+  const played = start === null || end === null ? null : { start, end };
   const segmentSizes = input.content?.segmentSizes ?? input.segmentSizes;
-  const playedBytes = playedStart === null || playedEnd === null ? null
-    : bytesForStretch(playedStart, playedEnd, segmentSizes, input.segmentSeconds ?? 4);
+  const playedBytes = played && bytesForStretch(played.start, played.end, segmentSizes, input.segmentSeconds ?? 4);
+  const completed = completedBytes(segments, tag);
   return {
     window,
     completedSegments: segments.length,
-    completedBytes: completedBytes(segments, tag),
+    completedBytes: completed,
     keptHostBytes: bytes.host,
     keptPeerBytes: bytes.peer,
     peerFraction: total > 0 ? bytes.peer / total : null,
-    realtimeFactor: playedStart === null || playedEnd === null ? null
-      : realtimeFactor(client, tag, window, allowMissing),
-    downloadRatio: playedBytes > 0 ? completedBytes(segments, tag) / playedBytes : null,
-    playedMediaMs: playedStart === null || playedEnd === null ? null : { start: playedStart, end: playedEnd },
+    realtimeFactor: played && realtimeFactor(played, window, tag),
+    downloadRatio: playedBytes > 0 ? completed / playedBytes : null,
+    playedMediaMs: played,
   };
 }
 
@@ -211,6 +204,11 @@ function spansFor(input) {
   return spans;
 }
 
+function capacityOf(input) {
+  return input.capacityBitsPerSecond
+    ?? input.condition?.capacityBitsPerSecond ?? input.condition?.capacityMbps * 1_000_000;
+}
+
 function spanFigure(input, window) {
   const tags = tagsOf(input);
   const windows = Object.fromEntries(tags.map((tag) => [tag, window]));
@@ -218,8 +216,7 @@ function spanFigure(input, window) {
   return {
     window,
     ...figures,
-    uplinkUtilisationMean: linkUtilisation(input.linkSamples, [window], input.capacityBitsPerSecond
-      ?? input.condition?.capacityBitsPerSecond ?? input.condition?.capacityMbps * 1_000_000),
+    uplinkUtilisationMean: linkUtilisation(input.linkSamples, [window], capacityOf(input)),
   };
 }
 
@@ -230,12 +227,10 @@ export function recomputeQaRun(input, directory = undefined) {
     step0WindowForViewer(input.clients?.[tag], tag)]));
   const step0 = figuresForWindows(input, windowsByClient);
   const union = Object.values(windowsByClient);
-  const capacity = input.capacityBitsPerSecond
-    ?? input.condition?.capacityBitsPerSecond ?? input.condition?.capacityMbps * 1_000_000;
   const step0Window = {
     windowsByClient,
     ...step0,
-    uplinkUtilisationMean: linkUtilisation(input.linkSamples, union, capacity),
+    uplinkUtilisationMean: linkUtilisation(input.linkSamples, union, capacityOf(input)),
   };
   const reproduces = step0.peerFractionAggregate !== null
     && step0.peerFractionAggregate <= 0.02

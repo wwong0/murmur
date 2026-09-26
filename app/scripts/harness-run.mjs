@@ -11,7 +11,7 @@ import { maybeInjectDisturbance } from './harness/disturbance.mjs';
 import { qualifyCdpBytes as defaultQualifyCdpBytes, qualifyLinkReceipts as defaultQualifyLinkReceipts } from './harness/qualification.mjs';
 import { evaluateRefusals } from './harness/refusals.mjs';
 import { armFor, clientTags } from './harness/arms.mjs';
-import { validateEngineWindows } from './harness/engine-windows.mjs';
+import { validateEngineWindows } from '../public/lib/engine-windows.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');

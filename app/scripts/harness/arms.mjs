@@ -4,8 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { validateCdpQualification, validateLinkReceiptQualification, CDP_QUALIFICATION_REASON, LINK_RECEIPT_QUALIFICATION_REASON } from './qualification.mjs';
 import { peerPageReadingExpression } from './cdp-records.mjs';
 import { viewerHttpLeak, uplinkVersusDelivered } from '../figures/host-origin-checks.mjs';
+import { declaresResponseSettle } from '../figures/peer-evidence.mjs';
 import { CEILING_MS } from '../harness-cadence.mjs';
-import { ENGINE_WINDOW_DEFAULTS } from './engine-windows.mjs';
+import { ENGINE_WINDOW_DEFAULTS } from '../../public/lib/engine-windows.mjs';
 
 export const REFUSAL_SCOPE = Object.freeze({
   neverPlayed: Object.freeze(['byte', 'drift']),
@@ -65,18 +66,21 @@ function readJson(file) {
   }
 }
 
+const STEP0_CONTENT_MANIFEST = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
+  '../../../step0/content/content-manifest.json');
+
+function contentManifestOf(manifest) {
+  return readJson(manifest.content?.manifestPath ?? STEP0_CONTENT_MANIFEST);
+}
+
 function recomputePeerContent(manifest) {
-  const manifestPath = manifest.content?.manifestPath
-    ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../step0/content/content-manifest.json');
-  const contentManifest = readJson(manifestPath);
+  const contentManifest = contentManifestOf(manifest);
   if (!Array.isArray(contentManifest?.segmentSizes)) throw new Error('content segmentSizes are unavailable');
   return { ...manifest.content, segmentSizes: contentManifest.segmentSizes };
 }
 
 function recomputePeerSegmentSeconds(manifest) {
-  const manifestPath = manifest.content?.manifestPath
-    ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../step0/content/content-manifest.json');
-  const contentManifest = readJson(manifestPath);
+  const contentManifest = contentManifestOf(manifest);
   if (!finite(contentManifest?.segmentSeconds) || contentManifest.segmentSeconds <= 0) {
     throw new Error('content segment seconds are unavailable');
   }
@@ -428,21 +432,20 @@ function peerBoundaryReading(session, reading) {
   };
 }
 
+const ENGINE_WINDOW_KEYS = Object.keys(ENGINE_WINDOW_DEFAULTS);
+
 function mainStreamWindows(config) {
   const stream = config?.mainStream;
   if (!stream || typeof stream !== 'object') return null;
-  return {
-    highDemandTimeWindow: stream.highDemandTimeWindow,
-    httpDownloadTimeWindow: stream.httpDownloadTimeWindow,
-    p2pDownloadTimeWindow: stream.p2pDownloadTimeWindow,
-  };
+  return Object.fromEntries(ENGINE_WINDOW_KEYS.map((key) => [key, stream[key]]));
 }
 
 function sameEngineWindows(left, right) {
-  return Boolean(left && right
-    && left.highDemandTimeWindow === right.highDemandTimeWindow
-    && left.httpDownloadTimeWindow === right.httpDownloadTimeWindow
-    && left.p2pDownloadTimeWindow === right.p2pDownloadTimeWindow);
+  return Boolean(left && right && ENGINE_WINDOW_KEYS.every((key) => left[key] === right[key]));
+}
+
+function declaredEngineWindows(condition) {
+  return Object.prototype.hasOwnProperty.call(condition, 'engineWindows') ? condition.engineWindows : null;
 }
 
 function peerLinkQdisc(topology, tag) {
@@ -518,15 +521,56 @@ async function readEngineWindows(session, condition) {
   try {
     value = await session.tab.evaluate('({ config: __app.peerEngineConfig(), page: __app.engineWindows() })');
   } catch {}
-  const declared = Object.prototype.hasOwnProperty.call(condition, 'engineWindows')
-    ? condition.engineWindows
-    : null;
+  const declared = declaredEngineWindows(condition);
   return {
     declared,
     expected: declared ?? ENGINE_WINDOW_DEFAULTS,
     inForce: mainStreamWindows(value?.config),
     pageError: value?.page?.error ?? null,
   };
+}
+
+function settledResponseRefusals(input, addReason) {
+  const condition = input.condition ?? {};
+  const settled = input.originSettled;
+  const records = settled?.counters?.responseRecords ?? settled?.responseRecords;
+  if (!settled || !Array.isArray(records)) {
+    addReason('response-settle-evidence-unavailable', REFUSAL_SCOPE.responseSettle, { figure: 'byte' });
+    return;
+  }
+  const atMs = Number(settled.atMs);
+  const endMs = Number((input.window ?? condition.window)?.endMs);
+  const gapMs = Number(condition.bars.responseSettleGapMs);
+  if (!finite(atMs) || !finite(endMs) || !finite(gapMs) || atMs - endMs < gapMs) {
+    addReason('response-settle-gap-short', REFUSAL_SCOPE.responseSettle, {
+      atMs, endMs, requiredMs: gapMs, actualMs: atMs - endMs,
+    });
+  }
+}
+
+function viewerInterfaceRefusals(input, tags, addReason) {
+  for (const tag of tags) {
+    const detail = viewerLinkDelta(input.viewerLinkStart?.clients?.[tag], input.viewerLinkEnd?.clients?.[tag],
+      input.peerBoundaryStart?.clients?.[tag]?.uploadBytes, input.peerBoundaryEnd?.clients?.[tag]?.uploadBytes, tag);
+    if (!detail.available) addReason('viewer-interface-evidence-unavailable', REFUSAL_SCOPE.viewerInterface, detail);
+    else if (detail.interfaceBytes < detail.uploadBytes) addReason('peer-bytes-bypassed-shaped-link', REFUSAL_SCOPE.viewerInterface, detail);
+  }
+}
+
+// Absent only on directories retained before 7c; a live run always carries the object.
+function engineWindowRefusals(input, tags, addReason) {
+  if (!input.engineWindows) return;
+  const expected = declaredEngineWindows(input.condition ?? {}) ?? ENGINE_WINDOW_DEFAULTS;
+  for (const tag of tags) {
+    const reading = input.engineWindows[tag];
+    if (reading?.pageError) {
+      addReason('engine-windows-invalid', REFUSAL_SCOPE.engineWindows, { tag, error: reading.pageError });
+    } else if (!reading || !reading.inForce) {
+      addReason('engine-windows-unavailable', REFUSAL_SCOPE.engineWindows, { tag });
+    } else if (!sameEngineWindows(reading.inForce, expected)) {
+      addReason('engine-windows-mismatch', REFUSAL_SCOPE.engineWindows, { tag, expected, inForce: reading.inForce });
+    }
+  }
 }
 
 const PEER_ARM = Object.freeze({
@@ -592,12 +636,10 @@ const PEER_ARM = Object.freeze({
       const reading = await readPeerLog(session, context.ndjson);
       if (kind === 'start') {
         session.engineWindows = await readEngineWindows(session, context.manifestFile.get().condition);
+        const manifestClients = context.manifestFile.get().clients;
         context.manifestFile.merge({ clients: {
-          ...context.manifestFile.get().clients,
-          [session.tag]: {
-            ...context.manifestFile.get().clients[session.tag],
-            engineWindows: session.engineWindows,
-          },
+          ...manifestClients,
+          [session.tag]: { ...manifestClients[session.tag], engineWindows: session.engineWindows },
         } });
       }
       clients[session.tag] = peerBoundaryReading(session, reading);
@@ -637,10 +679,8 @@ const PEER_ARM = Object.freeze({
       session.peerTotalsA = peerTotalsA.clients[session.tag];
       session.peerTotalsB = peerTotalsB.clients[session.tag];
     }
-    const bar = condition?.bars ?? {};
-    const hasSettleGap = Object.prototype.hasOwnProperty.call(bar, 'responseSettleGapMs');
-    if (!hasSettleGap) return { ...extras, peerTotalsA, peerTotalsB };
-    const settleGapMs = Number(bar.responseSettleGapMs);
+    if (!declaresResponseSettle(condition)) return { ...extras, peerTotalsA, peerTotalsB };
+    const settleGapMs = Number(condition.bars.responseSettleGapMs);
     const settleAtMs = Number(window?.endMs) + settleGapMs;
     if (!finite(settleGapMs) || settleGapMs < 0 || !finite(settleAtMs)) {
       throw new Error('response settle gap is not a finite non-negative declared bar');
@@ -699,34 +739,10 @@ const PEER_ARM = Object.freeze({
   refusals(input, addReason) {
     HOST_ARM.refusals(input, addReason);
     const condition = input.condition ?? {};
-    const bars = condition.bars ?? {};
-    if (Object.prototype.hasOwnProperty.call(bars, 'responseSettleGapMs')) {
-      const settled = input.originSettled;
-      const records = settled?.counters?.responseRecords ?? settled?.responseRecords;
-      if (!settled || !Array.isArray(records)) {
-        addReason('response-settle-evidence-unavailable', REFUSAL_SCOPE.responseSettle, { figure: 'byte' });
-      } else {
-        const atMs = Number(settled.atMs);
-        const endMs = Number((input.window ?? condition.window)?.endMs);
-        const gapMs = Number(bars.responseSettleGapMs);
-        if (!finite(atMs) || !finite(endMs) || !finite(gapMs) || atMs - endMs < gapMs) {
-          addReason('response-settle-gap-short', REFUSAL_SCOPE.responseSettle, {
-            atMs, endMs, requiredMs: gapMs, actualMs: atMs - endMs,
-          });
-        }
-      }
-    }
     const tags = clientTags(condition);
-    if (Object.prototype.hasOwnProperty.call(bars, 'responseSettleGapMs')) {
-      for (const tag of tags) {
-        const start = input.viewerLinkStart?.clients?.[tag];
-        const end = input.viewerLinkEnd?.clients?.[tag];
-        const peerStart = input.peerBoundaryStart?.clients?.[tag]?.uploadBytes;
-        const peerEnd = input.peerBoundaryEnd?.clients?.[tag]?.uploadBytes;
-        const detail = viewerLinkDelta(start, end, peerStart, peerEnd, tag);
-        if (!detail.available) addReason('viewer-interface-evidence-unavailable', REFUSAL_SCOPE.viewerInterface, detail);
-        else if (detail.interfaceBytes < detail.uploadBytes) addReason('peer-bytes-bypassed-shaped-link', REFUSAL_SCOPE.viewerInterface, detail);
-      }
+    if (declaresResponseSettle(condition)) {
+      settledResponseRefusals(input, addReason);
+      viewerInterfaceRefusals(input, tags, addReason);
     }
     const readings = input.peerReadings ?? {};
     for (const tag of tags) {
@@ -744,22 +760,7 @@ const PEER_ARM = Object.freeze({
       const anomalies = (input.peerRecords?.[tag] ?? []).filter((record) => record?.kind === 'anomaly');
       if (anomalies.length) addReason('peer-anomaly-records', REFUSAL_SCOPE.peerAnomaly, { tag, count: anomalies.length });
     }
-    // Absent only on directories retained before 7c; a live run always carries the object.
-    const engineWindows = input.engineWindows;
-    const expectedWindows = Object.prototype.hasOwnProperty.call(condition, 'engineWindows')
-      ? condition.engineWindows : ENGINE_WINDOW_DEFAULTS;
-    for (const tag of engineWindows ? tags : []) {
-      const reading = engineWindows[tag];
-      if (reading?.pageError) {
-        addReason('engine-windows-invalid', REFUSAL_SCOPE.engineWindows, { tag, error: reading.pageError });
-      } else if (!reading || !reading.inForce) {
-        addReason('engine-windows-unavailable', REFUSAL_SCOPE.engineWindows, { tag });
-      } else if (!sameEngineWindows(reading.inForce, expectedWindows)) {
-        addReason('engine-windows-mismatch', REFUSAL_SCOPE.engineWindows, {
-          tag, expected: expectedWindows, inForce: reading.inForce,
-        });
-      }
-    }
+    engineWindowRefusals(input, tags, addReason);
     const offsets = condition.positionOffsetMsByClient ?? {};
     for (const tag of tags) {
       const expected = offsets[tag] ?? 0;
