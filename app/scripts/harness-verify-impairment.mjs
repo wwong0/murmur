@@ -38,6 +38,7 @@ export const ARM_ORDER = ['uncapped', 'cap10', 'loss5', 'loss5-origin-only', 'de
 export const BARS = Object.freeze({
   goodputMinMbps: 50,
   cappedGoodputMbps: [8.5, 10.5],
+  cap20GoodputMbps: [19, 21],
   cap100GoodputMbps: [85, 105],
   cleanLossMaxFraction: 0.005,
   impairedLossFraction: [0.03, 0.07],
@@ -254,6 +255,9 @@ async function armMeasurements(name, context) {
   if (name === 'cap100') {
     return { goodput: measureGoodput(client, { exec }) };
   }
+  if (name === 'cap20') {
+    return { goodput: measureGoodput(client, { exec }) };
+  }
   if (name === 'loss5' || name === 'loss5-origin-only') {
     return {
       lossOriginToClient: await measureUdpLoss({ fromContainer: origin, toContainer: client, toAddress: clientMedia.address, port: 9603 }),
@@ -293,6 +297,9 @@ export function evaluateArm(name, measured, previous = {}) {
   }
   if (name === 'cap100') {
     assertions.push(within('goodput is at the declared 100 Mbps cap, two-sided', measured.goodput.mbps, BARS.cap100GoodputMbps));
+  }
+  if (name === 'cap20') {
+    assertions.push(within('goodput is at the declared 20 Mbps cap, two-sided', measured.goodput.mbps, BARS.cap20GoodputMbps));
   }
   if (name === 'loss5') {
     assertions.push(withinFraction('origin to client loss is 3-7%', lossOf(measured.lossOriginToClient), BARS.impairedLossFraction));

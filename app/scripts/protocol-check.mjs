@@ -50,9 +50,13 @@ import harnessPeerTopologySuite from './check/suites/harness-peer-topology.mjs';
 import harnessPeerUploadSuite from './check/suites/harness-peer-upload.mjs';
 import peerFiguresSuite from './check/suites/peer-figures.mjs';
 import oneViewingSuite from './check/suites/one-viewing.mjs';
+import qaRecomputeSuite from './check/suites/qa-recompute.mjs';
 import p2pMeasurementSuite from './check/suites/p2p-measurement.mjs';
+import regimesReadingSuite from './check/suites/regimes-reading.mjs';
+import regimesConditionsSuite from './check/suites/regimes-conditions.mjs';
 import peerSpacingSuite from './check/suites/peer-spacing.mjs';
 import peerChecksSuite from './check/suites/peer-checks.mjs';
+import peerConservationShapedSuite from './check/suites/peer-conservation-shaped.mjs';
 import peerSettleSuite from './check/suites/peer-settle.mjs';
 import hostOriginRefusalsSuite from './check/suites/host-origin-refusals.mjs';
 import harnessStartRequalSuite from './check/suites/harness-start-requal.mjs';
@@ -142,9 +146,13 @@ for (const suite of [
   harnessPeerUploadSuite,
   peerFiguresSuite,
   oneViewingSuite,
+  qaRecomputeSuite,
   p2pMeasurementSuite,
+  regimesReadingSuite,
+  regimesConditionsSuite,
   peerSpacingSuite,
   peerChecksSuite,
+  peerConservationShapedSuite,
   peerSettleSuite,
   hostOriginRefusalsSuite,
   harnessStartRequalSuite,

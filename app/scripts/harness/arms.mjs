@@ -445,18 +445,22 @@ function sameEngineWindows(left, right) {
     && left.p2pDownloadTimeWindow === right.p2pDownloadTimeWindow);
 }
 
+function peerLinkQdisc(topology, tag) {
+  if (!topology?.containers || !Array.isArray(topology.qdiscs)) return null;
+  return topology.qdiscs.find((candidate) => {
+    const rightContainer = candidate?.container === topology.containers?.[tag];
+    return rightContainer && candidate.network === 'wa-media'
+      && candidate.direction === 'egress' && candidate.discipline === 'tbf'
+      && candidate.readBack?.readings?.rate?.got !== null
+      && candidate.readBack?.readings?.rate?.got !== undefined;
+  }) ?? null;
+}
+
 function peerLinkProbePaths(topology, condition) {
   if (!topology.containers || !Array.isArray(topology.qdiscs)) return topology.probePaths;
   const probePaths = { ...(topology.probePaths ?? {}) };
-  const records = Array.isArray(topology.qdiscs) ? topology.qdiscs : [];
   for (const tag of clientTags(condition)) {
-    const record = records.find((candidate) => {
-      const rightContainer = candidate?.container === topology.containers?.[tag];
-      return rightContainer && candidate.network === 'wa-media'
-        && candidate.direction === 'egress' && candidate.discipline === 'tbf'
-        && candidate.readBack?.readings?.rate?.got !== null
-        && candidate.readBack?.readings?.rate?.got !== undefined;
-    });
+    const record = peerLinkQdisc(topology, tag);
     probePaths[tag] = {
       ...(probePaths[tag] ?? {}),
       peerLinksShaped: Boolean(record),
@@ -464,6 +468,22 @@ function peerLinkProbePaths(topology, condition) {
     };
   }
   return probePaths;
+}
+
+function peerLinkQueues(manifest) {
+  const topology = manifest?.topology;
+  if (!topology?.containers || !Array.isArray(topology.qdiscs)) return null;
+  const queues = {};
+  for (const tag of clientTags(manifest.condition)) {
+    const readings = peerLinkQdisc(topology, tag)?.readBack?.readings;
+    const rate = readings?.rate?.got;
+    const burst = readings?.burst?.got;
+    const latency = readings?.latency?.got;
+    if ([rate, burst, latency].every(finite) && rate >= 0 && burst >= 0 && latency >= 0) {
+      queues[tag] = { queueLimitBytes: rate / 8 * latency / 1000 + burst };
+    }
+  }
+  return queues;
 }
 
 function cumulativePeerUpload(value) {
@@ -517,7 +537,10 @@ const PEER_ARM = Object.freeze({
   recomputeContent: recomputePeerContent,
   recomputeSegmentSeconds: recomputePeerSegmentSeconds,
   recomputeAccountingMethod: () => PEER_ARM.byteAccountingMethod,
-  recomputeInputExtras: (manifest) => ({ cdpQualification: manifest.cdpQualification }),
+  recomputeInputExtras: (manifest) => {
+    const queues = peerLinkQueues(manifest);
+    return { cdpQualification: manifest.cdpQualification, ...(queues ? { peerLinkQueues: queues } : {}) };
+  },
   driftCriterionWhenUndeclared: Object.freeze({ verdict: 'not-drawn', reason: 'design.md D5' }),
   driftContextExtras: (manifest) => ({ topology: { probePaths: manifest.topology?.probePaths } }),
   driftRequiredFields: Object.freeze(['topology.probePaths']),

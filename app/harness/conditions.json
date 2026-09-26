@@ -279,6 +279,37 @@
       },
       "feeds": ["impairment-cap100", "goodput-85-to-105-mbps"]
     },
+    "cap20": {
+      "name": "shakedown/cap20",
+      "delivery": "http",
+      "publishes": false,
+      "clients": 1,
+      "capacityMbps": 20,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": { "rate": "20mbit", "burst": "64kbit", "latency": "400ms" }
+        }
+      ],
+      "backgroundLoadMbps": null,
+      "runLengthMs": 0,
+      "excludedPrefixMs": 0,
+      "measureWindowMs": 0,
+      "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "peerFractionAbsMax": 0.02,
+        "originClientAgreementAbsMax": 0.02,
+        "driftLogMissedMax": 0
+      },
+      "feeds": ["impairment-cap20", "goodput-19-to-21-mbps"]
+    },
     "loss5-cap100": {
       "name": "shakedown/loss5-cap100",
       "delivery": "http",
@@ -664,6 +695,60 @@
       "peerExchange": true,
       "positionOffsetMsByClient": { "c01": 0, "c02": 30000, "c03": 60000 },
       "feeds": ["7b2-runner-qualification"]
+    },
+    "regimes-qual": {
+      "name": "shakedown/regimes-qual",
+      "delivery": "host",
+      "publishes": false,
+      "clients": 5,
+      "capacityMbps": 20,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": { "rate": "20mbit", "burst": "64kbit", "latency": "400ms" }
+        },
+        {
+          "container": "client",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": { "rate": "10mbit", "burst": "32kbit", "latency": "400ms" }
+        }
+      ],
+      "backgroundLoadMbps": null,
+      "runLengthMs": 120000,
+      "excludedPrefixMs": 60000,
+      "measureWindowMs": 60000,
+      "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "driftLogMissedMax": 0,
+        "responseCutShortMaxBytes": 1129000,
+        "responseSettleGapMs": 3000,
+        "conservationChannelBytes": 131071,
+        "conservationRelativeMax": 0.05,
+        "conservationDeliveryGapMs": 3000,
+        "steadyUtilisationMax": 0.9,
+        "steadyDownloadRatioMin": 0.95,
+        "steadyDownloadRatioMax": 1.25,
+        "steadyRealtimeMin": 0.98
+      },
+      "peerExchange": true,
+      "positionOffsetMsByClient": { "c01": 0, "c02": 0, "c03": 0, "c04": 0, "c05": 0 },
+      "figureKinds": ["byte"],
+      "engineWindows": {
+        "highDemandTimeWindow": 15,
+        "httpDownloadTimeWindow": 60,
+        "p2pDownloadTimeWindow": 60
+      }
     }
   },
   "hostorigin-nop2p": {
@@ -1045,5 +1130,158 @@
     "peerExchange": true,
     "positionOffsetMsByClient": { "c01": 0, "c02": 30000, "c03": 60000, "c04": 90000, "c05": 120000 },
     "feeds": ["7b2-scattered-control"]
+  },
+  "regimes-limited-shaped": {
+    "name": "regimes-limited-shaped",
+    "delivery": "host",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 20,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": { "rate": "20mbit", "burst": "64kbit", "latency": "400ms" }
+      },
+      {
+        "container": "client",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": { "rate": "10mbit", "burst": "32kbit", "latency": "400ms" }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "runLengthMs": 300000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 180000,
+    "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "driftLogMissedMax": 0,
+      "responseCutShortMaxBytes": 1129000,
+      "responseSettleGapMs": 3000,
+      "conservationChannelBytes": 131071,
+      "conservationRelativeMax": 0.05,
+      "conservationDeliveryGapMs": 3000,
+      "steadyUtilisationMax": 0.9,
+      "steadyDownloadRatioMin": 0.95,
+      "steadyDownloadRatioMax": 1.25,
+      "steadyRealtimeMin": 0.98
+    },
+    "peerExchange": true,
+    "positionOffsetMsByClient": { "c01": 0, "c02": 0, "c03": 0, "c04": 0, "c05": 0 },
+    "figureKinds": ["byte"],
+    "engineWindows": {
+      "highDemandTimeWindow": 15,
+      "httpDownloadTimeWindow": 60,
+      "p2pDownloadTimeWindow": 60
+    },
+    "reading": {
+      "figure": "median",
+      "reading1": { "peerFractionMin": 0.6, "multiplierMax": 1.5 },
+      "reading2": { "peerFractionBelow": 0.55, "multiplierAbove": 1.65 },
+      "marginPeerFraction": 0.05,
+      "marginMultiplier": 0.15,
+      "eligibleRunsMin": 2,
+      "eligibleRunsMax": 3,
+      "control": { "condition": "p2p-scattered", "peerFractionMin": 0.5 }
+    }
+  },
+  "regimes-default-shaped": {
+    "name": "regimes-default-shaped",
+    "delivery": "host",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 10,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": { "rate": "10mbit", "burst": "32kbit", "latency": "400ms" }
+      },
+      {
+        "container": "client",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": { "rate": "10mbit", "burst": "32kbit", "latency": "400ms" }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "runLengthMs": 300000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 180000,
+    "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "driftLogMissedMax": 0,
+      "responseCutShortMaxBytes": 1129000,
+      "responseSettleGapMs": 3000,
+      "conservationChannelBytes": 131071,
+      "conservationRelativeMax": 0.05,
+      "conservationDeliveryGapMs": 3000,
+      "steadyUtilisationMax": 0.9,
+      "steadyDownloadRatioMin": 0.95,
+      "steadyDownloadRatioMax": 1.25,
+      "steadyRealtimeMin": 0.98
+    },
+    "peerExchange": true,
+    "positionOffsetMsByClient": { "c01": 0, "c02": 0, "c03": 0, "c04": 0, "c05": 0 },
+    "figureKinds": ["byte"]
+  },
+  "regimes-starved": {
+    "name": "regimes-starved",
+    "delivery": "host",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 5,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": { "rate": "5mbit", "burst": "16kbit", "latency": "400ms" }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "runLengthMs": 300000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 180000,
+    "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "driftLogMissedMax": 0,
+      "responseCutShortMaxBytes": 1129000,
+      "responseSettleGapMs": 3000,
+      "conservationChannelBytes": 131071,
+      "conservationRelativeMax": 0.05,
+      "conservationDeliveryGapMs": 3000,
+      "steadyUtilisationMax": 0.9,
+      "steadyDownloadRatioMin": 0.95,
+      "steadyDownloadRatioMax": 1.25,
+      "steadyRealtimeMin": 0.98
+    },
+    "peerExchange": true,
+    "positionOffsetMsByClient": { "c01": 0, "c02": 0, "c03": 0, "c04": 0, "c05": 0 },
+    "figureKinds": ["byte"]
   }
 }

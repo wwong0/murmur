@@ -325,10 +325,40 @@ function totalAt(value, field, key) {
   return source === undefined ? 0 : source;
 }
 
+function cancelledPeerAttempts(client, peerId) {
+  return recordsOf(client).filter((record) => record?.kind === 'attempt'
+    && record.source === 'p2p' && record.peerId === peerId && record.end !== 'loaded');
+}
+
+function segmentIndex(path) {
+  const match = pathOf(path).match(/(?:^|\/)seg-(\d+)\.m4s$/i);
+  return match ? Number(match[1]) : null;
+}
+
+function cancelAllowance(input, queueLimitBytes, channelBytes, cancels) {
+  const segmentSizes = input.content?.segmentSizes ?? input.segmentSizes;
+  let allowance = 0;
+  const failures = [];
+  for (const attempt of cancels) {
+    const index = segmentIndex(attempt.path);
+    const size = index === null ? undefined : segmentSizes?.[index];
+    const held = Number(attempt.heldAtEndBytes);
+    if (index === null || !finite(size) || size < 0 || !finite(held) || held < 0) {
+      failures.push({ type: 'conservation-segment-unknown', path: attempt.path ?? null, index });
+      continue;
+    }
+    allowance += Math.min(Math.max(0, size - held), channelBytes + queueLimitBytes);
+  }
+  return { allowance, failures };
+}
+
 function conservation(input, tolerances) {
   const tags = tagsOf(input);
   const failures = [];
   const toleranceRefusals = [];
+  const peerLinkQueues = input.peerLinkQueues ?? {};
+  const shapedPairs = Object.keys(peerLinkQueues).length > 0;
+  const pairs = [];
   const totals = Object.fromEntries(tags.map((tag) => [tag, input.clients?.[tag] ?? {}]));
   const gap = Number(tolerances.conservationDeliveryGapMs);
   if (!finite(gap) || gap < 0) {
@@ -366,18 +396,42 @@ function conservation(input, tolerances) {
     const D_B = totalAt(receiverB, 'chunkBytes.p2p', senderA.peerId);
     const closes = recordsOf(totals[receiver]).filter((record) => record?.kind === 'peer'
       && record.event === 'close' && record.peerId === senderA.peerId).length;
+    const cancels = cancelledPeerAttempts(totals[receiver], senderA.peerId);
     const channelBytes = Number(tolerances.conservationChannelBytes);
     const T = channelBytes * closes;
     const bound = Math.max(channelBytes,
       Number(tolerances.conservationRelativeMax) * U_B);
+    const shaped = Object.prototype.hasOwnProperty.call(peerLinkQueues, sender);
+    if (shaped) {
+      const queueLimitBytes = Number(peerLinkQueues[sender]?.queueLimitBytes);
+      if (!finite(queueLimitBytes) || queueLimitBytes < 0) {
+        failures.push({ type: 'conservation-queue-unknown', sender, receiver, queueLimitBytes });
+        continue;
+      }
+      const terms = cancelAllowance(input, queueLimitBytes, channelBytes, cancels);
+      const allowance = T + terms.allowance;
+      const pair = { sender, receiver, shaped: true, shortfall: U_A - D_B,
+        allowance, closes, cancels: cancels.length };
+      pairs.push(pair);
+      failures.push(...terms.failures.map((failure) => ({ ...failure, sender, receiver })));
+      const detail = { sender, receiver, U_A, U_B, D_A, D_B, closes,
+        cancels: cancels.length, T, allowance, queueLimitBytes };
+      if (!(D_A <= U_B && U_A - allowance <= D_B)) {
+        failures.push({ type: 'conservation-mismatch', ...detail });
+      }
+      continue;
+    }
     const detail = { sender, receiver, U_A, U_B, D_A, D_B, closes, T, bound };
     if (T > bound) {
       toleranceRefusals.push(detail);
-      continue;
+    } else if (!(D_A <= U_B && U_A - T <= D_B)) {
+      failures.push({ type: 'conservation-mismatch', ...detail });
     }
-    if (!(D_A <= U_B && U_A - T <= D_B)) failures.push({ type: 'conservation-mismatch', ...detail });
+    if (shapedPairs) pairs.push({ sender, receiver, shaped: false, shortfall: U_A - D_B,
+      allowance: T, closes, cancels: cancels.length });
   }
-  return { check: 'conservation', passed: failures.length === 0, failures, exercised: true, toleranceRefusals };
+  return { check: 'conservation', passed: failures.length === 0, failures, exercised: true,
+    toleranceRefusals, ...(shapedPairs ? { pairs } : {}) };
 }
 
 export function computePeerChecks(input = {}, tolerances = {}, pairing = pairResponseEvidence(input)) {
