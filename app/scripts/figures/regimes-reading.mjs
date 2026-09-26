@@ -50,9 +50,11 @@ export function median(values) {
   return order.length % 2 ? order[middle] : (order[middle - 1] + order[middle]) / 2;
 }
 
-// The register's verdict, written by the run; the recompute decides only publication.
+// The register's label and the runner's retained verdict must agree: the recompute
+// cannot see the live refusals (7c d1-findings.md F3).
 function accepted(entry) {
-  return entry?.outcome === 'complete' && entry?.publishes === true;
+  return entry?.outcome === 'complete' && entry?.publishes === true
+    && entry?.finalization?.writeByte === true;
 }
 
 function figureOf(entry) {
@@ -72,12 +74,20 @@ function buildIdsOf(entry) {
     .sort(([left], [right]) => left.localeCompare(right)));
 }
 
+function imagesOf(entry) {
+  return entry?.manifest?.topology?.regime?.images ?? null;
+}
+
+// The rig is the image pair the run's containers came from (7c d1-findings.md F4).
 function sameBuild(left, right) {
   const leftIds = buildIdsOf(left);
   const rightIds = buildIdsOf(right);
   const tags = Object.keys(leftIds);
+  const leftImages = imagesOf(left);
   return tags.length > 0 && JSON.stringify(leftIds) === JSON.stringify(rightIds)
-    && Object.values(leftIds).every((value) => typeof value === 'string' && value.length > 0);
+    && Object.values(leftIds).every((value) => typeof value === 'string' && value.length > 0)
+    && typeof leftImages?.origin === 'string' && typeof leftImages?.client === 'string'
+    && JSON.stringify(leftImages) === JSON.stringify(imagesOf(right));
 }
 
 function published(entry, figures) {

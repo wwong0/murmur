@@ -583,10 +583,10 @@ const PEER_ARM = Object.freeze({
   },
   async captureBoundaryExtras(kind, context) {
     const extras = await HOST_ARM.captureBoundaryExtras(kind, context);
-    if (kind === 'start') {
-      const viewerLinks = await context.options.viewerLinkReader?.() ?? null;
-      writeJson(path.join(context.runDir, 'viewer-link-start.json'), viewerLinks);
-    }
+    // Read at the boundary itself: the bypass check compares it with the peer
+    // upload read at the same boundary (7c d1-findings.md F2).
+    const viewerLinks = await context.options.viewerLinkReader?.() ?? null;
+    writeJson(path.join(context.runDir, `viewer-link-${kind}.json`), viewerLinks);
     const clients = {};
     for (const session of context.sessions.filter((entry) => entry.role === 'viewer')) {
       const reading = await readPeerLog(session, context.ndjson);
@@ -606,7 +606,7 @@ const PEER_ARM = Object.freeze({
     writeJson(path.join(context.runDir, `peer-boundary-${kind}.json`), { clients });
     return extras;
   },
-  async finalEvidence({ originUrl, fetchSnapshot, runDir, sessions, ndjson, condition, deadline, originSession, drainAll, window, startInstanceId, viewerLinkReader }) {
+  async finalEvidence({ originUrl, fetchSnapshot, runDir, sessions, ndjson, condition, deadline, originSession, drainAll, window, startInstanceId }) {
     const extras = await HOST_ARM.finalEvidence({ originUrl, fetchSnapshot, runDir });
     const viewers = sessions.filter((entry) => entry.role === 'viewer');
     const capture = async (name) => {
@@ -658,10 +658,8 @@ const PEER_ARM = Object.freeze({
       throw new Error('host counter instanceId changed during run');
     }
     writeJson(path.join(runDir, 'origin-counters-settled.json'), originSettled);
-    const viewerLinks = await viewerLinkReader?.() ?? null;
-    writeJson(path.join(runDir, 'viewer-link-end.json'), viewerLinks);
     await drainAll?.();
-    return { ...extras, peerTotalsA, peerTotalsB, originSettled, viewerLinks };
+    return { ...extras, peerTotalsA, peerTotalsB, originSettled };
   },
   evidence(sessions, hostEvidence, runDir) {
     const base = HOST_ARM.evidence(sessions, hostEvidence, runDir);

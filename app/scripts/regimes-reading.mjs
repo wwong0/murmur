@@ -40,12 +40,14 @@ function recomputeRegisteredRun(entry) {
   if (typeof directory !== 'string' || directory.length === 0) throw new Error('registered run has no directory');
   const runDir = runPath(directory);
   const manifest = readJson(path.join(runDir, 'manifest.json'));
+  const refusalReport = path.join(runDir, 'refusal-report.json');
+  const finalization = fs.existsSync(refusalReport) ? readJson(refusalReport).finalization ?? null : null;
   let report;
   try {
     report = recomputeRunDirectory(runDir);
   } catch (error) {
     if (entry.outcome !== 'aborted') throw error;
-    return { ...entry, directory, manifest, recomputeError: error.message };
+    return { ...entry, directory, manifest, finalization, recomputeError: error.message };
   }
   const uploadRates = entry.condition?.startsWith('regimes-')
     ? computeViewerUploadRates({
@@ -54,7 +56,7 @@ function recomputeRegisteredRun(entry) {
       boundaryEnd: readJson(path.join(runDir, 'peer-boundary-end.json')),
     })
     : null;
-  return { ...entry, directory, manifest, report, ...(uploadRates ? { uploadRates } : {}) };
+  return { ...entry, directory, manifest, report, finalization, ...(uploadRates ? { uploadRates } : {}) };
 }
 
 function ratioOf(report, directory) {
@@ -71,7 +73,8 @@ function accepted(entry) {
 }
 
 function qCReport(entries) {
-  const selected = entries.find((entry) => entry.condition === 'regimes-default-shaped' && accepted(entry));
+  const selected = entries.find((entry) => entry.condition === 'regimes-default-shaped' && accepted(entry)
+    && entry.finalization?.writeByte === true);
   if (!selected) return { diagnostic: true, condition: 'regimes-default-shaped', status: 'unavailable' };
   const figures = selected.report.figures;
   return {

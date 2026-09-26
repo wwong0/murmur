@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { assert, assertEqual, check } from '../harness.mjs';
 import { armFor } from '../../harness/arms.mjs';
 
@@ -60,5 +63,24 @@ export default async function harnessPeerUploadSuite() {
     const found = reasons({ ...base({ interfaceEnd: 38_000_000 }), condition: { ...condition, bars: {} } });
     assert(!has(found, 'peer-bytes-bypassed-shaped-link'), 'legacy condition skips bypass refusal');
     assert(!has(found, 'viewer-interface-evidence-unavailable'), 'legacy condition skips unavailable refusal');
+  });
+
+  await check('T6 4.3: the end interface count is read at the end boundary, beside the peer upload', async () => {
+    const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'peer-upload-boundary-'));
+    try {
+      let reads = 0;
+      const options = {
+        originSession: { tab: { evaluate: async () => ({ atMs: 1, instanceId: 'origin' }) } },
+        loopbackReader: async () => ({ txBytes: 0 }),
+        viewerLinkReader: async () => ({ clients: { c01: { atMs: 2_000, txBytes: ++reads } } }),
+        startInstanceId: 'origin',
+      };
+      const manifestFile = { get: () => ({ condition, clients: {} }), merge() {} };
+      await armFor(condition).captureBoundaryExtras('end', { room: {}, sessions: [], manifestFile, runDir, options });
+      const end = JSON.parse(fs.readFileSync(path.join(runDir, 'viewer-link-end.json'), 'utf8'));
+      assertEqual(end.clients.c01.txBytes, 1, 'the end boundary writes the interface count it read');
+    } finally {
+      fs.rmSync(runDir, { recursive: true, force: true });
+    }
   });
 }

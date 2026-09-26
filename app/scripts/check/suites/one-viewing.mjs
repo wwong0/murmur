@@ -149,29 +149,35 @@ export default async function oneViewingSuite() {
     }
   });
 
-  await check('one viewing: one-viewing without drift evidence is a hard error', async () => {
+  // A throw here would skip refusal evaluation and hide client-did-not-start (d1-findings.md F1).
+  await check('one viewing: a viewer with no drift record at a boundary refuses the multiplier by name', async () => {
     const input = {
       byteAccountingMethod: 'peer-attempt-cohort-v1',
       multiplierDenominator: 'one-viewing',
-      declaredClientTags: ['c01'],
-      clients: { c01: { records: [] } },
-      condition: { capacityMbps: 10 },
-      content: { segmentSizes: [1_000] },
-      segmentSeconds: 1,
-      window: { startMs: 0, endMs: 1_000 },
+      declaredClientTags: ['c01', 'c02'],
+      clients: { c01: { records: drift(0, 7_000) }, c02: { records: [] } },
+      condition: { capacityMbps: 10, bars: BARS },
+      content: { segmentSizes: [1_000, 1_000] },
+      segmentSeconds: 4,
+      window: { startMs: 0, endMs: 7_000 },
       originStart: { mediaBytesDelivered: 0 },
       originEnd: { mediaBytesDelivered: 0 },
     };
-    const pairing = { byClient: { c01: { pairs: [] } }, excused: [] };
-    let error;
-    try {
-      computePeerFigures(input, pairing);
-    } catch (caught) {
-      error = caught;
-    }
-    assertEqual(error?.message, 'one-viewing-drift-evidence-unavailable', 'one-viewing missing drift evidence throws');
+    const pairing = { byClient: { c01: { pairs: [] }, c02: { pairs: [] } }, excused: [] };
+    const never = computePeerFigures(input, pairing);
+    assertEqual(never.hostUploadMultiplierRefusal?.detail, 'one-viewing-drift-evidence-unavailable',
+      'a viewer with no drift records refuses the multiplier');
+    assertEqual(never.hostUploadMultiplier, undefined, 'no multiplier beside the refusal');
+    assertEqual(never.peerFractionSteady, false, 'the peer fraction is labelled not steady');
+
+    const late = computePeerFigures({ ...input, clients: { ...input.clients, c02: { records: drift(0, 3_000, 4_000, 7_000) } } }, pairing);
+    assertEqual(late.hostUploadMultiplierRefusal?.reason, 'one-viewing-unavailable', 'a late starter refuses by reason');
+    assert(late.hostUploadMultiplierRefusal?.detail.startsWith('drift-record-before-boundary-unavailable:c02:'),
+      'the refusal names the viewer without a start-boundary record');
+
     const legacy = computePeerFigures({ ...input, multiplierDenominator: 'distinct-completed' }, pairing);
     assertEqual(legacy.multiplierDenominator, 'distinct-completed', 'legacy denominator remains tolerant');
+    assertEqual(legacy.hostUploadMultiplierRefusal, undefined, 'a legacy directory refuses nothing for one viewing');
   });
 
   await check('one viewing: retained 7b2 published keys reproduce (dirs and keys are counted)', async () => {

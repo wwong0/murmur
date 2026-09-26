@@ -573,7 +573,6 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       originUrl, fetchSnapshot, runDir: prepared.runDir, sessions, ndjson, condition, deadline,
       window: manifestFile.get().window, originSession: boundaryOptions.originSession,
       startInstanceId: boundaryOptions.startInstanceId,
-      viewerLinkReader: boundaryOptions.viewerLinkReader,
       drainAll: () => Promise.all(sessions.map((session) => queuedDrain(session, ndjson, arm, Date.now()))),
     }));
   } catch (error) {

@@ -2,6 +2,7 @@ import { assert, assertEqual, assertNear, check } from '../harness.mjs';
 import { classifyRegimesReading, computeViewerUploadRates } from '../../figures/regimes-reading.mjs';
 
 const BUILD = { c00: { role: 'host', buildId: null }, c01: { buildId: 'build-a' }, c02: { buildId: 'build-a' } };
+const IMAGES = { origin: 'sha256:origin-a', client: 'sha256:client-a' };
 const steady = { steady: true, reason: null, legs: {
   utilisation: { value: 0.8, pass: true },
   downloadRatio: { byClient: { c01: 1, c02: 1 }, pass: true },
@@ -24,7 +25,8 @@ function run(directory, peerFraction, multiplier, overrides = {}) {
     condition: overrides.condition ?? 'regimes-limited-shaped',
     outcome: overrides.outcome ?? 'complete',
     publishes: overrides.publishes ?? true,
-    manifest: { clients: overrides.builds ?? BUILD },
+    finalization: { writeByte: overrides.writeByte ?? true },
+    manifest: { clients: overrides.builds ?? BUILD, topology: { regime: { images: overrides.images ?? IMAGES } } },
     report: {
       publishedByte: overrides.publishedByte ?? { published: true },
       figures: {
@@ -105,6 +107,18 @@ export default async function regimesReadingSuite() {
     const mismatch = classify([run('a', 0.6, 1.2), run('b', 0.6, 1.2)],
       [control(0.51, { builds: { c01: { buildId: 'build-b' }, c02: { buildId: 'build-b' } } })]);
     assertEqual(mismatch.reading, 'No reading', 'a control on another build is rejected');
+    const otherRig = classify([run('a', 0.6, 1.2), run('b', 0.6, 1.2)],
+      [control(0.51, { images: { ...IMAGES, client: 'sha256:client-b' } })]);
+    assertEqual(otherRig.reading, 'No reading', 'a control on another client image is rejected');
+  });
+
+  // The recompute cannot see live refusals; the runner's retained verdict can (d1-findings.md F3).
+  await check('regimes reading: a run the runner withheld does not vote, whatever the register says', async () => {
+    const result = classify([run('a', 0.6, 1.2), run('b', 0.6, 1.2), run('withheld', 0.1, 3, { writeByte: false })]);
+    assertEqual(result.eligibleCount, 2, 'the withheld run is not eligible');
+    assertEqual(result.reading, 'Reading 1', 'the withheld run does not move the medians');
+    const noControl = classify([run('a', 0.6, 1.2), run('b', 0.6, 1.2)], [control(0.51, { writeByte: false })]);
+    assertEqual(noControl.reading, 'No reading', 'a withheld control does not qualify');
   });
 
   await check('regimes reading: thresholds come only from the registered block', async () => {

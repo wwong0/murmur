@@ -150,20 +150,30 @@ function refusalFor(steady) {
   return { reason: steady.reason, failedLegs, legs: steady.legs };
 }
 
+const BOUNDARY_RECORD_MISSING = /^drift-record-(before|after)-boundary-unavailable:/;
+
 // A legacy directory without drift records publishes its distinct-completed figure alone.
+// A viewer that never started has no record at a boundary: refuse the multiplier and let
+// the start-wait and never-played refusals name it — a throw here skips them (7c
+// d1-findings.md F1).
 function oneViewingDetails(input, tags, multiplierDenominator) {
+  const required = multiplierDenominator === 'one-viewing';
   if (!hasDriftEvidence(input, tags)) {
-    if (multiplierDenominator === 'one-viewing') throw new Error('one-viewing-drift-evidence-unavailable');
-    return null;
+    return required ? { unavailable: 'one-viewing-drift-evidence-unavailable' } : null;
   }
-  return computeOneViewing({
-    clients: input.clients,
-    tags,
-    window: input.window,
-    offsets: offsetsFor(input, tags),
-    segmentSizes: input.content?.segmentSizes ?? input.segmentSizes,
-    segmentSeconds: input.segmentSeconds ?? 4,
-  });
+  try {
+    return computeOneViewing({
+      clients: input.clients,
+      tags,
+      window: input.window,
+      offsets: offsetsFor(input, tags),
+      segmentSizes: input.content?.segmentSizes ?? input.segmentSizes,
+      segmentSeconds: input.segmentSeconds ?? 4,
+    });
+  } catch (error) {
+    if (!BOUNDARY_RECORD_MISSING.test(error.message)) throw error;
+    return required ? { unavailable: error.message } : null;
+  }
 }
 
 export function computePeerFigures(input = {}, pairing = pairResponseEvidence(input)) {
@@ -235,7 +245,11 @@ export function computePeerFigures(input = {}, pairing = pairResponseEvidence(in
     peerCohortEmpty,
     peerRefusalReasons: peerCohortEmpty ? ['peer-cohort-empty'] : [],
   };
-  if (oneViewing) {
+  if (oneViewing?.unavailable) {
+    delete result.hostUploadMultiplier;
+    result.peerFractionSteady = false;
+    result.hostUploadMultiplierRefusal = { reason: 'one-viewing-unavailable', detail: oneViewing.unavailable };
+  } else if (oneViewing) {
     const state = steadyState({ input, tags, figures: {
       ...result,
       uplinkUtilisationMean: input.uplinkUtilisationMean,
