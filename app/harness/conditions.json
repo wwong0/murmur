@@ -749,6 +749,67 @@
         "httpDownloadTimeWindow": 60,
         "p2pDownloadTimeWindow": 60
       }
+    },
+    "trap-qual": {
+      "name": "shakedown/trap-qual",
+      "delivery": "host",
+      "publishes": false,
+      "clients": 5,
+      "capacityMbps": 20,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": { "rate": "20mbit", "burst": "64kbit", "latency": "400ms" }
+        },
+        {
+          "container": "client",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": { "rate": "10mbit", "burst": "32kbit", "latency": "400ms" }
+        }
+      ],
+      "backgroundLoadMbps": null,
+      "runLengthMs": 300000,
+      "excludedPrefixMs": 120000,
+      "measureWindowMs": 180000,
+      "content": { "dir": "/media", "identity": "step0-content-media-v1" },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "driftLogMissedMax": 0,
+        "responseCutShortMaxBytes": 1129000,
+        "responseSettleGapMs": 3000,
+        "conservationChannelBytes": 131071,
+        "conservationRelativeMax": 0.05,
+        "conservationDeliveryGapMs": 3000,
+        "steadyUtilisationMax": 0.9,
+        "steadyDownloadRatioMin": 0.95,
+        "steadyDownloadRatioMax": 1.25,
+        "steadyRealtimeMin": 0.98
+      },
+      "peerExchange": true,
+      "positionOffsetMsByClient": { "c01": 0, "c02": 0, "c03": 0, "c04": 0, "c05": 0 },
+      "figureKinds": ["byte"],
+      "engineWindows": {
+        "highDemandTimeWindow": 15,
+        "httpDownloadTimeWindow": 60,
+        "p2pDownloadTimeWindow": 60
+      },
+      "seek": { "issueAfterReadyMs": 120000, "deltaMs": 600000, "appliedTimeoutMs": 5000 },
+      "capacityStep": {
+        "container": "origin",
+        "network": "wa-media",
+        "discipline": "tbf",
+        "params": { "rate": "5mbit", "burst": "16kbit", "latency": "400ms" }
+      }
     }
   },
   "hostorigin-nop2p": {

@@ -5,6 +5,7 @@ import { computeReceiptCohort } from './receipt-cohort.mjs';
 import { computePeerFigures, PEER_ATTEMPT_COHORT_METHOD } from './peer-figures.mjs';
 import { computePeerChecks, pairResponseEvidence } from './peer-checks.mjs';
 import { peerSpacing } from './peer-spacing.mjs';
+import { computeNoP2pSteady } from './nop2p-steady.mjs';
 
 export const PEER_FRACTION_ABS_MAX = 0.02;
 
@@ -414,6 +415,28 @@ export function computeFigures(input = {}) {
   }
 
   Object.assign(result, linkFigures(input.linkSamples ?? input.utilisation?.samples ?? [], window, input.capacityBitsPerSecond ?? input.condition?.capacityBitsPerSecond));
+  // The receipt cohort is the no-P2P arm's (D5); the peer arm's one viewing is peer-figures.mjs's.
+  if (input.multiplierDenominator === 'one-viewing' && cohort) {
+    const tagsForSteady = tagsFrom(input, clients);
+    const offsets = input.condition?.positionOffsetMsByClient ?? input.declaredOffsetMsByClient ?? {};
+    const steady = computeNoP2pSteady({ input, figures: result, tags: tagsForSteady, offsets });
+    result.oneViewingBytesInWindow = steady.oneViewingBytesInWindow;
+    result.roomPositionSpreadMs = steady.roomPositionSpreadMs;
+    result.steadyState = steady.steadyState;
+    result.multiplierDenominator = 'one-viewing';
+    if (steady.steadyState.steady) {
+      result.hostUploadMultiplier = segmentBytesDeliveredInWindow / steady.oneViewingBytesInWindow;
+    } else {
+      delete result.hostUploadMultiplier;
+      result.hostUploadMultiplierRefusal = {
+        reason: steady.steadyState.reason,
+        failedLegs: Object.entries(steady.steadyState.legs)
+          .filter(([, leg]) => leg.pass !== true)
+          .map(([leg, value]) => ({ leg, value })),
+        legs: steady.steadyState.legs,
+      };
+    }
+  }
   const disagreements = tags.filter((tag) => finite(result.realtimeFactorByClient[tag]) && finite(result.realtimeFactorFromFrameQualityByClient[tag])
     && Math.abs(result.realtimeFactorByClient[tag] - result.realtimeFactorFromFrameQualityByClient[tag]) > 0.05);
   if (disagreements.length) result.realtimeFactorDisagreement = disagreements;

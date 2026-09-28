@@ -14,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { attach } from '../cdp.mjs';
-import { applyQdiscs, clearCondition, defaultExec, dockerExec, networkSubnet, resolveInterface } from '../../harness/apply-qdisc.mjs';
+import { applyQdiscs, changeQdisc, clearCondition, defaultExec, dockerExec, networkSubnet, resolveInterface } from '../../harness/apply-qdisc.mjs';
 import { requireDelivery } from '../delivery-pin.mjs';
 import { armFor } from './arms.mjs';
 
@@ -372,6 +372,10 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
 
     async applyQdiscs({ condition }) {
       return applyQdiscs({ condition, containers: state.containers, exec, subnets: state.subnets });
+    },
+
+    async stepQdisc({ capacityStep }) {
+      return changeQdisc({ state, capacityStep, exec });
     },
 
     async teardown({ condition }) {

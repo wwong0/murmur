@@ -3,6 +3,10 @@
 import { attemptDispositions } from '../../public/lib/peer-bytes.mjs';
 import { pairResponseEvidence } from './peer-checks.mjs';
 import { bytesForStretch, computeOneViewing } from './one-viewing.mjs';
+import { computeHeldAhead } from './held-ahead.mjs';
+import { computeSpanCourse } from './span-course.mjs';
+import { trapFigures } from './trap-figures.mjs';
+import { segmentIndex } from './seek-evidence.mjs';
 import { cohortSegments, finite, inWindow, originSnapshot, pathOf, recordsOf, responseRecords, safe, sumBytes, tagsOf } from './peer-evidence.mjs';
 
 export const PEER_ATTEMPT_COHORT_METHOD = 'peer-attempt-cohort-v1';
@@ -14,11 +18,6 @@ function difference(after, before, field) {
   const left = Number(originSnapshot(before)?.[field]);
   if (!finite(right) || !finite(left) || right < left) throw new Error(`counter ${field} is not monotonic`);
   return right - left;
-}
-
-function segmentIndex(path) {
-  const match = pathOf(path).match(/\/seg-(\d+)\.m4s$/i);
-  return match ? Number(match[1]) : null;
 }
 
 function segmentLengths(input, cohorts) {
@@ -176,11 +175,14 @@ function oneViewingDetails(input, tags, multiplierDenominator) {
 export function computePeerFigures(input = {}, pairing = pairResponseEvidence(input)) {
   const tags = tagsOf(input);
   const window = input.window;
+  const multiplierDenominator = input.multiplierDenominator ?? 'distinct-completed';
   const recordsByTag = Object.fromEntries(tags.map((tag) => [tag, recordsOf(input.clients?.[tag])]));
   // attemptDispositions throws on a record set that claims an attempt twice —
   // the publisher's whole-record invariant, held on this recompute path too.
   const dispositions = Object.fromEntries(tags.map((tag) => [tag, attemptDispositions(recordsByTag[tag])]));
-  const cohorts = Object.fromEntries(tags.map((tag) => [tag, cohortSegments(recordsByTag[tag], window)]));
+  const trap = multiplierDenominator === 'none-across-seek' ? trapFigures(input, window) : null;
+  const cohorts = trap?.cohorts
+    ?? Object.fromEntries(tags.map((tag) => [tag, cohortSegments(recordsByTag[tag], window)]));
   const lengths = segmentLengths(input, cohorts);
   const keptHostBytesByClient = {};
   const keptPeerBytesByClient = {};
@@ -217,8 +219,7 @@ export function computePeerFigures(input = {}, pairing = pairResponseEvidence(in
   const responseAgreement = pairing.unreceived?.report;
   const hostFetchOnceRatio = distinctSegmentBytesInWindow > 0
     ? mediaBytesDeliveredInWindow / distinctSegmentBytesInWindow : null;
-  const multiplierDenominator = input.multiplierDenominator ?? 'distinct-completed';
-  const oneViewing = oneViewingDetails(input, tags, multiplierDenominator);
+  const oneViewing = trap ? null : oneViewingDetails(input, tags, multiplierDenominator);
   const result = {
     byteAccountingMethod: PEER_ATTEMPT_COHORT_METHOD,
     keptHostBytesByClient,
@@ -262,7 +263,31 @@ export function computePeerFigures(input = {}, pairing = pairResponseEvidence(in
         result.hostUploadMultiplierRefusal = refusalFor(state);
       }
     }
+  } else if (trap) {
+    const seek = input.seek ?? input.context?.seek ?? {};
+    const host = seek.host ?? {};
+    const landingMs = Number(seek.landingMs ?? host.positionMs);
+    const effectiveSharedMs = Number(seek.effectiveSharedMs ?? host.atSharedMs);
+    result.peerFractionByClient = trap.peerFractionByClient;
+    result.peerFractionAggregate = trap.peerFractionAggregate;
+    result.peerFractionSteady = false;
+    result.hostUploadMultiplierRefusal = {
+      reason: 'seek-in-window',
+      detail: { version: seek.version ?? host.version ?? null, L: landingMs, E: effectiveSharedMs },
+    };
+    delete result.hostUploadMultiplier;
+    result.trapLandingSegment = trap.landingSegment;
+    result.preLandingSegmentsByClient = trap.preLandingSegmentsByClient;
+    result.presentedFrameRealtimeFactorByClient = trap.presentedFrameRealtimeFactorByClient;
+    result.realtimeFactorByClient = trap.presentedFrameRealtimeFactorByClient;
+    result.mediaAdvanceFactorByClient = input.realtimeFactorByClient ?? {};
+  }
+  const hasDrift = tags.every((tag) => Array.isArray(input.clients?.[tag]?.records)
+    && input.clients[tag].records.length > 0);
+  if (hasDrift) {
+    const { positionsByClient, ...held } = computeHeldAhead({ input, tags, window }) ?? {};
+    Object.assign(result, held);
+    if (trap) result.diagnostics = { spanCourse: computeSpanCourse(input) };
   }
   return result;
 }
-

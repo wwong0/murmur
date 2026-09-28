@@ -52,7 +52,7 @@ export function median(values) {
 
 // The register's label and the runner's retained verdict must agree: the recompute
 // cannot see the live refusals (7c d1-findings.md F3).
-function accepted(entry) {
+export function accepted(entry) {
   return entry?.outcome === 'complete' && entry?.publishes === true
     && entry?.finalization?.writeByte === true;
 }
@@ -79,7 +79,7 @@ function imagesOf(entry) {
 }
 
 // The rig is the image pair the run's containers came from (7c d1-findings.md F4).
-function sameBuild(left, right) {
+export function sameBuild(left, right) {
   const leftIds = buildIdsOf(left);
   const rightIds = buildIdsOf(right);
   const tags = Object.keys(leftIds);

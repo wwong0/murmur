@@ -48,6 +48,12 @@ const positionOffset = suppliedPositionOffsetMs === undefined
         ? { ms: null, error: `position-offset-must-be-at-most-${POSITION_OFFSET_MAX_MS}` }
         : { ms: suppliedPositionOffsetMs, error: null };
 const offsetMs = positionOffset.ms ?? 0;
+const suppliedHarnessSeek = globalThis.__waHarnessSeek;
+const harnessSeekConfig = suppliedHarnessSeek === undefined
+  ? { enabled: false, error: null }
+  : suppliedHarnessSeek === true
+    ? { enabled: true, error: null }
+    : { enabled: false, error: 'harness-seek-flag-must-be-true' };
 const suppliedEngineWindows = globalThis.__waEngineWindows;
 const engineWindows = suppliedEngineWindows === undefined
   ? { windows: null, error: null }
@@ -463,16 +469,26 @@ function renderControls() {
 }
 
 function issue(kind, args) {
-  acquisition.issue(kind, args);
+  const issued = acquisition.issue(kind, args);
   renderControls();
+  return issued;
 }
 
 function seekBy(deltaMs) {
   const now = clockSync.sharedNow();
-  if (!Number.isFinite(now)) return;
+  if (!Number.isFinite(now)) return false;
   const positionMs = roomTimeline.mediaMsAt(now + TRANSITION_LEAD_MS);
-  if (Number.isFinite(positionMs)) issue('seek', { positionMs: positionMs + deltaMs });
+  if (!Number.isFinite(positionMs)) return false;
+  return issue('seek', { positionMs: positionMs + deltaMs });
 }
+
+const harnessSeek = harnessSeekConfig.enabled
+  ? (deltaMs) => {
+      if (!Number.isFinite(deltaMs)) throw new TypeError('harnessSeek deltaMs must be finite');
+      const atPageMs = pageNow();
+      return { issued: seekBy(deltaMs), atPageMs };
+    }
+  : null;
 
 playButton.addEventListener('click', () => issue('play'));
 pauseButton.addEventListener('click', () => issue('pause'));
@@ -742,7 +758,7 @@ function schedulePollStart(delayMs) {
 }
 
 function pollStart() {
-  if (positionOffset.error !== null || engineWindows.error !== null) return;
+  if (positionOffset.error !== null || engineWindows.error !== null || harnessSeekConfig.error !== null) return;
   checkReady();
   const state = viewState();
   const nowSharedMs = clockSync.sharedNow();
@@ -832,6 +848,8 @@ window.__app = {
   tabId,
   clock: () => clockSync.read(),
   positionOffset: () => ({ ...positionOffset }),
+  ...(harnessSeekConfig.enabled ? { harnessSeek } : {}),
+  harnessSeekError: harnessSeekConfig.error,
   engineWindows: () => ({ windows: engineWindows.windows ? { ...engineWindows.windows } : null, error: engineWindows.error }),
   drift: (afterSeq = 0) => driftLog.read({ afterSeq }),
   // THE CANONICAL ROLLING WINDOW. Published so no consumer has to re-derive a
@@ -860,6 +878,17 @@ window.__app = {
     seams: controller.seams,
     starts: starts.map((entry) => ({ ...entry })),
   }),
+  playbackState: () => {
+    const state = acquisition.state;
+    if (!state) return null;
+    return {
+      lineage: state.lineage,
+      version: state.version,
+      playing: state.current.playing,
+      positionMs: state.current.mediaMs,
+      atSharedMs: state.current.atSharedMs,
+    };
+  },
   timeline: () => acquisition.snapshot,
 };
 

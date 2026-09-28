@@ -8,8 +8,10 @@ import { pairwiseDrift } from './figures/pairwise-drift.mjs';
 import { driftContext, driftFigure } from './figures/drift-context.mjs';
 import { startResiduals, stepFits, maxRateEvidence, maxRateCompletion } from './figures/start-requalification.mjs';
 import { bytesByClientCsv, publish, utilisationCsv } from './figures/publication.mjs';
+import { evaluateMachineTest } from './figures/machine-test.mjs';
 import { driftSeriesCsv, driftSvg } from './figures/drift-plot.mjs';
 import { armFor } from './harness/arms.mjs';
+import { parseRate } from '../harness/apply-qdisc.mjs';
 
 function readJson(filePath, fallback = undefined) {
   try {
@@ -32,6 +34,12 @@ export function readNdjson(filePath) {
 
 function counterFrom(value) {
   return value === undefined || value === null ? undefined : (value.counters ?? value);
+}
+
+export function capacityBitsForManifest(manifest = {}) {
+  return manifest.condition?.capacityStep
+    ? parseRate(manifest.condition.capacityStep.params?.rate)
+    : (manifest.condition?.capacityBitsPerSecond ?? (manifest.condition?.capacityMbps * 1_000_000));
 }
 
 function clientStreams(runDir, manifest) {
@@ -63,11 +71,15 @@ export function readRunDirectory(runDir) {
     content: arm.recomputeContent(manifest),
     segmentSeconds: arm.recomputeSegmentSeconds(manifest),
     multiplierDenominator: manifest.multiplierDenominator ?? 'distinct-completed',
+    seek: manifest.seek ?? null,
+    capacityStep: manifest.capacityStep ?? null,
     condition: manifest.condition,
     disturbance: manifest.disturbance ?? null,
     context,
-    capacityBitsPerSecond: manifest.condition?.capacityBitsPerSecond ?? (manifest.condition?.capacityMbps * 1_000_000),
+    capacityBitsPerSecond: capacityBitsForManifest(manifest),
     linkSamples: readNdjson(path.join(runDir, 'origin-link.ndjson')),
+    cpuSamples: readNdjson(path.join(runDir, 'cpu-samples.ndjson')),
+    cpuSampleFile: 'cpu-samples.ndjson',
     clockJoin: Object.fromEntries([...new Set(tags)].map((tag) => [tag,
       readJson(path.join(runDir, `client-${tag}.clock-join.json`))])),
     // Peer checks and host waste exclude the qualification's response by its ids.
@@ -76,10 +88,29 @@ export function readRunDirectory(runDir) {
   return { manifest, input };
 }
 
-export function recomputeRunDirectory(runDir) {
+export function recomputeRunDirectory(runDir, options = {}) {
   const retained = readRunDirectory(runDir);
   const arm = armFor(retained.input.condition);
-  const figures = computeFigures(retained.input);
+  let figures = computeFigures(retained.input);
+  if (retained.input.condition?.machineTest) {
+    const refusalReport = options.refusalReport
+      ?? readJson(path.join(runDir, 'refusal-report.json'))?.refusal
+      ?? null;
+    const attemptHistory = options.attemptHistory ?? retained.manifest.attemptHistory ?? [];
+    const machineTest = evaluateMachineTest({
+      recompute: {
+        figures,
+        clients: retained.input.clients,
+        condition: retained.input.condition,
+        window: retained.input.window,
+        cpuSamples: retained.input.cpuSamples,
+        cpuSampleFile: retained.input.cpuSampleFile,
+      },
+      refusalReport,
+      attemptHistory,
+    });
+    figures = { ...figures, diagnostic: 'ten-peer-machine-test', machineTest };
+  }
   const context = { ...retained.input.context, ...retained.manifest, ...figures };
   const publishedByte = publish('byte', figures, context);
   const csv = publishedByte.published === false ? null : {

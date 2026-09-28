@@ -28,6 +28,14 @@ const BYTE_FIELDS = Object.freeze([
   'content.frameRate',
 ]);
 
+const PEER_TIME_FIELDS = Object.freeze([
+  'heldAheadMsMedianByClient',
+  'heldAheadMsRoomMedian',
+  'positionSpreadMsMedian',
+  'positionSpreadSecondsUsed',
+  'positionUnavailableSecondsByClient',
+]);
+
 const PEER_BYTE_FIELDS = Object.freeze([
   'condition.name',
   'condition.capacityMbps',
@@ -57,6 +65,7 @@ const PEER_BYTE_FIELDS = Object.freeze([
   'achievedSpacingMsByClient',
   'content.identity',
   'content.frameRate',
+  ...PEER_TIME_FIELDS,
 ]);
 
 const PEER_ONE_VIEWING_FIELDS = Object.freeze([
@@ -67,6 +76,30 @@ const PEER_ONE_VIEWING_FIELDS = Object.freeze([
   'peerFractionSteady',
   'steadyState',
   'roomPositionSpreadMs',
+]);
+
+export const HOST_ONE_VIEWING_FIELDS = Object.freeze([
+  ...BYTE_FIELDS,
+  'distinctSegmentBytesConsumedInWindow',
+  'originSegmentBytesDeliveredInWindow',
+  'distinctSegmentsCompletedInWindow',
+  'oneViewingBytesInWindow',
+  'multiplierDenominator',
+  'steadyState',
+  'roomPositionSpreadMs',
+]);
+
+export const PEER_TRAP_FIELDS = Object.freeze([
+  ...PEER_BYTE_FIELDS.filter((field) => field !== 'hostUploadMultiplier'),
+  'hostFetchOnceRatio',
+  'multiplierDenominator',
+  'peerFractionSteady',
+  'hostUploadMultiplierRefusal',
+  'trapLandingSegment',
+  'preLandingSegmentsByClient',
+  'presentedFrameRealtimeFactorByClient',
+  'mediaAdvanceFactorByClient',
+  'parkAdvanceMsByClient',
 ]);
 
 export const DRIFT_FIELDS = Object.freeze([
@@ -127,7 +160,12 @@ export const REQUIRED_CONTEXT_FIELDS = Object.freeze({ byte: BYTE_FIELDS, drift:
 function fieldsFor(kind, context = {}, figure = {}) {
   if (kind === 'byte' && (context.byteAccountingMethod ?? figure.byteAccountingMethod) === PEER_ATTEMPT_COHORT_METHOD) {
     const denominator = context.multiplierDenominator ?? figure.multiplierDenominator ?? 'distinct-completed';
+    if (denominator === 'none-across-seek') return PEER_TRAP_FIELDS;
     return denominator === 'one-viewing' ? PEER_ONE_VIEWING_FIELDS : PEER_BYTE_FIELDS;
+  }
+  if (kind === 'byte' && (context.byteAccountingMethod ?? figure.byteAccountingMethod) === RECEIPT_COHORT_METHOD
+    && (context.multiplierDenominator ?? figure.multiplierDenominator) === 'one-viewing') {
+    return HOST_ONE_VIEWING_FIELDS;
   }
   if (kind === 'drift') {
     const condition = context.condition ?? figure.condition;
@@ -225,8 +263,9 @@ function settlingRefusal(context, figure) {
   return null;
 }
 
-function missingReceiptCohortField(figure) {
+function missingReceiptCohortField(figure, allowRefusedMultiplier = false) {
   for (const [field, valid] of RECEIPT_COHORT_FIELDS) {
+    if (allowRefusedMultiplier && field === 'hostUploadMultiplier') continue;
     if (!valid(figure?.[field])) return field;
   }
   return null;
@@ -253,17 +292,27 @@ export function publish(kind, figure = {}, context = {}) {
         if (absent(figure[field]?.[tag])) return { published: false, missing: `${field}[${tag}]` };
       }
     }
-    const missingReceiptField = missingReceiptCohortField(figure);
+    const denominator = context.multiplierDenominator ?? figure.multiplierDenominator;
+    const missingReceiptField = missingReceiptCohortField(figure, denominator === 'one-viewing');
     if (missingReceiptField) return { published: false, missing: missingReceiptField };
   }
   if (kind === 'byte') {
     const accountingMethod = context.byteAccountingMethod ?? figure.byteAccountingMethod;
     const denominator = context.multiplierDenominator ?? figure.multiplierDenominator;
-    if (accountingMethod === PEER_ATTEMPT_COHORT_METHOD && denominator === 'one-viewing') {
+    if ((accountingMethod === PEER_ATTEMPT_COHORT_METHOD || accountingMethod === RECEIPT_COHORT_METHOD)
+      && denominator === 'one-viewing') {
       const hasMultiplier = !absent(figure.hostUploadMultiplier);
       const hasRefusal = !absent(figure.hostUploadMultiplierRefusal);
       if (hasMultiplier === hasRefusal) {
         return { published: false, missing: 'hostUploadMultiplier-or-refusal' };
+      }
+    }
+    if (accountingMethod === PEER_ATTEMPT_COHORT_METHOD && denominator === 'none-across-seek') {
+      if (!absent(figure.hostUploadMultiplier)) {
+        return { published: false, missing: 'hostUploadMultiplier-forbidden-in-trap' };
+      }
+      if (absent(figure.hostUploadMultiplierRefusal)) {
+        return { published: false, missing: 'hostUploadMultiplierRefusal' };
       }
     }
     const reasons = evaluateByteControl({ bars: context.condition?.bars, tags: declaredTags(context, figure), figures: figure });

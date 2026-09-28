@@ -228,6 +228,24 @@ export function qdiscArgv({ ifName, discipline, params, order }) {
   return ['tc', 'qdisc', 'add', 'dev', ifName, ...placement, discipline, ...paramArgv(params)];
 }
 
+export function changeArgv({ ifName, discipline, params }) {
+  return ['tc', 'qdisc', 'change', 'dev', ifName, 'root', 'handle', '10:', discipline, ...paramArgv(params)];
+}
+
+export function changeQdisc({ state, capacityStep, exec = defaultExec }) {
+  const container = state?.containers?.[capacityStep?.container];
+  const ifName = state?.origin?.ifName;
+  if (!container || !ifName) throw new QdiscMismatch('origin interface is unavailable for capacity step', { state, capacityStep });
+  const argv = changeArgv({ ifName, discipline: capacityStep.discipline, params: capacityStep.params });
+  dockerExec(container, argv, exec);
+  const show = dockerExec(container, ['tc', 'qdisc', 'show', 'dev', ifName], exec);
+  const lines = parseQdiscLines(show);
+  const found = lines.find((entry) => entry.kind === capacityStep.discipline && entry.handle === '10:');
+  if (!found) return { readings: {}, matches: false, line: null };
+  const { mismatches, readings } = compareParameters(capacityStep.params, found.line);
+  return { readings, matches: mismatches.length === 0, line: found.line };
+}
+
 export function clearArgv(ifName) {
   return ['tc', 'qdisc', 'del', 'dev', ifName, 'root'];
 }

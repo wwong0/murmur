@@ -12,6 +12,9 @@ import { qualifyCdpBytes as defaultQualifyCdpBytes, qualifyLinkReceipts as defau
 import { evaluateRefusals } from './harness/refusals.mjs';
 import { armFor, clientTags } from './harness/arms.mjs';
 import { validateEngineWindows } from '../public/lib/engine-windows.mjs';
+import { parseRate, parseSize, parseTime } from '../harness/apply-qdisc.mjs';
+import { appliedSeekEvidence } from './figures/seek-evidence.mjs';
+import { startCpuSampler } from './harness/cpu-sampler.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -20,6 +23,7 @@ const MAX_RETAINED_BYTES = 200 * 1024 * 1024;
 const POLL_INTERVAL_MS = 125;
 const DRAIN_INTERVAL_MS = 15_000;
 const ECHO_INTERVAL_MS = 250;
+const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 // Bringing eleven containers up, building nothing, pulling nothing, and then
 // establishing the cadence takes minutes, and none of it is the run. The budget
@@ -44,6 +48,43 @@ export function conditionValidationReason(condition = {}) {
   }
   if (Object.prototype.hasOwnProperty.call(condition, 'engineWindows')
     && validateEngineWindows(condition.engineWindows).error) return 'engine-windows-invalid';
+  if (Object.prototype.hasOwnProperty.call(condition, 'seek')) {
+    const seek = condition.seek;
+    const keys = object(seek) ? Object.keys(seek).sort().join(',') : '';
+    if (!object(seek) || keys !== 'appliedTimeoutMs,deltaMs,issueAfterReadyMs'
+      || !Number.isFinite(seek.issueAfterReadyMs)
+      || seek.issueAfterReadyMs < 0
+      || seek.issueAfterReadyMs !== condition.excludedPrefixMs
+      || !Number.isFinite(seek.deltaMs)
+      || seek.deltaMs <= 0
+      || !Number.isFinite(seek.appliedTimeoutMs)
+      || seek.appliedTimeoutMs <= 0) return 'seek-invalid';
+  }
+  if (Object.prototype.hasOwnProperty.call(condition, 'capacityStep')) {
+    const step = condition.capacityStep;
+    const params = step?.params;
+    const stepKeys = object(step) ? Object.keys(step).sort().join(',') : '';
+    const keys = object(params) ? Object.keys(params).sort().join(',') : '';
+    const parsed = object(params) && keys === 'burst,latency,rate'
+      ? [parseRate(params.rate), parseSize(params.burst), parseTime(params.latency)] : [];
+    if (!object(step) || stepKeys !== 'container,discipline,network,params' || step.container !== 'origin' || step.network !== 'wa-media'
+      || step.discipline !== 'tbf' || keys !== 'burst,latency,rate'
+      || Object.values(params ?? {}).some((value) => typeof value !== 'string' || value.length === 0)
+      || parsed.some((value) => !Number.isFinite(value) || value <= 0)
+      || condition.seek === undefined) return 'capacity-step-invalid';
+  }
+  if (Object.prototype.hasOwnProperty.call(condition, 'machineTest')) {
+    const machine = condition.machineTest;
+    const machineKeys = object(machine) ? Object.keys(machine).sort().join(',') : '';
+    const bars = machine?.bars;
+    const barKeys = object(bars) ? Object.keys(bars).sort().join(',') : '';
+    if (!object(machine) || machineKeys !== 'bars,cpuSampleIntervalMs,pageEvaluationIntervalMs'
+      || !Number.isInteger(machine.cpuSampleIntervalMs) || machine.cpuSampleIntervalMs <= 0
+      || machine.pageEvaluationIntervalMs !== 250 || barKeys !== 'droppedFrameFractionMax,evaluationShortfallMax,realtimeMin'
+      || Object.values(bars).some((value) => !Number.isFinite(value) || value < 0 || value > 1)) {
+      return 'machine-test-invalid';
+    }
+  }
   if (!Object.prototype.hasOwnProperty.call(condition, 'positionOffsetMsByClient')) return null;
   const offsets = condition.positionOffsetMsByClient;
   if (!peer || !offsets || typeof offsets !== 'object' || Array.isArray(offsets)) return 'position-offset-invalid';
@@ -256,8 +297,9 @@ async function prepareClient(session, url, deadline, readyTimeoutMs = 30_000, op
   return recorder;
 }
 
-async function prepareHostClient(session, url, deadline) {
+async function prepareHostClient(session, url, deadline, options = {}) {
   await session.tab.send('Page.enable');
+  await options.beforeNavigate?.(session);
   await session.tab.send('Page.navigate', { url });
   await deadline.waitFor(`host ${session.tag}`, () => session.tab.evaluate('Boolean(window.__app && __app.hostCounters())'), Boolean, 30_000, 100);
 }
@@ -330,6 +372,91 @@ export async function drainClient(session, ndjson, atMs = Date.now(), options = 
 function queuedDrain(session, ndjson, arm, atMs = Date.now()) {
   session.drainChain = (session.drainChain ?? Promise.resolve()).then(() => arm.drain(session, ndjson, atMs, drainClient));
   return session.drainChain;
+}
+
+export async function stepThenSeek({ condition, topology, hostSession, preSeekState = null, readHostState,
+  stepQdisc, seek, drainAll = async () => {}, now = Date.now } = {}) {
+  const seekDeclaration = condition?.seek;
+  if (!seekDeclaration) return { capacityStep: null, seek: null };
+  let capacityStep = null;
+  if (condition.capacityStep) {
+    await drainAll();
+    const stepAtMs = now();
+    const readBackResult = await (stepQdisc ?? ((value) => topology.stepQdisc({ capacityStep: value })))(condition.capacityStep);
+    await drainAll();
+    const readBackAtMs = now();
+    capacityStep = {
+      declared: condition.capacityStep,
+      before: null,
+      readBack: readBackResult?.readings ?? {},
+      stepAtMs,
+      readBackAtMs,
+      inForce: readBackResult?.matches === true,
+    };
+    if (!capacityStep.inForce) return { capacityStep, seek: null };
+  }
+  const before = preSeekState ?? await readHostState?.();
+  if (!before) throw new Error('host playback state is unavailable before seek');
+  await drainAll();
+  const result = await seek(seekDeclaration.deltaMs);
+  // Harness clock, as readBackAtMs is; the page's instant is another machine's clock.
+  const seekIssuedAtMs = now();
+  await drainAll();
+  if (!result || result.issued !== true) throw new Error('harness seek was not issued');
+  return {
+    capacityStep,
+    seek: {
+      declared: seekDeclaration,
+      before,
+      seekIssuedAtMs,
+      pageIssuedAtMs: Number.isFinite(result.atPageMs) ? result.atPageMs : null,
+      issued: true,
+    },
+  };
+}
+
+export async function waitForAppliedSeek({ sessions = [], hostSession, before, timeoutMs, readState,
+  drainAll = async () => {}, now = Date.now, sleepFn = sleep } = {}) {
+  if (!before || !Number.isInteger(before.version) || typeof before.lineage !== 'string') {
+    throw new Error('host playback state before seek is invalid');
+  }
+  const all = [hostSession, ...sessions].filter(Boolean);
+  const lastReadings = {};
+  const matchedAtMs = {};
+  const deadline = now() + timeoutMs;
+  const read = readState ?? ((session) => session.tab.evaluate('__app.playbackState()'));
+  while (true) {
+    const atMs = now();
+    for (const session of all) {
+      const reading = await read(session);
+      lastReadings[session.tag] = reading;
+    }
+    const host = lastReadings[hostSession?.tag];
+    const hostApplied = host?.lineage === before.lineage
+      && Number.isInteger(host.version) && host.version > before.version;
+    if (hostApplied) {
+      const expected = { lineage: host.lineage, version: host.version, playing: host.playing, positionMs: host.positionMs, atSharedMs: host.atSharedMs };
+      for (const session of sessions) {
+        const reading = lastReadings[session.tag];
+        if (!matchedAtMs[session.tag] && reading?.lineage === expected.lineage && reading.version === expected.version
+          && reading.playing === expected.playing && reading.positionMs === expected.positionMs
+          && reading.atSharedMs === expected.atSharedMs) matchedAtMs[session.tag] = { atMs, reading };
+      }
+      const viewers = Object.fromEntries(sessions.map((session) => [session.tag, matchedAtMs[session.tag] ?? null]));
+      const allApplied = sessions.every((session) => {
+        const value = lastReadings[session.tag];
+        return value?.lineage === expected.lineage && value.version === expected.version
+          && value.playing === expected.playing && value.positionMs === expected.positionMs
+          && value.atSharedMs === expected.atSharedMs;
+      });
+      if (allApplied) return { host: expected, hostAtMs: atMs, viewers, timedOut: false, lastReadings };
+      if (now() >= deadline) return { host: expected, hostAtMs: atMs, viewers, timedOut: true, lastReadings };
+    }
+    await drainAll();
+    if (now() >= deadline) break;
+    await sleepFn(Math.min(POLL_INTERVAL_MS, Math.max(1, deadline - now())));
+  }
+  return { host: null, hostAtMs: null, viewers: {}, timedOut: true, lastReadings };
 }
 
 export function decideFinalization({ evaluation, recomputed, figureKinds, failure = null, recomputeError = null, retainedOverflow = false, cleanupFailure = null } = {}) {
@@ -441,6 +568,8 @@ function evidenceFor(sessions, originStart, originEnd, manifest, runDir, hostEvi
     cdpQualification: manifest.cdpQualification,
     cadence: manifest.cadence,
     startWait: manifest.startWait ?? null,
+    seek: manifest.seek ?? null,
+    capacityStep: manifest.capacityStep ?? null,
   };
   return { ...base, ...arm.evidence(sessions, hostEvidence, runDir) };
 }
@@ -450,6 +579,29 @@ async function disposeSession(session) {
   session.clockJoinRecorder?.dispose();
   session.recorder?.dispose();
   if (session.dispose) await session.dispose();
+}
+
+function capacityBeforeReadings(manifest, capacityStep) {
+  const record = (manifest.topology?.qdiscs ?? []).find((entry) =>
+    entry.containerRole === capacityStep.container && entry.discipline === capacityStep.discipline);
+  return record?.readBack?.readings ?? {};
+}
+
+function restartEvidence(boundary, effectiveSharedMs) {
+  const starts = boundary?.playback?.starts ?? [];
+  const candidate = starts.find((start) => Number.isFinite(start.firstStartAtSharedMs)
+    && start.firstStartAtSharedMs >= effectiveSharedMs);
+  if (candidate && Number.isFinite(candidate.startAtSharedMs) && candidate.startAtSharedMs < effectiveSharedMs) {
+    throw new Error('restart-start-before-effective-shared-time');
+  }
+  if (!candidate) return { restarted: false };
+  return {
+    restarted: true,
+    latenessMs: candidate.latenessMs,
+    reparks: candidate.reparks,
+    startAtSharedMs: candidate.startAtSharedMs,
+    positionMs: candidate.positionMs,
+  };
 }
 
 export async function runHarness({ conditionName, condition = conditionForName(conditionName), runDir = null, originUrl, clientOriginUrl = originUrl, topology = section3Topology(), clientFactory = noClientFactory, establishCadence = defaultEstablishCadence, qualifyCdpBytes = defaultQualifyCdpBytes, qualifyLinkReceipts = defaultQualifyLinkReceipts } = {}) {
@@ -486,6 +638,8 @@ export async function runHarness({ conditionName, condition = conditionForName(c
   let injectionHarnessMs = null;
   const hostEvidence = {};
   let boundaryOptions = {};
+  let seekEvidence = null;
+  let cpuSampler = null;
   try {
     const preparedTopology = await topology.prepare({ condition, runDir: prepared.runDir, manifest: manifestFile.get() });
     manifestFile.merge({ topology: { status: 'prepared', ...preparedTopology } });
@@ -494,6 +648,17 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     const qdiscs = await topology.applyQdiscs({ condition, runDir: prepared.runDir, manifest: manifestFile.get() });
     manifestFile.merge({ topology: readyTopology(manifestFile.get().topology, qdiscs, condition) });
     manifestFile.write();
+    if (condition.machineTest) {
+      const declaredTags = clientTags(condition);
+      const containers = Object.entries(preparedTopology.containers ?? {})
+        .filter(([name]) => name === 'origin' || declaredTags.includes(name))
+        .map(([, container]) => container);
+      cpuSampler = startCpuSampler({
+        runDir: prepared.runDir,
+        containers,
+        intervalMs: condition.machineTest.cpuSampleIntervalMs,
+      });
+    }
     if (!originUrl) throw new Error('origin URL is required for a harness run');
     monitor = startOriginMonitor({ healthUrl: `${originUrl}/room.html`, deadlineAt: deadline.deadlineAt, maxWallMs, onFailure: (event) => manifestFile.merge({ originFailure: event }), requestTimeoutMs: condition.monitorRequestTimeoutMs });
     monitor.promise.catch((error) => { failure ??= error; });
@@ -557,14 +722,109 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       fs.writeFileSync(path.join(prepared.runDir, 'disturbance.json'), `${JSON.stringify(disturbance, null, 2)}\n`);
       manifestFile.write();
     }
-    const startBoundary = await captureBoundary('start', sessions, originUrl, manifestFile.get(), manifestFile, ndjson, fetchSnapshot, boundaryOptions);
-    originStart = startBoundary.origin;
-    Object.assign(hostEvidence, arm.boundaryEvidence('start', startBoundary));
+    const drainAll = () => Promise.all(sessions.map((session) => queuedDrain(session, ndjson, arm, Date.now())));
+    if (condition.seek) {
+      const sequence = await stepThenSeek({
+        condition,
+        topology,
+        hostSession: boundaryOptions.originSession,
+        readHostState: () => boundaryOptions.originSession.tab.evaluate('__app.playbackState()'),
+        stepQdisc: topology.stepQdisc ? (capacityStep) => topology.stepQdisc({ capacityStep }) : undefined,
+        seek: (deltaMs) => boundaryOptions.originSession.tab.evaluate(`__app.harnessSeek(${JSON.stringify(deltaMs)})`),
+        drainAll,
+      });
+      if (sequence.capacityStep) {
+        sequence.capacityStep.before = capacityBeforeReadings(manifestFile.get(), condition.capacityStep);
+        manifestFile.merge({ capacityStep: sequence.capacityStep });
+        manifestFile.write();
+      }
+      if (sequence.seek) {
+        const startBoundary = await captureBoundary('start', sessions, originUrl, manifestFile.get(), manifestFile, ndjson, fetchSnapshot, boundaryOptions);
+        originStart = startBoundary.origin;
+        Object.assign(hostEvidence, arm.boundaryEvidence('start', startBoundary));
+        const window = manifestFile.get().window;
+        window.endMs = window.startMs + window.measureWindowMs;
+        window.seekLagMs = window.startMs - window.declaredStartMs;
+        manifestFile.write();
+        const applied = await waitForAppliedSeek({
+          sessions,
+          hostSession: boundaryOptions.originSession,
+          before: sequence.seek.before,
+          timeoutMs: condition.seek.appliedTimeoutMs,
+          drainAll,
+        });
+        const viewers = Object.fromEntries(sessions.map((session) => [session.tag, {
+          reading: applied.viewers[session.tag]?.reading ?? null,
+          appliedAtMs: applied.viewers[session.tag]?.atMs ?? null,
+        }]));
+        seekEvidence = {
+          ...sequence.seek,
+          issuedAtMs: sequence.seek.seekIssuedAtMs,
+          host: applied.host,
+          hostAtMs: applied.hostAtMs,
+          viewers,
+          lastReadings: applied.lastReadings,
+          applied: applied.timedOut === false,
+        };
+        if (applied.host) {
+          const landing = appliedSeekEvidence({
+            host: applied.host,
+            viewers,
+            peerRecords: Object.fromEntries(sessions.map((session) => [session.tag, session.peerRecords ?? []])),
+            declaredClientTags: sessions.map((session) => session.tag),
+            segmentSeconds: manifestFile.get().content?.segmentSeconds ?? 4,
+            highDemandTimeWindowMs: (condition.engineWindows?.highDemandTimeWindow ?? 15) * 1000,
+          });
+          seekEvidence = { ...seekEvidence, ...landing };
+        }
+        seekEvidence = {
+          ...seekEvidence,
+          landingMs: seekEvidence.host?.positionMs ?? null,
+          effectiveSharedMs: seekEvidence.host?.atSharedMs ?? null,
+        };
+        manifestFile.merge({ seek: seekEvidence });
+        fs.writeFileSync(path.join(prepared.runDir, 'seek.json'), `${JSON.stringify(seekEvidence, null, 2)}\n`);
+        manifestFile.write();
+      } else {
+        const startBoundary = await captureBoundary('start', sessions, originUrl, manifestFile.get(), manifestFile, ndjson, fetchSnapshot, boundaryOptions);
+        originStart = startBoundary.origin;
+        Object.assign(hostEvidence, arm.boundaryEvidence('start', startBoundary));
+      }
+    } else {
+      const startBoundary = await captureBoundary('start', sessions, originUrl, manifestFile.get(), manifestFile, ndjson, fetchSnapshot, boundaryOptions);
+      originStart = startBoundary.origin;
+      Object.assign(hostEvidence, arm.boundaryEvidence('start', startBoundary));
+    }
     await waitUntil(deadline, manifestFile.get().window.endMs);
     const endBoundary = await captureBoundary('end', sessions, originUrl, manifestFile.get(), manifestFile, ndjson, fetchSnapshot, boundaryOptions);
     originEnd = endBoundary.origin;
     Object.assign(hostEvidence, arm.boundaryEvidence('end', endBoundary));
     for (const session of sessions) session.endPlayback = endBoundary.snapshots[session.tag]?.playback;
+    if (seekEvidence?.host) {
+      const landing = appliedSeekEvidence({
+        host: seekEvidence.host,
+        viewers: seekEvidence.viewers,
+        peerRecords: Object.fromEntries(sessions.map((session) => [session.tag, session.peerRecords ?? []])),
+        declaredClientTags: sessions.map((session) => session.tag),
+        segmentSeconds: seekEvidence.segmentSeconds ?? manifestFile.get().content?.segmentSeconds ?? 4,
+        highDemandTimeWindowMs: seekEvidence.highDemandTimeWindowMs ?? Number(condition.engineWindows?.highDemandTimeWindow ?? 15) * 1000,
+      });
+      const viewers = Object.fromEntries(sessions.map((session) => {
+        const current = seekEvidence.viewers[session.tag] ?? {};
+        const refreshed = landing.viewers[session.tag] ?? {};
+        return [session.tag, {
+          ...current,
+          restart: restartEvidence(endBoundary.snapshots[session.tag], seekEvidence.host.atSharedMs),
+          highestSegmentBeforeE: refreshed.highestSegmentBeforeE,
+          heldSegments: refreshed.heldSegments,
+          kL: landing.landingSegment,
+        }];
+      }));
+      seekEvidence = { ...seekEvidence, ...landing, viewers, viewersNotRestarted: Object.keys(viewers).filter((tag) => viewers[tag].restart.restarted === false) };
+      manifestFile.merge({ seek: seekEvidence });
+      fs.writeFileSync(path.join(prepared.runDir, 'seek.json'), `${JSON.stringify(seekEvidence, null, 2)}\n`);
+      manifestFile.write();
+    }
     if (condition.disturbance && injectionHarnessMs !== null) {
       await waitUntil(deadline, injectionHarnessMs + condition.disturbance.observationMs + 2000);
     }
@@ -573,13 +833,14 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       originUrl, fetchSnapshot, runDir: prepared.runDir, sessions, ndjson, condition, deadline,
       window: manifestFile.get().window, originSession: boundaryOptions.originSession,
       startInstanceId: boundaryOptions.startInstanceId,
-      drainAll: () => Promise.all(sessions.map((session) => queuedDrain(session, ndjson, arm, Date.now()))),
+      drainAll,
     }));
   } catch (error) {
     failure ??= error;
   } finally {
     for (const loop of loops) loop.stop();
     await Promise.all(loops.map((loop) => loop.promise.catch(() => {})));
+    if (cpuSampler) await cpuSampler.stop();
     if (monitor) await stopOriginMonitor(monitor);
     for (const session of allSessions) {
       try {
@@ -629,6 +890,9 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     recomputed = recomputeRunDirectory(prepared.runDir);
     const publicationContext = { ...manifestFile.get(), ...recomputed.figures, declaredClientTags: tags };
     evaluation = evaluateRefusals({ ...evidenceFor(sessions, originStart, originEnd, manifestFile.get(), prepared.runDir, hostEvidence, arm), publicationContext });
+    if (condition.machineTest) {
+      recomputed = recomputeRunDirectory(prepared.runDir, { refusalReport: evaluation, attemptHistory: manifestFile.get().attemptHistory ?? [] });
+    }
     const decision = decideFinalization({
       evaluation,
       recomputed,

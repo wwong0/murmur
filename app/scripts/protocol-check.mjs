@@ -50,6 +50,8 @@ import harnessPeerTopologySuite from './check/suites/harness-peer-topology.mjs';
 import harnessPeerUploadSuite from './check/suites/harness-peer-upload.mjs';
 import peerFiguresSuite from './check/suites/peer-figures.mjs';
 import oneViewingSuite from './check/suites/one-viewing.mjs';
+import nop2pSteadySuite from './check/suites/nop2p-steady.mjs';
+import machineTestSuite from './check/suites/machine-test.mjs';
 import qaRecomputeSuite from './check/suites/qa-recompute.mjs';
 import p2pMeasurementSuite from './check/suites/p2p-measurement.mjs';
 import regimesReadingSuite from './check/suites/regimes-reading.mjs';
@@ -86,6 +88,14 @@ import peerBytesSuite from './check/suites/peer-bytes.mjs';
 import bytesReadoutSuite from './check/suites/bytes-readout.mjs';
 import peerEngineConfigSuite from './check/suites/peer-engine-config.mjs';
 import engineWindowsSuite from './check/suites/engine-windows.mjs';
+import seekEntrySuite from './check/suites/seek-entry.mjs';
+import capacityStepSuite from './check/suites/capacity-step.mjs';
+import seekEvidenceSuite from './check/suites/seek-evidence.mjs';
+import trapFiguresSuite from './check/suites/trap-figures.mjs';
+import trapReadingSuite from './check/suites/trap-reading.mjs';
+import starvedRecomputeSuite from './check/suites/starved-recompute.mjs';
+import heldAheadSuite from './check/suites/held-ahead.mjs';
+import spanCourseSuite from './check/suites/span-course.mjs';
 import peerExchangeEntrySuite from './check/suites/peer-exchange-entry.mjs';
 import peerExchangeBarsSuite from './check/suites/peer-exchange-bars.mjs';
 import positionOffsetSuite from './check/suites/position-offset.mjs';
@@ -146,6 +156,8 @@ for (const suite of [
   harnessPeerUploadSuite,
   peerFiguresSuite,
   oneViewingSuite,
+  nop2pSteadySuite,
+  machineTestSuite,
   qaRecomputeSuite,
   p2pMeasurementSuite,
   regimesReadingSuite,
@@ -182,6 +194,14 @@ for (const suite of [
   bytesReadoutSuite,
   peerEngineConfigSuite,
   engineWindowsSuite,
+  seekEntrySuite,
+  capacityStepSuite,
+  seekEvidenceSuite,
+  trapFiguresSuite,
+  trapReadingSuite,
+  starvedRecomputeSuite,
+  heldAheadSuite,
+  spanCourseSuite,
   peerExchangeEntrySuite,
   peerExchangeBarsSuite,
   positionOffsetSuite,

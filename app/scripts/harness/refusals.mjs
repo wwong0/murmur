@@ -2,6 +2,7 @@ import { missingFields } from '../figures/publication.mjs';
 import { CDP_QUALIFICATION_REASON } from './qualification.mjs';
 import { evaluateByteControl } from './byte-control.mjs';
 import { armFor, REFUSAL_SCOPE } from './arms.mjs';
+import { appliedSeekEvidence, appliedWithoutRestart } from '../figures/seek-evidence.mjs';
 
 export const REFUSAL_REASONS = Object.freeze([
   'client-never-began-playback',
@@ -47,6 +48,9 @@ export const REFUSAL_REASONS = Object.freeze([
   'peer-check-not-exercised:conservation',
   'position-offset-mismatch',
   'build-mismatch',
+  'capacity-step-not-in-force',
+  'seek-not-applied',
+  'seek-landed-on-held-media',
 ]);
 
 const PUBLICATION_ONLY_REASONS = new Set([CDP_QUALIFICATION_REASON]);
@@ -133,6 +137,10 @@ function droppedFraction(client, window) {
   return { available: true, dropped, total, fraction: dropped / total };
 }
 
+function seekAppliedButNotRestarted(input, tag) {
+  return appliedWithoutRestart(input.seek, tag);
+}
+
 export function evaluateRefusals(input = {}) {
   const condition = input.condition ?? {};
   const bars = condition.bars ?? {};
@@ -143,6 +151,13 @@ export function evaluateRefusals(input = {}) {
   const coverage = {};
   const dropped = {};
   const realtimeFactorByClient = {};
+
+  if (input.capacityStep && input.seek
+    && Number.isFinite(input.capacityStep.readBackAtMs)
+    && Number.isFinite(input.seek.seekIssuedAtMs)
+    && input.capacityStep.readBackAtMs > input.seek.seekIssuedAtMs) {
+    throw new Error('capacity-step-readback-after-seek');
+  }
 
   for (const tag of tags) {
     const client = clients[tag] ?? {};
@@ -161,7 +176,7 @@ export function evaluateRefusals(input = {}) {
       const media = records.at(-1).mediaMs - records[0].mediaMs;
       if (finite(display) && display > 0 && finite(media)) realtimeFactorByClient[tag] = media / display;
     }
-    if (!result.available) {
+    if (!result.available && !(seekAppliedButNotRestarted(input, tag) && result.detail?.reason === 'empty-window')) {
       addReason(reasons, 'record-coverage-unavailable', REFUSAL_SCOPE.coverage, { tag, detail: result.detail });
     } else if (!result.passes) {
       addReason(reasons, 'record-coverage-below-declared-fraction', REFUSAL_SCOPE.coverage, {
@@ -188,7 +203,8 @@ export function evaluateRefusals(input = {}) {
     }
     const quality = droppedFraction(client, window);
     dropped[tag] = quality;
-    if (!quality.available) {
+    const zeroDroppedDelta = Number(quality.detail?.total) === 0;
+    if (!quality.available && !(seekAppliedButNotRestarted(input, tag) && zeroDroppedDelta)) {
       addReason(reasons, 'dropped-frame-evidence-unavailable', REFUSAL_SCOPE.qualityEvidence, { tag, detail: quality.detail });
     } else if (quality.fraction > Number(bars.droppedFrameFractionMax)) {
       addReason(reasons, 'dropped-frames-above-declared-bar', REFUSAL_SCOPE.droppedFrames, {
@@ -252,6 +268,40 @@ export function evaluateRefusals(input = {}) {
   }
 
   reasons.push(...evaluateByteControl({ bars, tags, figures: input.publicationContext ?? {} }));
+
+  if (input.capacityStep && input.capacityStep.inForce === false) {
+    addReason(reasons, 'capacity-step-not-in-force', REFUSAL_SCOPE.capacityStep ?? ['byte', 'drift'], {
+      declared: input.capacityStep.declared,
+      readBack: input.capacityStep.readBack,
+    });
+  }
+
+  if (condition.seek && input.seek) {
+    if (!input.seek.host) {
+      for (const tag of tags) {
+        const lastReading = input.seek.lastReadings?.[tag] ?? input.seek.viewers?.[tag]?.reading ?? null;
+        addReason(reasons, 'seek-not-applied', REFUSAL_SCOPE.seek ?? ['byte', 'drift'], { tag, lastReading });
+      }
+    } else {
+      const landing = input.seek.landedOnHeldMedia ? input.seek : appliedSeekEvidence({
+        host: input.seek.host,
+        viewers: input.seek.viewers,
+        peerRecords: input.peerRecords,
+        declaredClientTags: tags,
+        segmentSeconds: input.seek.segmentSeconds ?? 4,
+        highDemandTimeWindowMs: input.seek.highDemandTimeWindowMs ?? Number(condition.engineWindows?.highDemandTimeWindow ?? 15) * 1000,
+      });
+      for (const entry of landing.notApplied ?? []) {
+        addReason(reasons, 'seek-not-applied', REFUSAL_SCOPE.seek ?? ['byte', 'drift'], {
+          ...entry,
+          lastReading: input.seek.lastReadings?.[entry.tag] ?? entry.lastReading ?? null,
+        });
+      }
+      for (const entry of landing.landedOnHeldMedia ?? []) {
+        addReason(reasons, 'seek-landed-on-held-media', REFUSAL_SCOPE.seek ?? ['byte', 'drift'], entry);
+      }
+    }
+  }
 
   const arm = armFor(condition);
   arm.refusals(input, (reason, scope, detail) => addReason(reasons, reason, scope, detail));

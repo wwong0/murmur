@@ -37,11 +37,19 @@ export const REFUSAL_SCOPE = Object.freeze({
   viewerInterface: Object.freeze(['byte']),
   positionOffset: Object.freeze(['byte', 'drift']),
   engineWindows: Object.freeze(['byte', 'drift']),
+  capacityStep: Object.freeze(['byte', 'drift']),
+  seek: Object.freeze(['byte', 'drift']),
   build: Object.freeze(['byte', 'drift']),
 });
 
 const finite = (value) => Number.isFinite(value);
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const STEADY_BAR_NAMES = Object.freeze(['steadyUtilisationMax', 'steadyDownloadRatioMin',
+  'steadyDownloadRatioMax', 'steadyRealtimeMin']);
+
+function declaresSteadyBars(condition = {}) {
+  return STEADY_BAR_NAMES.every((name) => finite(condition.bars?.[name]));
+}
 
 /** The declared clients' tags, c01 upward. */
 export function clientTags(condition) {
@@ -205,7 +213,15 @@ const HTTP_ARM = Object.freeze({
 });
 
 const HOST_ARM = Object.freeze({
-  ...baseArm({ hostTag: 'c00', runDirPrefix: '7a2', readyTimeoutMs: 120_000 }),
+  ...baseArm({ hostTag: 'c00', runDirPrefix: '8a', readyTimeoutMs: 120_000 }),
+  async openWindow({ sessions, condition, deadline, establishCadence, manifestFile, placeWindow }) {
+    const cadence = await establishCadence(sessions, { condition, deadline });
+    manifestFile.merge({
+      cadence,
+      window: placeWindow(condition, Date.now()),
+      ...(declaresSteadyBars(condition) ? { multiplierDenominator: 'one-viewing' } : {}),
+    });
+  },
   async prepareTopology(state, { services, exec, controlNetwork, mediaNetwork, networkSubnet, networkGateway, controlUdpDrop, mediaDefaultRoute, resolveInterface, waitForAgent }) {
     const controlSubnet = networkSubnet(controlNetwork, exec);
     state.subnets.set(controlNetwork, controlSubnet);
@@ -280,7 +296,13 @@ const HOST_ARM = Object.freeze({
     const url = `${clientOriginUrl}/room.html?room=${encodeURIComponent(room)}&role=host&tab=${this.hostTag}`;
     Object.assign(session, await clientFactory({ tag: this.hostTag, role: 'host', room, url, condition, runDir }));
     if (!session.tab) throw new Error('host tab is unavailable');
-    await prepareHostClient(session, url, deadline);
+    await prepareHostClient(session, url, deadline, {
+      beforeNavigate: condition.seek
+        ? async (hostSession) => hostSession.tab.send('Page.addScriptToEvaluateOnNewDocument', {
+          source: 'globalThis.__waHarnessSeek = true;',
+        })
+        : null,
+    });
     return session;
   },
   async qualify(sessions, { originSession, originContainer, qualifyLinkReceipts }) {
@@ -530,6 +552,15 @@ async function readEngineWindows(session, condition) {
   };
 }
 
+// T13 reads the hook's absence on every viewer live; T1's suite constructs it.
+async function readHarnessSeek(session) {
+  try {
+    return await session.tab.evaluate("({ present: typeof __app.harnessSeek === 'function', error: __app.harnessSeekError ?? null })");
+  } catch (error) {
+    return { present: null, error: `read-failed:${error.message}` };
+  }
+}
+
 function settledResponseRefusals(input, addReason) {
   const condition = input.condition ?? {};
   const settled = input.originSettled;
@@ -575,7 +606,7 @@ function engineWindowRefusals(input, tags, addReason) {
 
 const PEER_ARM = Object.freeze({
   ...HOST_ARM,
-  runDirPrefix: '7c',
+  runDirPrefix: '8a',
   byteAccountingMethod: 'peer-attempt-cohort-v1',
   multiplierDenominator: 'one-viewing',
   recomputeContent: recomputePeerContent,
@@ -599,7 +630,7 @@ const PEER_ARM = Object.freeze({
   // they go; cadence is established after the wait.
   async openWindow({ sessions, condition, deadline, establishCadence, manifestFile, placeWindow, drainAll, drainEveryMs }) {
     const window = placeWindow(condition, Date.now());
-    manifestFile.merge({ window, multiplierDenominator: this.multiplierDenominator });
+    manifestFile.merge({ window, multiplierDenominator: condition.seek ? 'none-across-seek' : this.multiplierDenominator });
     manifestFile.merge({ startWait: await this.waitForPlayback({ sessions, condition, window, deadline, drain: drainAll, drainEveryMs }) });
     manifestFile.write();
     await drainAll();
@@ -636,10 +667,11 @@ const PEER_ARM = Object.freeze({
       const reading = await readPeerLog(session, context.ndjson);
       if (kind === 'start') {
         session.engineWindows = await readEngineWindows(session, context.manifestFile.get().condition);
+        const harnessSeek = await readHarnessSeek(session);
         const manifestClients = context.manifestFile.get().clients;
         context.manifestFile.merge({ clients: {
           ...manifestClients,
-          [session.tag]: { ...manifestClients[session.tag], engineWindows: session.engineWindows },
+          [session.tag]: { ...manifestClients[session.tag], engineWindows: session.engineWindows, harnessSeek },
         } });
       }
       clients[session.tag] = peerBoundaryReading(session, reading);
