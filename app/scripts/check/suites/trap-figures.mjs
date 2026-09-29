@@ -105,6 +105,20 @@ export default async function trapFiguresSuite() {
     assertNear(figures.realtimeFactorByClient.c01, 170 / 180, 1e-12, 'trap realtime uses presented frames');
   });
 
+  // 8a's second qualification attempt aborted here: a starved viewer's origin bytes
+  // exceed its received bytes, which the discarded legacy column calls impossible.
+  await check('T4(e): a peer run computes when its discarded legacy byte column would be impossible', async () => {
+    const base = fixture();
+    const figures = computeFigures(fixture({
+      originStart: { ...base.originStart, byClient: { c01: { mediaBytesDelivered: 0, abortedMediaBytesDelivered: 0 } } },
+      originEnd: { ...base.originEnd, byClient: { c01: { mediaBytesDelivered: 1_000, abortedMediaBytesDelivered: 0 } } },
+      clients: { ...base.clients, c01: { ...base.clients.c01, requestTimebase: 'measure-window',
+        requests: [{ url: '/media/seg-00001.m4s', bodyBytes: 100, finished: true, endMs: 5_000 }] } },
+    }));
+    assert(Number.isFinite(figures.peerFractionAggregate), 'the peer figures compute');
+    assertEqual(figures.peerByteFractionByClient, undefined, 'the legacy column is not published');
+  });
+
   await check('T4(d): publication rejects a trap multiplier by name', async () => {
     const { figure, context } = publishedTrapFixture({ hostUploadMultiplier: 1 });
     assertEqual(PEER_TRAP_FIELDS.includes('hostUploadMultiplier'), false, 'trap fields exclude the multiplier');

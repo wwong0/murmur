@@ -60,6 +60,15 @@ export default async function harnessArmRecomputeSuite() {
     assertEqual(peer.trackerPort, '8101', 'peer supplies tracker port');
   });
 
+  // 8a's first baseline-nop2p-steady attempt aborted on 'segment sizes are unavailable'.
+  await check('harness arm recompute: a one-viewing host run sizes its stretch from the content', async () => {
+    const host = arms[1][1];
+    const oneViewing = { ...manifest, multiplierDenominator: 'one-viewing' };
+    assertEqual(host.recomputeContent(oneViewing).segmentSizes?.length, contentManifest.segmentSizes.length,
+      'one-viewing host content has segment sizes');
+    assertEqual(host.recomputeSegmentSeconds(oneViewing), contentManifest.segmentSeconds, 'one-viewing host segment seconds');
+  });
+
   // arms.mjs is excluded: armFor is where peerExchange selects the arm.
   await check('harness arm recompute: recompute branches do not inspect peerExchange', async () => {
     const figuresDir = path.resolve(suiteDir, '../../figures');

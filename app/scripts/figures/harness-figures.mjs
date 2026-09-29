@@ -180,7 +180,7 @@ function droppedFrames(records) {
 
 // One client's entry in each `…ByClient` figure, keyed by the figure's name.
 // A figure the client's evidence cannot support is left out.
-function clientFigures(tag, client, origin, window, content, receipt) {
+function clientFigures(tag, client, origin, window, content, receipt, { bytes = true } = {}) {
   const records = recordsFor(client, window);
   const polls = pollsFor(client, window);
   const result = {};
@@ -193,7 +193,7 @@ function clientFigures(tag, client, origin, window, content, receipt) {
   const receivedCompletedBytes = receipt ? receipt.clientCompletedBytes : numberOr(clientBytes?.completedBytes);
   const receivedAbortedBytes = numberOr(clientBytes?.canceledBytes);
 
-  if (finite(originCompletedBytes) && finite(receivedCompletedBytes) && receivedCompletedBytes > 0) {
+  if (bytes && finite(originCompletedBytes) && finite(receivedCompletedBytes) && receivedCompletedBytes > 0) {
     const peerFraction = 1 - originCompletedBytes / receivedCompletedBytes;
     if (peerFraction < -0.10 || peerFraction > 1.0) {
       throw new RangeError(`peerByteFractionByClient[${tag}] physically impossible: ${peerFraction}`);
@@ -408,7 +408,8 @@ export function computeFigures(input = {}) {
   };
 
   for (const tag of tags) {
-    const figures = clientFigures(tag, clients[tag] ?? {}, origin, window, input.content, cohort?.byClient[tag]);
+    const figures = clientFigures(tag, clients[tag] ?? {}, origin, window, input.content, cohort?.byClient[tag],
+      { bytes: input.auxiliaryOnly !== true });
     for (const [name, value] of Object.entries(figures)) {
       if (value !== undefined) (result[name] ??= {})[tag] = value;
     }
@@ -464,7 +465,8 @@ function withoutVersion(value) {
 
 function peerAuxiliaryFigures(input) {
   const context = input.context ? { ...input.context, byteAccountingMethod: undefined } : undefined;
-  const legacy = computeFigures({ ...input, byteAccountingMethod: undefined, context,
+  // The legacy byte columns are discarded here, so their guards must not abort a peer run.
+  const legacy = computeFigures({ ...input, byteAccountingMethod: undefined, context, auxiliaryOnly: true,
     originEnd: withoutVersion(input.originEnd ?? input.origin?.end) });
   return Object.fromEntries(PEER_AUXILIARY_FIELDS
     .filter((field) => legacy[field] !== undefined).map((field) => [field, legacy[field]]));

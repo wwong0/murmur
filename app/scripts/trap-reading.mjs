@@ -66,12 +66,13 @@ function readingFromConditions(entries, conditions) {
 
 export function buildTrapReadingReport({ registerPath, conditionsPath = CONDITIONS_PATH,
   diagnosticPath = D8_OUTPUT } = {}) {
-  const entries = registryEntries(registerPath).map(recomputeRegisteredRun);
+  const registered = registryEntries(registerPath);
   const conditions = readJson(conditionsPath);
-  const reading = readingFromConditions(entries, conditions);
-  // Only the trap arms and their control are read; the registry lists every run of the change.
-  const runs = entries.filter((entry) => conditions[entry.condition]?.reading?.kind === 'trap'
-    || entry.condition === reading.control.condition);
+  const reading = readingFromConditions(registered, conditions);
+  // Only the trap arms and their control are read; the registry lists every run of the
+  // change, and a goodput directory has no manifest to recompute.
+  const runs = registered.filter((entry) => conditions[entry.condition]?.reading?.kind === 'trap'
+    || entry.condition === reading.control.condition).map(recomputeRegisteredRun);
   const report = classifyTrapReading({ runs, reading });
   return {
     ...report,

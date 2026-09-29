@@ -58,6 +58,7 @@ import regimesReadingSuite from './check/suites/regimes-reading.mjs';
 import regimesConditionsSuite from './check/suites/regimes-conditions.mjs';
 import peerSpacingSuite from './check/suites/peer-spacing.mjs';
 import peerChecksSuite from './check/suites/peer-checks.mjs';
+import peerChecksGroupSuite from './check/suites/peer-checks-group.mjs';
 import peerConservationShapedSuite from './check/suites/peer-conservation-shaped.mjs';
 import peerSettleSuite from './check/suites/peer-settle.mjs';
 import hostOriginRefusalsSuite from './check/suites/host-origin-refusals.mjs';
@@ -164,6 +165,7 @@ for (const suite of [
   regimesConditionsSuite,
   peerSpacingSuite,
   peerChecksSuite,
+  peerChecksGroupSuite,
   peerConservationShapedSuite,
   peerSettleSuite,
   hostOriginRefusalsSuite,

@@ -67,15 +67,62 @@ function excusedResponseEvidence(input, pairing) {
     byReceipt.set(receiptKeyValue, [...(byReceipt.get(receiptKeyValue) ?? []), entry]);
     byResponse.set(entry.response.originResponseId, [...(byResponse.get(entry.response.originResponseId) ?? []), entry]);
   }
-  return eligible
+  const uniqueEntries = eligible
     .filter((entry) => byReceipt.get(`${entry.tag}:${entry.pair.receiptKey}`)?.length === 1
-      && byResponse.get(entry.response.originResponseId)?.length === 1)
+      && byResponse.get(entry.response.originResponseId)?.length === 1);
+  const unique = uniqueEntries
     .map((entry) => ({
       tag: entry.tag,
       requestId: entry.pair.receipt.requestId,
       originResponseId: entry.response.originResponseId,
       delivered: entry.response.delivered,
     }));
+  const excusedRequestKeys = new Set(uniqueEntries.map((entry) => JSON.stringify([entry.tag, entry.pair.receiptKey])));
+  const excusedResponseIds = new Set(unique.map((entry) => entry.originResponseId));
+  const groups = new Map();
+  const groupFor = (tag, path) => {
+    const key = JSON.stringify([tag, path]);
+    const group = groups.get(key) ?? { receipts: [], responses: [] };
+    groups.set(key, group);
+    return group;
+  };
+  for (const tag of tagsOf(input)) {
+    for (const pair of pairing.byClient[tag]?.pairs ?? []) {
+      const receipt = pair.receipt;
+      if (receipt.originResponseId !== null || receipt.canceled !== true || receipt.bodyBytes !== 0
+        || pair.attempt.bytes !== 0) continue;
+      const requestKey = JSON.stringify([tag, pair.receiptKey]);
+      if (!excusedRequestKeys.has(requestKey)) groupFor(tag, pathOf(receipt.url)).receipts.push({ tag, pair });
+    }
+  }
+  for (const response of candidates) {
+    if (excusedResponseIds.has(response.originResponseId)) continue;
+    groupFor(response.clientTag, pathOf(response.urlPath)).responses.push(response);
+  }
+  const result = [...unique];
+  for (const group of groups.values()) {
+    if (group.receipts.length < 1 || group.receipts.length !== group.responses.length) continue;
+    const parsed = group.responses.map((response) => ({ response, id: responseIdParts(response.originResponseId) }));
+    if (parsed.some(({ id }) => !id) || new Set(parsed.map(({ id }) => id.prefix)).size !== 1) continue;
+    const orderedReceipts = [...group.receipts].sort((left, right) => {
+      const start = (Number.isFinite(left.pair.receipt.startMs) ? left.pair.receipt.startMs : Infinity)
+        - (Number.isFinite(right.pair.receipt.startMs) ? right.pair.receipt.startMs : Infinity);
+      if (start) return start;
+      return (Number.isFinite(left.pair.receipt.seq) ? left.pair.receipt.seq : Infinity)
+        - (Number.isFinite(right.pair.receipt.seq) ? right.pair.receipt.seq : Infinity);
+    });
+    const orderedResponses = parsed.sort((left, right) => left.id.sequence - right.id.sequence);
+    if (!orderedResponses.every(({ response }, index) => overlaps(response, orderedReceipts[index].pair.attempt, receipts))) continue;
+    for (let index = 0; index < orderedResponses.length; index += 1) {
+      const { response } = orderedResponses[index];
+      if (excusedResponseIds.has(response.originResponseId)) throw new Error(`excusal-duplicate:${response.originResponseId}`);
+      excusedResponseIds.add(response.originResponseId);
+      const pair = orderedReceipts[index].pair;
+      result.push({ tag: pair.tag, requestId: pair.receipt.requestId,
+        originResponseId: response.originResponseId, delivered: response.delivered });
+    }
+  }
+  return result;
 }
 
 function overlaps(response, receipt, receipts) {

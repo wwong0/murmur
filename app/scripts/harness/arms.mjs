@@ -212,8 +212,14 @@ const HTTP_ARM = Object.freeze({
   },
 });
 
+const oneViewing = (manifest) => manifest.multiplierDenominator === 'one-viewing';
+
 const HOST_ARM = Object.freeze({
   ...baseArm({ hostTag: 'c00', runDirPrefix: '8a', readyTimeoutMs: 120_000 }),
+  // D5's one viewing sizes the played stretch from the content, as the peer arm does.
+  recomputeContent: (manifest) => (oneViewing(manifest) ? recomputePeerContent(manifest) : manifest.content),
+  recomputeSegmentSeconds: (manifest) => (oneViewing(manifest)
+    ? recomputePeerSegmentSeconds(manifest) : manifest.content?.segmentSeconds),
   async openWindow({ sessions, condition, deadline, establishCadence, manifestFile, placeWindow }) {
     const cadence = await establishCadence(sessions, { condition, deadline });
     manifestFile.merge({
