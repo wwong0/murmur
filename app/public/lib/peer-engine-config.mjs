@@ -1,4 +1,4 @@
-import { validateEngineWindows } from './engine-windows.mjs';
+import { validateEngineWindows, PRODUCT_ENGINE_WINDOWS } from './engine-windows.mjs';
 
 function requireString(value, name) {
   if (typeof value !== 'string') throw new TypeError(`peerEngineConfig: ${name} must be a string`);
@@ -19,7 +19,7 @@ export function peerEngineConfig({ roomId, trackerUrl, iceServers, windows = nul
     swarmId: roomId,
     announceTrackers: Object.freeze([trackerUrl]),
     rtcConfig: Object.freeze({ iceServers }),
-    ...(windows ?? {}),
+    ...(windows ?? PRODUCT_ENGINE_WINDOWS),
   });
   return Object.freeze({ core });
 }

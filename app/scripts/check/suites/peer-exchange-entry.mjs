@@ -20,6 +20,10 @@ export default async function peerExchangeEntrySuite() {
     assertEqual(loadEvent(page).p2p, null, 'case 1 load has no p2p engine');
     assertEqual(page.app.peerExchange(), 'off', 'case 1 peer exchange is off');
     assertEqual(JSON.stringify(page.app.peerBytes()), JSON.stringify({ attribution: null, peerExchange: 'off', peerId: null, peerIds: [] }), 'case 1 publishes the stub');
+    // T10 prevention claim: stage the work, then mutate execute() to derive
+    // p2p from delivery + role while dropping the tracker requirement. The
+    // 'case 1 load has no p2p engine' assertion goes red; restore the one-value
+    // roomHasPeerExchange derivation and check green again.
   });
 
   await check('peer-exchange-entry case 2: a tracked viewer receives the configured engine', async () => {

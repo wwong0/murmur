@@ -3,6 +3,7 @@ import { evaluateByteControl } from '../../harness/byte-control.mjs';
 import { armFor, REFUSAL_SCOPE } from '../../harness/arms.mjs';
 import { evaluateRefusals } from '../../harness/refusals.mjs';
 import { conditionForName, conditions } from '../../harness-run.mjs';
+import { ENGINE_WINDOW_DEFAULTS } from '../../../public/lib/engine-windows.mjs';
 
 const peer = conditions['p2p-naive'];
 const peerReasonNames = new Set([
@@ -110,7 +111,7 @@ export default async function harnessPeerConditionsSuite() {
 
   await check('harness peer conditions: peer sources enumerate every unchanged field', async () => {
     const source = conditions['hostorigin-nop2p'];
-    const excluded = ['name', 'bars', 'peerExchange', 'positionOffsetMsByClient', 'figureKinds', 'feeds'];
+    const excluded = ['name', 'bars', 'peerExchange', 'positionOffsetMsByClient', 'figureKinds', 'feeds', 'engineWindows'];
     for (const name of ['p2p-naive', 'p2p-scattered']) assertTopLevelEqualExcept(source, conditions[name], excluded, `${name} source`);
     assertEqual(JSON.stringify(Object.keys(peer.bars).sort()), JSON.stringify([
       'conservationChannelBytes', 'conservationRelativeMax', 'driftLogMissedMax',
@@ -123,11 +124,18 @@ export default async function harnessPeerConditionsSuite() {
     // `drift` is the pairwise figure; without `byte` the byte figure is withheld.
     assertEqual(JSON.stringify(conditions['p2p-naive'].figureKinds), JSON.stringify(['byte', 'drift']), 'p2p-naive publishes byte and drift');
     assert(!('figureKinds' in conditions['p2p-scattered']), 'p2p-scattered publishes byte only, as its source');
+    // T1 item 5: these ran at the library's defaults before the product declared its
+    // own, so each now declares them explicitly — a future run of it still behaves as
+    // it did before this change.
+    for (const name of ['p2p-naive', 'p2p-scattered']) {
+      assertEqual(JSON.stringify(conditions[name].engineWindows), JSON.stringify(ENGINE_WINDOW_DEFAULTS), `${name} declares the library's windows`);
+    }
 
     const qual = conditions.shakedown['p2p-qual'];
     const qualSource = conditions.shakedown['hostorigin-qual'];
-    assertTopLevelEqualExcept(qualSource, qual, ['name', 'clients', 'bars', 'peerExchange', 'positionOffsetMsByClient', 'feeds'], 'p2p qualification source');
+    assertTopLevelEqualExcept(qualSource, qual, ['name', 'clients', 'bars', 'peerExchange', 'positionOffsetMsByClient', 'feeds', 'engineWindows'], 'p2p qualification source');
     assertEqual(JSON.stringify(qual.positionOffsetMsByClient), JSON.stringify({ c01: 0, c02: 30000, c03: 60000 }), 'p2p qualification offsets');
+    assertEqual(JSON.stringify(qual.engineWindows), JSON.stringify(ENGINE_WINDOW_DEFAULTS), 'p2p qualification declares the library\'s windows');
   });
 
   await check('harness peer conditions: byte control bypasses the absent peer agreement bar', async () => {

@@ -12,6 +12,10 @@ export const MISSING_CLOCK = 'clock-estimate';
 export const MISSING_STATE = 'playback-state';
 export const MISSING_HOST_LINK = 'host-link';
 export const WAITING_PAUSED = 'room-paused';
+// T9 (design.md D6): a held room is a paused mapping everywhere the timeline
+// reads it, but it is never reported as a paused room — checked before
+// WAITING_PAUSED below.
+export const WAITING_HELD = 'room-held';
 export const WAITING_PREPARING = 'preparing';
 export const WAITING_REFUSED = 'play-refused';
 
@@ -80,6 +84,7 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0, 
     } else if (reportedMissing === null) {
       if (refused) waiting = WAITING_REFUSED;
       else if (lastState?.current?.playing) waiting = WAITING_PREPARING;
+      else if (lastState?.current?.held === true) waiting = WAITING_HELD;
       else if (lastState) waiting = WAITING_PAUSED;
     }
     return {

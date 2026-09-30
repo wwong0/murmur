@@ -12,6 +12,7 @@ import { qualifyCdpBytes as defaultQualifyCdpBytes, qualifyLinkReceipts as defau
 import { evaluateRefusals } from './harness/refusals.mjs';
 import { armFor, clientTags } from './harness/arms.mjs';
 import { validateEngineWindows } from '../public/lib/engine-windows.mjs';
+import { validateHeadroomFraction } from '../public/lib/send-pace.mjs';
 import { parseRate, parseSize, parseTime } from '../harness/apply-qdisc.mjs';
 import { appliedSeekEvidence } from './figures/seek-evidence.mjs';
 import { startCpuSampler } from './harness/cpu-sampler.mjs';
@@ -48,6 +49,10 @@ export function conditionValidationReason(condition = {}) {
   }
   if (Object.prototype.hasOwnProperty.call(condition, 'engineWindows')
     && validateEngineWindows(condition.engineWindows).error) return 'engine-windows-invalid';
+  if (Object.prototype.hasOwnProperty.call(condition, 'headroomFraction')) {
+    if (condition.delivery !== 'host') return 'headroom-fraction-requires-host-delivery';
+    if (validateHeadroomFraction(condition.headroomFraction).error) return 'headroom-fraction-invalid';
+  }
   if (Object.prototype.hasOwnProperty.call(condition, 'seek')) {
     const seek = condition.seek;
     const keys = object(seek) ? Object.keys(seek).sort().join(',') : '';

@@ -36,6 +36,10 @@ export function createPlaybackAcquisition({
   const maxFutureMs = settings.maxFutureMs ?? 0;
   const requestTimeoutMs = settings.requestTimeoutMs ?? ACQUISITION_REQUEST_TIMEOUT_MS;
   const backoffMs = settings.backoffMs ?? ACQUISITION_BACKOFF_MS;
+  // T5 (design.md D3/D4): whether the room has peer exchange, read at creation
+  // and at issue — not cached, since T10's single derivation may not have
+  // settled the first time `poll()` runs.
+  const holds = settings.holds ?? (() => false);
   if (![transitionLeadMs, maxFutureMs, requestTimeoutMs, backoffMs].every(validNumber)
     || transitionLeadMs < 0 || maxFutureMs < 0 || requestTimeoutMs < 0 || backoffMs < 0) {
     throw new TypeError('acquisition settings must be finite non-negative numbers');
@@ -153,15 +157,20 @@ export function createPlaybackAcquisition({
       || holder.state || !holder.awaitingCreation) return;
     let current;
     if (proposal) {
+      // T5: a rejoin's proposal carries its mappings, `held` included — a room
+      // that was held stays held across the sole member's own reconnect.
       current = {
         playing: proposal.current.playing,
         atSharedMs: proposal.current.atSharedMs,
         mediaMs: proposal.current.mediaMs,
+        ...(proposal.current.held === true ? { held: true } : {}),
       };
     } else {
       const now = clock.sharedNow();
       if (!validNumber(now)) return;
-      current = { playing: true, atSharedMs: now + transitionLeadMs, mediaMs: 0 };
+      current = holds()
+        ? { playing: false, atSharedMs: now + transitionLeadMs, mediaMs: 0, held: true }
+        : { playing: true, atSharedMs: now + transitionLeadMs, mediaMs: 0 };
     }
     creationIssued = true;
     const payload = {
@@ -370,7 +379,13 @@ export function createPlaybackAcquisition({
     if (kind === 'play' || kind === 'pause') {
       payload = { ...payload, atSharedMs: now + transitionLeadMs };
     } else if (kind === 'seek') {
-      payload = { ...payload, atSharedMs: now + transitionLeadMs, positionMs: args.positionMs };
+      payload = {
+        ...payload,
+        atSharedMs: now + transitionLeadMs,
+        positionMs: args.positionMs,
+        // T5: a room with peer exchange holds at the landing of every seek.
+        ...(holds() ? { hold: true } : {}),
+      };
     } else if (kind === 'control-mode') {
       payload = { ...payload, controlMode: args.controlMode };
     } else {
@@ -411,6 +426,10 @@ export function createPlaybackAcquisition({
         resolved: state !== null,
         identity: stateIdentity(state),
         playing: state?.current.playing ?? null,
+        // T5: `held` is `true`/`false` with a state, `null` without one — the
+        // three-value shape `docs/constraints/measurement.md` requires for "no
+        // value" against a real false.
+        held: state ? state.current.held === true : null,
         controlMode: state?.controlMode ?? null,
         rejected: holder.counters.rejected,
         adopted,

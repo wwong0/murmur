@@ -78,6 +78,13 @@ export function createHostAccounting({ wallNow = () => Date.now(), instanceId } 
       else if (response.aborted && pending === 0) settle(response, true);
       return response.settled;
     },
+    openCount(channelKey) {
+      const channel = responses.get(channelKey);
+      if (!channel) return 0;
+      let count = 0;
+      for (const response of channel.values()) if (!response.settled) count += 1;
+      return count;
+    },
     closeChannel(channelKey) {
       const channel = responses.get(channelKey);
       if (!channel) return;

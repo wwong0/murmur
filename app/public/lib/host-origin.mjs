@@ -6,8 +6,15 @@ import {
   createChannelSender,
   parseControl,
   sliceForRange,
+  CHUNK_PAYLOAD_BYTES,
+  DRAIN_POLL_MS,
 } from './segment-protocol.mjs';
 import { createHostAccounting } from './host-accounting.mjs';
+import { createSendPace, HEADROOM_DEFAULT, validateHeadroomFraction } from './send-pace.mjs';
+import { classifyInterval, createCapacityEstimate } from './capacity-estimate.mjs';
+
+const INTERVAL_NOMINAL_MS = 1000;
+const INTERVAL_RING_CAPACITY = 3600;
 
 const MEDIA_PREFIX = '/media/';
 const MAP_LINE_RE = /^#EXT-X-MAP:.*$/gm;
@@ -74,8 +81,10 @@ function inlinePlaylist(path, source, readSource) {
 /**
  * @param {{readSource: (path: string) => Promise<{status: number, bytes: Uint8Array|ArrayBuffer}>, clock?: object, settings?: object}} config
  */
-export function createHostOrigin({ readSource, clock, settings = {}, wallNow = () => Date.now() } = {}) {
+export function createHostOrigin({ readSource, clock, settings = {}, wallNow = () => Date.now(), pace = {} } = {}) {
   if (typeof readSource !== 'function') throw new TypeError('createHostOrigin: readSource is required');
+  const { fraction, error: fractionError } = validateHeadroomFraction(pace.fraction ?? HEADROOM_DEFAULT);
+  if (fractionError) throw new TypeError(`createHostOrigin: pace.fraction ${fractionError}`);
   const instanceId = `${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
   const accounting = createHostAccounting({ wallNow, instanceId });
   let responseCounter = 0;
@@ -83,6 +92,104 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
   const memo = new Map();
   const channels = new Set();
   const liveSenders = new Map();
+  const channelState = new Map(); // channelKey -> { pendingReads }
+  const retiredChannels = new Set();
+
+  // T3 (design.md D2): the one shared bucket and capacity estimate for every
+  // channel this host attaches, plus the interval sampler that feeds them.
+  const sendPace = createSendPace({ capBytes: CHUNK_PAYLOAD_BYTES });
+  const capacityEstimate = createCapacityEstimate({});
+  let waitingChannelCount = 0;
+  let samplerTimer = null;
+  let previousCloseMs = null;
+  let currentSamples = [];
+  let closedDrainedTotal = 0;
+  let previousTotalDrained = 0;
+  let intervalSeq = 0;
+  let intervalsEvicted = 0;
+  const intervalRing = [];
+
+  function isChannelInProgress(channelKey) {
+    return accounting.openCount(channelKey) > 0 || (channelState.get(channelKey)?.pendingReads ?? 0) > 0;
+  }
+
+  function totalDrainedNow() {
+    let total = closedDrainedTotal;
+    for (const sender of liveSenders.values()) total += sender.drainedBodyBytes();
+    return total;
+  }
+
+  function retireChannel(channelKey, sender) {
+    if (retiredChannels.has(channelKey)) return;
+    retiredChannels.add(channelKey);
+    closedDrainedTotal += sender.drainedBodyBytes();
+    liveSenders.delete(channelKey);
+    channelState.delete(channelKey);
+  }
+
+  function closeSamplerInterval(nowMs) {
+    const startMs = previousCloseMs;
+    const durationMs = nowMs - startMs;
+    if (!(durationMs > 0)) throw new RangeError('host-origin: interval durationMs must be positive');
+    const total = totalDrainedNow();
+    const drainedBodyBytes = total - previousTotalDrained;
+    if (drainedBodyBytes < 0) throw new RangeError('host-origin: drainedBodyBytes delta must not be negative');
+    previousTotalDrained = total;
+    const paceBoundMs = sendPace.closeInterval(nowMs);
+    if (paceBoundMs < 0 || paceBoundMs > durationMs) throw new RangeError('host-origin: paceBoundMs out of bounds for its interval');
+    const { linkBound, reason } = classifyInterval({ samples: currentSamples, drainedBodyBytes, durationMs, paceBoundMs });
+    capacityEstimate.record({ drainedBodyBytes, durationMs, linkBound });
+    if (fraction !== 'unpaced') {
+      const estimate = capacityEstimate.read();
+      sendPace.setRate(estimate.bytesPerSecond === null ? null : (fraction * estimate.bytesPerSecond) / 1000, nowMs);
+    }
+    intervalSeq += 1;
+    intervalRing.push({
+      seq: intervalSeq,
+      startMs,
+      endMs: nowMs,
+      endWallMs: wallNow(),
+      samples: currentSamples.length,
+      drainedBodyBytes,
+      durationMs,
+      linkBound,
+      reason,
+      paceBoundMs,
+    });
+    if (intervalRing.length > INTERVAL_RING_CAPACITY) {
+      intervalRing.shift();
+      intervalsEvicted += 1;
+    }
+    previousCloseMs = nowMs;
+    currentSamples = [];
+  }
+
+  function samplerTick() {
+    const now = clock.now();
+    const channelsSample = [];
+    for (const [channelKey, sender] of liveSenders) {
+      channelsSample.push({ inProgress: isChannelInProgress(channelKey), waitingBodyBytes: sender.waitingBodyBytes() });
+    }
+    currentSamples.push({ channels: channelsSample });
+    if (now >= previousCloseMs + INTERVAL_NOMINAL_MS) closeSamplerInterval(now);
+    scheduleSampler();
+  }
+
+  function scheduleSampler() {
+    if (samplerTimer !== null || channels.size === 0) return;
+    samplerTimer = clock.setTimeout(() => {
+      samplerTimer = null;
+      if (channels.size === 0) return;
+      samplerTick();
+    }, DRAIN_POLL_MS);
+  }
+
+  function startSamplerIfIdle() {
+    if (channels.size !== 1) return; // this attach is not the first live channel
+    previousCloseMs = clock.now();
+    currentSamples = [];
+    scheduleSampler();
+  }
 
   function nextRid() {
     responseCounter += 1;
@@ -109,19 +216,25 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
       channel,
       clock,
       settings,
+      gate: sendPace,
+      onWaiting(hasWaiting) {
+        waitingChannelCount += hasWaiting ? 1 : -1;
+        sendPace.setWaiting(waitingChannelCount, clock.now());
+      },
       onCredited(id, bytes) {
         accounting.credited(channelKey, id, bytes);
         accounting.settleIfDone(channelKey, id, sender.pendingFrames(id));
       },
       onClosed() {
         accounting.closeChannel(channelKey);
-        liveSenders.delete(channelKey);
+        retireChannel(channelKey, sender);
       },
     });
     const active = new Map();
     let detached = false;
 
     liveSenders.set(channelKey, sender);
+    channelState.set(channelKey, { pendingReads: 0 });
 
     const onMessage = (event) => {
       const control = parseControl(event?.data);
@@ -143,6 +256,7 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
       }
       const entry = { aborted: false };
       active.set(control.id, entry);
+      channelState.get(channelKey).pendingReads += 1;
       Promise.resolve()
         .then(() => read(control.path))
         .then((source) => respond(control, entry, source), () => respond(control, entry, BAD_GATEWAY));
@@ -151,6 +265,8 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
     // Every answer, a failed read included, is a head and a body; a non-2xx
     // slice is empty, so its body is only the `end`.
     function respond(control, entry, source) {
+      const state = channelState.get(channelKey);
+      if (state) state.pendingReads -= 1;
       if (detached || entry.aborted) return;
       const bytes = asBytes(source.bytes);
       const range = control.range && typeof control.range === 'object' ? control.range : null;
@@ -178,10 +294,15 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
       active.clear();
       sender.close();
       accounting.closeChannel(channelKey);
-      liveSenders.delete(channelKey);
+      retireChannel(channelKey, sender);
       channels.delete(detach);
+      if (channels.size === 0 && samplerTimer !== null) {
+        clock.clearTimeout(samplerTimer);
+        samplerTimer = null;
+      }
     };
     channels.add(detach);
+    startSamplerIfIdle();
     return detach;
   }
 
@@ -193,6 +314,18 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
     },
     stats() {
       return { protocolErrors, responses: responseCounter, channels: channels.size };
+    },
+    pace(afterSeq = 0) {
+      const estimate = capacityEstimate.read();
+      const paceBytesPerSecond = fraction === 'unpaced' || estimate.bytesPerSecond === null
+        ? null : fraction * estimate.bytesPerSecond;
+      return {
+        fraction,
+        estimate,
+        paceBytesPerSecond,
+        intervals: intervalRing.filter((entry) => entry.seq > afterSeq),
+        evicted: intervalsEvicted,
+      };
     },
   };
 }

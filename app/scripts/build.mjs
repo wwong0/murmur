@@ -17,6 +17,7 @@
 import * as esbuild from 'esbuild';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { enginePatchPlugin } from './engine-patch.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -53,6 +54,7 @@ export function buildOptions(buildId) {
     define: {
       __BUILD_ID__: JSON.stringify(buildId),
     },
+    plugins: [enginePatchPlugin()],
   };
 }
 

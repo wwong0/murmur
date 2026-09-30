@@ -147,8 +147,8 @@ function controllerText(state) {
 
 const NO_PEER_BYTES = { read: () => ({ attribution: null, peerExchange: 'off', peerId: null, peerIds: [] }) };
 
-export function createDiagnosticsOverlay({ clock, controller, bytes = NO_PEER_BYTES, log, playback }) {
-  const driftReadout = createDriftReadout({ log, playback });
+export function createDiagnosticsOverlay({ clock, controller, bytes = NO_PEER_BYTES, log, playback, heldAhead }) {
+  const driftReadout = createDriftReadout({ log, playback, heldAhead });
 
   function lines() {
     return {

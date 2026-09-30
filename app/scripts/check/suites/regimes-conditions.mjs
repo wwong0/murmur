@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { conditionForName, conditionValidationReason, conditions } from '../../harness-run.mjs';
 import { assert, assertEqual, assertNear, check } from '../harness.mjs';
+import { ENGINE_WINDOW_DEFAULTS } from '../../../public/lib/engine-windows.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const FILE = path.join(APP_DIR, 'harness', 'conditions.json');
@@ -73,7 +74,12 @@ export default async function regimesConditionsSuite() {
     assertEqual(qdiscsOf(starved), JSON.stringify([tbf('origin', '5mbit', '16kbit')]), 'starved shapes the origin only, burst scaled');
     assertEqual(JSON.stringify([limited, defaultShaped, starved, qualification].map((condition) => condition.capacityMbps)),
       JSON.stringify([20, 10, 5, 20]), 'capacities are as declared');
-    assert(!Object.hasOwn(defaultShaped, 'engineWindows') && !Object.hasOwn(starved, 'engineWindows'), 'default and starved leave the windows at the library defaults');
+    // T1 item 5: these ran at the library's defaults before the product declared its
+    // own, so each now declares them explicitly — a future run of it still behaves as
+    // it did before this change.
+    for (const condition of [defaultShaped, starved]) {
+      assertEqual(JSON.stringify(condition.engineWindows), JSON.stringify(ENGINE_WINDOW_DEFAULTS), `${condition.name} declares the library's windows`);
+    }
     assert(['regimes-default-shaped', 'regimes-starved'].every((name) => !Object.hasOwn(source[name], 'reading'))
       && !Object.hasOwn(qualification, 'reading'), 'only the limited condition carries the reading block');
     assertEqual(limited.engineWindows.highDemandTimeWindow, 15, 'limited high-demand window is 15s');

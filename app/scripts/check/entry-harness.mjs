@@ -63,7 +63,7 @@ export async function bundleProductEntry() {
     write: false,
     metafile: true,
     outfile: path.join(os.tmpdir(), 'entry-harness.bundle.js'),
-    plugins: [entryFakesPlugin({ spies: true, hits })],
+    plugins: [...(buildOptions('entry-harness').plugins ?? []), entryFakesPlugin({ spies: true, hits })],
   });
   return { code: result.outputFiles[0].text, hits, metafile: result.metafile };
 }

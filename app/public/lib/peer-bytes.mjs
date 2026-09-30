@@ -59,6 +59,10 @@ export function createPeerBytes({ wallNow = () => Date.now(), capacity = 65536 }
   const uploadBytes = {};
   const kept = { hostBytes: 0, peerBytes: 0 };
   const errors = { count: 0, last: null };
+  // T7 (design.md D5): finished segments' media-time spans, outside the ring so
+  // held-ahead can always see the whole run — the ring evicts, this must not.
+  const finishedByRuntimeId = new Map();
+  let finishedWithoutTimes = 0;
   let attribution = 'unavailable';
   let unavailable = false;
   let peerId = null;
@@ -219,6 +223,13 @@ export function createPeerBytes({ wallNow = () => Date.now(), capacity = 65536 }
     const state = stateFor(request);
     const keptAttemptIds = attribution === 'engine-request' && state ? [...state.unclaimed] : [];
     const keptSumBytes = attribution === 'engine-request' && state ? state.unclaimedBytes : 0;
+    // T7: the engine's fragment carries startTime/endTime in seconds (3.0.1
+    // hlsjs segment-manager.js); held-ahead reads media milliseconds.
+    const mediaStartMs = Number(segment.startTime) * 1000;
+    const mediaEndMs = Number(segment.endTime) * 1000;
+    const hasTimes = Number.isFinite(mediaStartMs) && Number.isFinite(mediaEndMs);
+    if (hasTimes) finishedByRuntimeId.set(segment.runtimeId, { mediaStartMs, mediaEndMs });
+    else finishedWithoutTimes += 1;
     append({
       kind: 'segment',
       runtimeId: segment.runtimeId,
@@ -227,6 +238,8 @@ export function createPeerBytes({ wallNow = () => Date.now(), capacity = 65536 }
       completedAtMs: wallNow(),
       keptAttemptIds,
       keptSumBytes,
+      mediaStartMs,
+      mediaEndMs,
     });
     if (attribution === 'engine-request' && state) {
       for (const attemptId of keptAttemptIds) {
@@ -321,7 +334,12 @@ export function createPeerBytes({ wallNow = () => Date.now(), capacity = 65536 }
     };
   }
 
-  return { attach, read };
+  // T7: outside the ring, so a segment's finished span survives eviction.
+  function finishedSegments() {
+    return [...finishedByRuntimeId.values()].map((entry) => ({ ...entry }));
+  }
+
+  return { attach, read, finishedSegments, get finishedWithoutTimes() { return finishedWithoutTimes; } };
 }
 
 export function attemptDispositions(records) {

@@ -9,11 +9,16 @@
 // public/room.html.
 
 import { createRoomClient } from './lib/room-client.mjs';
-import { ADDR_SERVER, newReclaimSecret, readBody } from './lib/envelope.mjs';
+import {
+  ADDR_SERVER, TYPE_AHEAD, buildAheadEnvelope, newReclaimSecret, readAheadReport, readBody,
+} from './lib/envelope.mjs';
 import { createPlayer } from './lib/player.mjs';
 import { createPeerBytes } from './lib/peer-bytes.mjs';
+import { heldAheadMs } from './lib/held-ahead.mjs';
+import { createHoldResume, createResumeRing } from './lib/hold-resume.mjs';
 import { peerEngineConfig } from './lib/peer-engine-config.mjs';
 import { validateEngineWindows } from './lib/engine-windows.mjs';
+import { HEADROOM_DEFAULT, validateHeadroomFraction } from './lib/send-pace.mjs';
 import { createClockSync, websocketProbe } from './lib/clock-sync.mjs';
 import { createRoomTimeline } from './lib/room-timeline.mjs';
 import { offsetView } from './lib/playback-state.mjs';
@@ -33,6 +38,7 @@ import {
   LATE_START_REPARK_MS, MAX_FUTURE_MS, MAX_LATE_REPARKS, PREPARE_LEAD_MS, PRESENTATION_ADVANCE_MS, TRANSITION_LEAD_MS,
 } from './lib/playback-leads.mjs';
 import { runTickSteps } from './lib/tick-steps.mjs';
+import { setUrgentContext, urgentDelay } from './lib/urgent-source.mjs';
 
 const BUILD_ID = __BUILD_ID__;
 
@@ -58,6 +64,17 @@ const suppliedEngineWindows = globalThis.__waEngineWindows;
 const engineWindows = suppliedEngineWindows === undefined
   ? { windows: null, error: null }
   : validateEngineWindows(suppliedEngineWindows);
+// T4 (design.md D2): read before load, as engineWindows is above. Absent gives
+// the product default, unsupplied; an invalid supply falls back to the same
+// default but is still marked supplied, and carries the error the harness reads
+// to refuse the run — the host still serves at the default (an invalid supply
+// must not break a room).
+const suppliedHeadroomFraction = globalThis.__waHeadroomFraction;
+const headroomFraction = (() => {
+  if (suppliedHeadroomFraction === undefined) return { fraction: HEADROOM_DEFAULT, supplied: false, error: null };
+  const { fraction, error } = validateHeadroomFraction(suppliedHeadroomFraction);
+  return error ? { fraction: HEADROOM_DEFAULT, supplied: true, error } : { fraction, supplied: true, error: null };
+})();
 
 console.log('[app] build', BUILD_ID);
 
@@ -260,6 +277,7 @@ async function installHostSide() {
       setTimeout: (fn, ms) => setTimeout(fn, ms),
       clearTimeout: (handle) => clearTimeout(handle),
     },
+    pace: { fraction: headroomFraction.fraction },
   });
   onEnvelope('host-link-offer', 'host-link offer', answerHostOffer);
   onEnvelope('host-link-ice', 'host-link ICE', routeHostIce);
@@ -294,6 +312,10 @@ let delivery = 'host';
 let iceServers = [];
 let trackerUrl = null;
 let peerExchange = null;
+// T10 (design.md D7): every reader of "does this room have peer exchange" reads
+// this one value, derived once in startApp — not the delivery/trackerUrl pair
+// each reader used to re-check for itself.
+let roomHasPeerExchange = false;
 const peerBytesPublisher = createPeerBytes();
 // A viewer publishes this stub until its engine is attached, so no reading
 // before load says attribution is unavailable.
@@ -429,6 +451,7 @@ const acquisition = createPlaybackAcquisition({
     maxFutureMs: MAX_FUTURE_MS,
     requestTimeoutMs: ACQUISITION_REQUEST_TIMEOUT_MS,
     backoffMs: ACQUISITION_BACKOFF_MS,
+    holds: () => roomHasPeerExchange,
   },
   mintLineage: newReclaimSecret,
   onOutcome: ({ env, outcome }) => {
@@ -436,14 +459,91 @@ const acquisition = createPlaybackAcquisition({
       addNotice(`your ${env.payload?.kind ?? 'operation'} was rejected: ${outcome}`, { warn: true });
     }
     renderControls();
-    if (outcome === 'applied') schedulePollStart(0);
+    if (outcome === 'applied') {
+      updateUrgentContext();
+      schedulePollStart(0);
+    }
   },
   report: (where, error) => addNotice(`playback state ${where} failed: ${error?.message ?? error}`, { warn: true }),
 });
 
+// T7/T8 (design.md D5, D3): the viewer's held-ahead, the reports the host has
+// seen, and the resume rule's own ring. Kept beside `acquisition`, not inside
+// it — held-ahead and the resume rule are both pure modules of their own.
+let heldAheadValue = null;
+let lastAheadSentAtPageMs = null;
+const aheadReports = new Map();
+let malformedAheadReports = 0;
+const holdResume = createHoldResume();
+const resumeRing = createResumeRing(256);
+
+function updateHeldAhead() {
+  // T7: never from `video.currentTime` (CONSTRAINTS.md → playback), and never
+  // on the host's page — the drift line's "not reported" arm covers exactly
+  // this absence and a viewer's own before its first value.
+  if (client.role === 'host') return;
+  const state = viewState();
+  if (!state) return;
+  const positionMs = state.current.mediaMs;
+  heldAheadValue = {
+    heldAheadMs: heldAheadMs({ positionMs, segments: peerBytesPublisher.finishedSegments() }),
+    positionMs,
+    atPageMs: pageNow(),
+  };
+}
+
+function sendAheadReport() {
+  if (!roomHasPeerExchange || client.role === 'host') return;
+  const state = acquisition.state;
+  if (!state || state.current.held !== true || !heldAheadValue) return;
+  const nowPageMs = pageNow();
+  if (lastAheadSentAtPageMs !== null && nowPageMs - lastAheadSentAtPageMs < 1000) return;
+  const host = client.roster.find((member) => member && member.role === 'host');
+  if (!host) return;
+  lastAheadSentAtPageMs = nowPageMs;
+  client.send(buildAheadEnvelope({
+    to: host.clientId,
+    lineage: state.lineage,
+    version: state.version,
+    heldAheadMs: heldAheadValue.heldAheadMs,
+  }));
+}
+
+onEnvelope(TYPE_AHEAD, 'ahead report', (env) => {
+  if (!roomHasPeerExchange || client.role !== 'host') return;
+  const report = readAheadReport(env);
+  if (!report) {
+    malformedAheadReports += 1;
+    return;
+  }
+  aheadReports.set(report.from, { lineage: report.lineage, version: report.version, heldAheadMs: report.heldAheadMs });
+});
+
+function driveHoldResume() {
+  if (!roomHasPeerExchange || client.role !== 'host') return;
+  const nowSharedMs = clockSync.sharedNow();
+  const result = holdResume.evaluate({
+    nowSharedMs,
+    state: acquisition.state,
+    roster: client.roster,
+    reports: Object.fromEntries(aheadReports),
+  });
+  if (!result) return;
+  const issuedOk = issue('play');
+  holdResume.issued(result.identity, issuedOk, nowSharedMs);
+  resumeRing.push({ ...result, issuedAtSharedMs: nowSharedMs, holdMs: nowSharedMs - result.heldAtSharedMs });
+}
+
 const viewState = () => offsetView(acquisition.state, offsetMs);
 const timeline = createRoomTimeline({ readState: viewState });
 const roomTimeline = createRoomTimeline({ readState: () => acquisition.state });
+
+function updateUrgentContext() {
+  const nowSharedMs = clockSync.sharedNow();
+  const roomMediaMs = Number.isFinite(nowSharedMs) ? timeline.mediaMsAt(nowSharedMs) : null;
+  if (!Number.isFinite(roomMediaMs)) return;
+  setUrgentContext({ held: acquisition.state?.current?.held === true, roomMediaMs });
+}
 
 function controlsReady(kind) {
   const state = acquisition.state;
@@ -460,7 +560,9 @@ function renderControls() {
   const state = acquisition.state;
   const ready = (kind) => controlsReady(kind);
   playButton.disabled = !(ready('play') && !state?.current.playing);
-  pauseButton.disabled = !(ready('pause') && state?.current.playing);
+  // T5 (design.md D3, "any member's own play or pause ends a hold"): a held
+  // state is paused, so pause is enabled to let a person end the hold.
+  pauseButton.disabled = !(ready('pause') && (state?.current.playing || state?.current.held));
   backButton.disabled = !ready('seek');
   forwardButton.disabled = !ready('seek');
   modeButton.hidden = client.role !== 'host';
@@ -727,7 +829,7 @@ function execute(result) {
       readiness = { attemptId: action.attemptId, needsSeeked: action.kind === 'park', prerequisiteSeen: false };
       recordAction(action, { startAtSharedMs: result.startAtSharedMs, seamEpochMs: epochMs }, () => {
         if (action.kind === 'load') {
-          const p2p = delivery === 'host' && typeof trackerUrl === 'string' && client.role !== 'host'
+          const p2p = roomHasPeerExchange && client.role !== 'host'
             ? {
                 core: peerEngineConfig({ roomId: room, trackerUrl, iceServers, windows: engineWindows.windows }).core,
                 onEngine: (engine) => {
@@ -803,6 +905,7 @@ const overlay = createDiagnosticsOverlay({
   bytes: { read: () => peerBytesRead() },
   log: driftLog,
   playback: start,
+  heldAhead: () => heldAheadValue,
 });
 
 // ON THE TICK, NOT ON A CLOCK EVENT: the half-width widens with age between
@@ -821,6 +924,10 @@ function tickPlayback() {
   runTickSteps([
     ['acquisition', () => acquisition.poll()],
     ['playback-start', pollStart],
+    ['urgent-context', updateUrgentContext],
+    ['held-ahead', updateHeldAhead],
+    ['ahead-report', sendAheadReport],
+    ['hold-resume', driveHoldResume],
     ['controller', () => treatment.pollController(() => controller.poll())],
     ['overlay', paintOverlay],
     ['controls', renderControls],
@@ -851,6 +958,8 @@ window.__app = {
   ...(harnessSeekConfig.enabled ? { harnessSeek } : {}),
   harnessSeekError: harnessSeekConfig.error,
   engineWindows: () => ({ windows: engineWindows.windows ? { ...engineWindows.windows } : null, error: engineWindows.error }),
+  headroom: () => ({ ...headroomFraction }),
+  hostPace: (afterSeq = 0) => (hostOrigin ? hostOrigin.pace(afterSeq) : null),
   drift: (afterSeq = 0) => driftLog.read({ afterSeq }),
   // THE CANONICAL ROLLING WINDOW. Published so no consumer has to re-derive a
   // median from `drift().records` and get a second one — the browser pass did,
@@ -869,8 +978,15 @@ window.__app = {
   hostCounters: () => (hostOrigin ? hostOrigin.snapshot() : null),
   hostReceipts: (afterSeq = 0) => (link ? link.receipts(afterSeq) : null),
   peerExchange: () => peerExchange,
+  urgentDelay,
   peerEngineConfig: () => (peerEngine ? peerEngine.getConfig().core : null),
   peerBytes: (afterSeq = 0) => peerBytesRead(afterSeq),
+  // T7/T8: the viewer's own held-ahead, and the host's resume ring.
+  heldAhead: () => heldAheadValue,
+  resumes: (afterSeq = 0) => {
+    const ring = resumeRing.read(afterSeq);
+    return { records: ring.records, evicted: ring.evicted, malformedReports: malformedAheadReports };
+  },
   playback: () => ({
     ...start.state(),
     callbacks: sampler.callbacks,
@@ -887,6 +1003,7 @@ window.__app = {
       playing: state.current.playing,
       positionMs: state.current.mediaMs,
       atSharedMs: state.current.atSharedMs,
+      held: state.current.held === true,
     };
   },
   timeline: () => acquisition.snapshot,
@@ -910,6 +1027,7 @@ async function startApp() {
       : client.role === 'host'
         ? 'host'
         : typeof trackerUrl === 'string' ? 'on' : 'off';
+    roomHasPeerExchange = delivery === 'host' && typeof trackerUrl === 'string';
     if (delivery === 'host') {
       await loadHostTransport();
       if (role === 'viewer') installViewerLink();

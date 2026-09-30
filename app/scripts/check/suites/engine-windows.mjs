@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as esbuild from 'esbuild';
 import { assert, assertEqual, check } from '../harness.mjs';
 import { bundleProductEntry, runEntry } from '../entry-harness.mjs';
-import { ENGINE_WINDOW_DEFAULTS, validateEngineWindows } from '../../../public/lib/engine-windows.mjs';
+import { ENGINE_WINDOW_DEFAULTS, PRODUCT_ENGINE_WINDOWS, validateEngineWindows } from '../../../public/lib/engine-windows.mjs';
 import { armFor } from '../../harness/arms.mjs';
 import { conditionValidationReason } from '../../harness-run.mjs';
 
@@ -56,16 +56,23 @@ let product;
 export default async function engineWindowsSuite() {
   product = await bundleProductEntry();
 
-  await check('engine-windows (a): absent global publishes null and leaves core windows absent', async () => {
+  // T1 (design.md D1): re-derived, not deleted. The premise changed — the core no
+  // longer builds without window keys when none is supplied; it builds the product's
+  // 15/60/60 instead. `__app.engineWindows()` (what the harness supplied) stays null.
+  await check('engine-windows (a): absent global publishes null and the core holds the product windows', async () => {
     const page = pageWith();
     await drain();
     assertEqual(json(page.app.engineWindows()), json({ windows: null, error: null }), 'absent global is published as no supplied windows');
     page.open();
     const core = loadEvent(page)?.detail?.p2p?.core;
     assert(core, 'peer load receives a core config');
-    assert(!Object.hasOwn(core, 'highDemandTimeWindow'), 'default high-demand window is not injected');
-    assert(!Object.hasOwn(core, 'httpDownloadTimeWindow'), 'default HTTP window is not injected');
-    assert(!Object.hasOwn(core, 'p2pDownloadTimeWindow'), 'default P2P window is not injected');
+    assertEqual(core.highDemandTimeWindow, PRODUCT_ENGINE_WINDOWS.highDemandTimeWindow, 'high-demand window defaults to the product set');
+    assertEqual(core.httpDownloadTimeWindow, PRODUCT_ENGINE_WINDOWS.httpDownloadTimeWindow, 'HTTP window defaults to the product set');
+    assertEqual(core.p2pDownloadTimeWindow, PRODUCT_ENGINE_WINDOWS.p2pDownloadTimeWindow, 'P2P window defaults to the product set');
+    // Mutation probe (item 2): `...(windows ?? PRODUCT_ENGINE_WINDOWS)` in
+    // peer-engine-config.mjs reverted to `...(windows ?? {})`. `npm run check` turned
+    // the three assertions above red — `core.highDemandTimeWindow` read `undefined`
+    // against the expected `15`. Reverted; check green again.
   });
 
   await check('engine-windows (b): supplied windows publish and merge into the peer core', async () => {
@@ -154,18 +161,32 @@ export default async function engineWindowsSuite() {
     assertEqual(mismatch.detail.tag, 'c01', 'mismatch names the viewer');
   });
 
-  await check('engine-windows (f): undeclared defaults are the expected set', async () => {
-    const nonDefault = { ...supplied };
-    const reasons = refusalReasons({}, windowReading({ inForce: nonDefault }));
+  await check('engine-windows (f): undeclared conditions expect the product set', async () => {
+    // Opportunity: a reading at the library's defaults (15/3000/6000), which is away
+    // from the product's, on a condition that declares no windows.
+    const reasons = refusalReasons({}, windowReading({ inForce: ENGINE_WINDOW_DEFAULTS }));
     const mismatch = reasons.find((entry) => entry.reason === 'engine-windows-mismatch');
-    assert(mismatch, 'non-default injected windows are refused when undeclared');
-    assertEqual(json(mismatch.detail.expected), json(ENGINE_WINDOW_DEFAULTS), 'undeclared viewer is compared against library defaults');
+    assert(mismatch, 'a reading at the library defaults is refused when undeclared');
+    assertEqual(json(mismatch.detail.expected), json(PRODUCT_ENGINE_WINDOWS), 'undeclared viewer is compared against the product set');
+    // The constant's own three values are asserted here too, so a mutation of
+    // PRODUCT_ENGINE_WINDOWS itself is caught by this check, not only by identity.
+    assertEqual(json(PRODUCT_ENGINE_WINDOWS), json({ highDemandTimeWindow: 15, httpDownloadTimeWindow: 60, p2pDownloadTimeWindow: 60 }),
+      'the product set is 15/60/60');
+    // Prevention claim — an undeclared condition refuses a page that is not at the
+    // product's windows. Mutation: arms.mjs engineWindowRefusals' expected fallback
+    // reverted from PRODUCT_ENGINE_WINDOWS to ENGINE_WINDOW_DEFAULTS. `npm run check`
+    // turned `assert(mismatch, 'a reading at the library defaults is refused when
+    // undeclared')` red: the library-defaults reading now equalled the fallback, so
+    // nothing was refused. It also turned the next check ('the expected set comes
+    // from the condition...') red the same way. Reverted; check green again.
   });
 
   await check('engine-windows: the expected set comes from the condition, not the recorded reading', async () => {
-    const lying = windowReading({ expected: supplied, inForce: supplied });
+    // The recorded reading's own `expected` field claims the product set — a lie the
+    // code must not trust — while `inForce` is away from it (the library defaults).
+    const lying = windowReading({ expected: PRODUCT_ENGINE_WINDOWS, inForce: ENGINE_WINDOW_DEFAULTS });
     const mismatch = refusalReasons({}, lying).find((entry) => entry.reason === 'engine-windows-mismatch');
-    assert(mismatch, 'a reading that records 15/60/60 as expected is still refused when the condition declares none');
+    assert(mismatch, 'a reading that records the product set as expected is still refused, on its actual inForce, when the condition declares none');
   });
 
   await check('engine-windows: evaluated on live evidence, not on directories retained before it existed', async () => {
@@ -182,5 +203,24 @@ export default async function engineWindowsSuite() {
     assert(validateEngineWindows({ ...supplied, extra: 1 }).error, 'extra key is rejected');
     assert(validateEngineWindows({ ...supplied, highDemandTimeWindow: 0 }).error, 'non-positive value is rejected');
     assert(validateEngineWindows({ ...supplied, highDemandTimeWindow: 61 }).error, 'ordering is rejected');
+  });
+
+  await check('engine-windows (T1 2.1 item 5): every peer condition in conditions.json declares windows', async () => {
+    const conditionsPath = path.resolve(suiteDir, '../../../harness/conditions.json');
+    const conditions = JSON.parse(await fs.readFile(conditionsPath, 'utf8'));
+    const undeclared = [];
+    const walk = (group, label) => {
+      for (const [name, condition] of Object.entries(group)) {
+        if (name === 'schemaVersion' || !condition || typeof condition !== 'object') continue;
+        if (condition.peerExchange === true) {
+          if (!Object.prototype.hasOwnProperty.call(condition, 'engineWindows')) undeclared.push(`${label}${name}`);
+        } else if (condition.delivery === undefined && !('peerExchange' in condition)
+          && Object.values(condition).every((value) => value && typeof value === 'object')) {
+          walk(condition, `${label}${name}/`);
+        }
+      }
+    };
+    walk(conditions, '');
+    assertEqual(json(undeclared), '[]', `every peerExchange condition declares windows; undeclared: ${undeclared.join(', ')}`);
   });
 }

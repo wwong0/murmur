@@ -6,7 +6,8 @@ import { peerPageReadingExpression } from './cdp-records.mjs';
 import { viewerHttpLeak, uplinkVersusDelivered } from '../figures/host-origin-checks.mjs';
 import { declaresResponseSettle } from '../figures/peer-evidence.mjs';
 import { CEILING_MS } from '../harness-cadence.mjs';
-import { ENGINE_WINDOW_DEFAULTS } from '../../public/lib/engine-windows.mjs';
+import { ENGINE_WINDOW_DEFAULTS, PRODUCT_ENGINE_WINDOWS } from '../../public/lib/engine-windows.mjs';
+import { HEADROOM_DEFAULT } from '../../public/lib/send-pace.mjs';
 
 export const REFUSAL_SCOPE = Object.freeze({
   neverPlayed: Object.freeze(['byte', 'drift']),
@@ -37,6 +38,7 @@ export const REFUSAL_SCOPE = Object.freeze({
   viewerInterface: Object.freeze(['byte']),
   positionOffset: Object.freeze(['byte', 'drift']),
   engineWindows: Object.freeze(['byte', 'drift']),
+  headroom: Object.freeze(['byte', 'drift']),
   capacityStep: Object.freeze(['byte', 'drift']),
   seek: Object.freeze(['byte', 'drift']),
   build: Object.freeze(['byte', 'drift']),
@@ -258,6 +260,15 @@ const HOST_ARM = Object.freeze({
     const originSession = options.originSession;
     const origin = await originSession.tab.evaluate('__app.hostCounters()');
     if (!origin) throw new Error(`host counter snapshot missing at ${kind} boundary`);
+    if (kind === 'start') {
+      const headroom = await readHeadroom(originSession);
+      writeJson(path.join(runDir, 'host-headroom.json'), headroom);
+      const manifestClients = manifestFile.get().clients;
+      manifestFile.merge({ clients: {
+        ...manifestClients,
+        [originSession.tag]: { ...manifestClients[originSession.tag], headroom },
+      } });
+    }
     if (kind === 'end') {
       for (const session of sessions.filter((entry) => entry.role === 'viewer')) {
         manifestFile.merge({ clients: { ...manifestFile.get().clients, [session.tag]: {
@@ -291,6 +302,7 @@ const HOST_ARM = Object.freeze({
       roomEnd: hostEvidence.roomEnd,
       roomFinal: hostEvidence.roomFinal,
       linkSamples: readNdjson(path.join(runDir, 'origin-link.ndjson')),
+      headroom: readJson(path.join(runDir, 'host-headroom.json')),
       receiptHealth: Object.fromEntries(sessions.map((session) => [session.tag, {
         missed: session.receiptLogMissed ?? 0,
         reset: session.receiptLogReset === true,
@@ -302,10 +314,16 @@ const HOST_ARM = Object.freeze({
     const url = `${clientOriginUrl}/room.html?room=${encodeURIComponent(room)}&role=host&tab=${this.hostTag}`;
     Object.assign(session, await clientFactory({ tag: this.hostTag, role: 'host', room, url, condition, runDir }));
     if (!session.tab) throw new Error('host tab is unavailable');
+    const hostSource = [
+      ...(condition.seek ? ['globalThis.__waHarnessSeek = true;'] : []),
+      ...(Object.prototype.hasOwnProperty.call(condition, 'headroomFraction')
+        ? [`globalThis.__waHeadroomFraction = ${JSON.stringify(condition.headroomFraction)};`]
+        : []),
+    ].join('\n');
     await prepareHostClient(session, url, deadline, {
-      beforeNavigate: condition.seek
+      beforeNavigate: hostSource
         ? async (hostSession) => hostSession.tab.send('Page.addScriptToEvaluateOnNewDocument', {
-          source: 'globalThis.__waHarnessSeek = true;',
+          source: hostSource,
         })
         : null,
     });
@@ -352,6 +370,7 @@ const HOST_ARM = Object.freeze({
       if (Number(health.missed) > 0) addReason('receipt-log-discarded-records', REFUSAL_SCOPE.receiptHealth, { tag, missed: health.missed });
       if (health.reset === true) addReason('receipt-log-reset', REFUSAL_SCOPE.receiptHealth, { tag });
     }
+    headroomRefusals(input, addReason);
   },
 });
 
@@ -552,9 +571,25 @@ async function readEngineWindows(session, condition) {
   const declared = declaredEngineWindows(condition);
   return {
     declared,
-    expected: declared ?? ENGINE_WINDOW_DEFAULTS,
+    expected: declared ?? PRODUCT_ENGINE_WINDOWS,
     inForce: mainStreamWindows(value?.config),
     pageError: value?.page?.error ?? null,
+  };
+}
+
+// T4 (design.md D2): the host's one reading, taken at the start boundary
+// alongside the host counter snapshot — the earliest common "ready" point a
+// single host session has, mirroring readEngineWindows above.
+async function readHeadroom(session) {
+  let value = null;
+  try {
+    value = await session.tab.evaluate('__app.headroom()');
+  } catch {}
+  return {
+    fraction: value?.fraction ?? null,
+    supplied: value?.supplied ?? null,
+    pageError: value?.error ?? null,
+    available: value !== null,
   };
 }
 
@@ -597,7 +632,7 @@ function viewerInterfaceRefusals(input, tags, addReason) {
 // Absent only on directories retained before 7c; a live run always carries the object.
 function engineWindowRefusals(input, tags, addReason) {
   if (!input.engineWindows) return;
-  const expected = declaredEngineWindows(input.condition ?? {}) ?? ENGINE_WINDOW_DEFAULTS;
+  const expected = declaredEngineWindows(input.condition ?? {}) ?? PRODUCT_ENGINE_WINDOWS;
   for (const tag of tags) {
     const reading = input.engineWindows[tag];
     if (reading?.pageError) {
@@ -607,6 +642,22 @@ function engineWindowRefusals(input, tags, addReason) {
     } else if (!sameEngineWindows(reading.inForce, expected)) {
       addReason('engine-windows-mismatch', REFUSAL_SCOPE.engineWindows, { tag, expected, inForce: reading.inForce });
     }
+  }
+}
+
+// One reading, not per-tag: the fraction is the host's alone. Absent only on
+// directories retained before this change; a live run always carries the object.
+function headroomRefusals(input, addReason) {
+  if (!input.headroom) return;
+  const condition = input.condition ?? {};
+  const expected = Object.prototype.hasOwnProperty.call(condition, 'headroomFraction') ? condition.headroomFraction : HEADROOM_DEFAULT;
+  const reading = input.headroom;
+  if (reading.pageError) {
+    addReason('headroom-fraction-invalid', REFUSAL_SCOPE.headroom, { error: reading.pageError });
+  } else if (!reading.available) {
+    addReason('headroom-fraction-unavailable', REFUSAL_SCOPE.headroom, {});
+  } else if (reading.fraction !== expected) {
+    addReason('headroom-fraction-mismatch', REFUSAL_SCOPE.headroom, { expected, published: reading.fraction });
   }
 }
 

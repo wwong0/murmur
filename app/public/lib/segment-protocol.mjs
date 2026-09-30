@@ -88,7 +88,7 @@ function setting(settings, name, fallback) {
   return Number.isFinite(settings?.[name]) ? settings[name] : fallback;
 }
 
-export function createChannelSender({ channel, clock, settings = {}, onClosed = null, onCredited = null }) {
+export function createChannelSender({ channel, clock, settings = {}, onClosed = null, onCredited = null, gate = null, onWaiting = null }) {
   const config = {
     chunkPayloadBytes: setting(settings, 'chunkPayloadBytes', CHUNK_PAYLOAD_BYTES),
     firstByteBudgetMs: setting(settings, 'firstByteBudgetMs', FIRST_BYTE_BUDGET_MS),
@@ -112,11 +112,40 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
   let waiting = false;
   let closed = false;
   let notified = false;
+  let gateWaitMs = null;
+  let hasWaiting = false;
 
   channel.bufferedAmountLowThreshold = config.bufferFloorBytes;
 
   function cursor() {
     return handedBytes - channel.bufferedAmount;
+  }
+
+  // Credited payload plus the drained part of the first uncredited frame's
+  // payload — byte-exact, unlike counting whole credited chunks alone.
+  function drainedBodyBytes() {
+    let total = 0;
+    for (const bytes of deliveredById.values()) total += bytes;
+    const first = frameFifo[0];
+    if (first) {
+      const frameStart = first.cumulativeEnd - (first.payloadBytes + FRAME_HEADER_BYTES);
+      const partial = Math.min(Math.max(cursor() - frameStart - FRAME_HEADER_BYTES, 0), first.payloadBytes);
+      total += partial;
+    }
+    return total;
+  }
+
+  function waitingBodyBytes() {
+    let total = 0;
+    for (const body of bodies.values()) total += body.bytes.byteLength - body.offset;
+    return total;
+  }
+
+  function notifyWaiting() {
+    const now = waitingBodyBytes() > 0;
+    if (now === hasWaiting) return;
+    hasWaiting = now;
+    try { onWaiting?.(now); } catch { /* a waiting listener must not stop delivery */ }
   }
 
   function credit() {
@@ -173,6 +202,7 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
     cancelWait();
     bodies.clear();
     order.length = 0;
+    notifyWaiting();
     if (report) notifyClosed(error);
   }
 
@@ -204,9 +234,11 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
       if (index < roundRobin) roundRobin -= 1;
       if (roundRobin >= order.length) roundRobin = 0;
     }
+    notifyWaiting();
   }
 
   function admit() {
+    gateWaitMs = null;
     while (!closed && bodies.size > 0 && channel.bufferedAmount < currentBound()) {
       let selected = null;
       for (let scan = 0; scan < order.length; scan++) {
@@ -218,19 +250,28 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
         }
       }
       if (!selected) break;
+      if (gate) {
+        const availability = gate.available(clock.now());
+        if (!availability.ok) {
+          gateWaitMs = availability.waitMs;
+          break;
+        }
+      }
       const { body, index } = selected;
       const length = Math.min(config.chunkPayloadBytes, body.bytes.byteLength - body.offset);
       const frame = encodeFrame(body.id, body.seq, body.bytes.subarray(body.offset, body.offset + length));
-      if (!sendRaw(frame)) return;
+      if (!sendRaw(frame)) { notifyWaiting(); return; }
+      gate?.take(length, clock.now());
       body.offset += length;
       body.seq += 1;
       frameFifo.push({ id: body.id, cumulativeEnd: handedBytes, payloadBytes: length });
       roundRobin = (index + 1) % order.length;
       if (body.offset >= body.bytes.byteLength) {
-        if (!sendControl({ t: 'end', id: body.id })) return;
+        if (!sendControl({ t: 'end', id: body.id })) { notifyWaiting(); return; }
         removeBody(body.id);
       }
     }
+    notifyWaiting();
   }
 
   function runWake() {
@@ -246,7 +287,7 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
     if (closed || waiting || (bodies.size === 0 && channel.bufferedAmount === 0)) return;
     waiting = true;
     channel.addEventListener('bufferedamountlow', wake);
-    timer = clock.setTimeout(wake, config.drainPollMs);
+    timer = clock.setTimeout(wake, gateWaitMs ?? config.drainPollMs);
   }
 
   // The buffer-low event, the drain poll and a new body all wake the same way.
@@ -279,6 +320,7 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
       removeBody(id);
       credit();
       scheduleWake();
+      notifyWaiting();
     },
     close() {
       if (closed) return;
@@ -291,6 +333,8 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
     pendingFrames(id) {
       return frameFifo.reduce((count, frame) => count + (frame.id === id ? 1 : 0), 0);
     },
+    drainedBodyBytes,
+    waitingBodyBytes,
     flush() {
       if (!closed) credit();
     },

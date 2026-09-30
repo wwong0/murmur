@@ -88,6 +88,7 @@ function makeOverlay({
   clockState = { offsetMs: null, halfWidthMs: null, sampleCount: 0 },
   controllerState = makeControllerState(),
   playbackState = { playing: true, missing: null },
+  heldAhead = () => null,
 } = {}) {
   const log = createDriftLog();
   const overlay = createDiagnosticsOverlay({
@@ -95,6 +96,7 @@ function makeOverlay({
     controller: fakeState(controllerState),
     log,
     playback: fakeState(playbackState),
+    heldAhead,
   });
   return { log, overlay };
 }
@@ -390,6 +392,19 @@ export default async function diagnosticsOverlaySuite() {
     assertEqual(lines[1], 'drift: not playing — preparing start (retargets 2)', 'preparing with its retargets');
     assertEqual(lines[2], 'drift: not playing — waiting for playback-state', 'missing state');
     assertEqual(lines[3], 'drift: not playing — waiting for host-link', 'missing host link');
+  });
+
+  await check('diagnostics overlay: a held room names held-ahead and never reuses the paused line', async () => {
+    const viewer = makeOverlay({
+      playbackState: { playing: false, missing: null, waiting: 'room-held', retargets: 2 },
+      heldAhead: () => ({ heldAheadMs: 4_250 }),
+    }).overlay.lines().drift;
+    assertEqual(viewer, 'drift: not playing — room held for the room · held-ahead 4.3 s', 'a viewer line carries its held-ahead figure');
+    const host = makeOverlay({
+      playbackState: { playing: false, missing: null, waiting: 'room-held', retargets: 2 },
+    }).overlay.lines().drift;
+    assertEqual(host, 'drift: not playing — room held for the room · held-ahead not reported', 'the host line names the absent report');
+    assert(!host.includes('room paused') && !viewer.includes('room paused'), 'held lines never call the room paused');
   });
 
   await check('diagnostics overlay: an in-threshold hold with no correction renders an acting shape (O1 input)', async () => {

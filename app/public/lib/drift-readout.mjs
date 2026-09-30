@@ -14,14 +14,26 @@ import {
   MISSING_CLOCK,
   MISSING_HOST_LINK,
   MISSING_STATE,
+  WAITING_HELD,
   WAITING_PAUSED,
   WAITING_PREPARING,
   WAITING_REFUSED,
 } from './playback-start.mjs';
 
-/** The scheduled start's status as words (change 5 design.md D6): a missing input first. */
-function notPlayingReason({ missing, waiting, retargets }) {
+/**
+ * The scheduled start's status as words (change 5 design.md D6): a missing
+ * input first. T9 (design.md D6): a held room names the viewer's held-ahead,
+ * never "room paused" — `heldAheadValue` is `null` before the reader has a
+ * value, which covers the host's page (never a value) and a viewer before its
+ * first one, so the line has nothing optional either way.
+ */
+function notPlayingReason({ missing, waiting, retargets }, heldAheadValue) {
   if (missing) return `waiting for ${missing}`;
+  if (waiting === WAITING_HELD) {
+    return heldAheadValue === null
+      ? 'room held for the room · held-ahead not reported'
+      : `room held for the room · held-ahead ${(heldAheadValue.heldAheadMs / 1000).toFixed(1)} s`;
+  }
   if (waiting === WAITING_PAUSED) return 'room paused';
   if (waiting === WAITING_PREPARING) return `preparing start (retargets ${retargets})`;
   if (waiting === WAITING_REFUSED) return 'start refused, click the page to start';
@@ -43,7 +55,13 @@ const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const MISSING_RE = [MISSING_CLOCK, MISSING_STATE, MISSING_HOST_LINK].map(escapeRegex).join('|');
 // The text notPlayingReason renders for WAITING_PAUSED, WAITING_PREPARING and
 // WAITING_REFUSED; the drift suite renders each one against this.
-const WAITING_RE = ['room paused', 'preparing start \\(retargets \\d+\\)', 'start refused, click the page to start'].join('|');
+const WAITING_RE = [
+  'room paused',
+  'preparing start \\(retargets \\d+\\)',
+  'start refused, click the page to start',
+  'room held for the room · held-ahead \\d+\\.\\d+ s',
+  'room held for the room · held-ahead not reported',
+].join('|');
 const REFUSAL_RE = REFUSAL_REASONS.map(escapeRegex).join('|');
 
 export const DRIFT_LINE_NOT_PLAYING_RE = new RegExp(
@@ -76,14 +94,14 @@ function whyNoRecords(counters, before) {
 /**
  * @param {{log: {read: Function, summary: Function}, playback: {state: () => object}}} config
  */
-export function createDriftReadout({ log, playback }) {
+export function createDriftReadout({ log, playback, heldAhead = () => null }) {
   let cursor = 0;
   /** The counters as of the previous line, so a rising one can be told from a high one. */
   let seenCounters = null;
 
   function text() {
     const status = playback.state();
-    if (!status.playing) return `drift: not playing — ${notPlayingReason(status)}`;
+    if (!status.playing) return `drift: not playing — ${notPlayingReason(status, heldAhead())}`;
     const read = log.read({ afterSeq: cursor });
     const before = seenCounters;
     seenCounters = read.counters;

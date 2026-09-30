@@ -694,6 +694,11 @@
       },
       "peerExchange": true,
       "positionOffsetMsByClient": { "c01": 0, "c02": 30000, "c03": 60000 },
+      "engineWindows": {
+        "highDemandTimeWindow": 15,
+        "httpDownloadTimeWindow": 3000,
+        "p2pDownloadTimeWindow": 6000
+      },
       "feeds": ["7b2-runner-qualification"]
     },
     "regimes-qual": {
@@ -1153,6 +1158,11 @@
     "peerExchange": true,
     "positionOffsetMsByClient": { "c01": 0, "c02": 0, "c03": 0, "c04": 0, "c05": 0 },
     "figureKinds": ["byte", "drift"],
+    "engineWindows": {
+      "highDemandTimeWindow": 15,
+      "httpDownloadTimeWindow": 3000,
+      "p2pDownloadTimeWindow": 6000
+    },
     "feeds": ["7b2-naive-measurement"]
   },
   "p2p-scattered": {
@@ -1190,6 +1200,11 @@
     },
     "peerExchange": true,
     "positionOffsetMsByClient": { "c01": 0, "c02": 30000, "c03": 60000, "c04": 90000, "c05": 120000 },
+    "engineWindows": {
+      "highDemandTimeWindow": 15,
+      "httpDownloadTimeWindow": 3000,
+      "p2pDownloadTimeWindow": 6000
+    },
     "feeds": ["7b2-scattered-control"]
   },
   "regimes-limited-shaped": {
@@ -1303,7 +1318,12 @@
     },
     "peerExchange": true,
     "positionOffsetMsByClient": { "c01": 0, "c02": 0, "c03": 0, "c04": 0, "c05": 0 },
-    "figureKinds": ["byte"]
+    "figureKinds": ["byte"],
+    "engineWindows": {
+      "highDemandTimeWindow": 15,
+      "httpDownloadTimeWindow": 3000,
+      "p2pDownloadTimeWindow": 6000
+    }
   },
   "regimes-starved": {
     "name": "regimes-starved",
@@ -1343,7 +1363,12 @@
     },
     "peerExchange": true,
     "positionOffsetMsByClient": { "c01": 0, "c02": 0, "c03": 0, "c04": 0, "c05": 0 },
-    "figureKinds": ["byte"]
+    "figureKinds": ["byte"],
+    "engineWindows": {
+      "highDemandTimeWindow": 15,
+      "httpDownloadTimeWindow": 3000,
+      "p2pDownloadTimeWindow": 6000
+    }
   },
   "trap-seek": {
     "name": "trap-seek",

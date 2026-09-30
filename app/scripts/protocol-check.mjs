@@ -89,6 +89,12 @@ import peerBytesSuite from './check/suites/peer-bytes.mjs';
 import bytesReadoutSuite from './check/suites/bytes-readout.mjs';
 import peerEngineConfigSuite from './check/suites/peer-engine-config.mjs';
 import engineWindowsSuite from './check/suites/engine-windows.mjs';
+import urgentSourceSuite from './check/suites/urgent-source.mjs';
+import enginePatchSuite from './check/suites/engine-patch.mjs';
+import capacityEstimateSuite from './check/suites/capacity-estimate.mjs';
+import sendPaceSuite from './check/suites/send-pace.mjs';
+import hostPaceSuite from './check/suites/host-pace.mjs';
+import headroomSuite from './check/suites/headroom.mjs';
 import seekEntrySuite from './check/suites/seek-entry.mjs';
 import capacityStepSuite from './check/suites/capacity-step.mjs';
 import seekEvidenceSuite from './check/suites/seek-evidence.mjs';
@@ -101,6 +107,10 @@ import peerExchangeEntrySuite from './check/suites/peer-exchange-entry.mjs';
 import peerExchangeBarsSuite from './check/suites/peer-exchange-bars.mjs';
 import positionOffsetSuite from './check/suites/position-offset.mjs';
 import roomTimelineSuite from './check/suites/room-timeline.mjs';
+import aheadRelaySuite from './check/suites/ahead-relay.mjs';
+import playbackHoldSuite from './check/suites/playback-hold.mjs';
+import heldAheadLiveSuite from './check/suites/held-ahead-live.mjs';
+import holdResumeSuite from './check/suites/hold-resume.mjs';
 import playbackStateSuite from './check/suites/playback-state.mjs';
 import playbackStateRulesSuite from './check/suites/playback-state-rules.mjs';
 import playbackAcquisitionSuite from './check/suites/playback-acquisition.mjs';
@@ -196,6 +206,12 @@ for (const suite of [
   bytesReadoutSuite,
   peerEngineConfigSuite,
   engineWindowsSuite,
+  urgentSourceSuite,
+  enginePatchSuite,
+  capacityEstimateSuite,
+  sendPaceSuite,
+  hostPaceSuite,
+  headroomSuite,
   seekEntrySuite,
   capacityStepSuite,
   seekEvidenceSuite,
@@ -208,6 +224,10 @@ for (const suite of [
   peerExchangeBarsSuite,
   positionOffsetSuite,
   roomTimelineSuite,
+  aheadRelaySuite,
+  playbackHoldSuite,
+  heldAheadLiveSuite,
+  holdResumeSuite,
   playbackStateSuite,
   playbackStateRulesSuite,
   playbackAcquisitionSuite,

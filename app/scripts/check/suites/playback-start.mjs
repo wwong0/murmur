@@ -10,6 +10,7 @@ import {
   MISSING_CLOCK,
   MISSING_HOST_LINK,
   MISSING_STATE,
+  WAITING_HELD,
   WAITING_PAUSED,
   WAITING_PREPARING,
   WAITING_REFUSED,
@@ -84,6 +85,22 @@ export default async function playbackStartSuite() {
     assertEqual(status.actions.length, 0, 'resolved without state has no actions');
     assertEqual(status.missing, MISSING_STATE, 'state is named when clock is present');
     assertEqual(status.resolved, false, 'state without a snapshot is not resolved');
+  });
+
+  await check('playback-start: a held mapping is named room-held, not room-paused, with every other snapshot field unchanged', async () => {
+    const pausedState = paused();
+    const pausedResult = rig({ state: pausedState }).poll();
+    const heldResult = rig({ state: { ...pausedState, current: { ...pausedState.current, held: true } } }).poll();
+    const sharedFields = ['playing', 'resolved', 'missing', 'opens', 'begun', 'retargets', 'reparks', 'lastLatenessMs', 'lastPlayError', 'attemptId', 'startAtSharedMs'];
+    for (const field of sharedFields) {
+      assertEqual(heldResult[field], pausedResult[field], `held and paused agree on ${field}`);
+    }
+    assertEqual(pausedResult.waiting, WAITING_PAUSED, 'the ordinary paused mapping remains room-paused');
+    assertEqual(heldResult.waiting, WAITING_HELD, 'the held mapping is room-held');
+    assert(heldResult.waiting !== WAITING_PAUSED, 'a held room is never reported as room-paused');
+    // Mutation probe: staged, then the held branch in playback-start.mjs's
+    // snapshot was removed. `npm run check` turned the 'the held mapping is
+    // room-held' assertion red (room-paused). Reverted; check green again.
   });
 
   await check('playback-start: a viewer holds the first load until the host link opens', async () => {

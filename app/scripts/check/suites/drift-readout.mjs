@@ -22,6 +22,7 @@ import {
   MISSING_CLOCK,
   MISSING_HOST_LINK,
   MISSING_STATE,
+  WAITING_HELD,
   WAITING_PAUSED,
   WAITING_PREPARING,
   WAITING_REFUSED,
@@ -36,10 +37,10 @@ function fakePlayback(state = { playing: false, missing: MISSING_CLOCK }) {
 /** A record carrying one drift figure. Only `driftMs` reaches the line. */
 const drifted = (driftMs) => ({ ok: true, record: { driftMs, clock: {} } });
 
-function rig() {
+function rig({ heldAhead = () => null } = {}) {
   const log = createDriftLog();
   const playback = fakePlayback();
-  return { log, playback, readout: createDriftReadout({ log, playback }) };
+  return { log, playback, readout: createDriftReadout({ log, playback, heldAhead }) };
 }
 
 export default async function driftReadoutSuite() {
@@ -61,6 +62,18 @@ export default async function driftReadoutSuite() {
     assertEqual(lines[1], 'drift: not playing — preparing start (retargets 3)', 'preparing names its retargets');
     assertEqual(lines[2], 'drift: not playing — start refused, click the page to start', 'a refused start names the remedy');
     assertEqual(new Set(lines).size, 3, 'the three reasons render distinctly');
+
+    playback.held.state = { ...base, waiting: WAITING_HELD };
+    assertEqual(readout.text(), 'drift: not playing — room held for the room · held-ahead not reported', 'a held host or not-yet-reporting viewer names the held room');
+  });
+
+  await check('drift read-out: a held viewer renders its held-ahead figure, and the figure is required by the shape', async () => {
+    const { playback, readout } = rig({ heldAhead: () => ({ heldAheadMs: 4_250 }) });
+    playback.held.state = { playing: false, missing: null, waiting: WAITING_HELD, retargets: 3 };
+    const line = readout.text();
+    assertEqual(line, 'drift: not playing — room held for the room · held-ahead 4.3 s', 'held-ahead is formatted to one decimal second');
+    assert(DRIFT_LINE_NOT_PLAYING_RE.test(line), 'the figure-bearing held line matches the published not-playing shape');
+    assert(!DRIFT_LINE_NOT_PLAYING_RE.test('drift: not playing — room held for the room'), 'a held line without its figure is not accepted');
   });
 
   await check('drift read-out: playing and recording nothing says WHICH counter is rising, fastest first', async () => {
@@ -109,7 +122,7 @@ export default async function driftReadoutSuite() {
 
   await check('drift read-out: every silent form has only its own published shape', async () => {
     const missing = [MISSING_CLOCK, MISSING_STATE, MISSING_HOST_LINK];
-    const waiting = [WAITING_PAUSED, WAITING_PREPARING, WAITING_REFUSED];
+    const waiting = [WAITING_PAUSED, WAITING_PREPARING, WAITING_REFUSED, WAITING_HELD];
     const notPlaying = [
       ...missing.map((reason) => {
         const { playback, readout } = rig();

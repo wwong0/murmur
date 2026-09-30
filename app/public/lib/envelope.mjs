@@ -87,6 +87,27 @@ export function buildPlaybackStateAnswerEnvelope({ to, replyTo, payload }) {
   return buildClientEnvelope({ type: TYPE_PLAYBACK_STATE_ANSWER, to, replyTo, payload });
 }
 
+// T6 (design.md D5): a viewer's held-ahead report, relayed to the host over the
+// room's own websocket — no server change (server/** carries no "payload").
+export const TYPE_AHEAD = 'ahead';
+
+/** Build a viewer's held-ahead report, addressed to one member (the host). */
+export function buildAheadEnvelope({ to, lineage, version, heldAheadMs }) {
+  return buildClientEnvelope({ type: TYPE_AHEAD, to, payload: { lineage, version, heldAheadMs } });
+}
+
+/** Read a relayed `ahead` envelope; `null` on any malformed field. */
+export function readAheadReport(env) {
+  if (env === null || typeof env !== 'object') return null;
+  if (typeof env.from !== 'string' || env.from.length === 0) return null;
+  const body = env.payload;
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return null;
+  if (typeof body.lineage !== 'string' || body.lineage.length === 0) return null;
+  if (!Number.isInteger(body.version)) return null;
+  if (typeof body.heldAheadMs !== 'number' || !Number.isFinite(body.heldAheadMs) || body.heldAheadMs < 0) return null;
+  return { from: env.from, lineage: body.lineage, version: body.version, heldAheadMs: body.heldAheadMs };
+}
+
 // Direction-aware structural validation; payload meaning belongs to consumers.
 
 /** Return `{ok}` or `{ok:false, reason}` for client envelopes. */

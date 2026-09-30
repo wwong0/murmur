@@ -87,6 +87,7 @@ import { t9FigureLines } from './drift-browser-report.mjs';
 import { inSyncWithoutCorrection } from './settle-wait.mjs';
 import { TRANSITION_LEAD_MS } from '../public/lib/playback-leads.mjs';
 import { WAITING_PAUSED } from '../public/lib/playback-start.mjs';
+import { PRODUCT_ENGINE_WINDOWS } from '../public/lib/engine-windows.mjs';
 import { seamEpochAgreement, startResidual } from './start-residual.mjs';
 import { evaluatePeerExchange } from './figures/peer-exchange-bars.mjs';
 import { PEER_PAGE_READING } from './peer-exchange-probe.mjs';
@@ -116,12 +117,9 @@ const MEDIA_DIR = path.resolve(process.env.APP_MEDIA_DIR ?? path.join(APP_DIR, '
 const WINDOW_STATE = 'visible, non-occluded (Chrome automation flags)';
 const MAX_RETAINED_BYTES = 10 * 1024 * 1024;
 /**
- * The gap the run IMPOSES between the two windows (3b design.md D3). Without it
- * the assertion below cannot fail: open both at the same instant and a working
- * timeline and a DELETED timeline both put both windows near position zero, so
- * the observation is identical in the two worlds it has to separate. With it,
- * a working timeline makes the second window catch up and a broken one leaves
- * it ten seconds behind. It is the input to the experiment, not dead time.
+ * The hold the run IMPOSES before the second window joins. Held creation replaces
+ * the old playing gap: a working room keeps the host held while it is alone, then
+ * resumes both pages from one state after the viewer reports enough media.
  */
 const WINDOW_GAP_MS = 10000;
 
@@ -220,6 +218,7 @@ function readContentFrameRate() {
 
 const URL_A = `${ORIGIN}/room.html?room=demo&role=host&tab=A`;
 const URL_B = `${ORIGIN}/room.html?room=demo&role=viewer&tab=B`;
+const URL_C = `${ORIGIN}/room.html?room=demo&role=viewer&tab=C`;
 const URL_V = `${ORIGIN}/room.html?room=demo&role=viewer&tab=V`;
 const URL_P = `${ORIGIN}/room.html?room=demo&role=viewer&tab=P`;
 // The treatment's event history, on the two measured windows only; the later
@@ -227,10 +226,11 @@ const URL_P = `${ORIGIN}/room.html?room=demo&role=viewer&tab=P`;
 const URL_A_MEASURED = `${URL_A}&treatmentEvidence=1`;
 const URL_B_MEASURED = `${URL_B}&treatmentEvidence=1`;
 
-// The first window IS page A — no about:blank bootstrap window.
+// The first window IS page A. It opens blank so the harness seek flag is
+// installed before the product loads (T12), then navigates to A.
 const chrome = spawn(
   CHROME,
-  [...FLAGS, `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`, '--window-size=700,500', '--window-position=0,0', URL_A_MEASURED],
+  [...FLAGS, `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`, '--window-size=700,500', '--window-position=0,0', 'about:blank'],
   { stdio: 'ignore' }
 );
 
@@ -248,6 +248,22 @@ async function attach(label, url, alreadyOpen = false) {
   const before = new Set((await cdpHttp('/json/list')).map((t) => t.id));
   spawn(CHROME, [...FLAGS, '--new-window', `--user-data-dir=${profile}`, '--window-size=700,500', url], { stdio: 'ignore' });
   return attachTo(PORT, url, { label, exclude: before });
+}
+
+/**
+ * Opens a fresh target, installs the urgent-delay fixture before navigation,
+ * and only then loads the product. The loader reads this global at module
+ * evaluation time, so a reload after an ordinary attach would be too late.
+ */
+async function attachWithUrgentDelay(label, url, delayMs) {
+  if (!Number.isFinite(delayMs) || delayMs < 0 || delayMs > 500) throw new TypeError(`invalid urgent delay for ${label}`);
+  const before = new Set((await cdpHttp('/json/list')).map((t) => t.id));
+  spawn(CHROME, [...FLAGS, '--new-window', `--user-data-dir=${profile}`, '--window-size=700,500', 'about:blank'], { stdio: 'ignore' });
+  const tab = await attachTo(PORT, 'about:blank', { label, exclude: before });
+  await tab.send('Page.enable');
+  await tab.send('Page.addScriptToEvaluateOnNewDocument', { source: `globalThis.__waUrgentDelayMs = ${JSON.stringify(delayMs)};` });
+  await tab.send('Page.navigate', { url });
+  return tab;
 }
 
 // `currentTime` appears here and NOWHERE ELSE IN THIS FILE, for two questions it
@@ -322,6 +338,21 @@ const SEAM = `(() => {
   };
 })()`;
 
+/** Values used for the held-creation step, without folding them into every drift sample. */
+const HOLD_SEAM = `(() => {
+  const app = window.__app;
+  if (!app) return { present: false };
+  const playback = app.playback();
+  return {
+    present: true,
+    playback,
+    playbackState: app.playbackState(),
+    heldAhead: app.heldAhead(),
+    resumes: app.resumes(),
+    starts: playback.starts,
+  };
+})()`;
+
 /** The page surface change 5 pass 2 adds: controls, invite, URL, and the state they act on. */
 const PAGE = `(() => {
   const app = window.__app;
@@ -387,12 +418,10 @@ async function seamOf(tab, timeoutMs = 20000) {
 }
 
 /**
- * How far this window has played PAST WHERE IT OPENED. `currentTime` on its own
- * stopped meaning "it is playing" the moment change 3b made playback start at
- * the room's position: the second window opens WINDOW_GAP_MS in BY CONSTRUCTION,
- * so `time > 1` is true of it before it has shown a single frame. A window whose
- * start position is unreadable yields NaN, which fails every comparison below
- * rather than passing one.
+ * How far this window has played PAST WHERE IT OPENED. A window whose start
+ * position is unreadable yields NaN, which fails every comparison below rather
+ * than passing one. Held creation means the second page now opens with the room,
+ * so this remains a movement check after the shared resume rather than a gap test.
  */
 function advancedMs(seam, probe) {
   const startedAt = latestStart(seam)?.positionMs;
@@ -778,8 +807,12 @@ try {
   const windows = await cdpHttp('/json/list');
   console.log(`(chrome opened ${windows.filter((t) => t.type === 'page').length} page target(s))`);
 
-  console.log('\n--- 7.1 / 7.2: two windows, one room ---');
-  const a = await attach('A/host', URL_A_MEASURED, true);
+  console.log('\n--- 7.1 / 7.2: two windows, one room after held creation ---');
+  const a = await attach('A/host', 'about:blank', true);
+  // Without Page.enable the script is accepted and never runs (C2's probe, 8b).
+  await a.send('Page.enable');
+  await a.send('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.__waHarnessSeek = true;' });
+  await a.send('Page.navigate', { url: URL_A_MEASURED });
   recorderA = createRecorder({ label: 'A', tab: a, dir: RUN_DIR, treatment: true });
 
   console.log('\n--- 3.1: which build is this run talking to? ---');
@@ -798,12 +831,79 @@ try {
     `page reports ${seamEarly.buildId}`
   );
 
-  // THE IMPOSED GAP (3.4) — the input to the experiment, not dead time. Read
-  // WINDOW_GAP_MS before shortening or removing it.
-  console.log(`\n--- 3.4: opening the second window ${WINDOW_GAP_MS / 1000}s late, on purpose ---`);
+  console.log('\n--- T11: held creation before the viewer joins ---');
+  const heldAlone = await pollUntil(
+    () => a.evaluate(HOLD_SEAM),
+    (reading) => reading.present
+      && reading.playbackState?.held === true
+      && reading.playback?.waiting === 'room-held',
+    { everyMs: 250, deadlineAt: Date.now() + 30_000 },
+  );
+  expect(
+    "T11 host A alone publishes a held state with waiting 'room-held'",
+    heldAlone.ok && heldAlone.value.playbackState?.held === true && heldAlone.value.playback?.waiting === 'room-held',
+    JSON.stringify({ playback: heldAlone.value.playback, playbackState: heldAlone.value.playbackState }),
+  );
+  expect(
+    'T11 host A alone has no resume record before a viewer joins',
+    (heldAlone.value.resumes?.records ?? []).length === 0,
+    JSON.stringify(heldAlone.value.resumes),
+  );
+
+  // THE IMPOSED HOLD (3.4) — the input to the re-derived experiment, not dead
+  // time. Read WINDOW_GAP_MS before shortening or removing it.
+  console.log(`\n--- 3.4: keeping creation held for ${WINDOW_GAP_MS / 1000}s before the viewer joins ---`);
   await pumpingWait([recorderA], WINDOW_GAP_MS, CAPTURE_POLL_MS);
-  const b = await attach('B/view', URL_B_MEASURED);
+  const heldBeforeViewer = await a.evaluate(HOLD_SEAM);
+  expect(
+    `3.4 host A remains held while alone for ${WINDOW_GAP_MS / 1000}s`,
+    heldBeforeViewer.playbackState?.held === true && heldBeforeViewer.playback?.waiting === 'room-held',
+    JSON.stringify({ playback: heldBeforeViewer.playback, playbackState: heldBeforeViewer.playbackState }),
+  );
+  const b = await attachWithUrgentDelay('B/view', URL_B_MEASURED, 0);
   recorderB = createRecorder({ label: 'B', tab: b, dir: RUN_DIR, treatment: true });
+
+  console.log('\n--- T11: held creation resumed by a viewer\'s reports ---');
+  const heldResume = await pollUntil(
+    async () => {
+      const [host, viewer] = await Promise.all([a.evaluate(HOLD_SEAM), b.evaluate(HOLD_SEAM)]);
+      return { host, viewer };
+    },
+    ({ host, viewer }) => Number(viewer.heldAhead?.heldAheadMs) >= 4_000
+      && (host.resumes?.records ?? []).length > 0
+      && (host.starts ?? []).length > 0,
+    { everyMs: 250, deadlineAt: Date.now() + 60_000 },
+  );
+  const heldHost = heldResume.value.host ?? {};
+  const heldViewer = heldResume.value.viewer ?? {};
+  const heldRecords = heldHost.resumes?.records ?? [];
+  const heldRecord = heldRecords[0] ?? null;
+  const heldBReport = heldRecord ? Object.values(heldRecord.viewers ?? {}).find((viewer) => viewer?.tabId === 'B') : null;
+  const heldPlay = heldHost.starts?.at(-1) ?? null;
+  const heldResumeDetail = JSON.stringify({
+    cause: heldRecord?.cause ?? null,
+    B: { heldAheadMs: heldViewer.heldAhead?.heldAheadMs ?? null, report: heldBReport ?? null },
+    issuedAtSharedMs: heldRecord?.issuedAtSharedMs ?? null,
+    playAtSharedMs: heldPlay?.playAtSharedMs ?? null,
+    A: { waiting: heldHost.playback?.waiting ?? null, playing: heldHost.playback?.playing ?? null },
+  });
+  expect(
+    'T11 B reports at least 4000ms held-ahead',
+    heldResume.ok && Number(heldViewer.heldAhead?.heldAheadMs) >= 4_000,
+    heldResumeDetail,
+  );
+  expect(
+    "T11 A records exactly one ready resume containing B's report",
+    heldRecords.length === 1 && heldRecord?.cause === 'ready' && heldBReport !== undefined && Number(heldBReport?.heldAheadMs) >= 4_000,
+    heldResumeDetail,
+  );
+  expect(
+    "T11 A's element starts only after the ready resume was issued",
+    Number.isFinite(heldRecord?.issuedAtSharedMs)
+      && Number.isFinite(heldPlay?.playAtSharedMs)
+      && heldPlay.playAtSharedMs >= heldRecord.issuedAtSharedMs,
+    heldResumeDetail,
+  );
 
   console.log('\n--- T5: waiting for both windows to settle ---');
   const recorders = [recorderA, recorderB];
@@ -895,7 +995,7 @@ try {
   expect(`3.6 B is within ${DRIFT_TOLERANCE_MS}ms of the room`, Math.abs(convergedB.convergedMedianMs ?? Infinity) <= DRIFT_TOLERANCE_MS, `median ${convergedB.convergedMedianMs?.toFixed(1)}ms over ${convergedB.convergedCount} records`);
   const spread = Math.abs((convergedA.convergedMedianMs ?? NaN) - (convergedB.convergedMedianMs ?? NaN));
   expect(
-    `3.5 the late window caught up: the two agree to within ${POSITION_TOLERANCE_MS}ms, not the ${WINDOW_GAP_MS / 1000}s it opened late`,
+    `3.5 held creation kept the second window aligned: the two agree to within ${POSITION_TOLERANCE_MS}ms after the ${WINDOW_GAP_MS / 1000}s hold`,
     spread <= POSITION_TOLERANCE_MS,
     `A median ${convergedA.convergedMedianMs ?? 'null'}ms; B median ${convergedB.convergedMedianMs ?? 'null'}ms over ${CONVERGED_WINDOW_MS / 1000}s spans (${convergedA.convergedCount}/${convergedB.convergedCount} records)`
   );
@@ -936,24 +1036,35 @@ try {
     expect(`3.8 ${label}'s controller line uses a published shape`, controllerMatches.length === readings.length, JSON.stringify(distinct('controllerText')));
   }
 
-  console.log('\n--- 7.1 / 7.2: two windows, one room ---');
+  console.log('\n--- 7.1 / 7.2: two windows, one room after held creation ---');
   console.log('  A:', JSON.stringify(pa));
   console.log('  B:', JSON.stringify(pb));
   const advA = advancedMs(sa, pa);
   const advB = advancedMs(sb, pb);
-  expect('7.1 both windows have played on past where they opened', advA > 1000 && advB > 1000, `A +${(advA / 1000).toFixed(1)}s past its start, B +${(advB / 1000).toFixed(1)}s`);
+  expect('7.1 both windows have played on past where the held room resumed them', advA > 1000 && advB > 1000, `A +${(advA / 1000).toFixed(1)}s past its start, B +${(advB / 1000).toFixed(1)}s`);
   expect('7.1 both rosters show two members', pa.members.length === 2 && pb.members.length === 2, `A=${pa.members.length} B=${pb.members.length}`);
   expect('7.1 rosters agree', JSON.stringify(pa.members.slice().sort()) === JSON.stringify(pb.members.slice().sort()));
 
   console.log('\n--- 5.1: a late-joining viewer and peer exchange (7b D7) ---');
-  // B has played far longer than D7's 20 s head start, so P is the late joiner.
-  // P closes before T7, which observes A and B only.
+  // A and B have resumed together; P is the late joiner after the held-creation
+  // start. P closes before T7, which observes A and B only.
   const peerSettings = await (await fetch(`${ORIGIN}/app-settings`, { cache: 'no-store' })).json();
   const p = await attach('P/view', URL_P);
   const pStart = (await pollUntil(() => p.evaluate(PEER_PAGE_READING), (reading) => reading?.playback?.playing === true, { everyMs: 500, deadlineAt: Date.now() + 60_000 })).value;
   await sleep(2000);
   const pAdvanced = await p.evaluate(PEER_PAGE_READING);
   expect('5.1 the late joiner plays and advances 2 s', (pAdvanced.currentTime - pStart.currentTime) >= 2, `${pStart.currentTime} → ${pAdvanced.currentTime}`);
+  // 3.5's catch-up claim, re-derived: held creation starts A and B together, so
+  // P is now the window that opens late. A deleted timeline would seat P at its
+  // own join instant, a minute or more off the room's epoch.
+  const roomAtP = (await a.evaluate(HOLD_SEAM)).playbackState;
+  const pEpochMs = pAdvanced.playback?.starts?.at(-1)?.epochMs;
+  const roomEpochMs = roomAtP?.playing ? roomAtP.atSharedMs - roomAtP.positionMs : NaN;
+  expect(
+    `3.5 the late joiner started on the room's timeline, within ${POSITION_TOLERANCE_MS}ms of its epoch`,
+    Math.abs(pEpochMs - roomEpochMs) <= POSITION_TOLERANCE_MS,
+    `P seam epoch ${pEpochMs}; room epoch ${roomEpochMs}`,
+  );
   const peerDeadline = Date.now() + 90_000;
   let peerReading = null;
   do {
@@ -965,19 +1076,119 @@ try {
   const peerBars = evaluatePeerExchange({
     ...peerReading,
     defaults: {
-      defaultStreamConfig: Core.DEFAULT_STREAM_CONFIG,
+      // B2 used to re-derive the library defaults. T1 makes the product's
+      // 15/60/60 windows the no-harness input, so this browser bar reads back
+      // that product set while retaining the rest of the library config.
+      defaultStreamConfig: { ...Core.DEFAULT_STREAM_CONFIG, ...PRODUCT_ENGINE_WINDOWS },
       defaultCommonConfig: Core.DEFAULT_COMMON_CORE_CONFIG,
       trackerUrl: peerSettings.trackerUrl,
       iceServers: peerSettings.iceServers,
     },
   });
-  for (const key of ['B1', 'B3', 'B4', 'B5', 'B8']) {
+  for (const key of ['B1', 'B2', 'B3', 'B4', 'B5', 'B8']) {
     const bar = peerBars.byKey[key];
     expect(`5.1 ${key} peer-exchange bar passes`, bar?.pass === true, JSON.stringify(bar));
   }
   await cdpHttp(`/json/close/${p.targetId}`);
   const rosterBack = (await pollUntil(() => a.evaluate(PROBE), (probe) => probe.members.length === 2, { everyMs: 500, deadlineAt: Date.now() + 15_000 })).value;
   expect('5.1 closing the late joiner returns the room to two members', rosterBack.members.length === 2, JSON.stringify(rosterBack.members));
+
+  console.log('\n--- T12: one held seek, one host response, and one peer handoff ---');
+  // B draws 0 and C draws 400, so C sees B's announcement before its own
+  // host load (B's amendment 1). C joins after the late joiner has closed. Both globals are
+  // installed before the product document is navigated, so this probes the
+  // loader's once-per-episode draw rather than a post-load seam override.
+  const c = await attachWithUrgentDelay('C/view', URL_C, 400);
+  const delayReady = await pollUntil(
+    async () => ({
+      b: await b.evaluate('window.__app?.urgentDelay?.() ?? null'),
+      c: await c.evaluate('window.__app?.urgentDelay?.() ?? null'),
+      bPage: await pageOf(b),
+      cPage: await pageOf(c),
+    }),
+    (reading) => reading.b?.fixedMs === 0
+      && reading.c?.fixedMs === 400
+      && reading.bPage.present
+      && reading.cPage.present,
+    { everyMs: 250, deadlineAt: Date.now() + 30_000 },
+  );
+  expect('T12 B and C publish their fixed urgent delays', delayReady.ok, JSON.stringify({ b: delayReady.value.b, c: delayReady.value.c }));
+
+  const urgentBefore = {
+    host: await a.evaluate('window.__app.hostCounters()'),
+    b: await b.evaluate('window.__app.peerBytes()'),
+    c: await c.evaluate('window.__app.peerBytes()'),
+  };
+  // +600 s, as 8a's trap seek: past every viewer's 60 s windows, so neither holds
+  // the landing and both need it at once. A +10 s seek lands inside B's buffer.
+  const seekReady = await pollUntil(() => pageOf(a), (page) => page.buttons?.['forward-10']?.disabled === false, { everyMs: 250, deadlineAt: Date.now() + 15_000 });
+  const seekIssue = seekReady.ok ? await a.evaluate('window.__app.harnessSeek(600000)') : null;
+  expect('T12 the host issues a +600 s held seek while B and C are present', seekIssue?.issued === true, JSON.stringify(seekIssue));
+  const landing = (await pollUntil(() => a.evaluate('window.__app.playbackState()'), (state) => state?.held === true && state.positionMs >= 600_000, { everyMs: 100, deadlineAt: Date.now() + 5_000 })).value;
+  const landingMs = landing?.held === true ? landing.positionMs : NaN;
+
+  const urgentEvidence = await pollUntil(
+    async () => {
+      const [host, bReading, cReading] = await Promise.all([
+        a.evaluate('window.__app.hostCounters()'),
+        b.evaluate('window.__app.peerBytes()'),
+        c.evaluate('window.__app.peerBytes()'),
+      ]);
+      const retainedByPath = (reading, cursor) => {
+        const attempts = new Map(reading.records
+          .filter((record) => record.seq > cursor.latestSeq && record.kind === 'attempt')
+          .map((record) => [record.attemptId, record]));
+        const byPath = new Map();
+        for (const segment of reading.records.filter((record) => record.seq > cursor.latestSeq && record.kind === 'segment')) {
+          const useful = (segment.keptAttemptIds ?? [])
+            .map((attemptId) => attempts.get(attemptId))
+            .filter((attempt) => attempt && (attempt.source === 'http' || attempt.source === 'p2p'));
+          if (useful.length > 0) byPath.set(segment.path, { segment, attempts: useful });
+        }
+        return byPath;
+      };
+      const bByPath = retainedByPath(bReading, urgentBefore.b);
+      const cByPath = retainedByPath(cReading, urgentBefore.c);
+      // The landing segment only, by its media times — never the first path that
+      // happens to show the wanted pattern.
+      const landingPath = [...bByPath.values()]
+        .find(({ segment }) => segment.mediaStartMs <= landingMs && landingMs < segment.mediaEndMs)?.segment.path ?? null;
+      const bEntry = landingPath ? bByPath.get(landingPath) : null;
+      const cEntry = landingPath ? cByPath.get(landingPath) : null;
+      const candidate = bEntry && cEntry
+        ? { path: landingPath, b: bEntry, c: cEntry, bPeerId: bReading.peerId, cPeerId: cReading.peerId }
+        : null;
+      return { host, bReading, cReading, candidate };
+    },
+    ({ candidate }) => candidate !== null,
+    { everyMs: 250, deadlineAt: Date.now() + 45_000 },
+  );
+  const urgent = urgentEvidence.value;
+  const urgentCandidate = urgent.candidate;
+  const hostByPath = urgent.host?.counters?.byPath ?? {};
+  const hostBeforePath = urgentBefore.host?.counters?.byPath?.[urgentCandidate?.path]?.hits ?? 0;
+  const hostAfterPath = hostByPath[urgentCandidate?.path]?.hits ?? 0;
+  const bAttempt = urgentCandidate?.b.attempts[0] ?? null;
+  const cAttempt = urgentCandidate?.c.attempts[0] ?? null;
+  const sourcesOf = (entry) => [...new Set((entry?.attempts ?? []).map((attempt) => attempt.source))].join(',');
+  expect(
+    'T12 the held landing has one HTTP attempt for B and one P2P attempt for C',
+    urgentEvidence.ok && sourcesOf(urgentCandidate?.b) === 'http' && sourcesOf(urgentCandidate?.c) === 'p2p',
+    JSON.stringify({ landingMs, path: urgentCandidate?.path, B: urgentCandidate?.b.attempts, C: urgentCandidate?.c.attempts }),
+  );
+  expect(
+    'T12 C gets the landing bytes from B',
+    cAttempt?.peerId === urgentCandidate?.bPeerId,
+    JSON.stringify({ B: urgentCandidate?.bPeerId, C: cAttempt?.peerId }),
+  );
+  expect(
+    'T12 the host serves exactly one response for the landing path',
+    urgentCandidate !== null && hostAfterPath - hostBeforePath === 1,
+    JSON.stringify({ path: urgentCandidate?.path, before: hostBeforePath, after: hostAfterPath, counters: urgent.host?.counters }),
+  );
+  await cdpHttp(`/json/close/${c.targetId}`);
+  const rosterAfterUrgent = (await pollUntil(() => a.evaluate(PROBE), (probe) => probe.members.length === 2, { everyMs: 500, deadlineAt: Date.now() + 15_000 })).value;
+  expect('T12 closing C returns the measured room to two members', rosterAfterUrgent.members.length === 2, JSON.stringify(rosterAfterUrgent.members));
 
   console.log('\n--- T7: model check and hardware questions ---');
   const observationStates = await observeWindows([{ label: 'A', tab: a, recorder: recorderA }, { label: 'B', tab: b, recorder: recorderB }], OBSERVE_MS);
@@ -1157,7 +1368,7 @@ try {
   const pb2 = await b.evaluate(PROBE);
   const advA2 = advancedMs(await seamOf(a), pa2);
   const advB2 = advancedMs(await seamOf(b), pb2);
-  expect('7.2 playback continues past the first few segments', advA2 > 12000 && advB2 > 12000, `A +${(advA2 / 1000).toFixed(1)}s past its start, B +${(advB2 / 1000).toFixed(1)}s`);
+  expect('7.2 playback continues past the first few segments after the held resume', advA2 > 12000 && advB2 > 12000, `A +${(advA2 / 1000).toFixed(1)}s past its start, B +${(advB2 / 1000).toFixed(1)}s`);
   expect('7.2 neither window stalled', pa2.time > pa.time + 5 && pb2.time > pb.time + 5, `A +${(pa2.time - pa.time).toFixed(1)}s, B +${(pb2.time - pb.time).toFixed(1)}s`);
 
   console.log('\n--- 9.1: replicated pause and resume, by page click ---');
