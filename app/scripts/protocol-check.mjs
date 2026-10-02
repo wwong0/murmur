@@ -47,6 +47,8 @@ import trackerSpawnSuite from './check/suites/tracker-spawn.mjs';
 import harnessConditionsSuite from './check/suites/harness-conditions.mjs';
 import harnessPeerConditionsSuite from './check/suites/harness-peer-conditions.mjs';
 import harnessPeerTopologySuite from './check/suites/harness-peer-topology.mjs';
+import topologyReadbackSuite from './check/suites/topology-readback.mjs';
+import originProxySuite from './check/suites/origin-proxy.mjs';
 import harnessPeerUploadSuite from './check/suites/harness-peer-upload.mjs';
 import peerFiguresSuite from './check/suites/peer-figures.mjs';
 import oneViewingSuite from './check/suites/one-viewing.mjs';
@@ -94,6 +96,10 @@ import enginePatchSuite from './check/suites/engine-patch.mjs';
 import capacityEstimateSuite from './check/suites/capacity-estimate.mjs';
 import sendPaceSuite from './check/suites/send-pace.mjs';
 import hostPaceSuite from './check/suites/host-pace.mjs';
+import paceBoundSuite from './check/suites/pace-bound.mjs';
+import controlEvidenceSuite from './check/suites/control-evidence.mjs';
+import controlFiguresSuite from './check/suites/control-figures.mjs';
+import controlReadingSuite from './check/suites/control-reading.mjs';
 import headroomSuite from './check/suites/headroom.mjs';
 import seekEntrySuite from './check/suites/seek-entry.mjs';
 import capacityStepSuite from './check/suites/capacity-step.mjs';
@@ -164,6 +170,8 @@ for (const suite of [
   harnessConditionsSuite,
   harnessPeerConditionsSuite,
   harnessPeerTopologySuite,
+  topologyReadbackSuite,
+  originProxySuite,
   harnessPeerUploadSuite,
   peerFiguresSuite,
   oneViewingSuite,
@@ -211,6 +219,10 @@ for (const suite of [
   capacityEstimateSuite,
   sendPaceSuite,
   hostPaceSuite,
+  paceBoundSuite,
+  controlEvidenceSuite,
+  controlFiguresSuite,
+  controlReadingSuite,
   headroomSuite,
   seekEntrySuite,
   capacityStepSuite,

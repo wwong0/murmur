@@ -63,6 +63,8 @@ services:
       APP_HOST: 0.0.0.0
       APP_DELIVERY: ${WA_DELIVERY:-http}
       APP_TRACKER_PORT: ${WA_TRACKER_PORT:-}
+      APP_TRACKER_HOST: origin-media
+      WA_ORIGIN_ROLE: ${WA_ORIGIN_ROLE:-server}
     volumes:
       - ../../step0/content:/media:ro
       - ../results:/results
@@ -81,6 +83,31 @@ services:
       wa-control:
         aliases:
           - origin-control
+
+  server:
+    image: wa6a-origin:latest
+    init: true
+    command: ['node', 'harness/origin-entry.mjs']
+    environment:
+      APP_MEDIA_DIR: /media
+      APP_PORT: '8100'
+      APP_HOST: 0.0.0.0
+      APP_DELIVERY: host
+      APP_TRACKER_PORT: ${WA_TRACKER_PORT:-}
+      APP_TRACKER_HOST: server-media
+      WA_ORIGIN_ROLE: server
+    volumes:
+      - ../../step0/content:/media:ro
+      - ../results:/results
+    ports:
+      - '127.0.0.1:8111:8100'
+    networks:
+      wa-media:
+        aliases:
+          - server-media
+      wa-control:
+        aliases:
+          - server-control
 
   sink:
     image: wa6a-origin:latest

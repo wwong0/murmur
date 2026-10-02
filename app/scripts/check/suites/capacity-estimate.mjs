@@ -2,17 +2,19 @@
 // constructed drain intervals. Pure module — no server, no clock.
 
 import { assert, assertEqual, check } from '../harness.mjs';
-import { classifyInterval, createCapacityEstimate, MIN_LINK_BOUND_SAMPLES } from '../../../public/lib/capacity-estimate.mjs';
+import { classifyInterval, createCapacityEstimate, MAX_SAMPLE_GAP_MS } from '../../../public/lib/capacity-estimate.mjs';
 
-function samplesOf(count, { inProgress = true, waitingBodyBytes = 1 } = {}) {
-  return Array.from({ length: count }, () => ({ channels: [{ inProgress, waitingBodyBytes }] }));
+// One sample every 20 ms from +20 to +1000 of an interval starting at 0, as the host polls.
+function samplesOf(count = 50, { inProgress = true, waitingBodyBytes = 1 } = {}) {
+  return Array.from({ length: count }, (_, index) => ({ atMs: (index + 1) * 20, channels: [{ inProgress, waitingBodyBytes }] }));
 }
 
-// The canonical link-bound base: every one of MIN_LINK_BOUND_SAMPLES samples has one
-// in-progress channel with bytes waiting, no pace-bound time, and a real drain.
+// The canonical link-bound base: every sample has one in-progress channel with bytes
+// waiting, no pace-bound time, and a real drain.
 function baseFixture() {
   return {
-    samples: samplesOf(MIN_LINK_BOUND_SAMPLES),
+    samples: samplesOf(),
+    startMs: 0,
     drainedBodyBytes: 1000,
     durationMs: 1000,
     paceBoundMs: 0,
@@ -21,7 +23,7 @@ function baseFixture() {
 
 function withOneSample(samples, index, sample) {
   const copy = samples.map((entry) => entry);
-  copy[index] = sample;
+  copy[index] = { ...samples[index], ...sample };
   return copy;
 }
 
@@ -31,7 +33,7 @@ export default async function capacityEstimateSuite() {
     const drained = [1_000_000, 1_100_000, 900_000, 1_200_000, 1_000_000];
     for (const drainedBodyBytes of drained) {
       const { linkBound, reason } = classifyInterval({
-        samples: samplesOf(MIN_LINK_BOUND_SAMPLES), drainedBodyBytes, durationMs: 1000, paceBoundMs: 0,
+        samples: samplesOf(), startMs: 0, drainedBodyBytes, durationMs: 1000, paceBoundMs: 0,
       });
       assert(linkBound, `interval at ${drainedBodyBytes} B is link-bound`);
       assertEqual(reason, null, 'a link-bound interval names no reason');
@@ -117,8 +119,8 @@ export default async function capacityEstimateSuite() {
     const base = baseFixture();
     assertEqual(classifyInterval(base).reason, null, 'the base fixture is link-bound');
 
-    const fewSamples = { ...base, samples: base.samples.slice(0, MIN_LINK_BOUND_SAMPLES - 1) };
-    assertEqual(classifyInterval(fewSamples).reason, 'few-samples', 'one sample short of the floor is few-samples');
+    const gap = { ...base, samples: base.samples.filter((_, index) => index < 20 || index > 22) };
+    assertEqual(classifyInterval(gap).reason, 'sample-gap', 'three missing polls, an 80 ms gap, is sample-gap');
 
     const noRequest = { ...base, samples: withOneSample(base.samples, 10, { channels: [{ inProgress: false, waitingBodyBytes: 1 }] }) };
     assertEqual(classifyInterval(noRequest).reason, 'no-request', 'a sample with no in-progress channel is no-request');
@@ -131,6 +133,24 @@ export default async function capacityEstimateSuite() {
 
     const noDrain = { ...base, drainedBodyBytes: 0 };
     assertEqual(classifyInterval(noDrain).reason, 'no-drain', 'zero drained bytes is no-drain');
+  });
+
+  await check('capacity-estimate: coverage is judged by the largest gap, its edges included, not by a count', async () => {
+    // 40 samples 25 ms apart, a loaded page's slower timer: fewer than the old floor
+    // of 48, and every gap well inside the bound.
+    const slow = Array.from({ length: 40 }, (_, index) => ({ atMs: (index + 1) * 25, channels: [{ inProgress: true, waitingBodyBytes: 1 }] }));
+    assertEqual(classifyInterval({ ...baseFixture(), samples: slow }).linkBound, true, 'a 25 ms timer is link-bound');
+    const edge = MAX_SAMPLE_GAP_MS + 1;
+    const lateStart = samplesOf().filter(({ atMs }) => atMs >= edge);
+    assertEqual(classifyInterval({ ...baseFixture(), samples: lateStart }).reason, 'sample-gap', 'an unsampled start is a gap');
+    const earlyEnd = samplesOf().filter(({ atMs }) => atMs <= 1000 - edge);
+    assertEqual(classifyInterval({ ...baseFixture(), samples: earlyEnd }).reason, 'sample-gap', 'an unsampled end is a gap');
+    const atBound = samplesOf().filter(({ atMs }) => atMs !== 500 && atMs !== 520);
+    assertEqual(classifyInterval({ ...baseFixture(), samples: atBound }).linkBound, true, 'a gap of exactly the bound is covered');
+    const unstamped = samplesOf().map(({ channels }) => ({ channels }));
+    assertEqual(classifyInterval({ ...baseFixture(), samples: unstamped }).reason, 'sample-gap', 'samples without instants fail closed');
+    // Mutation probe, staged: largestGapMs's final `endMs - previous` term dropped.
+    // `npm run check` turned 'an unsampled end is a gap' red. Reverted; check green.
   });
 
   await check('capacity-estimate: impossible interval values throw, in both classifyInterval and record', async () => {

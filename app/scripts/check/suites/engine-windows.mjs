@@ -209,11 +209,17 @@ export default async function engineWindowsSuite() {
     const conditionsPath = path.resolve(suiteDir, '../../../harness/conditions.json');
     const conditions = JSON.parse(await fs.readFile(conditionsPath, 'utf8'));
     const undeclared = [];
+    // 8b2's conditions run the product's own windows: declaring them is what
+    // their product-input refusal refuses, so they must not.
+    const productInputs = ['shakedown/control-qual', 'control-five', 'control-ten', 'control-seek', 'sweep-070', 'sweep-095', 'sweep-unpaced'];
+    const supplied = [];
     const walk = (group, label) => {
       for (const [name, condition] of Object.entries(group)) {
         if (name === 'schemaVersion' || !condition || typeof condition !== 'object') continue;
         if (condition.peerExchange === true) {
-          if (!Object.prototype.hasOwnProperty.call(condition, 'engineWindows')) undeclared.push(`${label}${name}`);
+          const declares = Object.prototype.hasOwnProperty.call(condition, 'engineWindows');
+          if (productInputs.includes(`${label}${name}`)) { if (declares) supplied.push(`${label}${name}`); }
+          else if (!declares) undeclared.push(`${label}${name}`);
         } else if (condition.delivery === undefined && !('peerExchange' in condition)
           && Object.values(condition).every((value) => value && typeof value === 'object')) {
           walk(condition, `${label}${name}/`);
@@ -222,5 +228,6 @@ export default async function engineWindowsSuite() {
     };
     walk(conditions, '');
     assertEqual(json(undeclared), '[]', `every peerExchange condition declares windows; undeclared: ${undeclared.join(', ')}`);
+    assertEqual(json(supplied), '[]', `no product-input condition supplies windows; supplied: ${supplied.join(', ')}`);
   });
 }

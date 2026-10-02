@@ -17,6 +17,7 @@ import { attach } from '../cdp.mjs';
 import { applyQdiscs, changeQdisc, clearCondition, defaultExec, dockerExec, networkSubnet, resolveInterface } from '../../harness/apply-qdisc.mjs';
 import { requireDelivery } from '../delivery-pin.mjs';
 import { armFor } from './arms.mjs';
+import { hostSourceOnLoopback, topologyReadback } from './topology-readback.mjs';
 
 const HARNESS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'harness');
 const COMPOSE_FILE = path.join(HARNESS_DIR, 'compose.yaml');
@@ -25,10 +26,27 @@ export const PROJECT = 'wa6a';
 export const MEDIA_NETWORK = 'wa-media';
 export const CONTROL_NETWORK = 'wa-control';
 export const ORIGIN_HOST_URL = 'http://127.0.0.1:8110';
+export const SERVER_HOST_URL = 'http://127.0.0.1:8111';
 // The MEDIA alias, never the bare service name: `origin` resolves to both of
 // the origin's addresses and a client that picked the control one would fetch
 // its media past the shaped interface (compose.yaml).
 export const CLIENT_ORIGIN_URL = 'http://origin-media:8100';
+export const SERVER_CLIENT_URL = 'http://server-media:8100';
+export const HOST_PAGE_URL = 'http://127.0.0.1:8100';
+
+export function urlsForDelivery(delivery) {
+  if (delivery === 'host') return {
+    countersUrl: SERVER_HOST_URL,
+    clientOriginUrl: SERVER_CLIENT_URL,
+    hostPageUrl: HOST_PAGE_URL,
+  };
+  if (delivery === 'http') return {
+    countersUrl: ORIGIN_HOST_URL,
+    clientOriginUrl: CLIENT_ORIGIN_URL,
+    hostPageUrl: ORIGIN_HOST_URL,
+  };
+  throw new Error(`unsupported delivery: ${delivery}`);
+}
 
 const CDP_PORT_BASE = 9300;
 const AGENT_PORT_BASE = 9400;
@@ -47,8 +65,35 @@ export function composeContainers(project = PROJECT, exec = defaultExec) {
   return Object.fromEntries(rows.map((row) => [row.Service, row.Name]));
 }
 
-export function serviceNames(clients) {
-  return ['origin', 'sink', ...Array.from({ length: clients }, (_, index) => `c${String(index + 1).padStart(2, '0')}`)];
+export function readTopology({ containers, exec = defaultExec } = {}) {
+  const names = Object.keys(containers ?? {});
+  const raw = { containers: {} };
+  for (const name of names) {
+    const container = containers[name];
+    const addresses = dockerExec(container, ['ip', '-json', 'addr', 'show'], exec);
+    const interfaces = JSON.parse(addresses).map((entry) => entry.ifname).filter(Boolean);
+    const qdiscs = Object.fromEntries(interfaces.map((ifName) => [ifName,
+      dockerExec(container, ['tc', 'qdisc', 'show', 'dev', ifName], exec)]));
+    raw.containers[name] = {
+      container,
+      addresses,
+      qdiscs,
+      established: dockerExec(container, ['ss', '-Htn', 'state', 'established'], exec),
+      ...(name === 'origin' ? { listeners: dockerExec(container, ['ss', '-Htln'], exec) } : {}),
+    };
+  }
+  return raw;
+}
+
+export function readMediaCounters({ container, exec = defaultExec } = {}) {
+  if (!container) throw new Error('origin container is required for media counters');
+  const script = "fetch('http://127.0.0.1:8102/harness/counters').then(async (response) => { if (!response.ok) throw new Error('HTTP ' + response.status); process.stdout.write(await response.text()); })";
+  return JSON.parse(dockerExec(container, ['node', '-e', script], exec));
+}
+
+export function serviceNames(clients, { delivery = 'http' } = {}) {
+  return ['origin', ...(delivery === 'host' ? ['server'] : []), 'sink',
+    ...Array.from({ length: clients }, (_, index) => `c${String(index + 1).padStart(2, '0')}`)];
 }
 
 async function waitForOrigin(originUrl, timeoutMs = 90_000) {
@@ -189,15 +234,18 @@ function containerRunDir(runDir) {
 }
 
 export function probePathsFromContainers(containers, condition) {
-  return Object.fromEntries(armFor(condition).members(condition).declaredTags.map((tag) => {
+  const paths = Object.fromEntries(armFor(condition).members(condition).declaredTags.map((tag) => {
     const container = tag === 'c00' ? containers.origin : containers[tag];
     if (!container) throw new Error(`probe path has no prepared container for ${tag}`);
     return [tag, {
       container,
       clockProbesCrossShapedUplink: container !== containers.origin,
       peerLinksShaped: false,
+      origin: { container: containers.origin },
+      ...(condition.delivery === 'host' && tag !== 'c00' ? { server: { container: containers.server } } : {}),
     }];
   }));
+  return paths;
 }
 
 function startSampler({ container, ifName, runDir, intervalMs = 125, exec = defaultExec }) {
@@ -289,22 +337,27 @@ export function readSinkCount({ container, exec = defaultExec } = {}) {
  * run before any client starts (executor-spec.md §3, Boundaries).
  */
 export function createComposeTopology({ project = PROJECT, exec = defaultExec, originUrl = ORIGIN_HOST_URL, samplerIntervalMs = 125, down = true } = {}) {
-  const state = { containers: {}, origin: null, control: null, controlUdpDrop: null, sampler: null, backgroundLoad: null, subnets: new Map(), runDir: null };
+  const state = { containers: {}, origin: null, control: null, controlUdpDrop: null, sampler: null, backgroundLoad: null, subnets: new Map(), runDir: null, urls: urlsForDelivery('http'), boundaries: {} };
 
   return {
     state,
-    originUrl,
-    clientOriginUrl: CLIENT_ORIGIN_URL,
+    get originUrl() { return state.urls.countersUrl ?? originUrl; },
+    get clientOriginUrl() { return state.urls.clientOriginUrl; },
+    get hostPageUrl() { return state.urls.hostPageUrl; },
 
     async prepare({ condition, runDir }) {
       const arm = armFor(condition);
+      state.urls = urlsForDelivery(condition.delivery);
       state.runDir = runDir;
-      const services = serviceNames(condition.clients);
+      const services = serviceNames(condition.clients, { delivery: condition.delivery });
       const previousDelivery = process.env.WA_DELIVERY;
       const previousTrackerPort = process.env.WA_TRACKER_PORT;
+      const previousOriginRole = process.env.WA_ORIGIN_ROLE;
       process.env.WA_DELIVERY = condition.delivery;
       if (arm.trackerPort !== null) process.env.WA_TRACKER_PORT = arm.trackerPort;
       else delete process.env.WA_TRACKER_PORT;
+      if (condition.delivery === 'host') process.env.WA_ORIGIN_ROLE = 'host-page';
+      else delete process.env.WA_ORIGIN_ROLE;
       try {
         compose(['up', '-d', '--no-build', ...services], { project, exec });
       } finally {
@@ -312,13 +365,16 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
         else process.env.WA_DELIVERY = previousDelivery;
         if (previousTrackerPort === undefined) delete process.env.WA_TRACKER_PORT;
         else process.env.WA_TRACKER_PORT = previousTrackerPort;
+        if (previousOriginRole === undefined) delete process.env.WA_ORIGIN_ROLE;
+        else process.env.WA_ORIGIN_ROLE = previousOriginRole;
       }
       state.containers = composeContainers(project, exec);
       const missing = services.filter((name) => !state.containers[name]);
       if (missing.length) throw new Error(`compose did not start: ${missing.join(', ')}`);
-      await waitForOrigin(originUrl);
-      await requireDelivery(originUrl, condition.delivery, {
-        trackerUrl: arm.trackerPort === null ? null : `ws://origin-media:${arm.trackerPort}`,
+      if (condition.delivery === 'host' && !state.containers.server) throw new Error('host delivery requires server container');
+      await waitForOrigin(state.urls.countersUrl);
+      await requireDelivery(state.urls.countersUrl, condition.delivery, {
+        trackerUrl: arm.trackerPort === null ? null : `ws://${condition.delivery === 'host' ? 'server-media' : 'origin-media'}:${arm.trackerPort}`,
       });
 
       const subnet = networkSubnet(MEDIA_NETWORK, exec, project);
@@ -352,6 +408,9 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
       const content = { ...condition.content, ...readContentFrameRate(state.containers.origin, exec) };
       return {
         containers: state.containers,
+        countersUrl: state.urls.countersUrl,
+        clientOriginUrl: state.urls.clientOriginUrl,
+        hostPageUrl: state.urls.hostPageUrl,
         probePaths: probePathsFromContainers(state.containers, condition),
         originInterface: state.origin,
         sampler: state.sampler,
@@ -422,6 +481,31 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
       return { clients };
     },
 
+    async captureBoundary({ kind, condition, runDir, room }) {
+      if (condition.delivery !== 'host') return null;
+      const raw = readTopology({ containers: state.containers, exec });
+      const subnet = state.subnets.get(MEDIA_NETWORK);
+      raw.mediaAddresses = Object.fromEntries(['origin', 'server'].map((name) => [name,
+        resolveInterface(state.containers[name], subnet, exec).address]));
+      const readback = topologyReadback({ raw, declaredViewers: armFor(condition).members(condition).tags });
+      const media = readMediaCounters({ container: state.containers.origin, exec });
+      const boundary = { raw, readback, media };
+      state.boundaries[kind] = { ...boundary, room };
+      if (kind === 'end') {
+        boundary.loopback = hostSourceOnLoopback({
+          serverStart: state.boundaries.start?.room,
+          serverEnd: room,
+          mediaStart: state.boundaries.start?.media,
+          mediaEnd: media,
+          readback,
+        });
+        fs.writeFileSync(path.join(runDir, 'host-source-loopback.json'), `${JSON.stringify(boundary.loopback, null, 2)}\n`);
+      }
+      fs.writeFileSync(path.join(runDir, `topology-${kind}.json`), `${JSON.stringify({ raw, readback, ...(boundary.loopback ? { loopback: boundary.loopback } : {}) }, null, 2)}\n`);
+      fs.writeFileSync(path.join(runDir, `media-counters-${kind}.json`), `${JSON.stringify(media, null, 2)}\n`);
+      return boundary;
+    },
+
     async clientFactory({ tag }) {
       const tab = await attach(cdpPortFor(tag), 'about:blank', { label: tag });
       const version = await tab.send('Browser.getVersion');
@@ -436,8 +520,9 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
             tab.ws?.close?.();
           }
         },
-        async startEcho({ room, out, intervalMs = 250 }) {
-          return agentPost(tag, '/echo/start', { room, out, intervalMs, originUrl: CLIENT_ORIGIN_URL, tag });
+        async startEcho({ room, out, intervalMs = 250, condition }) {
+          const origin = condition?.delivery === 'host' ? SERVER_CLIENT_URL : CLIENT_ORIGIN_URL;
+          return agentPost(tag, '/echo/start', { room, out, intervalMs, originUrl: origin, tag });
         },
       };
     },
@@ -448,7 +533,7 @@ export function composeDown({ project = PROJECT, exec = defaultExec } = {}) {
   return compose(['down', '--remove-orphans'], { project, exec });
 }
 
-export function composeUp({ project = PROJECT, exec = defaultExec, clients = 1 } = {}) {
-  compose(['up', '-d', '--no-build', ...serviceNames(clients)], { project, exec });
+export function composeUp({ project = PROJECT, exec = defaultExec, clients = 1, delivery = 'http' } = {}) {
+  compose(['up', '-d', '--no-build', ...serviceNames(clients, { delivery })], { project, exec });
   return composeContainers(project, exec);
 }

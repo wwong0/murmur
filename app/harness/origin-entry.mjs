@@ -1,48 +1,77 @@
-// The origin container's process: the existing room server, bound where other
-// containers can reach it.
-//
-// `room-server.mjs` defaults to 127.0.0.1, which inside a container accepts
-// nothing from the client containers; the host is an option it already takes.
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { optionsFromEnv, startRoomServer } from '../server/room-server.mjs';
 import { requireTrackerStarted, startTracker, trackerFailure } from '../scripts/runner/tracker.mjs';
+import { createOriginProxy } from './origin-proxy.mjs';
 
-let server = null;
+let roomServer = null;
+let proxy = null;
 let tracker = null;
 let shuttingDown = false;
+
+function closeServer(server) {
+  return server ? server.close() : Promise.resolve();
+}
+
+function closeProxy(server) {
+  if (!server) return Promise.resolve();
+  return new Promise((resolve) => server.close(() => resolve()));
+}
 
 async function shutdown(code) {
   if (shuttingDown) return;
   shuttingDown = true;
-  if (server) await server.close();
+  await closeProxy(proxy);
+  await closeServer(roomServer);
   if (tracker && tracker.exitCode === null) tracker.kill();
   process.exit(code);
 }
 
-async function main() {
-  const trackerPort = process.env.APP_TRACKER_PORT;
-  let trackerState = null;
-  if (trackerPort) {
-    trackerState = startTracker({
-      port: trackerPort,
-      hostname: null,
-      stdio: 'inherit',
-      cwd: process.cwd(),
-      env: process.env,
-    });
-    tracker = trackerState.child;
-    await requireTrackerStarted(trackerState);
-  }
-  const env = { ...process.env };
-  if (trackerPort) env.APP_TRACKER_URL = `ws://origin-media:${trackerPort}`;
-  else delete env.APP_TRACKER_URL;
-  server = startRoomServer({ ...optionsFromEnv(env), host: process.env.APP_HOST ?? '0.0.0.0' });
-  server.ready.then((port) => console.log(`[origin] ready on ${port}`));
-  trackerState?.exited.then(async (result) => {
-    if (shuttingDown) return;
-    console.error(`[origin] ${trackerFailure(result)}`);
-    await shutdown(1);
+async function startTrackerIfConfigured(env) {
+  const port = env.APP_TRACKER_PORT;
+  if (!port) return null;
+  const state = startTracker({ port, hostname: null, stdio: 'inherit', cwd: process.cwd(), env });
+  await requireTrackerStarted(state);
+  tracker = state.child;
+  state.exited.then(async (result) => {
+    if (!shuttingDown) {
+      console.error(`[origin] ${trackerFailure(result)}`);
+      await shutdown(1);
+    }
   });
+  return state;
+}
+
+async function startServerRole(env) {
+  const trackerPort = env.APP_TRACKER_PORT;
+  const trackerHost = env.APP_TRACKER_HOST ?? 'origin-media';
+  const trackerState = await startTrackerIfConfigured(env);
+  const serverEnv = { ...env };
+  if (trackerPort) serverEnv.APP_TRACKER_URL = `ws://${trackerHost}:${trackerPort}`;
+  else delete serverEnv.APP_TRACKER_URL;
+  roomServer = startRoomServer({ ...optionsFromEnv(serverEnv), host: env.APP_HOST ?? '0.0.0.0' });
+  roomServer.ready.then((port) => console.log(`[origin] ready on ${port}`));
+  return trackerState;
+}
+
+async function startHostPageRole(env) {
+  const serverEnv = { ...env, APP_PORT: '8102', APP_HOST: '127.0.0.1', APP_DELIVERY: 'host' };
+  delete serverEnv.APP_TRACKER_PORT;
+  delete serverEnv.APP_TRACKER_URL;
+  roomServer = startRoomServer({ ...optionsFromEnv(serverEnv), host: '127.0.0.1', port: 8102 });
+  proxy = createOriginProxy({ mediaTarget: 'http://127.0.0.1:8102', roomTarget: 'http://server-media:8100' });
+  await new Promise((resolve) => proxy.listen(8100, '127.0.0.1', resolve));
+  roomServer.ready.then((port) => console.log(`[origin] media instance ready on ${port}`));
+  console.log('[origin] host-page proxy ready on 8100');
+}
+
+async function main() {
+  const env = { ...process.env };
+  const role = env.WA_ORIGIN_ROLE ?? 'server';
+  if (role !== 'server' && role !== 'host-page') throw new Error(`unknown WA_ORIGIN_ROLE ${JSON.stringify(role)}`);
+  if (role === 'host-page') await startHostPageRole(env);
+  else await startServerRole(env);
 }
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
@@ -52,7 +81,10 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
   });
 }
 
-main().catch(async (error) => {
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+if (isMain) main().catch(async (error) => {
   console.error(`[origin] fatal: ${error?.message ?? error}`);
   await shutdown(1);
 });
+
+export { main };

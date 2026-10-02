@@ -5,11 +5,10 @@
 
 import { assert, assertEqual, check } from '../harness.mjs';
 import { createFakeClock, createFakeLink } from '../fake-channel.mjs';
-import { createHostOrigin } from '../../../public/lib/host-origin.mjs';
+import { createHostOrigin, PACE_CAP_BYTES } from '../../../public/lib/host-origin.mjs';
 import { HEADROOM_DEFAULT } from '../../../public/lib/send-pace.mjs';
 import { encodeControl, parseControl } from '../../../public/lib/segment-protocol.mjs';
 
-const CAP_BYTES = 65528;
 const BIG_BODY_BYTES = 20_000_000;
 const SMALL_BODY_BYTES = 5_000_000;
 
@@ -78,9 +77,11 @@ export default async function hostPaceSuite() {
       const drained = window.intervals.reduce((total, interval) => total + interval.drainedBodyBytes, 0);
 
       const target = 1062.5 * 5000;
-      const slack = CAP_BYTES + 65528 + sumBuffered;
+      const slack = PACE_CAP_BYTES + 65528 + sumBuffered;
       assert(Math.abs(drained - target) <= slack, `drained (${drained}) tracks the paced target (${target}) within slack (${slack})`);
-      assert(slack < 0.05 * target, `slack (${slack}) is under 5% of the target (${target})`);
+      // Five chunks of bucket and overshoot are 6.2% of the target; 10% keeps the
+      // unpaced 7.5 MB/s the mutation below reaches far outside it.
+      assert(slack < 0.1 * target, `slack (${slack}) is under 10% of the target (${target})`);
       // Mutation probe, staged: `gate: sendPace` in host-origin.mjs's attach()
       // dropped to `gate: null`. `npm run check` turned the upper-side assertion
       // red — drained (bounded only by the raised 2 500 B/ms links) blew past
@@ -133,7 +134,7 @@ export default async function hostPaceSuite() {
     }
   });
 
-  await check('host-pace: a falling capacity lowers the pace, and every qualifying interval is link-bound', async () => {
+  await check('host-pace: an estimate formed on slow links paces at its fraction, and every qualifying interval is link-bound', async () => {
     const clock = createFakeClock();
     const { origin, cleanup } = await buildLinkBoundHost({
       clock, fraction: HEADROOM_DEFAULT, hostDrainBytesPerMs: 200, bodyBytes: SMALL_BODY_BYTES,
@@ -146,6 +147,29 @@ export default async function hostPaceSuite() {
       const relError = Math.abs(result.estimate.bytesPerSecond - 600_000) / 600_000;
       assert(relError <= 0.005, `estimate within 0.5% of 600,000 B/s (got ${result.estimate.bytesPerSecond})`);
       assertEqual(result.paceBytesPerSecond, HEADROOM_DEFAULT * result.estimate.bytesPerSecond, 'pace is 0.85 × the estimate');
+    } finally {
+      cleanup();
+    }
+  });
+
+  await check('host-pace: a paced host whose links fall lowers its estimate and its pace', async () => {
+    const clock = createFakeClock();
+    const { origin, links, cleanup } = await buildLinkBoundHost({
+      clock, fraction: HEADROOM_DEFAULT, hostDrainBytesPerMs: 416.667, bodyBytes: 2 * BIG_BODY_BYTES,
+    });
+    try {
+      clock.advance(7000); // the estimate forms at 1.25 MB/s, and two intervals run paced
+      const before = origin.pace();
+      assert(before.paceBytesPerSecond > 1_000_000, `paced near 1.06 MB/s before the fall (got ${before.paceBytesPerSecond})`);
+      for (const link of links) link.host.setDrainRate(200);
+      clock.advance(15000);
+      const after = origin.pace(before.intervals.at(-1).seq);
+      const relError = Math.abs(after.estimate.bytesPerSecond - 600_000) / 600_000;
+      assert(relError <= 0.005, `estimate falls to within 0.5% of 600,000 B/s (got ${after.estimate.bytesPerSecond})`);
+      assertEqual(after.paceBytesPerSecond, HEADROOM_DEFAULT * after.estimate.bytesPerSecond, 'pace is 0.85 × the fallen estimate');
+      // Mutation probe, staged: PACE_CAP_BYTES in host-origin.mjs set back to one
+      // chunk. Every interval after the fall read pace-bound, none link-bound, and
+      // the estimate assertion above went red at 1,249,857. Reverted; check green.
     } finally {
       cleanup();
     }

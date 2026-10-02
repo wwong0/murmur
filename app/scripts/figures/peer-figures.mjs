@@ -7,6 +7,7 @@ import { computeHeldAhead } from './held-ahead.mjs';
 import { computeSpanCourse } from './span-course.mjs';
 import { trapFigures } from './trap-figures.mjs';
 import { segmentIndex } from './seek-evidence.mjs';
+import { paceBoundFraction } from './pace-bound.mjs';
 import { cohortSegments, finite, inWindow, originSnapshot, pathOf, recordsOf, responseRecords, safe, sumBytes, tagsOf } from './peer-evidence.mjs';
 
 export const PEER_ATTEMPT_COHORT_METHOD = 'peer-attempt-cohort-v1';
@@ -105,7 +106,7 @@ function downloadRatios(input, tags, cohorts, oneViewing) {
   return byClient;
 }
 
-export function steadyState({ input, tags, figures, cohorts, oneViewing }) {
+export function steadyState({ input, tags, figures, cohorts, oneViewing, hostPace, wallOffsetMs }) {
   const bars = input.condition?.bars ?? {};
   const declared = ['steadyUtilisationMax', 'steadyDownloadRatioMin',
     'steadyDownloadRatioMax', 'steadyRealtimeMin'].every((name) => finite(bars[name]));
@@ -130,10 +131,32 @@ export function steadyState({ input, tags, figures, cohorts, oneViewing }) {
   };
   realtime.pass = declared && tags.every((tag) => finite(realtimeByClient[tag])
     && realtimeByClient[tag] >= realtime.bar);
-  const legs = { utilisation, downloadRatio, realtime };
+  const publishedPace = hostPace ?? input.hostPace;
+  const publishedWallOffsetMs = wallOffsetMs ?? input.wallOffsetMs;
+  const paceBound = finite(bars.steadyPaceBoundMax) && input.headroom?.fraction === 'unpaced'
+    ? { applies: false, reason: 'unpaced' }
+    : finite(bars.steadyPaceBoundMax) && finite(input.headroom?.fraction)
+      ? (() => {
+        if (!finite(publishedWallOffsetMs)) throw new Error('steady-state pace-bound wall offset is unavailable');
+        const result = paceBoundFraction({ intervals: publishedPace?.intervals ?? [], window: input.window,
+          wallOffsetMs: publishedWallOffsetMs });
+        return {
+          applies: true,
+          value: result.value,
+          pacedMs: result.pacedMs,
+          coveredMs: result.coveredMs,
+          windowMs: result.windowMs,
+          bar: bars.steadyPaceBoundMax,
+          pass: finite(result.value) && result.value <= bars.steadyPaceBoundMax,
+          reason: result.reason,
+        };
+      })()
+      : null;
+  const legs = { utilisation, downloadRatio, realtime, ...(paceBound ? { paceBound } : {}) };
   let reason = null;
   if (!declared) reason = 'steady-state-bars-undeclared';
   else if (!utilisation.pass) reason = 'steady-state-utilisation';
+  else if (paceBound?.applies === true && !paceBound.pass) reason = 'steady-state-pace-bound';
   else if (!downloadRatio.pass) reason = 'steady-state-download-ratio';
   else if (!realtime.pass) reason = 'steady-state-realtime';
   return { steady: reason === null, legs, reason };
@@ -141,7 +164,7 @@ export function steadyState({ input, tags, figures, cohorts, oneViewing }) {
 
 function refusalFor(steady) {
   const failedLegs = Object.entries(steady.legs)
-    .filter(([, leg]) => leg.pass !== true)
+    .filter(([, leg]) => leg.applies !== false && leg.pass !== true)
     .map(([name, leg]) => ({ leg: name, value: leg }));
   return { reason: steady.reason, failedLegs, legs: steady.legs };
 }
@@ -251,7 +274,7 @@ export function computePeerFigures(input = {}, pairing = pairResponseEvidence(in
     const state = steadyState({ input, tags, figures: {
       uplinkUtilisationMean: input.uplinkUtilisationMean,
       realtimeFactorByClient: input.realtimeFactorByClient,
-    }, cohorts, oneViewing });
+    }, cohorts, oneViewing, hostPace: input.hostPace, wallOffsetMs: input.wallOffsetMs });
     result.oneViewingBytesInWindow = oneViewing.oneViewingBytesInWindow;
     result.roomPositionSpreadMs = oneViewing.roomPositionSpreadMs;
     result.peerFractionSteady = state.steady;

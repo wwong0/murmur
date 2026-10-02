@@ -8,6 +8,7 @@ import { declaresResponseSettle } from '../figures/peer-evidence.mjs';
 import { CEILING_MS } from '../harness-cadence.mjs';
 import { ENGINE_WINDOW_DEFAULTS, PRODUCT_ENGINE_WINDOWS } from '../../public/lib/engine-windows.mjs';
 import { HEADROOM_DEFAULT } from '../../public/lib/send-pace.mjs';
+import { evidenceRefusals } from './control-evidence.mjs';
 
 export const REFUSAL_SCOPE = Object.freeze({
   neverPlayed: Object.freeze(['byte', 'drift']),
@@ -42,6 +43,8 @@ export const REFUSAL_SCOPE = Object.freeze({
   capacityStep: Object.freeze(['byte', 'drift']),
   seek: Object.freeze(['byte', 'drift']),
   build: Object.freeze(['byte', 'drift']),
+  topology: Object.freeze(['byte', 'drift']),
+  control: Object.freeze(['byte', 'drift']),
 });
 
 const finite = (value) => Number.isFinite(value);
@@ -217,7 +220,7 @@ const HTTP_ARM = Object.freeze({
 const oneViewing = (manifest) => manifest.multiplierDenominator === 'one-viewing';
 
 const HOST_ARM = Object.freeze({
-  ...baseArm({ hostTag: 'c00', runDirPrefix: '8a', readyTimeoutMs: 120_000 }),
+  ...baseArm({ hostTag: 'c00', runDirPrefix: '8b2', readyTimeoutMs: 120_000 }),
   // D5's one viewing sizes the played stretch from the content, as the peer arm does.
   recomputeContent: (manifest) => (oneViewing(manifest) ? recomputePeerContent(manifest) : manifest.content),
   recomputeSegmentSeconds: (manifest) => (oneViewing(manifest)
@@ -307,11 +310,12 @@ const HOST_ARM = Object.freeze({
         missed: session.receiptLogMissed ?? 0,
         reset: session.receiptLogReset === true,
       }])),
+      ...(hostEvidence.controlEvidence ? { controlEvidence: hostEvidence.controlEvidence } : {}),
     };
   },
-  async openSessions({ room, clientOriginUrl, clientFactory, condition, runDir, deadline, newSession, prepareHostClient }) {
+  async openSessions({ room, clientOriginUrl, hostPageUrl = clientOriginUrl, clientFactory, condition, runDir, deadline, newSession, prepareHostClient }) {
     const session = newSession(this.hostTag, 'host');
-    const url = `${clientOriginUrl}/room.html?room=${encodeURIComponent(room)}&role=host&tab=${this.hostTag}`;
+    const url = `${hostPageUrl}/room.html?room=${encodeURIComponent(room)}&role=host&tab=${this.hostTag}`;
     Object.assign(session, await clientFactory({ tag: this.hostTag, role: 'host', room, url, condition, runDir }));
     if (!session.tab) throw new Error('host tab is unavailable');
     const hostSource = [
@@ -371,6 +375,12 @@ const HOST_ARM = Object.freeze({
       if (health.reset === true) addReason('receipt-log-reset', REFUSAL_SCOPE.receiptHealth, { tag });
     }
     headroomRefusals(input, addReason);
+    for (const boundary of Object.values(input.topologyBoundaries ?? {})) {
+      for (const reason of boundary.readback?.refusals ?? []) addReason(reason, REFUSAL_SCOPE.topology, { boundary: boundary.readback });
+    }
+    for (const refusal of evidenceRefusals({ ...input.controlEvidence, seek: input.seek, peerExchange: input.condition?.peerExchange === true })) {
+      addReason(refusal.reason, REFUSAL_SCOPE.control, refusal.detail);
+    }
   },
 });
 
@@ -663,7 +673,7 @@ function headroomRefusals(input, addReason) {
 
 const PEER_ARM = Object.freeze({
   ...HOST_ARM,
-  runDirPrefix: '8a',
+  runDirPrefix: '8b2',
   byteAccountingMethod: 'peer-attempt-cohort-v1',
   multiplierDenominator: 'one-viewing',
   recomputeContent: recomputePeerContent,

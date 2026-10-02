@@ -7,6 +7,7 @@ import { startOriginMonitor, stopOriginMonitor } from './runner/origin-monitor.m
 import { recomputeRunDirectory } from './harness-figures.mjs';
 import { isPublishedFigure } from './figures/publication.mjs';
 import { attachClockJoinRecorder, attachTabTakenDetector, boundaryExpression, createRequestRecorder, installStallRecorder, pollExpression } from './harness/cdp-records.mjs';
+import { urlsForDelivery } from './harness/topology.mjs';
 import { maybeInjectDisturbance } from './harness/disturbance.mjs';
 import { qualifyCdpBytes as defaultQualifyCdpBytes, qualifyLinkReceipts as defaultQualifyLinkReceipts } from './harness/qualification.mjs';
 import { evaluateRefusals } from './harness/refusals.mjs';
@@ -16,6 +17,8 @@ import { validateHeadroomFraction } from '../public/lib/send-pace.mjs';
 import { parseRate, parseSize, parseTime } from '../harness/apply-qdisc.mjs';
 import { appliedSeekEvidence } from './figures/seek-evidence.mjs';
 import { startCpuSampler } from './harness/cpu-sampler.mjs';
+import { createControlEvidence, recordingEndForSeek } from './harness/control-evidence.mjs';
+import { timebaseJoin } from './figures/control-figures.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -341,6 +344,7 @@ export async function captureBoundary(kind, sessions, originUrl, manifest, manif
     manifest.clients[session.tag].boundaries[kind] = value;
   }
   const room = await snapshotReader(originUrl);
+  const topology = await options.topologyBoundaryReader?.(kind, room);
   const { origin } = await arm.captureBoundaryExtras(kind, {
     room,
     sessions,
@@ -352,8 +356,12 @@ export async function captureBoundary(kind, sessions, originUrl, manifest, manif
   if (kind === 'start') manifest.window.startMs = origin.atMs;
   else manifest.window.endMs = origin.atMs;
   manifest.window[`${kind}SnapshotAtMs`] = origin.atMs;
+  if (topology) {
+    const current = manifest.topology ?? {};
+    manifest.topology = { ...current, boundaries: { ...(current.boundaries ?? {}), [kind]: topology } };
+  }
   manifestFile.write();
-  return { snapshots, origin, room };
+  return { snapshots, origin, room, topology };
 }
 
 export async function drainClient(session, ndjson, atMs = Date.now(), options = {}) {
@@ -575,6 +583,7 @@ function evidenceFor(sessions, originStart, originEnd, manifest, runDir, hostEvi
     startWait: manifest.startWait ?? null,
     seek: manifest.seek ?? null,
     capacityStep: manifest.capacityStep ?? null,
+    topologyBoundaries: manifest.topology?.boundaries ?? null,
   };
   return { ...base, ...arm.evidence(sessions, hostEvidence, runDir) };
 }
@@ -609,7 +618,7 @@ function restartEvidence(boundary, effectiveSharedMs) {
   };
 }
 
-export async function runHarness({ conditionName, condition = conditionForName(conditionName), runDir = null, originUrl, clientOriginUrl = originUrl, topology = section3Topology(), clientFactory = noClientFactory, establishCadence = defaultEstablishCadence, qualifyCdpBytes = defaultQualifyCdpBytes, qualifyLinkReceipts = defaultQualifyLinkReceipts } = {}) {
+export async function runHarness({ conditionName, condition = conditionForName(conditionName), runDir = null, originUrl, clientOriginUrl = originUrl, hostPageUrl = clientOriginUrl, topology = section3Topology(), clientFactory = noClientFactory, establishCadence = defaultEstablishCadence, qualifyCdpBytes = defaultQualifyCdpBytes, qualifyLinkReceipts = defaultQualifyLinkReceipts } = {}) {
   validateCondition(condition, conditionName ?? condition.name);
   const arm = armFor(condition);
   requireDeclaredDelivery(condition, conditionName ?? condition.name);
@@ -626,9 +635,16 @@ export async function runHarness({ conditionName, condition = conditionForName(c
   const manifestFile = createManifestFile({ runDir: prepared.runDir, initial: initialManifest(condition, prepared.runDir, startedAt, members) });
   const ndjson = createNdjson(prepared.runDir);
   ndjson.write('origin-link.ndjson', []);
+  if (arm.hostTag) {
+    ndjson.write('host-control-poll.ndjson', []);
+    ndjson.write('host-pace.ndjson', []);
+    ndjson.write('host-resumes.ndjson', []);
+    for (const tag of tags) ndjson.write(`viewer-control-${tag}.ndjson`, []);
+  }
   for (const tag of members.declaredTags) for (const name of streamNames(tag, arm.streams)) ndjson.write(name, []);
   manifestFile.write();
-  const maxWallMs = Math.max(60_000, condition.runLengthMs + STARTUP_ALLOWANCE_MS);
+  const recordingTailAllowanceMs = condition.seek ? 180_000 : 0;
+  const maxWallMs = Math.max(60_000, condition.runLengthMs + STARTUP_ALLOWANCE_MS + recordingTailAllowanceMs);
   const deadline = createDeadline({ startedAt, maxWallMs });
   const room = `harness-${crypto.randomUUID()}`;
   const sessions = tags.map((tag, index) => ({ ...newSession(tag, roles[index]), receiptCursor: 0, receiptLogMissed: 0, receiptLogReset: false }));
@@ -645,6 +661,8 @@ export async function runHarness({ conditionName, condition = conditionForName(c
   let boundaryOptions = {};
   let seekEvidence = null;
   let cpuSampler = null;
+  let controlEvidence = null;
+  let recordingEndTargetMs = null;
   try {
     const preparedTopology = await topology.prepare({ condition, runDir: prepared.runDir, manifest: manifestFile.get() });
     manifestFile.merge({ topology: { status: 'prepared', ...preparedTopology } });
@@ -667,11 +685,19 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     if (!originUrl) throw new Error('origin URL is required for a harness run');
     monitor = startOriginMonitor({ healthUrl: `${originUrl}/room.html`, deadlineAt: deadline.deadlineAt, maxWallMs, onFailure: (event) => manifestFile.merge({ originFailure: event }), requestTimeoutMs: condition.monitorRequestTimeoutMs });
     monitor.promise.catch((error) => { failure ??= error; });
-    originSession = await arm.openSessions({ room, clientOriginUrl, clientFactory, condition, runDir: prepared.runDir, deadline, newSession, prepareHostClient });
+    originSession = await arm.openSessions({ room, clientOriginUrl, hostPageUrl, clientFactory, condition, runDir: prepared.runDir, deadline, newSession, prepareHostClient });
     allSessions = originSession ? [originSession, ...sessions] : sessions;
+    if (originSession) {
+      controlEvidence = createControlEvidence({ hostSession: originSession, ndjson, runDir: prepared.runDir });
+      const hostPoll = startLoop(() => controlEvidence.pollHost(), 250, (error) => { failure ??= error; });
+      loops.push(hostPoll);
+    }
     boundaryOptions = arm.boundaryOptions(allSessions);
     boundaryOptions.loopbackReader = () => topology.readLoopbackCounter();
     boundaryOptions.viewerLinkReader = () => topology.readViewerLinkCounters?.() ?? null;
+    boundaryOptions.topologyBoundaryReader = (kind, room) => topology.captureBoundary?.({
+      kind, room, condition, runDir: prepared.runDir, manifest: manifestFile.get(),
+    });
     for (const [index, session] of sessions.entries()) {
       const clientUrl = `${clientOriginUrl}/room.html?room=${encodeURIComponent(room)}&role=${session.role}&tab=${session.tag}`;
       const acquired = await clientFactory({ tag: session.tag, role: session.role, room, url: clientUrl, condition, runDir: prepared.runDir });
@@ -686,6 +712,10 @@ export async function runHarness({ conditionName, condition = conditionForName(c
         manifestFile,
         runDir: prepared.runDir,
       }));
+      if (controlEvidence) {
+        const viewerPoll = startLoop(() => controlEvidence.pollViewer(session), 250, (error) => { failure ??= error; });
+        loops.push(viewerPoll);
+      }
       if (index === 0) {
         const qualification = await arm.qualify(sessions, {
           originSession,
@@ -696,7 +726,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
         manifestFile.set(mergeVerifiedContext(manifestFile.get(), { cdpQualification: qualification }));
         manifestFile.write();
       }
-      await session.startEcho?.({ room: `${room}-probe`, out: `/results/${path.basename(prepared.runDir)}/client-${session.tag}.echo.ndjson`, intervalMs: ECHO_INTERVAL_MS });
+      await session.startEcho?.({ room: `${room}-probe`, out: `/results/${path.basename(prepared.runDir)}/client-${session.tag}.echo.ndjson`, intervalMs: ECHO_INTERVAL_MS, condition });
     }
 
     // Before the measure window, and its failure ends the run: a regime whose
@@ -771,6 +801,13 @@ export async function runHarness({ conditionName, condition = conditionForName(c
           lastReadings: applied.lastReadings,
           applied: applied.timedOut === false,
         };
+        if (controlEvidence && seekEvidence.host) {
+          const join = timebaseJoin(controlEvidence.hostPoll);
+          const tailEndMs = recordingEndForSeek({ join, seek: seekEvidence });
+          recordingEndTargetMs = Math.max(manifestFile.get().window.endMs, tailEndMs ?? manifestFile.get().window.endMs);
+          manifestFile.merge({ recordingTailMs: Math.max(0, recordingEndTargetMs - manifestFile.get().window.endMs) });
+          manifestFile.write();
+        }
         if (applied.host) {
           const landing = appliedSeekEvidence({
             host: applied.host,
@@ -800,7 +837,8 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       originStart = startBoundary.origin;
       Object.assign(hostEvidence, arm.boundaryEvidence('start', startBoundary));
     }
-    await waitUntil(deadline, manifestFile.get().window.endMs);
+    recordingEndTargetMs ??= manifestFile.get().window.endMs;
+    await waitUntil(deadline, recordingEndTargetMs);
     const endBoundary = await captureBoundary('end', sessions, originUrl, manifestFile.get(), manifestFile, ndjson, fetchSnapshot, boundaryOptions);
     originEnd = endBoundary.origin;
     Object.assign(hostEvidence, arm.boundaryEvidence('end', endBoundary));
@@ -845,6 +883,9 @@ export async function runHarness({ conditionName, condition = conditionForName(c
   } finally {
     for (const loop of loops) loop.stop();
     await Promise.all(loops.map((loop) => loop.promise.catch(() => {})));
+    if (controlEvidence) {
+      try { hostEvidence.controlEvidence = controlEvidence.finalize(); } catch (error) { cleanupFailure ??= error; }
+    }
     if (cpuSampler) await cpuSampler.stop();
     if (monitor) await stopOriginMonitor(monitor);
     for (const session of allSessions) {
@@ -922,11 +963,15 @@ export async function main(argv = process.argv.slice(2)) {
   }
   const { createComposeTopology } = await import('./harness/topology.mjs');
   const composed = createComposeTopology();
+  const condition = conditionForName(parsed.conditionName);
+  const urls = urlsForDelivery(condition.delivery);
   const result = await runHarness({
     conditionName: parsed.conditionName,
+    condition,
     runDir: parsed.runDir ? path.resolve(parsed.runDir) : undefined,
-    originUrl: composed.originUrl,
-    clientOriginUrl: composed.clientOriginUrl,
+    originUrl: urls.countersUrl,
+    clientOriginUrl: urls.clientOriginUrl,
+    hostPageUrl: urls.hostPageUrl,
     topology: composed,
     clientFactory: (request) => composed.clientFactory(request),
   });

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { computeFigures, guardRegimes } from './figures/harness-figures.mjs';
 import { pairwiseDrift } from './figures/pairwise-drift.mjs';
 import { driftContext, driftFigure } from './figures/drift-context.mjs';
+import { computeControlFigures, timebaseJoin } from './figures/control-figures.mjs';
 import { startResiduals, stepFits, maxRateEvidence, maxRateCompletion } from './figures/start-requalification.mjs';
 import { bytesByClientCsv, publish, utilisationCsv } from './figures/publication.mjs';
 import { evaluateMachineTest } from './figures/machine-test.mjs';
@@ -60,6 +61,16 @@ export function readRunDirectory(runDir) {
   const context = manifest.context ?? manifest;
   const tags = manifest.declaredClientTags ?? manifest.clientTags ?? manifest.condition?.clientTags
     ?? Object.keys(manifest.clients ?? {});
+  const hostPoll = readNdjson(path.join(runDir, 'host-control-poll.ndjson')) ?? [];
+  const hostPaceRecords = readNdjson(path.join(runDir, 'host-pace.ndjson')) ?? [];
+  const resumes = readNdjson(path.join(runDir, 'host-resumes.ndjson')) ?? [];
+  const hostPaceFinal = readJson(path.join(runDir, 'host-pace-final.json'));
+  const viewerPolls = Object.fromEntries([...new Set(tags)].map((tag) => [tag,
+    readNdjson(path.join(runDir, `viewer-control-${tag}.ndjson`)) ?? []]));
+  const controlAvailable = hostPoll.length > 0;
+  const timebase = controlAvailable ? timebaseJoin(hostPoll) : null;
+  const capacityBeforeReadings = (manifest.topology?.qdiscs ?? [])
+    .find((entry) => entry.containerRole === 'origin')?.readBack?.readings ?? null;
   const input = {
     byteAccountingMethod: arm.recomputeAccountingMethod(manifest),
     window,
@@ -77,11 +88,21 @@ export function readRunDirectory(runDir) {
     disturbance: manifest.disturbance ?? null,
     context,
     capacityBitsPerSecond: capacityBitsForManifest(manifest),
+    capacityBeforeReadings,
     linkSamples: readNdjson(path.join(runDir, 'origin-link.ndjson')),
     cpuSamples: readNdjson(path.join(runDir, 'cpu-samples.ndjson')),
     cpuSampleFile: 'cpu-samples.ndjson',
     clockJoin: Object.fromEntries([...new Set(tags)].map((tag) => [tag,
       readJson(path.join(runDir, `client-${tag}.clock-join.json`))])),
+    hostPoll,
+    viewerPolls,
+    hostPace: hostPaceFinal ? { ...hostPaceFinal, intervals: hostPaceRecords,
+      evicted: hostPaceFinal.evicted ?? 0 } : null,
+    hostPaceFinal,
+    resumes: { records: resumes, evicted: hostPaceFinal?.resumeEvicted ?? 0 },
+    timebase,
+    wallOffsetMs: timebase?.wallOffsetMs ?? null,
+    controlAvailable,
     // Peer checks and host waste exclude the qualification's response by its ids.
     ...arm.recomputeInputExtras(manifest),
   };
@@ -92,6 +113,11 @@ export function recomputeRunDirectory(runDir, options = {}) {
   const retained = readRunDirectory(runDir);
   const arm = armFor(retained.input.condition);
   let figures = computeFigures(retained.input);
+  if (arm.byteAccountingMethod === 'peer-attempt-cohort-v1') {
+    const control = retained.input.controlAvailable
+      ? computeControlFigures({ ...retained.input, figures }, { manifest: retained.manifest }) : null;
+    figures = { ...figures, control };
+  }
   if (retained.input.condition?.machineTest) {
     const refusalReport = options.refusalReport
       ?? readJson(path.join(runDir, 'refusal-report.json'))?.refusal

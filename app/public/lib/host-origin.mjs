@@ -15,6 +15,10 @@ import { classifyInterval, createCapacityEstimate } from './capacity-estimate.mj
 
 const INTERVAL_NOMINAL_MS = 1000;
 const INTERVAL_RING_CAPACITY = 3600;
+// Four chunks deep, not one: at one, two channels admitting within a chunk's refill
+// drove the level negative and every link-bound interval read pace-bound, so a paced
+// host never saw its capacity fall (8b d1-findings.md F2).
+export const PACE_CAP_BYTES = 4 * CHUNK_PAYLOAD_BYTES;
 
 const MEDIA_PREFIX = '/media/';
 const MAP_LINE_RE = /^#EXT-X-MAP:.*$/gm;
@@ -97,7 +101,7 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
 
   // T3 (design.md D2): the one shared bucket and capacity estimate for every
   // channel this host attaches, plus the interval sampler that feeds them.
-  const sendPace = createSendPace({ capBytes: CHUNK_PAYLOAD_BYTES });
+  const sendPace = createSendPace({ capBytes: PACE_CAP_BYTES });
   const capacityEstimate = createCapacityEstimate({});
   let waitingChannelCount = 0;
   let samplerTimer = null;
@@ -137,7 +141,7 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
     previousTotalDrained = total;
     const paceBoundMs = sendPace.closeInterval(nowMs);
     if (paceBoundMs < 0 || paceBoundMs > durationMs) throw new RangeError('host-origin: paceBoundMs out of bounds for its interval');
-    const { linkBound, reason } = classifyInterval({ samples: currentSamples, drainedBodyBytes, durationMs, paceBoundMs });
+    const { linkBound, reason } = classifyInterval({ samples: currentSamples, startMs, drainedBodyBytes, durationMs, paceBoundMs });
     capacityEstimate.record({ drainedBodyBytes, durationMs, linkBound });
     if (fraction !== 'unpaced') {
       const estimate = capacityEstimate.read();
@@ -170,7 +174,7 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
     for (const [channelKey, sender] of liveSenders) {
       channelsSample.push({ inProgress: isChannelInProgress(channelKey), waitingBodyBytes: sender.waitingBodyBytes() });
     }
-    currentSamples.push({ channels: channelsSample });
+    currentSamples.push({ atMs: now, channels: channelsSample });
     if (now >= previousCloseMs + INTERVAL_NOMINAL_MS) closeSamplerInterval(now);
     scheduleSampler();
   }

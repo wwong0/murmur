@@ -26,7 +26,7 @@ export function attachClockJoinRecorder(tab) {
       const message = framePayload(params);
       const at = stamp(params);
       if (!at) return;
-      if (message?.type === 'joined') joined.push(at);
+      if (message?.type === 'joined') joined.push({ ...at, recvSharedMs: message.ts?.recv ?? null });
       if (joined.length && message?.type === 'echo-reply' && echoReplies.length < 20) echoReplies.push(at);
     }),
     tab.on('Network.webSocketFrameSent', (params) => {

@@ -34,7 +34,7 @@ export default async function harnessArmsSuite() {
     assert(Object.isFrozen(armFor({ delivery: 'host' })), 'host arm is frozen');
     assertEqual(armFor({}).runDirPrefix, '6a', 'missing delivery selects HTTP');
     assertEqual(armFor({ delivery: 'http' }).runDirPrefix, '6a', 'HTTP run prefix');
-    assertEqual(armFor({ delivery: 'host' }).runDirPrefix, '8a', 'host run prefix');
+    assertEqual(armFor({ delivery: 'host' }).runDirPrefix, '8b2', 'host run prefix');
     let failed = false;
     try { armFor({ delivery: 'peer' }); } catch { failed = true; }
     assert(failed, 'peer and unknown delivery values throw');
