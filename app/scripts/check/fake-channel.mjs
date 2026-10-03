@@ -78,6 +78,8 @@ export function createFakeChannel({ clock, drainBytesPerMs = 0, label = 'channel
   let rate = Number(drainBytesPerMs) || 0;
   let sequence = 0;
   let fractionalDrain = 0;
+  let belowDelayMs = null;
+  let lastDeliveryAt = 0;
   const queue = [];
   const listeners = new Map();
   const channel = {
@@ -98,6 +100,11 @@ export function createFakeChannel({ clock, drainBytesPerMs = 0, label = 'channel
     },
     setDrainRate(value) {
       rate = Math.max(0, Number(value) || 0);
+    },
+    // A queue below `bufferedAmount`: each drained message reaches the peer this
+    // many ms later, in order. The browser's transport and the kernel's qdisc.
+    setBelowDelay(fn) {
+      belowDelayMs = fn;
     },
     _pair(other) {
       peer = other;
@@ -172,7 +179,10 @@ export function createFakeChannel({ clock, drainBytesPerMs = 0, label = 'channel
     }
     for (const data of deliveries) {
       if (!peer || peer.readyState === 'closed') continue;
-      peer._deliver(data);
+      const delay = belowDelayMs ? Math.max(0, Number(belowDelayMs()) || 0) : 0;
+      if (delay === 0 && lastDeliveryAt <= endTime) { peer._deliver(data); continue; }
+      lastDeliveryAt = Math.max(lastDeliveryAt, endTime + delay);
+      clock.setTimeout(() => { if (peer && peer.readyState !== 'closed') peer._deliver(data); }, lastDeliveryAt - endTime);
     }
     if (wasAbove && channel.bufferedAmount <= channel.bufferedAmountLowThreshold) {
       emit('bufferedamountlow', {});
@@ -184,11 +194,15 @@ export function createFakeChannel({ clock, drainBytesPerMs = 0, label = 'channel
   return channel;
 }
 
-export function createFakeLink({ clock, hostDrainBytesPerMs = 0, viewerDrainBytesPerMs = 0 }) {
+// The viewer end answers the host's echo as host-link.mjs does, unless told not to.
+export function createFakeLink({ clock, hostDrainBytesPerMs = 0, viewerDrainBytesPerMs = 0, answerEcho = true }) {
   const host = createFakeChannel({ clock, drainBytesPerMs: hostDrainBytesPerMs, label: 'host' });
   const viewer = createFakeChannel({ clock, drainBytesPerMs: viewerDrainBytesPerMs, label: 'viewer' });
   host._pair(viewer);
   viewer._pair(host);
+  if (answerEcho) viewer.addEventListener('message', (event) => {
+    if (typeof event.data === 'string' && event.data.startsWith('{"t":"echo"') && viewer.readyState === 'open') viewer.send(event.data);
+  });
   host._open();
   viewer._open();
   return {

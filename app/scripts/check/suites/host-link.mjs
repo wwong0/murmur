@@ -431,4 +431,23 @@ export default async function hostLinkSuite() {
     // turned 'a forged presence leaves the link in place' red; restored, green.
     rig.link.close();
   });
+
+  await check('host-link: the viewer answers the host\'s echo with the same message, and the host reads a round trip', async () => {
+    // T15 (design.md D2). The fake link here does not answer an echo itself.
+    const rig = setup();
+    await flush();
+    await settle(rig.clock, 1100);
+    const echoesOn = (channel) => channel.ledger.map((entry) => entry.data).filter((data) => typeof data === 'string' && parseControl(data)?.t === 'echo');
+    const sent = echoesOn(rig.rawLink.host);
+    const answered = echoesOn(rig.rawLink.viewer);
+    assert(sent.length >= 10, `the host sent an echo a period (got ${sent.length})`);
+    assert(answered.length >= sent.length - 1, `the viewer answered each one (${answered.length} of ${sent.length})`);
+    assertEqual(JSON.stringify(answered), JSON.stringify(sent.slice(0, answered.length)), 'each answer is the message it received');
+    const interval = rig.origin.pace().intervals.at(-1);
+    assert(interval.echoSamples >= 9, `the host read the answers as samples (got ${interval.echoSamples})`);
+    assert(interval.queueMs !== null && interval.queueMs <= 1, `and a round trip at its floor (got ${interval.queueMs})`);
+    // Mutation probe, staged: host-link.mjs's echo branch removed. `npm run check`
+    // turned 'the viewer answered each one' red (0 of 23). Reverted; green again.
+    rig.link.close();
+  });
 }

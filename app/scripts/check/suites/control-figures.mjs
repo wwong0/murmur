@@ -79,6 +79,28 @@ export default async function controlFiguresSuite() {
     assertNear(bars.downloadRatioMax, 1.3833333333333333, 1e-12, 'upper ratio bar widens');
   });
 
+  // A condition with no steady bars (p2p-scattered) publishes its spans with
+  // null bars and no passing leg. Widening the absent bars gave NaN, which
+  // withheld the run's byte figure (8b2 p2p-scattered attempt 1). The pair
+  // differs only in bars. Red without the repair: both bars read NaN, not null.
+  await check('control figures: a condition without steady bars publishes null recovery bars, never non-finite', async () => {
+    const input = (bars) => baseInput({ condition: { peerExchange: true, bars }, declaredClientTags: ['c01'],
+      clients: { c01: { records: [], polls: [] } },
+      viewerPolls: { c01: [{ harnessAfterMs: 0 }, { harnessAfterMs: 60_000 }] }, linkSamples: [], capacityBitsPerSecond: 10_000_000 });
+    const undeclared = recoverySpans({ input: input({ controlFloorMin: 0.5 }), transition: 0, recordingEnd: 60_000 }).spans[0];
+    const declared = recoverySpans({ input: input(BARS), transition: 0, recordingEnd: 60_000 }).spans[0];
+    assertEqual(undeclared.bars.downloadRatioMin, null, 'an undeclared lower ratio bar is null');
+    assertEqual(undeclared.bars.downloadRatioMax, null, 'an undeclared upper ratio bar is null');
+    assertEqual(undeclared.legs.downloadRatio.bars.min, null, 'the leg publishes the null bar');
+    const numbers = [];
+    JSON.stringify(undeclared, (key, value) => { if (typeof value === 'number') numbers.push([key, value]); return value; });
+    assert(numbers.length > 0, 'the span holds numbers to test');
+    assertEqual(numbers.filter(([, value]) => !Number.isFinite(value)).map(([key]) => key).join(','), '', 'no number in the span is non-finite');
+    assertEqual(undeclared.pass, false, 'a span with no bars does not pass');
+    assertEqual(undeclared.legs.realtime.pass, false, 'a null realtime bar passes nothing');
+    assertNear(declared.bars.downloadRatioMin, 0.8166666666666667, 1e-12, 'the declared pair still widens');
+  });
+
   await check('control figures: estimate ratio uses the read-back tbf rate', async () => {
     const result = estimateFigure({ hostPace: baseInput().hostPace, hostPaceFinal: baseInput().hostPaceFinal,
       capacityBeforeReadings: { rate: { got: 10_000_000 } }, window: { startMs: 0, endMs: 180_000 }, wallOffsetMs: 0 });

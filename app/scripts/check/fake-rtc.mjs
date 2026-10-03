@@ -128,7 +128,7 @@ export function createFakeRtcFactory({ clock, onLink, stats = null, hostDrainByt
     removeEventListener(type, fn) { this._events.removeEventListener(type, fn); }
     emit(type, value) { this._events.emit(type, value); }
     createDataChannel() {
-      const link = createFakeLink({ clock, hostDrainBytesPerMs, viewerDrainBytesPerMs });
+      const link = createFakeLink({ clock, hostDrainBytesPerMs, viewerDrainBytesPerMs, answerEcho: false });
       links.push(link);
       this.channel = link.viewer;
       onLink?.(link, this);

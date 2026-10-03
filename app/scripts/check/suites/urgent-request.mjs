@@ -7,7 +7,8 @@ import { createFakeRoomClient, createFakeRtcFactory } from '../fake-rtc.mjs';
 import { createHostLink } from '../../../public/lib/host-link.mjs';
 import { createHostOrigin } from '../../../public/lib/host-origin.mjs';
 import { READY_HELD_AHEAD_MS } from '../../../public/lib/hold-resume.mjs';
-import { parseSegmentTimes, requestIsUrgent } from '../../../public/lib/urgent-request.mjs';
+import { parseSegmentTimes, requestIsUrgent, urgentPositionMs } from '../../../public/lib/urgent-request.mjs';
+import { offsetView } from '../../../public/lib/playback-state.mjs';
 import { parseControl } from '../../../public/lib/segment-protocol.mjs';
 
 const BASE = 'https://media.test/';
@@ -97,6 +98,27 @@ export default async function urgentRequestSuite() {
     assert(!requestIsUrgent({ path: '/media/seg-09999.m4s', positionMs: 0, segments, runwayMs: 4000 }), 'an unknown path is not urgent');
     assert(!requestIsUrgent({ path: '/media/seg-00000.m4s', positionMs: null, segments, runwayMs: 4000 }), 'no position: not urgent');
     assert(!requestIsUrgent({ path: '/media/seg-00000.m4s', positionMs: 0, segments: null, runwayMs: 4000 }), 'no playlist yet: not urgent');
+  });
+
+  await check('urgent-request: a viewer that loads inside the held creation\'s lead marks its start segment urgent', async () => {
+    // 8b2's attempt 4: the first viewer asked for seg-00000 90 ms before the held
+    // creation took effect, with no mapping in effect and so no position.
+    const segments = parseSegmentTimes(PLAYLIST, '/media/master.m3u8');
+    const created = { lineage: 'room', version: 2, current: { playing: false, atSharedMs: 10_000, mediaMs: 0, held: true }, previous: null, controlMode: 'open' };
+    const urgentAt = (state, sharedMs) => ['/media/seg-00000.m4s', '/media/seg-00001.m4s']
+      .filter((path) => requestIsUrgent({ path, positionMs: urgentPositionMs(state, sharedMs), segments, runwayMs: READY_HELD_AHEAD_MS })).join(',');
+    assertEqual(urgentPositionMs(created, 9_910), 0, 'in the lead the position is where the creation starts');
+    assertEqual(urgentAt(created, 9_910), '/media/seg-00000.m4s', 'the start segment is urgent in the lead, the next is not');
+    assertEqual(urgentAt(created, 10_050), '/media/seg-00000.m4s', 'and stays so once the creation is in effect');
+    assertEqual(urgentPositionMs(offsetView(created, 5000), 9_910), 5000, 'an offset viewer\'s own position carries its offset');
+    const seek = { ...created, version: 3, current: { playing: false, atSharedMs: 20_000, mediaMs: 8000, held: true }, previous: created.current };
+    assertEqual(urgentPositionMs(seek, 19_900), 0, 'a transition\'s lead keeps the prior mapping\'s position');
+    assertEqual(urgentPositionMs(seek, 5_000), null, 'before every mapping of a state with a prior one: none');
+    assertEqual(urgentPositionMs(null, 9_910), null, 'no state: no position');
+    assertEqual(urgentPositionMs(created, null), null, 'no shared clock: no position');
+    // Mutation probe, staged: urgentPositionMs returning mediaMsAt's null in the
+    // lead. `npm run check` turned 'in the lead the position is where the creation
+    // starts' red (null). Reverted; green.
   });
 
   await check('urgent-request: the host link carries the mark to the host, and keeps the playlist\'s segment times', async () => {

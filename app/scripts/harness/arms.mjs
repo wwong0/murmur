@@ -200,6 +200,8 @@ function baseArm({ hostTag, runDirPrefix, readyTimeoutMs }) {
       manifestFile.merge({ cadence, window: placeWindow(condition, Date.now()) });
     },
     async openSessions() { return null; },
+    // Whether the first viewer is qualified after every viewer has joined.
+    qualifyAfterJoins: false,
     async drain(session, ndjson, atMs, drainClient) { return drainClient(session, ndjson, atMs); },
     clientStreams: (runDir, manifest, files) => clientStreams(runDir, manifest, files, false, false),
   };
@@ -221,6 +223,7 @@ const oneViewing = (manifest) => manifest.multiplierDenominator === 'one-viewing
 
 const HOST_ARM = Object.freeze({
   ...baseArm({ hostTag: 'c00', runDirPrefix: '8b2', readyTimeoutMs: 120_000 }),
+  qualifyAfterJoins: true,
   // D5's one viewing sizes the played stretch from the content, as the peer arm does.
   recomputeContent: (manifest) => (oneViewing(manifest) ? recomputePeerContent(manifest) : manifest.content),
   recomputeSegmentSeconds: (manifest) => (oneViewing(manifest)

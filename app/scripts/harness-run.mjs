@@ -701,6 +701,17 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     boundaryOptions.topologyBoundaryReader = (kind, room) => topology.captureBoundary?.({
       kind, room, condition, runDir: prepared.runDir, manifest: manifestFile.get(),
     });
+    const qualifyFirst = async () => {
+      const qualification = await arm.qualify(sessions, {
+        originSession,
+        originContainer: preparedTopology.containers?.origin,
+        qualifyCdpBytes,
+        qualifyLinkReceipts,
+      });
+      manifestFile.set(mergeVerifiedContext(manifestFile.get(), { cdpQualification: qualification }));
+      manifestFile.write();
+    };
+    const startEcho = (session) => session.startEcho?.({ room: `${room}-probe`, out: `/results/${path.basename(prepared.runDir)}/client-${session.tag}.echo.ndjson`, intervalMs: ECHO_INTERVAL_MS, condition });
     for (const [index, session] of sessions.entries()) {
       const clientUrl = `${clientOriginUrl}/room.html?room=${encodeURIComponent(room)}&role=${session.role}&tab=${session.tag}`;
       const acquired = await clientFactory({ tag: session.tag, role: session.role, room, url: clientUrl, condition, runDir: prepared.runDir });
@@ -719,17 +730,14 @@ export async function runHarness({ conditionName, condition = conditionForName(c
         const viewerPoll = startLoop(() => controlEvidence.pollViewer(session), 250, (error) => { failure ??= error; });
         loops.push(viewerPoll);
       }
-      if (index === 0) {
-        const qualification = await arm.qualify(sessions, {
-          originSession,
-          originContainer: preparedTopology.containers?.origin,
-          qualifyCdpBytes,
-          qualifyLinkReceipts,
-        });
-        manifestFile.set(mergeVerifiedContext(manifestFile.get(), { cdpQualification: qualification }));
-        manifestFile.write();
-      }
-      await session.startEcho?.({ room: `${room}-probe`, out: `/results/${path.basename(prepared.runDir)}/client-${session.tag}.echo.ndjson`, intervalMs: ECHO_INTERVAL_MS, condition });
+      if (index === 0 && !arm.qualifyAfterJoins) await qualifyFirst();
+      if (!arm.qualifyAfterJoins) await startEcho(session);
+    }
+    // 8b design.md D3 (i): the host arm's room starts once its roster has been still
+    // for 2 s, so its viewers all join before the first is qualified.
+    if (arm.qualifyAfterJoins) {
+      await qualifyFirst();
+      for (const session of sessions) await startEcho(session);
     }
 
     // Before the measure window, and its failure ends the run: a regime whose

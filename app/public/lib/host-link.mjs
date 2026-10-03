@@ -228,6 +228,11 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
       if (typeof event?.data === 'string') {
         const control = parseControl(event.data);
         if (!control) return;
+        // design.md D2: the host times this answer to see a queue below it.
+        if (control.t === 'echo') {
+          try { candidate.send(event.data); } catch { /* link close reports through teardown */ }
+          return;
+        }
         const entry = pending.get(control.id);
         if (!entry) return;
         if (control.t === 'head') entry.onHead(control);

@@ -2,7 +2,22 @@
 // the segments from its own position across D3's ready runway. Pure: the page
 // supplies the position, and the playlist text the host link already carried.
 
+import { mediaMsAt } from './playback-state.mjs';
+
 const EXTINF_RE = /^#EXTINF:\s*([0-9.]+)/;
+
+/**
+ * The viewer's own position for D9. A created state has no mapping in effect
+ * during its lead, and the page already loads: its position is then where that
+ * state starts, the held creation's 0 (design.md D4, D9).
+ */
+export function urgentPositionMs(state, sharedMs) {
+  const positionMs = mediaMsAt(state, sharedMs);
+  if (positionMs !== null || !Number.isFinite(sharedMs)) return positionMs;
+  const current = state?.current;
+  if (!current || state.previous || !Number.isFinite(current.mediaMs) || !(sharedMs < current.atSharedMs)) return null;
+  return current.mediaMs;
+}
 
 function resolvedPath(uri, playlistPath) {
   try {

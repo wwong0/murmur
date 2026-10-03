@@ -8,10 +8,13 @@ import {
   sliceForRange,
   CHUNK_PAYLOAD_BYTES,
   DRAIN_POLL_MS,
+  FIRST_BYTE_BUDGET_MS,
+  BUFFER_FLOOR_BYTES,
 } from './segment-protocol.mjs';
 import { createHostAccounting } from './host-accounting.mjs';
 import { createSendPace, HEADROOM_DEFAULT, validateHeadroomFraction } from './send-pace.mjs';
-import { classifyInterval, createCapacityEstimate } from './capacity-estimate.mjs';
+import { classifyInterval, createCapacityEstimate, createProbePlan, createQueuedRun } from './capacity-estimate.mjs';
+import { createEchoDelay, ECHO_MARGIN_MS } from './echo-delay.mjs';
 import { createSendArbiter } from './send-arbiter.mjs';
 
 const INTERVAL_NOMINAL_MS = 1000;
@@ -20,9 +23,8 @@ const INTERVAL_RING_CAPACITY = 3600;
 // drove the level negative and every link-bound interval read pace-bound, so a paced
 // host never saw its capacity fall (8b d1-findings.md F2).
 export const PACE_CAP_BYTES = 4 * CHUNK_PAYLOAD_BYTES;
-// T14 (design.md D2, reversed): more handed than the wire carried, past the bucket's
-// own burst, is a queue below the host; a probe follows 10 pace-bound intervals.
-export const QUEUE_GROWTH_BYTES = PACE_CAP_BYTES;
+// T14, T15 (design.md D2): a probe follows 10 pace-bound intervals, or each one
+// while the estimate still climbs.
 export const PROBE_AFTER_INTERVALS = 10;
 export const PROBE_FACTOR = 1.1;
 
@@ -111,6 +113,12 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
   const sendPace = createSendPace({ capBytes: PACE_CAP_BYTES });
   const arbiter = createSendArbiter({ pace: sendPace, clock });
   const capacityEstimate = createCapacityEstimate({});
+  const queuedRun = createQueuedRun({ marginMs: ECHO_MARGIN_MS, chunkBytes: CHUNK_PAYLOAD_BYTES });
+  // design.md D2, the cap: a channel is held while the bytes handed to it that no
+  // echo answer has confirmed pass what its answers confirmed in the last of these.
+  const queueCapMs = Number.isFinite(settings?.firstByteBudgetMs) ? settings.firstByteBudgetMs : FIRST_BYTE_BUDGET_MS;
+  const probePlan = createProbePlan({ after: PROBE_AFTER_INTERVALS, factor: PROBE_FACTOR, marginMs: ECHO_MARGIN_MS });
+  const echo = createEchoDelay();
   let waitingChannelCount = 0;
   let samplerTimer = null;
   let previousCloseMs = null;
@@ -123,8 +131,8 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
   let wireGeneration = 0;
   let previousWire = null;
   let wireChain = null;
-  let paceBoundRun = 0;
   let probing = false;
+  let climbing = true;
   let intervalSeq = 0;
   let intervalsEvicted = 0;
   const intervalRing = [];
@@ -179,6 +187,21 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
     closedDrainedTotal += sender.drainedBodyBytes();
     liveSenders.delete(channelKey);
     channelState.delete(channelKey);
+    echo.drop(channelKey);
+  }
+
+  // Unpaced and a few times a second, so the answer's delay is the queue below the host.
+  function sendEchoIfDue(channelKey, sender, nowMs, afterChunk = false) {
+    const n = afterChunk ? echo.after(channelKey, nowMs) : echo.due(channelKey, nowMs);
+    if (n === null || !sender.sendControl({ t: 'echo', n })) return;
+    echo.handed(channelKey, n, sender.stats().handedBytes);
+  }
+
+  function channelHeld(channelKey, nowMs) {
+    const seen = echo.confirmed(channelKey, nowMs, queueCapMs);
+    const sender = liveSenders.get(channelKey);
+    if (!seen || !sender) return false;
+    return sender.stats().handedBytes - seen.totalBytes > Math.max(BUFFER_FLOOR_BYTES, seen.windowBytes);
   }
 
   function closeSamplerInterval(nowMs) {
@@ -194,7 +217,8 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
     previousTotalHanded = handedTotal;
     const paceBoundMs = sendPace.closeInterval(nowMs);
     if (paceBoundMs < 0 || paceBoundMs > durationMs) throw new RangeError('host-origin: paceBoundMs out of bounds for its interval');
-    const interval = { samples: currentSamples, startMs, endMs: nowMs, endWallMs: wallNow(), durationMs, drainedBodyBytes, handedBytes, paceBoundMs, probe: probing };
+    const echoed = echo.closeInterval(startMs, nowMs);
+    const interval = { samples: currentSamples, startMs, endMs: nowMs, endWallMs: wallNow(), durationMs, drainedBodyBytes, handedBytes, paceBoundMs, probe: probing, echoed };
     previousCloseMs = nowMs;
     currentSamples = [];
     const generation = wireGeneration;
@@ -207,19 +231,15 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
   }
 
   function finishInterval(interval, wireBytes) {
-    const { samples, startMs, durationMs, handedBytes, paceBoundMs, probe } = interval;
-    const verdict = classifyInterval({ samples, startMs, durationMs, paceBoundMs, wireBytes, handedBytes, queueGrowthBytes: QUEUE_GROWTH_BYTES });
-    capacityEstimate.record({ wireBytes, durationMs, linkBound: verdict.linkBound });
-    // A probe the bucket still bound, with no queue below, carried 1.1 × the estimate.
-    let raised = false;
+    const { samples, startMs, durationMs, handedBytes, paceBoundMs, probe, echoed } = interval;
+    const verdict = classifyInterval({ samples, startMs, durationMs, paceBoundMs, wireBytes, handedBytes, queueMs: echoed.queueMs, marginMs: ECHO_MARGIN_MS });
+    const reading = queuedRun.add({ wireBytes, durationMs, linkBound: verdict.linkBound, headQueueMs: echoed.headQueueMs, tailQueueMs: echoed.tailQueueMs });
+    if (reading) capacityEstimate.record({ ...reading, linkBound: true });
     const rate = wireBytes === null ? null : wireBytes * 1000 / durationMs;
-    if (probe && verdict.reason === 'pace-bound' && rate > (capacityEstimate.read().bytesPerSecond ?? Infinity)) {
-      capacityEstimate.raise(rate);
-      raised = true;
-    }
-    if (verdict.linkBound || probe) paceBoundRun = 0;
-    else if (verdict.reason === 'pace-bound') paceBoundRun += 1;
-    probing = fraction !== 'unpaced' && paceBoundRun >= PROBE_AFTER_INTERVALS;
+    const plan = probePlan.close({ probe, linkBound: verdict.linkBound, reason: verdict.reason, rate, headQueueMs: echoed.headQueueMs, tailQueueMs: echoed.tailQueueMs }, capacityEstimate.read().bytesPerSecond);
+    if (plan.raiseTo !== null) capacityEstimate.raise(plan.raiseTo);
+    probing = fraction !== 'unpaced' && plan.probeNext;
+    climbing = plan.climbing;
     setPaceRate(clock.now());
     intervalSeq += 1;
     intervalRing.push({
@@ -233,11 +253,18 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
       wireBytes,
       durationMs,
       linkBound: verdict.linkBound,
-      queued: verdict.queued === true,
+      queued: verdict.linkBound,
       reason: verdict.reason,
       paceBoundMs,
       probe,
-      raised,
+      queueMs: echoed.queueMs,
+      headQueueMs: echoed.headQueueMs,
+      tailQueueMs: echoed.tailQueueMs,
+      echoSamples: echoed.samples,
+      heldSamples: samples.filter((sample) => sample.channels.some((channel) => channel.held)).length,
+      readingBytesPerSecond: reading ? reading.wireBytes * 1000 / reading.durationMs : null,
+      raised: plan.raiseTo !== null,
+      climbing,
     });
     if (intervalRing.length > INTERVAL_RING_CAPACITY) {
       intervalRing.shift();
@@ -249,7 +276,8 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
     const now = clock.now();
     const channelsSample = [];
     for (const [channelKey, sender] of liveSenders) {
-      channelsSample.push({ inProgress: isChannelInProgress(channelKey), waitingBodyBytes: sender.waitingBodyBytes() });
+      channelsSample.push({ inProgress: isChannelInProgress(channelKey), waitingBodyBytes: sender.waitingBodyBytes(), held: channelHeld(channelKey, now) });
+      sendEchoIfDue(channelKey, sender, now);
     }
     currentSamples.push({ atMs: now, channels: channelsSample });
     if (now >= previousCloseMs + INTERVAL_NOMINAL_MS) closeSamplerInterval(now);
@@ -304,6 +332,8 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
       clock,
       settings,
       gate: arbiter,
+      held: () => channelHeld(channelKey, clock.now()),
+      onChunk: () => sendEchoIfDue(channelKey, sender, clock.now(), true),
       onWaiting(hasWaiting) {
         waitingChannelCount += hasWaiting ? 1 : -1;
         sendPace.setWaiting(waitingChannelCount, clock.now());
@@ -322,10 +352,15 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
 
     liveSenders.set(channelKey, sender);
     channelState.set(channelKey, { pendingReads: 0 });
+    echo.add(channelKey);
 
     const onMessage = (event) => {
       const control = parseControl(event?.data);
       if (!control) return;
+      if (control.t === 'echo') {
+        echo.answered(channelKey, control.n, clock.now());
+        return;
+      }
       if (control.t === 'abort') {
         if (uint32(control.id) && active.has(control.id)) {
           active.get(control.id).aborted = true;
@@ -391,6 +426,8 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
     };
     channels.add(detach);
     startSamplerIfIdle();
+    // The first echo leaves before any body, so the floor is read on an empty channel.
+    sendEchoIfDue(channelKey, sender, clock.now());
     return detach;
   }
 

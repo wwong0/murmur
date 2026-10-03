@@ -1,5 +1,6 @@
 import { assert, assertEqual, check } from '../harness.mjs';
 import {
+  PEER_WAIT_HELD_LIMIT_MS,
   PEER_WAIT_LIMIT_MS,
   drawUrgentDelay,
   setUrgentContext,
@@ -63,10 +64,22 @@ export default async function urgentSourceSuite() {
     // rerun green before this suite was handed off.
   });
 
-  await check('urgent-source: a loading peer waits through the held budget', async () => {
+  await check('urgent-source: a loading peer waits through the budget, 6 s in a held room', async () => {
     assertEqual(result({ loaders: 1, nowMs: PEER_WAIT_LIMIT_MS - 1 }).source, 'wait', 'loader waits before limit');
     assertEqual(result({ loaders: 1, nowMs: PEER_WAIT_LIMIT_MS - 1 }).untilMs, PEER_WAIT_LIMIT_MS, 'loader wait boundary');
     assertEqual(result({ loaders: 1, nowMs: PEER_WAIT_LIMIT_MS }).source, 'http', 'loader uses HTTP at limit');
+    // design.md D8 (m), 38ac6c6: the held room's budget, through the call the queue makes.
+    assertEqual(PEER_WAIT_HELD_LIMIT_MS, 6_000, 'the held limit is 6 s');
+    assertEqual(PEER_WAIT_LIMIT_MS, 3_000, 'the playing limit stays 3 s');
+    setUrgentContext({ held: true, roomMediaMs: 0 });
+    const heldRoom = { held: true, loaders: 1, budgetMs: urgentBudgetMs(0) };
+    setUrgentContext();
+    assertEqual(result({ ...heldRoom, nowMs: 5_999 }).source, 'wait', 'a held room still waits on a loader at 5 999 ms');
+    assertEqual(result({ ...heldRoom, nowMs: 5_999 }).untilMs, 6_000, 'and wakes at 6 000 ms');
+    assertEqual(result({ ...heldRoom, nowMs: 6_000 }).source, 'http', 'a held room goes to the host at 6 000 ms');
+    // Mutation probe, staged: urgentPeerWaitMs returning PEER_WAIT_LIMIT_MS when
+    // held, as before 38ac6c6. `npm run check` turned 'a held room still waits on a
+    // loader at 5 999 ms' red (http). Reverted; check green again.
   });
 
   await check('urgent-source: delay never exceeds a zero budget', async () => {
@@ -78,7 +91,7 @@ export default async function urgentSourceSuite() {
     // HTTP immediately`. Restored and rerun green before this suite was handed off.
   });
 
-  await check('urgent-source: a progressing peer switches only at spentAt', async () => {
+  await check('urgent-source: a progressing peer is switched in a playing room only, a budget after its transfer began', async () => {
     assertEqual(result({ p2pLoading: true, nowMs: PEER_WAIT_LIMIT_MS - 1 }).source, 'p2p', 'progressing peer before budget');
     assertEqual(result({ p2pLoading: true, nowMs: PEER_WAIT_LIMIT_MS }).source, 'http', 'progressing peer at budget');
     // Prevention proof: opportunity is a progressing peer at both sides of its
@@ -89,6 +102,23 @@ export default async function urgentSourceSuite() {
     // early; action boundary is the pre-budget result. Mutation: gate the stock
     // switch without the budget (`nowMs >= spentAt`). Named red: `progressing
     // peer before budget`. Restored and rerun green before this suite was handed off.
+
+    // design.md D8 (l), 38ac6c6. Attempt 3's seek: the viewer waited 2 890 ms on a
+    // loader, its peer transfer began, and the budget cut it 110 ms later.
+    const late = { p2pLoading: true, waitStartMs: 0, p2pStartMs: 2_890 };
+    assertEqual(result({ ...late, nowMs: 3_000 }).source, 'p2p', 'a playing room does not charge the transfer for the wait before it');
+    assertEqual(result({ ...late, nowMs: 5_889 }).source, 'p2p', 'the transfer has its budget from its own start');
+    assertEqual(result({ ...late, nowMs: 5_890 }).source, 'http', 'and is switched when that is spent');
+    const heldLate = { ...late, held: true, budgetMs: PEER_WAIT_HELD_LIMIT_MS };
+    assertEqual(result({ ...heldLate, nowMs: 3_000 }).source, 'p2p', 'a held room keeps a progressing transfer past 3 s');
+    assertEqual(result({ ...heldLate, nowMs: 2_890 + PEER_WAIT_HELD_LIMIT_MS }).source, 'p2p', 'and past its 6 s wait budget');
+    assertEqual(result({ ...heldLate, nowMs: 60_000 }).source, 'p2p', 'it ends on completion or the engine\'s timeout, not here');
+    assertEqual(result({ ...heldLate, p2pLoading: false, p2pFailed: true, nowMs: 60_000 }).source, 'http', 'a transfer the engine timed out goes to the host');
+    // Mutation probe, staged: the `held === true ||` term removed. `npm run check`
+    // turned 'and past its 6 s wait budget' red (http). Reverted; green. Second
+    // probe, staged: `p2pStartMs + budgetMs` put back to `spentAt`. Turned 'a
+    // playing room does not charge the transfer for the wait before it' red
+    // (http). Reverted; check green again.
   });
 
   await check('urgent-source: one host copy serves a later waiting viewer', async () => {
@@ -108,7 +138,8 @@ export default async function urgentSourceSuite() {
   await check('urgent-source: held-ahead supplies the peer wait budget', async () => {
     assertEqual(urgentPeerWaitMs({ held: false, segmentStartMs: 6_000, roomMediaMs: 2_000 }), 2_500, '4000ms held-ahead leaves 2500ms');
     assertEqual(urgentPeerWaitMs({ held: false, segmentStartMs: 3_500, roomMediaMs: 2_500 }), 0, '1000ms held-ahead leaves no wait');
-    assertEqual(urgentPeerWaitMs({ held: true, segmentStartMs: 0, roomMediaMs: 0 }), PEER_WAIT_LIMIT_MS, 'held room uses fixed limit');
+    assertEqual(urgentPeerWaitMs({ held: true, segmentStartMs: 0, roomMediaMs: 0 }), PEER_WAIT_HELD_LIMIT_MS, 'held room uses its fixed limit');
+    assertEqual(urgentPeerWaitMs({ held: false, segmentStartMs: 60_000, roomMediaMs: 0 }), PEER_WAIT_LIMIT_MS, 'a playing room never waits past 3 s');
     // Prevention proof: opportunity is a playing room with 4000ms held-ahead;
     // action boundary is the computed budget. Mutation: return the fixed limit
     // for every non-held room. Named red: `4000ms held-ahead leaves 2500ms`.
@@ -131,7 +162,7 @@ export default async function urgentSourceSuite() {
     assertEqual(urgentBudgetMs(6_000), 2_500, 'playing room budgets from the segment start');
     assertEqual(urgentBudgetMs(Number.NaN), 0, 'a segment without a start time goes to the host');
     setUrgentContext({ held: true, roomMediaMs: 2_000 });
-    assertEqual(urgentBudgetMs(6_000), PEER_WAIT_LIMIT_MS, 'held room uses the fixed limit');
+    assertEqual(urgentBudgetMs(6_000), PEER_WAIT_HELD_LIMIT_MS, 'held room uses its fixed limit');
     setUrgentContext();
     // Prevention proof (C2): opportunity is the patched queue's call, which
     // passes only the segment's start. Action boundary: urgentBudgetMs. Mutation:

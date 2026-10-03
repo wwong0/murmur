@@ -16,7 +16,7 @@ import * as LoggerUtils from "./utils/logger.js";
 import * as StreamUtils from "./utils/stream.js";
 import * as Utils from "./utils/utils.js";
 import debug from "debug";
-import { drawUrgentDelay, urgentBudgetMs, urgentSource } from "./urgent-source.mjs"; // wa-patch: use the product's urgent-load decision
+import { drawUrgentDelay, urgentBudgetMs, urgentContext, urgentSource } from "./urgent-source.mjs"; // wa-patch: use the product's urgent-load decision
 const FAILED_ATTEMPTS_CLEAR_INTERVAL = 60000;
 const PEER_UPDATE_LATENCY = 1000;
 export class HybridLoader {
@@ -413,8 +413,10 @@ export class HybridLoader {
         this.urgentWaits.set(segment.runtimeId, wait); // wa-patch: retain the start and draw across queue passes
         const budgetMs = urgentBudgetMs(segment.startTime * 1000); // wa-patch: the budget runs to this segment's start
         const p2pLoading = request?.status === "loading" && request.downloadSource === "p2p"; // wa-patch: this viewer's own peer load
-        const decision = urgentSource({ nowMs, p2pLoading, holders: statuses.filter((status) => status === "loaded").length, loaders: statuses.filter((status) => status === "http-loading").length, p2pFailed: !p2pLoading && (request?.failedAttempts?.p2pAttemptsCount ?? 0) > 0, waitStartMs: wait.waitStartMs, delayMs: wait.delayMs, budgetMs }); // wa-patch: choose peer, wait or host
-        if (p2pLoading && decision.source === "p2p") this.armUrgentWait(segment, { source: "wait", untilMs: wait.waitStartMs + budgetMs }, nowMs); // wa-patch: wake to switch once the budget is spent
+        wait.p2pStartMs = p2pLoading ? (wait.p2pStartMs ?? nowMs) : undefined; // wa-patch: a peer transfer's budget runs from the pass that first saw it
+        const held = urgentContext().held; // wa-patch: a held room leaves a progressing peer transfer alone
+        const decision = urgentSource({ nowMs, p2pLoading, holders: statuses.filter((status) => status === "loaded").length, loaders: statuses.filter((status) => status === "http-loading").length, p2pFailed: !p2pLoading && (request?.failedAttempts?.p2pAttemptsCount ?? 0) > 0, held, waitStartMs: wait.waitStartMs, p2pStartMs: wait.p2pStartMs, delayMs: wait.delayMs, budgetMs }); // wa-patch: choose peer, wait or host
+        if (p2pLoading && !held && decision.source === "p2p") this.armUrgentWait(segment, { source: "wait", untilMs: wait.p2pStartMs + budgetMs }, nowMs); // wa-patch: wake to switch once the transfer's budget is spent
         return decision; // wa-patch: the pure rule's answer
     } // wa-patch: finish the urgent wake helper
     armUrgentWait(segment, decision, nowMs) { // wa-patch: arm the rule's single wake timer

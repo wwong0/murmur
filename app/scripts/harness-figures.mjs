@@ -102,6 +102,8 @@ export function readRunDirectory(runDir) {
     resumes: { records: resumes, evicted: hostPaceFinal?.resumeEvicted ?? 0 },
     timebase,
     wallOffsetMs: timebase?.wallOffsetMs ?? null,
+    // The steady test's pace leg applies on the host's published fraction.
+    headroom: readJson(path.join(runDir, 'host-headroom.json'), null),
     controlAvailable,
     // Peer checks and host waste exclude the qualification's response by its ids.
     ...arm.recomputeInputExtras(manifest),

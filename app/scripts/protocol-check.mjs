@@ -99,6 +99,8 @@ import hostPaceSuite from './check/suites/host-pace.mjs';
 import sendArbiterSuite from './check/suites/send-arbiter.mjs';
 import urgentRequestSuite from './check/suites/urgent-request.mjs';
 import wireEstimateSuite from './check/suites/wire-estimate.mjs';
+import echoDelaySuite from './check/suites/echo-delay.mjs';
+import harnessJoinOrderSuite from './check/suites/harness-join-order.mjs';
 import paceBoundSuite from './check/suites/pace-bound.mjs';
 import controlEvidenceSuite from './check/suites/control-evidence.mjs';
 import controlFiguresSuite from './check/suites/control-figures.mjs';
@@ -225,6 +227,8 @@ for (const suite of [
   sendArbiterSuite,
   urgentRequestSuite,
   wireEstimateSuite,
+  echoDelaySuite,
+  harnessJoinOrderSuite,
   paceBoundSuite,
   controlEvidenceSuite,
   controlFiguresSuite,

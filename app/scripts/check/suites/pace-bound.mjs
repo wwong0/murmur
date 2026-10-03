@@ -1,6 +1,12 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { assert, assertEqual, assertNear, check } from '../harness.mjs';
+import { readRunDirectory } from '../../harness-figures.mjs';
 import { paceBoundFraction } from '../../figures/pace-bound.mjs';
 import { steadyState } from '../../figures/peer-figures.mjs';
+
+const SCRATCH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../.tmp');
 
 const BARS = {
   steadyUtilisationMax: 0.90,
@@ -117,5 +123,29 @@ export default async function paceBoundSuite() {
     const result = state();
     assertEqual(result.reason, 'steady-state-pace-bound', 'pace-bound action boundary is observed');
     assertEqual(result.steady, false, 'the paced host cannot pass steady state');
+  });
+  // The leg applies on input.headroom, which a run's recompute must load from
+  // host-headroom.json: control-five attempt 1 was read without the leg, with the
+  // host pace-bound for 0.405 of its window. Mutation: drop the headroom line from
+  // readRunDirectory; red on the fraction; restored, green. The pair of
+  // directories shares its manifest and differs only in the file.
+  await check('pace bound: a retained run hands its published fraction to the steady test', async () => {
+    fs.mkdirSync(SCRATCH, { recursive: true });
+    const dirs = ['with', 'without'].map((name) => fs.mkdtempSync(path.join(SCRATCH, `8b2-headroom-${name}-`)));
+    try {
+      for (const dir of dirs) {
+        fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({
+          condition: { delivery: 'host', peerExchange: true, clients: 1, bars: BARS }, declaredClientTags: ['c01'] }));
+      }
+      fs.writeFileSync(path.join(dirs[0], 'host-headroom.json'), JSON.stringify({ fraction: 0.85, supplied: false }));
+      const [present, absent] = dirs.map((dir) => readRunDirectory(dir).input);
+      assertEqual(present.headroom?.fraction, 0.85, 'the published fraction reaches the recompute input');
+      assertEqual(absent.headroom, null, 'a run without the file has no fraction, not a default');
+      const leg = state(0.85, { headroom: present.headroom }).legs.paceBound;
+      assertEqual(leg?.applies, true, 'the pace leg applies on the loaded fraction');
+      assertEqual(state(0.85, { headroom: absent.headroom }).legs.paceBound, undefined, 'and is absent without one');
+    } finally {
+      for (const dir of dirs) fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 }

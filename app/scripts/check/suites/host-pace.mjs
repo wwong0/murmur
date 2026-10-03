@@ -58,15 +58,18 @@ export default async function hostPaceSuite() {
       clock, fraction: HEADROOM_DEFAULT, hostDrainBytesPerMs: 416.667, bodyBytes: BIG_BODY_BYTES,
     });
     try {
-      clock.advance(5000); // five nominal intervals: the estimate forms, unpaced throughout
+      // The estimate forms, the buffers drain under the pace, and the first probe
+      // meets the link, which ends the climb (T15): no probe falls in the window.
+      clock.advance(12000);
       const buildup = origin.pace();
-      assert(buildup.estimate.bytesPerSecond !== null, 'the estimate has formed after five link-bound intervals');
+      assert(buildup.estimate.bytesPerSecond !== null, 'the estimate has formed');
+      assertEqual(buildup.intervals.at(-1).climbing, false, 'a probe met the link, so the climb has ended');
       const buildupError = Math.abs(buildup.estimate.bytesPerSecond - 1_250_000) / 1_250_000;
       assert(buildupError <= 0.005, `estimate within 0.5% of 1,250,000 B/s (got ${buildup.estimate.bytesPerSecond})`);
       const seqAtBuildup = buildup.intervals.at(-1).seq;
 
       for (const link of links) link.host.setDrainRate(2500);
-      clock.advance(2000); // the transition: pacing has already taken hold at t=5000
+      clock.advance(2000); // the transition: pacing took hold before the links rose
 
       const sumBuffered = links.reduce((total, link) => total + link.host.bufferedAmount, 0);
       const seqAtWindowStart = origin.pace(seqAtBuildup).intervals.at(-1).seq;
@@ -74,6 +77,7 @@ export default async function hostPaceSuite() {
       clock.advance(5000); // the measurement window
       const window = origin.pace(seqAtWindowStart);
       assertEqual(window.intervals.length, 5, 'the measurement window closed exactly five intervals');
+      assertEqual(window.intervals.filter((interval) => interval.probe).length, 0, 'no probe ran in the window');
       const drained = window.intervals.reduce((total, interval) => total + interval.drainedBodyBytes, 0);
 
       const target = 1062.5 * 5000;
@@ -105,13 +109,17 @@ export default async function hostPaceSuite() {
     links.forEach((link, index) => sendRequest(link, index + 1, '/media/big.m4s'));
     clock.advance(1); // deliver the queued req controls, short of the sampler's first tick
     await flush();    // let the source read resolve and admission begin, before any sample is taken
-    const fourth = createFakeLink({ clock, hostDrainBytesPerMs: 10_000, viewerDrainBytesPerMs: 10_000 });
-    const detachFourth = origin.attach(fourth.host);
+    let fourth = null;
+    let detachFourth = () => {};
     try {
-      clock.advance(6000); // five intervals form the estimate; the sixth runs paced
+      clock.advance(6000); // intervals 2 and 3 form the estimate; the rest run paced
       const evidence = origin.pace().intervals.at(-1);
       assert(evidence.paceBoundMs > 0, `the shared bucket was empty with a channel waiting for part of the interval (paceBoundMs=${evidence.paceBoundMs})`);
 
+      // Attached once the pace binds: an idle channel on a link of its own reads no
+      // queue, and the lowest channel decides whether the host's uplink is queued.
+      fourth = createFakeLink({ clock, hostDrainBytesPerMs: 10_000, viewerDrainBytesPerMs: 10_000 });
+      detachFourth = origin.attach(fourth.host);
       sendRequest(fourth, 99, '/media/held.m4s');
       await settle(clock, 1);
       assert(release !== null, 'the fourth channel’s source read is in flight');
@@ -128,25 +136,29 @@ export default async function hostPaceSuite() {
       // Reverted; check green again.
     } finally {
       detachFourth();
-      fourth.closeBoth();
+      fourth?.closeBoth();
       detaches.forEach((detach) => detach());
       links.forEach((link) => link.closeBoth());
     }
   });
 
-  await check('host-pace: an estimate formed on slow links paces at its fraction within two intervals', async () => {
+  await check('host-pace: an estimate formed on slow links paces at its fraction once the buffers drain', async () => {
     const clock = createFakeClock();
     const { origin, cleanup } = await buildLinkBoundHost({
       clock, fraction: HEADROOM_DEFAULT, hostDrainBytesPerMs: 200, bodyBytes: SMALL_BODY_BYTES,
     });
     try {
-      clock.advance(5000);
+      // Ten: the climb's first probe is the eighth interval, and the ninth holds its queue.
+      clock.advance(10000);
       const result = origin.pace();
-      assertEqual(result.intervals.length, 5, 'five intervals closed');
-      // D2 reversed (T14): the first link-bound interval forms the estimate; the
-      // channels' buffers carry the second, and the pace binds every one after.
-      assertEqual(result.intervals[0].linkBound, true, 'the first interval is link-bound');
-      for (const interval of result.intervals.slice(2)) assertEqual(interval.reason, 'pace-bound', `interval seq ${interval.seq} is pace-bound`);
+      assertEqual(result.intervals.length, 10, 'ten intervals closed');
+      // T15: the first interval holds the echo that read the floor, so it is not
+      // queued; the second and third are, and together they are the first reading.
+      assertEqual(result.intervals[0].reason, 'no-queue', 'the first interval saw the round trip at its floor');
+      assertEqual(result.intervals[1].linkBound, true, 'the second interval is link-bound');
+      assertEqual(result.intervals[2].linkBound, true, 'the third interval is link-bound');
+      assert(result.intervals[1].readingBytesPerSecond === null && result.intervals[2].readingBytesPerSecond !== null, 'the reading closes with the second queued interval');
+      assertEqual(result.intervals.at(-1).reason, 'pace-bound', 'the pace binds once the channels\u2019 buffers have drained');
       const relError = Math.abs(result.estimate.bytesPerSecond - 600_000) / 600_000;
       assert(relError <= 0.005, `estimate within 0.5% of 600,000 B/s (got ${result.estimate.bytesPerSecond})`);
       assertEqual(result.paceBytesPerSecond, HEADROOM_DEFAULT * result.estimate.bytesPerSecond, 'pace is 0.85 × the estimate');
@@ -161,7 +173,7 @@ export default async function hostPaceSuite() {
       clock, fraction: HEADROOM_DEFAULT, hostDrainBytesPerMs: 416.667, bodyBytes: 2 * BIG_BODY_BYTES,
     });
     try {
-      clock.advance(7000); // the estimate forms at 1.25 MB/s, and two intervals run paced
+      clock.advance(7000); // the estimate forms at 1.25 MB/s, and the buffers drain under the pace
       const before = origin.pace();
       assert(before.paceBytesPerSecond > 1_000_000, `paced near 1.06 MB/s before the fall (got ${before.paceBytesPerSecond})`);
       for (const link of links) link.host.setDrainRate(200);
@@ -170,9 +182,9 @@ export default async function hostPaceSuite() {
       const relError = Math.abs(after.estimate.bytesPerSecond - 600_000) / 600_000;
       assert(relError <= 0.005, `estimate falls to within 0.5% of 600,000 B/s (got ${after.estimate.bytesPerSecond})`);
       assertEqual(after.paceBytesPerSecond, HEADROOM_DEFAULT * after.estimate.bytesPerSecond, 'pace is 0.85 × the fallen estimate');
-      // Mutation probe, staged: PACE_CAP_BYTES in host-origin.mjs set back to one
-      // chunk. Every interval after the fall read pace-bound, none link-bound, and
-      // the estimate assertion above went red at 1,249,857. Reverted; check green.
+      // D1's F2 probe here (PACE_CAP_BYTES back to one chunk) no longer turns this
+      // case: since T15 the echo reads the fall, not the bucket's burst. Re-run
+      // 2026-10-03, it turned only 'no probe ran in the window' above.
     } finally {
       cleanup();
     }

@@ -1190,6 +1190,34 @@ try {
   const rosterAfterUrgent = (await pollUntil(() => a.evaluate(PROBE), (probe) => probe.members.length === 2, { everyMs: 500, deadlineAt: Date.now() + 15_000 })).value;
   expect('T12 closing C returns the measured room to two members', rosterAfterUrgent.members.length === 2, JSON.stringify(rosterAfterUrgent.members));
 
+  // T14 (design.md D2, reversed): a real Chrome's wire reading advances while bodies drain.
+  console.log('\n--- T14: the host reads its wire ---');
+  const hostPace = await a.evaluate('window.__app.hostPace()');
+  const draining = (hostPace?.intervals ?? []).filter((interval) => interval.handedBytes > 0);
+  const unread = draining.filter((interval) => !(interval.wireBytes > 0));
+  expect('T14 every interval that handed bytes read bytes on the wire', draining.length > 0 && unread.length === 0, JSON.stringify({
+    intervals: hostPace?.intervals?.length ?? null,
+    draining: draining.length,
+    unread: unread.slice(0, 3).map(({ seq, handedBytes, wireBytes }) => ({ seq, handedBytes, wireBytes })),
+    estimate: hostPace?.estimate ?? null,
+    paceBytesPerSecond: hostPace?.paceBytesPerSecond ?? null,
+    linkBound: (hostPace?.intervals ?? []).filter((interval) => interval.linkBound).length,
+    probes: (hostPace?.intervals ?? []).filter((interval) => interval.probe).length,
+  }));
+  // T15 (design.md D2, the echo): a real viewer page answers the host's echo.
+  const echoed = (hostPace?.intervals ?? []).filter((interval) => interval.queueMs !== null && interval.queueMs !== undefined);
+  const queueValues = echoed.map((interval) => interval.queueMs).sort((left, right) => left - right);
+  expect('T15 the host reads an echo round trip from its viewers', echoed.length > 0, JSON.stringify({
+    intervals: hostPace?.intervals?.length ?? null,
+    echoed: echoed.length,
+    echoSamples: echoed.reduce((sum, interval) => sum + interval.echoSamples, 0),
+    queueMsLowest: queueValues[0] ?? null,
+    queueMsMedian: queueValues[Math.floor(queueValues.length / 2)] ?? null,
+    queueMsHighest: queueValues.at(-1) ?? null,
+    reasons: Object.fromEntries(Object.entries(Object.groupBy(hostPace?.intervals ?? [], (interval) => interval.reason ?? 'link-bound')).map(([reason, list]) => [reason, list.length])),
+    raised: (hostPace?.intervals ?? []).filter((interval) => interval.raised).length,
+  }));
+
   console.log('\n--- T7: model check and hardware questions ---');
   const observationStates = await observeWindows([{ label: 'A', tab: a, recorder: recorderA }, { label: 'B', tab: b, recorder: recorderB }], OBSERVE_MS);
   const refreshRates = await measureRefreshRates([{ label: 'A', tab: a }, { label: 'B', tab: b }]);

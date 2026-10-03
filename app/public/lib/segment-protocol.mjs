@@ -7,7 +7,7 @@ export const BUFFER_FLOOR_BYTES = 65536;
 export const DRAIN_POLL_MS = 20;
 export const RATE_WINDOW_MS = 1000;
 
-const CONTROL_TYPES = new Set(['req', 'abort', 'head', 'end', 'err']);
+const CONTROL_TYPES = new Set(['req', 'abort', 'head', 'end', 'err', 'echo']);
 const textEncoder = new TextEncoder();
 
 export function asBytes(value) {
@@ -88,7 +88,7 @@ function setting(settings, name, fallback) {
   return Number.isFinite(settings?.[name]) ? settings[name] : fallback;
 }
 
-export function createChannelSender({ channel, clock, settings = {}, onClosed = null, onCredited = null, gate = null, onWaiting = null }) {
+export function createChannelSender({ channel, clock, settings = {}, onClosed = null, onCredited = null, gate = null, onWaiting = null, held = null, onChunk = null }) {
   const config = {
     chunkPayloadBytes: setting(settings, 'chunkPayloadBytes', CHUNK_PAYLOAD_BYTES),
     firstByteBudgetMs: setting(settings, 'firstByteBudgetMs', FIRST_BYTE_BUDGET_MS),
@@ -254,6 +254,8 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
 
   function offer() {
     if (closed || channel.bufferedAmount >= currentBound()) return null;
+    // design.md D2, the cap: the host holds a channel with too much unconfirmed.
+    if (held?.() === true) return null;
     const selected = select();
     if (!selected) return null;
     return selected.body.urgent ? 'urgent' : 'normal';
@@ -276,6 +278,7 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
       if (!sendControl({ t: 'end', id: body.id })) return length;
       removeBody(body.id);
     }
+    onChunk?.();
     return length;
   }
 

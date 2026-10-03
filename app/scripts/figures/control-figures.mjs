@@ -174,9 +174,11 @@ function coverageGap(polls, window) {
 
 export function widenedBars(bars, spanMs, edgeSegments, segmentSeconds) {
   const edge = 2 * edgeSegments * segmentSeconds * 1000 / spanMs;
+  // An undeclared bar is no value, as steadyState reads it: never a widened NaN.
+  const widen = (bar, by) => (finite(bar) ? bar + by : null);
   return {
-    downloadRatioMin: Number(bars?.steadyDownloadRatioMin) - edge,
-    downloadRatioMax: Number(bars?.steadyDownloadRatioMax) + edge,
+    downloadRatioMin: widen(bars?.steadyDownloadRatioMin, -edge),
+    downloadRatioMax: widen(bars?.steadyDownloadRatioMax, edge),
     utilisationMax: bars?.steadyUtilisationMax ?? null,
     realtimeMin: bars?.steadyRealtimeMin ?? null,
     paceBoundMax: bars?.steadyPaceBoundMax ?? null,
@@ -215,14 +217,16 @@ function spanLegs({ input, window, tags, bars, edgeSegments, segmentSeconds, hos
   const ratio = Object.fromEntries(tags.map((tag) => [tag, figures.downloadRatioByClient?.[tag] ?? null]));
   const realtime = presentedFrameRealtimeFactorByClient(input, window);
   const widened = widenedBars(bars, window.endMs - window.startMs, edgeSegments, segmentSeconds);
-  const ratioPass = tags.every((tag) => finite(ratio[tag]) && ratio[tag] >= widened.downloadRatioMin && ratio[tag] <= widened.downloadRatioMax);
-  const realtimePass = tags.every((tag) => finite(realtime[tag]) && realtime[tag] >= widened.realtimeMin);
+  const ratioPass = finite(widened.downloadRatioMin) && finite(widened.downloadRatioMax)
+    && tags.every((tag) => finite(ratio[tag]) && ratio[tag] >= widened.downloadRatioMin && ratio[tag] <= widened.downloadRatioMax);
+  const realtimePass = finite(widened.realtimeMin)
+    && tags.every((tag) => finite(realtime[tag]) && realtime[tag] >= widened.realtimeMin);
   const utilisationValue = linkFigure(input.linkSamples, window, input.capacityBitsPerSecond).uplinkUtilisationMean;
   const utilisation = leg(utilisationValue, widened.utilisationMax);
   const pace = finite(wallOffsetMs) && hostPace?.intervals
     ? paceBoundFraction({ intervals: hostPace.intervals, window, wallOffsetMs }) : null;
   const paceLeg = pace ? { ...pace, bar: widened.paceBoundMax,
-    pass: pace.value !== null && pace.value <= widened.paceBoundMax } : null;
+    pass: pace.value !== null && finite(widened.paceBoundMax) && pace.value <= widened.paceBoundMax } : null;
   const legs = {
     utilisation,
     downloadRatio: { byClient: ratio, bars: { min: widened.downloadRatioMin, max: widened.downloadRatioMax }, pass: ratioPass },

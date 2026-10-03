@@ -39,7 +39,7 @@ import {
 } from './lib/playback-leads.mjs';
 import { runTickSteps } from './lib/tick-steps.mjs';
 import { setUrgentContext, urgentDelay } from './lib/urgent-source.mjs';
-import { requestIsUrgent } from './lib/urgent-request.mjs';
+import { requestIsUrgent, urgentPositionMs } from './lib/urgent-request.mjs';
 import { createWireMeter } from './lib/wire-meter.mjs';
 
 const BUILD_ID = __BUILD_ID__;
@@ -293,7 +293,7 @@ async function installHostSide() {
 function urgentRequestFor(path) {
   try {
     const nowSharedMs = clockSync.sharedNow();
-    const positionMs = Number.isFinite(nowSharedMs) ? timeline.mediaMsAt(nowSharedMs) : null;
+    const positionMs = urgentPositionMs(viewState(), nowSharedMs);
     return requestIsUrgent({ path, positionMs, segments: link?.segmentTimes() ?? null, runwayMs: READY_HELD_AHEAD_MS });
   } catch (error) {
     addNotice(`urgent request: ${error?.message ?? String(error)}`);
