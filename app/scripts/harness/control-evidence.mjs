@@ -85,12 +85,14 @@ export function evidenceRefusals({ hostPace, resumes, hostPoll = [], seek = null
     refusals.push({ reason: 'start-hold-unobserved', detail: { state: first ?? null } });
   }
   const resumeRecords = resumes?.records ?? resumes ?? [];
+  // The resuming state is the first observed state of the held lineage at a higher
+  // version. Versions are the room's envelope seqs, not consecutive (8b2 executor-spec
+  // T3 item 9), so it must be read as the play itself: playing, and not held.
   for (const record of resumeRecords) {
-    const later = hostPoll.filter((poll) => poll.state?.lineage === record.identity?.lineage
+    const resumed = hostPoll.find((poll) => poll.state?.lineage === record.identity?.lineage
       && finite(poll.state?.version) && poll.state.version > record.identity?.version);
-    const effective = later.some((poll) => poll.state.version === record.identity.version + 1);
-    if (later.length && !effective) {
-      refusals.push({ reason: 'resume-effective-unobserved', detail: { record } });
+    if (resumed && !(resumed.state.playing === true && resumed.state.held !== true)) {
+      refusals.push({ reason: 'resume-effective-unobserved', detail: { record, resumed: resumed.state } });
     }
   }
   if (seek?.host && seek.host.held !== true) {

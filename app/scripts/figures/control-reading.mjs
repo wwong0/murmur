@@ -338,7 +338,7 @@ export function classifyControlReading({ runs = [], reading, armNames = [] } = {
       runs: summaries,
       criteria: noReading ? {} : criteria,
       criterion: noReading ? {} : criteria,
-      published: Object.fromEntries(config.published.map((name) => [name,
+      published: Object.fromEntries((config.published ?? []).map((name) => [name,
         acceptedSummaries.map((summary) => ({ directory: summary.directory,
           ...(summary.classification.published[name] ?? { value: null }) }))])),
       sweep: classifiedSweep,

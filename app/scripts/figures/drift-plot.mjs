@@ -41,9 +41,13 @@ export function driftSvg(published) {
   const intervalMs = intervalOf(published);
   const startMs = published.window.startMs;
   const targetMs = published.criterionVerdict?.targetMs ?? published.condition?.criterion?.targetMs;
-  if (!finite(targetMs) || targetMs < 0) throw new Error('drift plot requires a non-negative criterion target');
+  // A peer arm publishes drift with no criterion (`not-drawn`): the plot then
+  // carries the series and no target lines, never a target it was not given.
+  const notDrawn = published.criterionVerdict?.verdict === 'not-drawn' && targetMs === undefined;
+  if (!notDrawn && (!finite(targetMs) || targetMs < 0)) throw new Error('drift plot requires a non-negative criterion target');
+  const targets = notDrawn ? [] : [targetMs, -targetMs];
   const points = tags.flatMap((tag) => (Array.isArray(series[tag]) ? series[tag] : []).filter(finite));
-  const extent = Math.max(targetMs, ...points.map((value) => Math.abs(value)), 1);
+  const extent = Math.max(...targets, ...points.map((value) => Math.abs(value)), 1);
   const width = 900;
   const height = 480;
   const left = 82;
@@ -60,7 +64,7 @@ export function driftSvg(published) {
   lines.push(`<title>Drift by client relative to window start</title>`);
   lines.push(`<line class="axis" x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}"/>`);
   lines.push(`<line class="axis" x1="${left}" y1="${top + plotHeight}" x2="${left + plotWidth}" y2="${top + plotHeight}"/>`);
-  for (const value of [targetMs, -targetMs]) {
+  for (const value of targets) {
     const y = numberText(yAt(value));
     lines.push(`<line class="criterion" x1="${left}" y1="${y}" x2="${left + plotWidth}" y2="${y}"/>`);
     lines.push(`<text class="criterion-label" x="${left + plotWidth - 4}" y="${numberText(Number(y) - 4)}" text-anchor="end">${numberText(value)} ms</text>`);

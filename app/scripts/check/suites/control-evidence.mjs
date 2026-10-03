@@ -55,6 +55,22 @@ export default async function controlEvidenceSuite() {
     assertEqual(reasonsOf({ hostPoll: held }).length, 0, 'the first observed state skips polls with no state yet');
   });
 
+  await check('control evidence: the resuming state is the first later version, read as a play', async () => {
+    // Attempt 2's start: held at version 2, resumed at version 8 — versions are
+    // envelope seqs, so seven was never a state of the room.
+    const record = { seq: 1, identity: { lineage: 'l', version: 2 } };
+    const poll = (version, playing, held) => ({ state: { lineage: 'l', version, playing, held } });
+    const reasonsOf = (hostPoll) => evidenceRefusals({ hostPoll, resumes: { records: [record] } }).map((entry) => entry.reason);
+    assertEqual(reasonsOf([poll(2, false, true), poll(8, true, false)]).length, 0, 'a play at a non-consecutive version is the resume');
+    assertEqual(reasonsOf([poll(2, false, true), poll(8, false, false), poll(9, true, false)]).join(), 'resume-effective-unobserved', 'a pause seen first hides the resume');
+    assertEqual(reasonsOf([poll(2, false, true), poll(8, false, true)]).join(), 'resume-effective-unobserved', 'a held state seen first is not the resume');
+    assertEqual(reasonsOf([poll(2, false, true)]).length, 0, 'no later state: the hold is unresumed, not refused');
+    // Mutation probe, staged: control-evidence.mjs's rule restored to "a later
+    // state exists at the held version + 1". `npm run check` turned 'a play at a
+    // non-consecutive version is the resume' red (refused, as attempt 2 was).
+    // Reverted; check green again.
+  });
+
   await check('control evidence: host drains and viewer polls use fake tabs and clocks', async () => {
     const files = writer();
     let tick = 1_000;

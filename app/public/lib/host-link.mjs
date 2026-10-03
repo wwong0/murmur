@@ -8,6 +8,7 @@ import {
 } from './segment-protocol.mjs';
 import { createShimFetch, createShimXhr } from './host-link-shim.mjs';
 import { ADDR_SERVER } from './envelope.mjs';
+import { parseSegmentTimes } from './urgent-request.mjs';
 
 function nowOf(clock) {
   return clock && typeof clock.now === 'function' ? () => clock.now() : () => performance.now();
@@ -47,9 +48,9 @@ function reportStats(stats) {
 }
 
 /**
- * @param {{client: object, RTCPeerConnection: Function, rtcConfig?: object, clock?: object, onChange?: Function}} config
+ * @param {{client: object, RTCPeerConnection: Function, rtcConfig?: object, clock?: object, onChange?: Function, urgency?: (path: string) => boolean}} config
  */
-export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, clock, onChange, wallNow = () => Date.now(), receiptCapacity = 4096 } = {}) {
+export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, clock, onChange, wallNow = () => Date.now(), receiptCapacity = 4096, urgency = null } = {}) {
   if (!client || typeof client.on !== 'function' || typeof client.onEvent !== 'function') throw new TypeError('createHostLink: client is required');
   if (typeof RTCPeerConnection !== 'function') throw new TypeError('createHostLink: RTCPeerConnection is required');
   if (typeof wallNow !== 'function') throw new TypeError('createHostLink: wallNow must be a function');
@@ -78,6 +79,20 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
   const receiptLog = [];
   let latestReceiptSeq = 0;
   let missedReceipts = 0;
+  const segmentTimes = new Map();
+
+  // design.md D9: a page's throw marks nothing urgent rather than failing the load.
+  function urgentFor(path) {
+    try { return typeof urgency === 'function' && urgency(path) === true; } catch { return false; }
+  }
+
+  function keepPlaylist(path, chunks) {
+    const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0));
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    const times = parseSegmentTimes(new TextDecoder().decode(bytes), path);
+    if (times) for (const [segmentPath, span] of times) segmentTimes.set(segmentPath, span);
+  }
 
   function snapshot() {
     return {
@@ -123,6 +138,7 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
       bodyBytes: entry.bodyBytes,
       finished,
       canceled,
+      urgent: entry.urgent,
       source: 'host-link-receipt',
     };
     if (maxReceipts === 0) {
@@ -354,6 +370,8 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
       }
       const id = nextId++;
       const requestId = `${state.linkId}:${id}`;
+      const urgent = urgentFor(path);
+      const playlistChunks = path.endsWith('.m3u8') ? [] : null;
       state.requestsByPath[path] = (state.requestsByPath[path] ?? 0) + 1;
       const entry = {
         path,
@@ -362,6 +380,7 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
         headMs: null,
         head: null,
         bodyBytes: 0,
+        urgent,
         receiptDone: false,
         onHead: (head) => {
           entry.head = head;
@@ -370,14 +389,18 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
         },
         onChunk: (chunk) => {
           entry.bodyBytes += chunk.byteLength;
+          playlistChunks?.push(chunk);
           (handlers.onChunk ?? (() => {}))(chunk);
         },
-        onEnd: handlers.onEnd ?? (() => {}),
+        onEnd: (end) => {
+          if (playlistChunks && entry.head?.status === 200) keepPlaylist(path, playlistChunks);
+          (handlers.onEnd ?? (() => {}))(end);
+        },
         onError,
       };
       pending.set(id, entry);
       try {
-        channel.send(encodeControl({ t: 'req', id, path, range }));
+        channel.send(encodeControl(urgent ? { t: 'req', id, path, range, urgent: true } : { t: 'req', id, path, range }));
       } catch {
         pending.delete(id);
         finishReceipt(entry, false, true);
@@ -397,6 +420,9 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
     close() {
       tearDown('absent');
       currentHost = null;
+    },
+    segmentTimes() {
+      return segmentTimes;
     },
     createShimFetch({ realFetch, baseUrl }) {
       return createShimFetch({ link: this, realFetch, baseUrl });

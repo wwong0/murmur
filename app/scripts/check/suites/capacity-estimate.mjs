@@ -1,5 +1,5 @@
 // T2 (design.md D2; tasks.md 2.2): the host's uplink capacity estimate, over
-// constructed drain intervals. Pure module — no server, no clock.
+// constructed intervals read at the wire. Pure module — no server, no clock.
 
 import { assert, assertEqual, check } from '../harness.mjs';
 import { classifyInterval, createCapacityEstimate, MAX_SAMPLE_GAP_MS } from '../../../public/lib/capacity-estimate.mjs';
@@ -10,12 +10,16 @@ function samplesOf(count = 50, { inProgress = true, waitingBodyBytes = 1 } = {})
 }
 
 // The canonical link-bound base: every sample has one in-progress channel with bytes
-// waiting, no pace-bound time, and a real drain.
+// waiting, no pace-bound time, bytes on the wire and no queue below the host.
+const QUEUE_GROWTH = 262_112;
+
 function baseFixture() {
   return {
     samples: samplesOf(),
     startMs: 0,
-    drainedBodyBytes: 1000,
+    wireBytes: 1000,
+    handedBytes: 1000,
+    queueGrowthBytes: QUEUE_GROWTH,
     durationMs: 1000,
     paceBoundMs: 0,
   };
@@ -31,13 +35,13 @@ export default async function capacityEstimateSuite() {
   await check('capacity-estimate: the median of five link-bound intervals', async () => {
     const estimate = createCapacityEstimate({ window: 5 });
     const drained = [1_000_000, 1_100_000, 900_000, 1_200_000, 1_000_000];
-    for (const drainedBodyBytes of drained) {
+    for (const wireBytes of drained) {
       const { linkBound, reason } = classifyInterval({
-        samples: samplesOf(), startMs: 0, drainedBodyBytes, durationMs: 1000, paceBoundMs: 0,
+        samples: samplesOf(), startMs: 0, wireBytes, handedBytes: wireBytes, queueGrowthBytes: QUEUE_GROWTH, durationMs: 1000, paceBoundMs: 0,
       });
-      assert(linkBound, `interval at ${drainedBodyBytes} B is link-bound`);
+      assert(linkBound, `interval at ${wireBytes} B is link-bound`);
       assertEqual(reason, null, 'a link-bound interval names no reason');
-      estimate.record({ drainedBodyBytes, durationMs: 1000, linkBound });
+      estimate.record({ wireBytes, durationMs: 1000, linkBound });
     }
     const read = estimate.read();
     assertEqual(read.bytesPerSecond, 1_000_000, 'the estimate is the median of the five rates, not their mean (1,040,000)');
@@ -67,27 +71,52 @@ export default async function capacityEstimateSuite() {
     // Reverted; check green again.
   });
 
-  await check('capacity-estimate: fewer than five link-bound intervals publish null and intervalsBehind', async () => {
+  await check('capacity-estimate: the estimate forms at the first link-bound interval, and its window fills to five', async () => {
+    // D2 reversed (owner, 2026-10-03): the pace starts a second into the start's fill.
     const estimate = createCapacityEstimate({ window: 5 });
-    for (let index = 0; index < 4; index += 1) {
-      estimate.record({ drainedBodyBytes: 1_000_000, durationMs: 1000, linkBound: true });
-    }
-    const afterFour = estimate.read();
-    assertEqual(afterFour.bytesPerSecond, null, 'four link-bound intervals publish no estimate yet');
-    assertEqual(afterFour.intervalsBehind, 4, 'four intervals are behind the estimate');
-    // Mutation probe: staged, then the `window` comparison in `read` changed to the
-    // literal `4`. `npm run check` turned the `bytesPerSecond` assertion above red (a
-    // number, 1,000,000, against the expected `null`). Reverted; check green again.
-    estimate.record({ drainedBodyBytes: 1_000_000, durationMs: 1000, linkBound: true });
-    const afterFive = estimate.read();
-    assert(typeof afterFive.bytesPerSecond === 'number', 'a fifth link-bound interval publishes a number');
-    assertEqual(afterFive.bytesPerSecond, 1_000_000, 'the fifth interval completes the window at 1,000,000 B/s');
+    estimate.record({ wireBytes: 1_000_000, durationMs: 1000, linkBound: true });
+    const afterOne = estimate.read();
+    assertEqual(afterOne.bytesPerSecond, 1_000_000, 'one link-bound interval forms the estimate');
+    assertEqual(afterOne.intervalsBehind, 1, 'one interval is behind it');
+    // Mutation probe, staged: `read` publishing null below five rates, as before the
+    // reversal. `npm run check` turned 'one link-bound interval forms the estimate' red
+    // (null), and wire-estimate's first-interval case with it. Reverted; check green.
+    for (const wireBytes of [400_000, 1_200_000, 1_100_000, 900_000, 1_300_000]) estimate.record({ wireBytes, durationMs: 1000, linkBound: true });
+    assertEqual(estimate.read().intervalsBehind, 5, 'the window holds five');
+    assertEqual(estimate.read().bytesPerSecond, 1_100_000, 'the median of the last five, the first gone');
+  });
+
+  await check('capacity-estimate: a raise replaces every rate behind the estimate', async () => {
+    const estimate = createCapacityEstimate({ window: 5 });
+    for (let index = 0; index < 5; index += 1) estimate.record({ wireBytes: 600_000, durationMs: 1000, linkBound: true });
+    estimate.raise(700_000);
+    assertEqual(estimate.read().bytesPerSecond, 700_000, 'the raised rate is the estimate at once');
+    assertEqual(estimate.read().intervalsBehind, 1, 'one rate is behind it');
+    estimate.record({ wireBytes: 650_000, durationMs: 1000, linkBound: true });
+    assertEqual(estimate.read().bytesPerSecond, 700_000, 'later rates join the raised one, not the old window');
+    let threw = false;
+    try { estimate.raise(0); } catch { threw = true; }
+    assert(threw, 'a raise to zero throws');
+  });
+
+  await check('capacity-estimate: a queue grown below the host is link-bound, whatever the pace and the channels', async () => {
+    const base = baseFixture();
+    const queued = { ...base, paceBoundMs: 400, wireBytes: 500_000, handedBytes: 500_000 + QUEUE_GROWTH + 1,
+      samples: withOneSample(base.samples, 10, { channels: [{ inProgress: true, waitingBodyBytes: 0 }] }) };
+    const result = classifyInterval(queued);
+    assertEqual(result.linkBound, true, 'more handed than the wire carried, past the bucket burst, is link-bound');
+    assertEqual(result.queued, true, 'and says it was a queue');
+    const atBurst = { ...queued, handedBytes: 500_000 + QUEUE_GROWTH };
+    assertEqual(classifyInterval(atBurst).reason, 'channel-idle', 'a growth of exactly the burst is not a queue');
+    // Mutation probe, staged: the queued clause removed. `npm run check` turned
+    // 'more handed than the wire carried' red (channel-idle), and wire-estimate's
+    // fall under the pace with it. Reverted; check green again.
   });
 
   await check('capacity-estimate: falling capacity is read from the last window, not the whole history', async () => {
     const estimate = createCapacityEstimate({ window: 5 });
-    for (let index = 0; index < 5; index += 1) estimate.record({ drainedBodyBytes: 1_250_000, durationMs: 1000, linkBound: true });
-    for (let index = 0; index < 5; index += 1) estimate.record({ drainedBodyBytes: 600_000, durationMs: 1000, linkBound: true });
+    for (let index = 0; index < 5; index += 1) estimate.record({ wireBytes: 1_250_000, durationMs: 1000, linkBound: true });
+    for (let index = 0; index < 5; index += 1) estimate.record({ wireBytes: 600_000, durationMs: 1000, linkBound: true });
     const read = estimate.read();
     assertEqual(read.bytesPerSecond, 600_000, 'the estimate follows the last five intervals, not the median over all ten');
     assertEqual(read.linkBoundTotal, 10, 'ten link-bound intervals were recorded in total');
@@ -100,9 +129,9 @@ export default async function capacityEstimateSuite() {
 
   await check('capacity-estimate: a non-link-bound interval changes nothing in the estimate', async () => {
     const estimate = createCapacityEstimate({ window: 5 });
-    for (let index = 0; index < 5; index += 1) estimate.record({ drainedBodyBytes: 1_000_000, durationMs: 1000, linkBound: true });
+    for (let index = 0; index < 5; index += 1) estimate.record({ wireBytes: 1_000_000, durationMs: 1000, linkBound: true });
     const before = estimate.read();
-    estimate.record({ drainedBodyBytes: 50, durationMs: 1000, linkBound: false });
+    estimate.record({ wireBytes: 50, durationMs: 1000, linkBound: false });
     const after = estimate.read();
     assertEqual(after.bytesPerSecond, before.bytesPerSecond, 'a non-link-bound interval does not move the estimate');
     assertEqual(after.linkBoundTotal, before.linkBoundTotal, 'a non-link-bound interval is not counted');
@@ -131,8 +160,9 @@ export default async function capacityEstimateSuite() {
     const paceBound = { ...base, paceBoundMs: 1 };
     assertEqual(classifyInterval(paceBound).reason, 'pace-bound', 'a nonzero pace-bound time is pace-bound');
 
-    const noDrain = { ...base, drainedBodyBytes: 0 };
-    assertEqual(classifyInterval(noDrain).reason, 'no-drain', 'zero drained bytes is no-drain');
+    const noWire = { ...base, wireBytes: 0, handedBytes: 0 };
+    assertEqual(classifyInterval(noWire).reason, 'no-wire', 'zero wire bytes is no-wire');
+    assertEqual(classifyInterval({ ...base, wireBytes: null }).reason, 'no-wire', 'a missing wire reading is no-wire');
   });
 
   await check('capacity-estimate: coverage is judged by the largest gap, its edges included, not by a count', async () => {
@@ -161,17 +191,17 @@ export default async function capacityEstimateSuite() {
       assert(threw, `classifyInterval throws for durationMs = ${durationMs}`);
     }
     let negativeThrew = false;
-    try { classifyInterval({ ...base, drainedBodyBytes: -1 }); } catch { negativeThrew = true; }
-    assert(negativeThrew, 'classifyInterval throws for a negative drainedBodyBytes');
+    try { classifyInterval({ ...base, wireBytes: -1 }); } catch { negativeThrew = true; }
+    assert(negativeThrew, 'classifyInterval throws for a negative wireBytes');
 
     const estimate = createCapacityEstimate({ window: 5 });
     for (const durationMs of [0, -1]) {
       let threw = false;
-      try { estimate.record({ drainedBodyBytes: 1000, durationMs, linkBound: true }); } catch { threw = true; }
+      try { estimate.record({ wireBytes: 1000, durationMs, linkBound: true }); } catch { threw = true; }
       assert(threw, `record throws for durationMs = ${durationMs}`);
     }
     let recordNegativeThrew = false;
-    try { estimate.record({ drainedBodyBytes: -1, durationMs: 1000, linkBound: true }); } catch { recordNegativeThrew = true; }
-    assert(recordNegativeThrew, 'record throws for a negative drainedBodyBytes');
+    try { estimate.record({ wireBytes: -1, durationMs: 1000, linkBound: true }); } catch { recordNegativeThrew = true; }
+    assert(recordNegativeThrew, 'record throws for a negative wireBytes');
   });
 }

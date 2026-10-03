@@ -134,7 +134,7 @@ export default async function hostPaceSuite() {
     }
   });
 
-  await check('host-pace: an estimate formed on slow links paces at its fraction, and every qualifying interval is link-bound', async () => {
+  await check('host-pace: an estimate formed on slow links paces at its fraction within two intervals', async () => {
     const clock = createFakeClock();
     const { origin, cleanup } = await buildLinkBoundHost({
       clock, fraction: HEADROOM_DEFAULT, hostDrainBytesPerMs: 200, bodyBytes: SMALL_BODY_BYTES,
@@ -143,7 +143,10 @@ export default async function hostPaceSuite() {
       clock.advance(5000);
       const result = origin.pace();
       assertEqual(result.intervals.length, 5, 'five intervals closed');
-      for (const interval of result.intervals) assertEqual(interval.linkBound, true, `interval seq ${interval.seq} is link-bound`);
+      // D2 reversed (T14): the first link-bound interval forms the estimate; the
+      // channels' buffers carry the second, and the pace binds every one after.
+      assertEqual(result.intervals[0].linkBound, true, 'the first interval is link-bound');
+      for (const interval of result.intervals.slice(2)) assertEqual(interval.reason, 'pace-bound', `interval seq ${interval.seq} is pace-bound`);
       const relError = Math.abs(result.estimate.bytesPerSecond - 600_000) / 600_000;
       assert(relError <= 0.005, `estimate within 0.5% of 600,000 B/s (got ${result.estimate.bytesPerSecond})`);
       assertEqual(result.paceBytesPerSecond, HEADROOM_DEFAULT * result.estimate.bytesPerSecond, 'pace is 0.85 × the estimate');

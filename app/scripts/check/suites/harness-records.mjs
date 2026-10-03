@@ -19,6 +19,7 @@ const REGISTERS = [
   { change: '7b2', required: true },
   { change: '7c', required: true },
   { change: '8a', required: true },
+  { change: '8b2', required: true },
 ];
 
 export default async function harnessRecordsSuite() {

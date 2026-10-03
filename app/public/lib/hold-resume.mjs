@@ -5,7 +5,7 @@
 // across calls: the viewer set's key, when it last changed, and when the
 // viewer count first went from zero to one.
 
-const READY_HELD_AHEAD_MS = 4_000;
+export const READY_HELD_AHEAD_MS = 4_000;
 const ROSTER_SETTLE_MS = 2_000;
 const BOUND_MS = 10_000;
 const REISSUE_SUPPRESS_MS = 3_000;

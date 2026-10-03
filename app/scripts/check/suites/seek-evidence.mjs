@@ -88,5 +88,21 @@ export default async function seekEvidenceSuite() {
     assertEqual(result.timedOut, false, 'polling ends when every viewer matches');
     assertEqual(result.host.version, 4, 'host transition is retained');
     assertEqual(result.viewers.c01.reading.positionMs, 40_000, 'viewer matching reading is retained');
+    assertEqual('held' in result.host, false, 'a host state with no held field publishes none');
+  });
+
+  await check('seek evidence: the applied host state keeps its held reading', async () => {
+    const host = { tag: 'host' };
+    const viewer = { tag: 'c01' };
+    const before = { lineage: 'lineage', version: 2, playing: true, positionMs: 1, atSharedMs: 100, held: false };
+    const held = { lineage: 'lineage', version: 9, playing: false, positionMs: 600_000, atSharedMs: 500, held: true };
+    const readings = new Map([[host, [before, held]], [viewer, [before, held]]]);
+    const result = await waitForAppliedSeek({
+      hostSession: host, sessions: [viewer], before, timeoutMs: 50,
+      readState: async (session) => readings.get(session).shift(), drainAll: async () => {},
+      now: (() => { let value = 0; return () => value += 10; })(), sleepFn: async () => {},
+    });
+    assertEqual(result.timedOut, false, 'the held seek is applied on the viewer');
+    assertEqual(result.host.held, true, 'seek.host carries held: true');
   });
 }

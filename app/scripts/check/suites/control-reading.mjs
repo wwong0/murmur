@@ -151,6 +151,10 @@ export default async function controlReadingSuite() {
     const result = classifyControlReading({ runs: [], reading: BASE_READING, armNames: ['control-five'] });
     assertEqual(result.arms['control-five'].readingKey, 'none', 'empty arm has no reading');
     assert(result.arms['control-five'].reasons.includes('accepted-run-count:0'), 'empty arm names count');
+    // The registered blocks of control-five and control-seek hold no `published` list.
+    const { published, ...unlisted } = BASE_READING;
+    const bare = classifyControlReading({ runs: [], reading: unlisted, armNames: ['control-five'] });
+    assertEqual(JSON.stringify(bare.arms['control-five'].published), '{}', 'a block with no published list publishes none');
   });
 
   await check('control reading: sweep accepted positions publish spans, wait, recovery and queue figures', async () => {

@@ -112,8 +112,8 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
   let waiting = false;
   let closed = false;
   let notified = false;
-  let gateWaitMs = null;
   let hasWaiting = false;
+  let turn = null;
 
   channel.bufferedAmountLowThreshold = config.bufferFloorBytes;
 
@@ -202,6 +202,7 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
     cancelWait();
     bodies.clear();
     order.length = 0;
+    turn?.unregister();
     notifyWaiting();
     if (report) notifyClosed(error);
   }
@@ -237,39 +238,62 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
     notifyWaiting();
   }
 
+  // The next body in turn among urgent bodies with bytes left, else among all
+  // (design.md D9): a viewer's start segment never waits on its own prefetch.
+  function select() {
+    let fallback = null;
+    for (let scan = 0; scan < order.length; scan++) {
+      const index = (roundRobin + scan) % order.length;
+      const body = bodies.get(order[index]);
+      if (!body || body.offset >= body.bytes.byteLength) continue;
+      if (body.urgent) return { body, index };
+      fallback ??= { body, index };
+    }
+    return fallback;
+  }
+
+  function offer() {
+    if (closed || channel.bufferedAmount >= currentBound()) return null;
+    const selected = select();
+    if (!selected) return null;
+    return selected.body.urgent ? 'urgent' : 'normal';
+  }
+
+  // One body chunk, and its `end` when it is the last. Returns the payload
+  // length handed, or 0 when nothing was.
+  function admitChunk() {
+    const selected = select();
+    if (!selected) return 0;
+    const { body, index } = selected;
+    const length = Math.min(config.chunkPayloadBytes, body.bytes.byteLength - body.offset);
+    const frame = encodeFrame(body.id, body.seq, body.bytes.subarray(body.offset, body.offset + length));
+    if (!sendRaw(frame)) return 0;
+    body.offset += length;
+    body.seq += 1;
+    frameFifo.push({ id: body.id, cumulativeEnd: handedBytes, payloadBytes: length });
+    roundRobin = (index + 1) % order.length;
+    if (body.offset >= body.bytes.byteLength) {
+      if (!sendControl({ t: 'end', id: body.id })) return length;
+      removeBody(body.id);
+    }
+    return length;
+  }
+
+  function admitOne() {
+    const length = offer() === null ? 0 : admitChunk();
+    notifyWaiting();
+    return length;
+  }
+
+  // Gated, the arbiter decides whose chunk goes next across every channel
+  // (send-arbiter.mjs); this channel only says it has one.
   function admit() {
-    gateWaitMs = null;
-    while (!closed && bodies.size > 0 && channel.bufferedAmount < currentBound()) {
-      let selected = null;
-      for (let scan = 0; scan < order.length; scan++) {
-        const index = (roundRobin + scan) % order.length;
-        const body = bodies.get(order[index]);
-        if (body && body.offset < body.bytes.byteLength) {
-          selected = { body, index };
-          break;
-        }
-      }
-      if (!selected) break;
-      if (gate) {
-        const availability = gate.available(clock.now());
-        if (!availability.ok) {
-          gateWaitMs = availability.waitMs;
-          break;
-        }
-      }
-      const { body, index } = selected;
-      const length = Math.min(config.chunkPayloadBytes, body.bytes.byteLength - body.offset);
-      const frame = encodeFrame(body.id, body.seq, body.bytes.subarray(body.offset, body.offset + length));
-      if (!sendRaw(frame)) { notifyWaiting(); return; }
-      gate?.take(length, clock.now());
-      body.offset += length;
-      body.seq += 1;
-      frameFifo.push({ id: body.id, cumulativeEnd: handedBytes, payloadBytes: length });
-      roundRobin = (index + 1) % order.length;
-      if (body.offset >= body.bytes.byteLength) {
-        if (!sendControl({ t: 'end', id: body.id })) { notifyWaiting(); return; }
-        removeBody(body.id);
-      }
+    if (turn) {
+      turn.poke(clock.now());
+      return;
+    }
+    while (offer() !== null) {
+      if (admitChunk() === 0) break;
     }
     notifyWaiting();
   }
@@ -287,7 +311,7 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
     if (closed || waiting || (bodies.size === 0 && channel.bufferedAmount === 0)) return;
     waiting = true;
     channel.addEventListener('bufferedamountlow', wake);
-    timer = clock.setTimeout(wake, gateWaitMs ?? config.drainPollMs);
+    timer = clock.setTimeout(wake, config.drainPollMs);
   }
 
   // The buffer-low event, the drain poll and a new body all wake the same way.
@@ -301,13 +325,14 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
   }
 
   channel.addEventListener('close', onChannelClose);
+  turn = gate ? gate.register({ offer, admitOne }) : null;
 
   return {
     sendControl,
-    start(id, bytes) {
+    start(id, bytes, { urgent = false } = {}) {
       if (closed || bodies.has(id)) return;
       const payload = asBytes(bytes);
-      const body = { id, bytes: payload, offset: 0, seq: 0 };
+      const body = { id, bytes: payload, offset: 0, seq: 0, urgent: urgent === true };
       bodies.set(id, body);
       order.push(id);
       wake();

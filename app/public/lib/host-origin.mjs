@@ -12,6 +12,7 @@ import {
 import { createHostAccounting } from './host-accounting.mjs';
 import { createSendPace, HEADROOM_DEFAULT, validateHeadroomFraction } from './send-pace.mjs';
 import { classifyInterval, createCapacityEstimate } from './capacity-estimate.mjs';
+import { createSendArbiter } from './send-arbiter.mjs';
 
 const INTERVAL_NOMINAL_MS = 1000;
 const INTERVAL_RING_CAPACITY = 3600;
@@ -19,6 +20,11 @@ const INTERVAL_RING_CAPACITY = 3600;
 // drove the level negative and every link-bound interval read pace-bound, so a paced
 // host never saw its capacity fall (8b d1-findings.md F2).
 export const PACE_CAP_BYTES = 4 * CHUNK_PAYLOAD_BYTES;
+// T14 (design.md D2, reversed): more handed than the wire carried, past the bucket's
+// own burst, is a queue below the host; a probe follows 10 pace-bound intervals.
+export const QUEUE_GROWTH_BYTES = PACE_CAP_BYTES;
+export const PROBE_AFTER_INTERVALS = 10;
+export const PROBE_FACTOR = 1.1;
 
 const MEDIA_PREFIX = '/media/';
 const MAP_LINE_RE = /^#EXT-X-MAP:.*$/gm;
@@ -85,13 +91,14 @@ function inlinePlaylist(path, source, readSource) {
 /**
  * @param {{readSource: (path: string) => Promise<{status: number, bytes: Uint8Array|ArrayBuffer}>, clock?: object, settings?: object}} config
  */
-export function createHostOrigin({ readSource, clock, settings = {}, wallNow = () => Date.now(), pace = {} } = {}) {
+export function createHostOrigin({ readSource, clock, settings = {}, wallNow = () => Date.now(), pace = {}, wire = null } = {}) {
   if (typeof readSource !== 'function') throw new TypeError('createHostOrigin: readSource is required');
   const { fraction, error: fractionError } = validateHeadroomFraction(pace.fraction ?? HEADROOM_DEFAULT);
   if (fractionError) throw new TypeError(`createHostOrigin: pace.fraction ${fractionError}`);
   const instanceId = `${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
   const accounting = createHostAccounting({ wallNow, instanceId });
   let responseCounter = 0;
+  let urgentResponses = 0;
   let protocolErrors = 0;
   const memo = new Map();
   const channels = new Set();
@@ -102,6 +109,7 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
   // T3 (design.md D2): the one shared bucket and capacity estimate for every
   // channel this host attaches, plus the interval sampler that feeds them.
   const sendPace = createSendPace({ capBytes: PACE_CAP_BYTES });
+  const arbiter = createSendArbiter({ pace: sendPace, clock });
   const capacityEstimate = createCapacityEstimate({});
   let waitingChannelCount = 0;
   let samplerTimer = null;
@@ -109,6 +117,14 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
   let currentSamples = [];
   let closedDrainedTotal = 0;
   let previousTotalDrained = 0;
+  let closedHandedTotal = 0;
+  let previousTotalHanded = 0;
+  // Readings arrive in order; a sampler restart starts a new generation.
+  let wireGeneration = 0;
+  let previousWire = null;
+  let wireChain = null;
+  let paceBoundRun = 0;
+  let probing = false;
   let intervalSeq = 0;
   let intervalsEvicted = 0;
   const intervalRing = [];
@@ -123,9 +139,43 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
     return total;
   }
 
+  // Every byte the channels moved below `bufferedAmount`: frames and controls.
+  function totalHandedNow() {
+    let total = closedHandedTotal;
+    for (const sender of liveSenders.values()) total += sender.stats().drainedBytes;
+    return total;
+  }
+
+  // Without a transport below the channel (the fake links), the drain is the wire.
+  function readWire(then) {
+    let value;
+    try {
+      value = wire ? wire.read() : totalHandedNow();
+    } catch {
+      value = null;
+    }
+    const settle = (bytes) => then(Number.isFinite(bytes) ? bytes : null);
+    if (value && typeof value.then === 'function') {
+      const previous = wireChain ?? Promise.resolve();
+      wireChain = previous.then(() => value).then(settle, () => settle(null));
+    } else if (wireChain) {
+      wireChain = wireChain.then(() => settle(value));
+    } else {
+      settle(value);
+    }
+  }
+
+  function setPaceRate(nowMs) {
+    if (fraction === 'unpaced') return;
+    const { bytesPerSecond } = capacityEstimate.read();
+    const factor = probing ? PROBE_FACTOR : fraction;
+    sendPace.setRate(bytesPerSecond === null ? null : (factor * bytesPerSecond) / 1000, nowMs);
+  }
+
   function retireChannel(channelKey, sender) {
     if (retiredChannels.has(channelKey)) return;
     retiredChannels.add(channelKey);
+    closedHandedTotal += sender.stats().drainedBytes;
     closedDrainedTotal += sender.drainedBodyBytes();
     liveSenders.delete(channelKey);
     channelState.delete(channelKey);
@@ -139,33 +189,60 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
     const drainedBodyBytes = total - previousTotalDrained;
     if (drainedBodyBytes < 0) throw new RangeError('host-origin: drainedBodyBytes delta must not be negative');
     previousTotalDrained = total;
+    const handedTotal = totalHandedNow();
+    const handedBytes = handedTotal - previousTotalHanded;
+    previousTotalHanded = handedTotal;
     const paceBoundMs = sendPace.closeInterval(nowMs);
     if (paceBoundMs < 0 || paceBoundMs > durationMs) throw new RangeError('host-origin: paceBoundMs out of bounds for its interval');
-    const { linkBound, reason } = classifyInterval({ samples: currentSamples, startMs, drainedBodyBytes, durationMs, paceBoundMs });
-    capacityEstimate.record({ drainedBodyBytes, durationMs, linkBound });
-    if (fraction !== 'unpaced') {
-      const estimate = capacityEstimate.read();
-      sendPace.setRate(estimate.bytesPerSecond === null ? null : (fraction * estimate.bytesPerSecond) / 1000, nowMs);
+    const interval = { samples: currentSamples, startMs, endMs: nowMs, endWallMs: wallNow(), durationMs, drainedBodyBytes, handedBytes, paceBoundMs, probe: probing };
+    previousCloseMs = nowMs;
+    currentSamples = [];
+    const generation = wireGeneration;
+    readWire((bytes) => {
+      if (generation !== wireGeneration) return;
+      const wireBytes = bytes === null || previousWire === null ? null : Math.max(0, bytes - previousWire);
+      if (bytes !== null) previousWire = bytes;
+      finishInterval(interval, wireBytes);
+    });
+  }
+
+  function finishInterval(interval, wireBytes) {
+    const { samples, startMs, durationMs, handedBytes, paceBoundMs, probe } = interval;
+    const verdict = classifyInterval({ samples, startMs, durationMs, paceBoundMs, wireBytes, handedBytes, queueGrowthBytes: QUEUE_GROWTH_BYTES });
+    capacityEstimate.record({ wireBytes, durationMs, linkBound: verdict.linkBound });
+    // A probe the bucket still bound, with no queue below, carried 1.1 × the estimate.
+    let raised = false;
+    const rate = wireBytes === null ? null : wireBytes * 1000 / durationMs;
+    if (probe && verdict.reason === 'pace-bound' && rate > (capacityEstimate.read().bytesPerSecond ?? Infinity)) {
+      capacityEstimate.raise(rate);
+      raised = true;
     }
+    if (verdict.linkBound || probe) paceBoundRun = 0;
+    else if (verdict.reason === 'pace-bound') paceBoundRun += 1;
+    probing = fraction !== 'unpaced' && paceBoundRun >= PROBE_AFTER_INTERVALS;
+    setPaceRate(clock.now());
     intervalSeq += 1;
     intervalRing.push({
       seq: intervalSeq,
       startMs,
-      endMs: nowMs,
-      endWallMs: wallNow(),
-      samples: currentSamples.length,
-      drainedBodyBytes,
+      endMs: interval.endMs,
+      endWallMs: interval.endWallMs,
+      samples: samples.length,
+      drainedBodyBytes: interval.drainedBodyBytes,
+      handedBytes,
+      wireBytes,
       durationMs,
-      linkBound,
-      reason,
+      linkBound: verdict.linkBound,
+      queued: verdict.queued === true,
+      reason: verdict.reason,
       paceBoundMs,
+      probe,
+      raised,
     });
     if (intervalRing.length > INTERVAL_RING_CAPACITY) {
       intervalRing.shift();
       intervalsEvicted += 1;
     }
-    previousCloseMs = nowMs;
-    currentSamples = [];
   }
 
   function samplerTick() {
@@ -192,6 +269,12 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
     if (channels.size !== 1) return; // this attach is not the first live channel
     previousCloseMs = clock.now();
     currentSamples = [];
+    previousTotalHanded = totalHandedNow();
+    wireGeneration += 1;
+    previousWire = null;
+    wireChain = null;
+    const generation = wireGeneration;
+    readWire((bytes) => { if (generation === wireGeneration) previousWire = bytes; });
     scheduleSampler();
   }
 
@@ -220,7 +303,7 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
       channel,
       clock,
       settings,
-      gate: sendPace,
+      gate: arbiter,
       onWaiting(hasWaiting) {
         waitingChannelCount += hasWaiting ? 1 : -1;
         sendPace.setWaiting(waitingChannelCount, clock.now());
@@ -258,7 +341,7 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
         protocolErrors += 1;
         return;
       }
-      const entry = { aborted: false };
+      const entry = { aborted: false, urgent: control.urgent === true };
       active.set(control.id, entry);
       channelState.get(channelKey).pendingReads += 1;
       Promise.resolve()
@@ -285,7 +368,8 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
         viewerTag,
         expected: head.length,
       });
-      sender.start(control.id, bytes.subarray(slice.start, slice.start + slice.length));
+      if (entry.urgent) urgentResponses += 1;
+      sender.start(control.id, bytes.subarray(slice.start, slice.start + slice.length), { urgent: entry.urgent });
       if (head.length === 0) accounting.settleIfDone(channelKey, control.id, sender.pendingFrames(control.id));
     }
 
@@ -317,7 +401,7 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
       return accounting.snapshot();
     },
     stats() {
-      return { protocolErrors, responses: responseCounter, channels: channels.size };
+      return { protocolErrors, responses: responseCounter, urgentResponses, channels: channels.size };
     },
     pace(afterSeq = 0) {
       const estimate = capacityEstimate.read();

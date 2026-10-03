@@ -103,4 +103,17 @@ export default async function harnessDriftPlotSuite() {
     assert(svg.includes('time from window start (ms)'), 'SVG labels elapsed time in milliseconds');
     assertEqual((svg.match(/class="criterion"/g) ?? []).length, 2, 'SVG has plus and minus criterion lines');
   });
+
+  await check('harness drift plot: a not-drawn criterion plots the series with no target lines', async () => {
+    const published = publishedFixture();
+    const notDrawn = publish('drift', { ...published, condition: { name: 'plot', capacityMbps: 10, runLengthMs: 2_000 },
+      criterionVerdict: { verdict: 'not-drawn', reason: 'design.md D5' } }, { declaredClientTags: TAGS });
+    const svg = driftSvg(notDrawn);
+    assertEqual((svg.match(/class="criterion"/g) ?? []).length, 0, 'no criterion line is drawn');
+    assertEqual([...svg.matchAll(/<polyline\b/g)].length, 3, 'the three series are still drawn');
+    // A verdict that names a criterion but lost its target is still refused.
+    const lost = publish('drift', { ...published, condition: { name: 'plot', capacityMbps: 10, runLengthMs: 2_000 },
+      criterionVerdict: { statistic: 'median', verdict: 'met' } }, { declaredClientTags: TAGS });
+    assertEqual(throws(() => driftSvg(lost)), true, 'a drawn verdict without a target is refused');
+  });
 }

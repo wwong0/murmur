@@ -15,7 +15,7 @@ import {
 import { createPlayer } from './lib/player.mjs';
 import { createPeerBytes } from './lib/peer-bytes.mjs';
 import { heldAheadMs } from './lib/held-ahead.mjs';
-import { createHoldResume, createResumeRing } from './lib/hold-resume.mjs';
+import { createHoldResume, createResumeRing, READY_HELD_AHEAD_MS } from './lib/hold-resume.mjs';
 import { peerEngineConfig } from './lib/peer-engine-config.mjs';
 import { validateEngineWindows } from './lib/engine-windows.mjs';
 import { HEADROOM_DEFAULT, validateHeadroomFraction } from './lib/send-pace.mjs';
@@ -39,6 +39,8 @@ import {
 } from './lib/playback-leads.mjs';
 import { runTickSteps } from './lib/tick-steps.mjs';
 import { setUrgentContext, urgentDelay } from './lib/urgent-source.mjs';
+import { requestIsUrgent } from './lib/urgent-request.mjs';
+import { createWireMeter } from './lib/wire-meter.mjs';
 
 const BUILD_ID = __BUILD_ID__;
 
@@ -278,10 +280,25 @@ async function installHostSide() {
       clearTimeout: (handle) => clearTimeout(handle),
     },
     pace: { fraction: headroomFraction.fraction },
+    // T14 (design.md D2, reversed): the estimate reads the wire, not the channels' drain.
+    wire: createWireMeter({ peers: () => [...hostPeers.values()].map((entry) => entry.pc) }),
   });
   onEnvelope('host-link-offer', 'host-link offer', answerHostOffer);
   onEnvelope('host-link-ice', 'host-link ICE', routeHostIce);
   hostSideInstalled = true;
+}
+
+// T13 (design.md D9): the viewer's own start or resume segments, and the playlist,
+// go to the host marked urgent. A failure here marks nothing urgent.
+function urgentRequestFor(path) {
+  try {
+    const nowSharedMs = clockSync.sharedNow();
+    const positionMs = Number.isFinite(nowSharedMs) ? timeline.mediaMsAt(nowSharedMs) : null;
+    return requestIsUrgent({ path, positionMs, segments: link?.segmentTimes() ?? null, runwayMs: READY_HELD_AHEAD_MS });
+  } catch (error) {
+    addNotice(`urgent request: ${error?.message ?? String(error)}`);
+    return false;
+  }
 }
 
 function installViewerLink() {
@@ -291,6 +308,7 @@ function installViewerLink() {
     client,
     RTCPeerConnection,
     rtcConfig: rtcConfig(),
+    urgency: urgentRequestFor,
     onChange: (snapshot) => {
       if (snapshot.state !== lastState) {
         lastState = snapshot.state;

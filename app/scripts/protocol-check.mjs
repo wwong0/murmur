@@ -96,6 +96,9 @@ import enginePatchSuite from './check/suites/engine-patch.mjs';
 import capacityEstimateSuite from './check/suites/capacity-estimate.mjs';
 import sendPaceSuite from './check/suites/send-pace.mjs';
 import hostPaceSuite from './check/suites/host-pace.mjs';
+import sendArbiterSuite from './check/suites/send-arbiter.mjs';
+import urgentRequestSuite from './check/suites/urgent-request.mjs';
+import wireEstimateSuite from './check/suites/wire-estimate.mjs';
 import paceBoundSuite from './check/suites/pace-bound.mjs';
 import controlEvidenceSuite from './check/suites/control-evidence.mjs';
 import controlFiguresSuite from './check/suites/control-figures.mjs';
@@ -219,6 +222,9 @@ for (const suite of [
   capacityEstimateSuite,
   sendPaceSuite,
   hostPaceSuite,
+  sendArbiterSuite,
+  urgentRequestSuite,
+  wireEstimateSuite,
   paceBoundSuite,
   controlEvidenceSuite,
   controlFiguresSuite,
