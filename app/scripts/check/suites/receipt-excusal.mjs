@@ -73,4 +73,19 @@ export default async function receiptExcusalSuite() {
       'a finite head remains host-response-unpaired');
     assertEqual(result.excusedByteless.count, 0, 'a finite head is not excused');
   });
+
+  // Each differs from the first case in one field of the receipt.
+  await check('receipt excusal: a receipt that was not cancelled is not excused', async () => {
+    const result = response(fixture({ receipt: { canceled: false } }));
+    assertEqual(JSON.stringify(result.failures.map(({ type, tag, requestId }) => [type, tag, requestId])),
+      JSON.stringify([['host-response-unpaired', 'c01', 'req-c01']]), 'not cancelled leaves exactly that refusal');
+    assertEqual(result.excusedByteless.count, 0, 'a receipt that was not cancelled is not excused');
+  });
+
+  await check('receipt excusal: a receipt naming a response the host has no record of is not excused', async () => {
+    const result = response(fixture({ receipt: { originResponseId: 'host:9' } }));
+    assertEqual(JSON.stringify(result.failures.map(({ type, tag, originResponseId }) => [type, tag, originResponseId])),
+      JSON.stringify([['host-response-unpaired', 'c01', 'host:9']]), 'the named response is the refusal');
+    assertEqual(result.excusedByteless.count, 0, 'a receipt naming a response is not excused');
+  });
 }

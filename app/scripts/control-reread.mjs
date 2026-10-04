@@ -76,6 +76,13 @@ function criterionResult(reading, classification, name) {
   return classification?.criteria?.[name]?.result ?? null;
 }
 
+// 8a's classifier publishes registered acceptance as `accepted`. The run entry
+// already carries both acceptance values by name (design.md D4), so it is dropped.
+function rereadTrapClass(entry, condition, trapReading) {
+  const { accepted: _asRegistered, ...trapClass } = trapClassForRun(entry, condition, trapReading);
+  return trapClass;
+}
+
 function outputRun(record, registeredRuns, trapReading, labels) {
   const { conditionEntry: condition, acceptance, classification } = record;
   const figures = figureOf(record.reread);
@@ -91,7 +98,7 @@ function outputRun(record, registeredRuns, trapReading, labels) {
       steadyState,
       recovery: classification?.recovery ?? null,
       wait: classification?.wait ?? null,
-      trapClass: classification && condition.seek ? trapClassForRun(record.reread, condition, trapReading) : null,
+      trapClass: classification && condition.seek ? rereadTrapClass(record.reread, condition, trapReading) : null,
     },
     descriptive: {
       label: 'descriptive, not a verdict',
