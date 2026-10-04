@@ -1,5 +1,5 @@
 import { median as medianOfSorted } from '../../public/lib/frame-drift.mjs';
-import { accepted, buildIdsOf, buildMatch, figureOf, imagesOf } from './regimes-reading.mjs';
+import { accepted, buildIdsOf, figureOf, imagesOf, sameBuildId } from './regimes-reading.mjs';
 
 const finite = (value) => Number.isFinite(value);
 
@@ -86,10 +86,7 @@ function controlSummary(entries, config, acceptedRuns) {
       const figures = figureOf(entry);
       const peerFractionAggregate = finite(figures.peerFractionAggregate)
         ? figures.peerFractionAggregate : null;
-      const sameBuildAsArm = acceptedRuns.every((run) => {
-        const match = buildMatch(entry, run);
-        return match.same === true && match.matchedOn === 'build-id-and-images';
-      });
+      const sameBuildAsArm = acceptedRuns.every((run) => sameBuildId(entry, run));
       return {
         directory: entry?.directory ?? null,
         condition: conditionOf(entry),

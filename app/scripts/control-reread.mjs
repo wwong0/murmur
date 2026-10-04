@@ -6,7 +6,7 @@ import {
   confirmation, labelFaults, registeredDifferences, remainingRefusals, rereadAcceptance, rulesOf,
 } from './figures/control-reread.mjs';
 import {
-  buildControlReadingReport, recomputeControlRun, sweepPositions, trapClassForRun,
+  buildControlReadingReport, conditionByName, recomputeControlRun, sweepPositions, trapClassForRun,
 } from './control-reading.mjs';
 import { classifyControlReading, classifyControlRun } from './figures/control-reading.mjs';
 import { figureOf } from './figures/regimes-reading.mjs';
@@ -21,17 +21,6 @@ import {
 const DEFAULT_OUTPUT = 'results/8b3-control-reread.json';
 const RESPONSE_CHECK = 'response-agreement';
 const UNPACED = 'sweep-unpaced';
-
-function conditionByName(conditions, name) {
-  if (conditions?.[name]) return conditions[name];
-  for (const value of Object.values(conditions ?? {})) {
-    if (!value || typeof value !== 'object') continue;
-    if (value.name === name) return value;
-    const nested = conditionByName(value, name);
-    if (nested) return nested;
-  }
-  return null;
-}
 
 // D1: the rule set is committed before anything is computed under it.
 function ruleSetCommitOf(rulePath) {

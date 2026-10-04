@@ -83,15 +83,19 @@ function imagePair(value) {
   return { origin: value.origin, client: value.client };
 }
 
-function buildStatus(ids) {
-  const values = Object.values(ids);
-  if (!values.length) return 'viewers-unavailable';
+// A run's viewers read one build id (`id` is it), none, or a named reason they do not.
+function viewerBuild(entry) {
+  const values = Object.values(buildIdsOf(entry));
+  if (!values.length) return { reason: 'viewers-unavailable' };
   const present = values.filter((value) => typeof value === 'string' && value.length > 0);
-  if (!present.length) return 'none';
-  if (present.length < values.length) return 'partial';
-  return new Set(present).size === 1 ? 'one' : 'mixed';
+  if (!present.length) return { id: null };
+  if (present.length < values.length) return { reason: 'build-id-partial' };
+  return new Set(present).size === 1 ? { id: present[0] } : { reason: 'build-id-mixed' };
 }
 
+const UNESTABLISHED = ['viewers-unavailable', 'build-id-partial', 'build-id-mixed'];
+
+// The rig is the image pair the run's containers came from (7c d1-findings.md F4).
 export function buildMatch(left, right) {
   const leftImages = imagePair(imagesOf(left));
   const rightImages = imagePair(imagesOf(right));
@@ -99,30 +103,19 @@ export function buildMatch(left, right) {
   if (leftImages.origin !== rightImages.origin || leftImages.client !== rightImages.client) {
     return { same: false, matchedOn: null, reason: 'different-images' };
   }
-  const leftStatus = buildStatus(buildIdsOf(left));
-  const rightStatus = buildStatus(buildIdsOf(right));
-  if (leftStatus === 'viewers-unavailable' || rightStatus === 'viewers-unavailable') {
-    return { same: null, matchedOn: null, reason: 'viewers-unavailable' };
-  }
-  if (leftStatus === 'partial' || rightStatus === 'partial') {
-    return { same: null, matchedOn: null, reason: 'build-id-partial' };
-  }
-  if (leftStatus === 'mixed' || rightStatus === 'mixed') {
-    return { same: null, matchedOn: null, reason: 'build-id-mixed' };
-  }
-  if (leftStatus === 'one' && rightStatus === 'one') {
-    const leftId = new Set(Object.values(buildIdsOf(left))).values().next().value;
-    const rightId = new Set(Object.values(buildIdsOf(right))).values().next().value;
-    return leftId === rightId
-      ? { same: true, matchedOn: 'build-id-and-images', reason: null }
-      : { same: false, matchedOn: null, reason: 'different-build-id' };
-  }
-  return { same: true, matchedOn: 'images', reason: null };
+  const builds = [viewerBuild(left), viewerBuild(right)];
+  const reason = UNESTABLISHED.find((name) => builds.some((build) => build.reason === name));
+  if (reason) return { same: null, matchedOn: null, reason };
+  const [leftId, rightId] = builds.map((build) => build.id);
+  if (leftId === null || rightId === null) return { same: true, matchedOn: 'images', reason: null };
+  return leftId === rightId
+    ? { same: true, matchedOn: 'build-id-and-images', reason: null }
+    : { same: false, matchedOn: null, reason: 'different-build-id' };
 }
 
-// The rig is the image pair the run's containers came from (7c d1-findings.md F4).
-export function sameBuild(left, right) {
-  return buildMatch(left, right).same === true;
+// The match 7c and 8a registered: one viewer build id on each side, and the images.
+export function sameBuildId(left, right) {
+  return buildMatch(left, right).matchedOn === 'build-id-and-images';
 }
 
 function published(entry, figures) {
@@ -168,10 +161,7 @@ function controlSummary(entries, reading, eligibleRuns) {
     .map((entry) => {
       const figures = figureOf(entry);
       const peerFraction = finite(figures.peerFractionAggregate) ? figures.peerFractionAggregate : null;
-      const sameBuildAsEligible = eligibleRuns.every((run) => {
-        const match = buildMatch(entry, run);
-        return match.same === true && match.matchedOn === 'build-id-and-images';
-      });
+      const sameBuildAsEligible = eligibleRuns.every((run) => sameBuildId(entry, run));
       return {
         summary: {
           directory: entry.directory ?? null,

@@ -209,7 +209,7 @@ function controlSummary(entries, config, acceptedRuns) {
   return { selected: selected ?? null, candidates };
 }
 
-function classification(entry, reading, isAccepted = accepted) {
+export function classifyControlRun(entry, reading, isAccepted = accepted) {
   const config = thresholds(reading);
   const figures = figureOf(entry);
   const productRefusal = productInputRefusal(entry, config);
@@ -246,10 +246,6 @@ function classification(entry, reading, isAccepted = accepted) {
     wait: control?.holds ?? null,
     recovery: control?.recovery ?? null,
   };
-}
-
-export function classifyControlRun(entry, reading, isAccepted = accepted) {
-  return classification(entry, reading, isAccepted);
 }
 
 function majorityResult(summaries, name) {

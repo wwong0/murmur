@@ -20,7 +20,7 @@ const TRAP_RESULT = 'results/8a-trap-reading-d9.json';
 const TRAP_BAR_KEYS = ['behindHeldAheadMsBelow', 'reproducedPeerFractionMax',
   'notReproducedPeerFractionMin', 'scatteredSpreadMsAbove'];
 
-function conditionByName(conditions, name) {
+export function conditionByName(conditions, name) {
   if (conditions && conditions[name]) return conditions[name];
   for (const value of Object.values(conditions ?? {})) {
     if (!value || typeof value !== 'object') continue;
