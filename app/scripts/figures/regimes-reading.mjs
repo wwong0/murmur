@@ -78,16 +78,51 @@ export function imagesOf(entry) {
   return entry?.manifest?.topology?.regime?.images ?? null;
 }
 
+function imagePair(value) {
+  if (typeof value?.origin !== 'string' || typeof value?.client !== 'string') return null;
+  return { origin: value.origin, client: value.client };
+}
+
+function buildStatus(ids) {
+  const values = Object.values(ids);
+  if (!values.length) return 'viewers-unavailable';
+  const present = values.filter((value) => typeof value === 'string' && value.length > 0);
+  if (!present.length) return 'none';
+  if (present.length < values.length) return 'partial';
+  return new Set(present).size === 1 ? 'one' : 'mixed';
+}
+
+export function buildMatch(left, right) {
+  const leftImages = imagePair(imagesOf(left));
+  const rightImages = imagePair(imagesOf(right));
+  if (!leftImages || !rightImages) return { same: null, matchedOn: null, reason: 'images-unavailable' };
+  if (leftImages.origin !== rightImages.origin || leftImages.client !== rightImages.client) {
+    return { same: false, matchedOn: null, reason: 'different-images' };
+  }
+  const leftStatus = buildStatus(buildIdsOf(left));
+  const rightStatus = buildStatus(buildIdsOf(right));
+  if (leftStatus === 'viewers-unavailable' || rightStatus === 'viewers-unavailable') {
+    return { same: null, matchedOn: null, reason: 'viewers-unavailable' };
+  }
+  if (leftStatus === 'partial' || rightStatus === 'partial') {
+    return { same: null, matchedOn: null, reason: 'build-id-partial' };
+  }
+  if (leftStatus === 'mixed' || rightStatus === 'mixed') {
+    return { same: null, matchedOn: null, reason: 'build-id-mixed' };
+  }
+  if (leftStatus === 'one' && rightStatus === 'one') {
+    const leftId = new Set(Object.values(buildIdsOf(left))).values().next().value;
+    const rightId = new Set(Object.values(buildIdsOf(right))).values().next().value;
+    return leftId === rightId
+      ? { same: true, matchedOn: 'build-id-and-images', reason: null }
+      : { same: false, matchedOn: null, reason: 'different-build-id' };
+  }
+  return { same: true, matchedOn: 'images', reason: null };
+}
+
 // The rig is the image pair the run's containers came from (7c d1-findings.md F4).
 export function sameBuild(left, right) {
-  const leftIds = buildIdsOf(left);
-  const rightIds = buildIdsOf(right);
-  const tags = Object.keys(leftIds);
-  const leftImages = imagesOf(left);
-  return tags.length > 0 && JSON.stringify(leftIds) === JSON.stringify(rightIds)
-    && Object.values(leftIds).every((value) => typeof value === 'string' && value.length > 0)
-    && typeof leftImages?.origin === 'string' && typeof leftImages?.client === 'string'
-    && JSON.stringify(leftImages) === JSON.stringify(imagesOf(right));
+  return buildMatch(left, right).same === true;
 }
 
 function published(entry, figures) {
@@ -133,7 +168,10 @@ function controlSummary(entries, reading, eligibleRuns) {
     .map((entry) => {
       const figures = figureOf(entry);
       const peerFraction = finite(figures.peerFractionAggregate) ? figures.peerFractionAggregate : null;
-      const sameBuildAsEligible = eligibleRuns.every((run) => sameBuild(entry, run));
+      const sameBuildAsEligible = eligibleRuns.every((run) => {
+        const match = buildMatch(entry, run);
+        return match.same === true && match.matchedOn === 'build-id-and-images';
+      });
       return {
         summary: {
           directory: entry.directory ?? null,

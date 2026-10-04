@@ -1,0 +1,31 @@
+{
+  "change": "8b3",
+  "settled": "2026-10-04",
+  "settledIn": "83ccd9c",
+  "postResult": true,
+  "registry": "results/RUNS-8b2.json",
+  "registeredReading": "results/8b2-control-reading.json",
+  "labels": {
+    "build": "measured on the pre-J1-repair build",
+    "reading": "re-read post-result on 2026-10-04",
+    "standing": "not a registered pass"
+  },
+  "rules": [
+    {
+      "id": "cap-used",
+      "rule": "the steady test's pace leg is the cap used, at most 0.90",
+      "replaces": "8b2 design.md D3: pace-bound time at most 0.10 of the window",
+      "bars": { "steadyCapUsedMax": 0.9 },
+      "removeBars": ["steadyPaceBoundMax"]
+    },
+    {
+      "id": "byteless-cancelled-receipt",
+      "rule": "response-agreement excuses a receipt that is cancelled, has no head, carries zero bytes and has no host record",
+      "replaces": "response-agreement refusing such a receipt as host-response-unpaired; 8a D9's pairing is unchanged",
+      "excusals": { "bytelessCancelledReceipt": true }
+    }
+  ],
+  "conditions": ["control-five", "control-ten", "control-seek", "sweep-095", "sweep-unpaced"],
+  "readAsRegistered": ["p2p-scattered", "baseline-nop2p-steady", "shakedown/cap10"],
+  "outOfReach": [{ "condition": "sweep-070", "reason": "aborted before its window" }]
+}

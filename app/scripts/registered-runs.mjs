@@ -48,7 +48,7 @@ export function finalizationOf(runDir) {
 
 // A run whose byte figure the harness refused may have nothing to recompute; it is
 // listed with the error. One the harness finalised must recompute.
-export function recomputeRegisteredRun(entry) {
+export function recomputeRegisteredRun(entry, options) {
   const directory = registeredDirectory(entry);
   const runDir = runPath(directory);
   const manifest = readJson(path.join(runDir, 'manifest.json'));
@@ -56,7 +56,7 @@ export function recomputeRegisteredRun(entry) {
   const registered = { ...entry, directory, condition: entry.condition ?? manifest.condition?.name,
     manifest, finalization };
   try {
-    return { ...registered, report: recomputeRunDirectory(runDir) };
+    return { ...registered, report: recomputeRunDirectory(runDir, options) };
   } catch (error) {
     if (finalization?.writeByte === true) throw error;
     return { ...registered, recomputeError: error.message };

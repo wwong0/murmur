@@ -61,6 +61,7 @@ import regimesConditionsSuite from './check/suites/regimes-conditions.mjs';
 import peerSpacingSuite from './check/suites/peer-spacing.mjs';
 import peerChecksSuite from './check/suites/peer-checks.mjs';
 import peerChecksGroupSuite from './check/suites/peer-checks-group.mjs';
+import receiptExcusalSuite from './check/suites/receipt-excusal.mjs';
 import peerConservationShapedSuite from './check/suites/peer-conservation-shaped.mjs';
 import peerSettleSuite from './check/suites/peer-settle.mjs';
 import hostOriginRefusalsSuite from './check/suites/host-origin-refusals.mjs';
@@ -102,9 +103,14 @@ import wireEstimateSuite from './check/suites/wire-estimate.mjs';
 import echoDelaySuite from './check/suites/echo-delay.mjs';
 import harnessJoinOrderSuite from './check/suites/harness-join-order.mjs';
 import paceBoundSuite from './check/suites/pace-bound.mjs';
+import capUsedSuite from './check/suites/cap-used.mjs';
+import steadyCapUsedSuite from './check/suites/steady-cap-used.mjs';
 import controlEvidenceSuite from './check/suites/control-evidence.mjs';
 import controlFiguresSuite from './check/suites/control-figures.mjs';
 import controlReadingSuite from './check/suites/control-reading.mjs';
+import buildMatchSuite from './check/suites/build-match.mjs';
+import controlReadingRepairsSuite from './check/suites/control-reading-repairs.mjs';
+import controlRereadSuite from './check/suites/control-reread.mjs';
 import headroomSuite from './check/suites/headroom.mjs';
 import seekEntrySuite from './check/suites/seek-entry.mjs';
 import capacityStepSuite from './check/suites/capacity-step.mjs';
@@ -189,6 +195,7 @@ for (const suite of [
   peerSpacingSuite,
   peerChecksSuite,
   peerChecksGroupSuite,
+  receiptExcusalSuite,
   peerConservationShapedSuite,
   peerSettleSuite,
   hostOriginRefusalsSuite,
@@ -230,9 +237,14 @@ for (const suite of [
   echoDelaySuite,
   harnessJoinOrderSuite,
   paceBoundSuite,
+  capUsedSuite,
+  steadyCapUsedSuite,
   controlEvidenceSuite,
   controlFiguresSuite,
   controlReadingSuite,
+  buildMatchSuite,
+  controlReadingRepairsSuite,
+  controlRereadSuite,
   headroomSuite,
   seekEntrySuite,
   capacityStepSuite,

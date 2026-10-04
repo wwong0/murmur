@@ -1,11 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { HEADROOM_DEFAULT } from '../public/lib/send-pace.mjs';
 import {
   baselineTable,
   classifyControlReading,
   classifyControlRun,
 } from './figures/control-reading.mjs';
+import { classifyTrapRun } from './figures/trap-reading.mjs';
 import { accepted } from './figures/regimes-reading.mjs';
 import {
   appPath, argument, CONDITIONS_PATH, isMain, readJson, recomputeRegisteredRun, registeredDirectory,
@@ -14,6 +16,9 @@ import {
 
 const DEFAULT_OUTPUT = 'results/8b2-control-reading.json';
 const GOODPUT_CONDITION = 'shakedown/cap10';
+const TRAP_RESULT = 'results/8a-trap-reading-d9.json';
+const TRAP_BAR_KEYS = ['behindHeldAheadMsBelow', 'reproducedPeerFractionMax',
+  'notReproducedPeerFractionMin', 'scatteredSpreadMsAbove'];
 
 function conditionByName(conditions, name) {
   if (conditions && conditions[name]) return conditions[name];
@@ -52,7 +57,7 @@ function goodputRun(entry, runDir) {
 }
 
 // The goodput directory is an arm reading, not a harness run: it has no manifest.
-function recomputeControlRun(entry) {
+export function recomputeControlRun(entry) {
   const directory = registeredDirectory(entry);
   const runDir = runPath(directory);
   if (!fs.existsSync(runDir)) throw new Error(`registered run directory missing:${directory}`);
@@ -60,10 +65,65 @@ function recomputeControlRun(entry) {
   return recomputeRegisteredRun(entry);
 }
 
-function outputRun(entry, conditions) {
+export function trapClassForRun(entry, condition, trapReading) {
+  const ownReading = condition?.reading;
+  for (const key of TRAP_BAR_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(ownReading ?? {}, key)
+      && ownReading[key] !== trapReading?.[key]) {
+      throw new Error(`trap-bars-mismatch:${condition?.name ?? entry?.condition ?? null}`);
+    }
+  }
+  const figures = entry?.report?.figures ?? entry?.figures;
+  if (!figures || typeof figures !== 'object') return { key: null, reason: 'figures-unavailable' };
+  try {
+    // Each value once: the run entry already carries its directory, build and images.
+    const { classKey, class: className, label, accepted: isAccepted, behind, peerFractionAggregate,
+      heldAheadMsRoomMedian, positionSpreadMsMedian } = classifyTrapRun(entry, trapReading);
+    return { key: classKey, class: className, label, accepted: isAccepted, behind, peerFractionAggregate,
+      heldAheadMsRoomMedian, positionSpreadMsMedian };
+  } catch (error) {
+    return { key: null, reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export function sweepPositions(runs, conditions) {
+  const entries = [...conditionEntries(conditions).values()].filter((condition) => {
+    if (condition?.reading?.kind !== 'control') return false;
+    const declared = Object.prototype.hasOwnProperty.call(condition, 'headroomFraction');
+    return condition.reading.sweep === true || (condition.seek && !declared);
+  });
+  const positions = entries.map((condition) => {
+    const declared = Object.prototype.hasOwnProperty.call(condition, 'headroomFraction');
+    const fraction = declared ? condition.headroomFraction : HEADROOM_DEFAULT;
+    return {
+      fraction,
+      condition: condition.name,
+      runs: (runs ?? []).filter((entry) => entry?.condition === condition.name && entry?.classification)
+        .map((entry) => ({
+          directory: entry.directory ?? null,
+          accepted: entry.classification.accepted ?? null,
+          sweep: entry.figures?.control?.sweep ?? null,
+          wait: entry.classification.wait ?? null,
+          recovery: entry.classification.recovery ?? null,
+        })),
+    };
+  });
+  return positions.sort((left, right) => {
+    const leftNumeric = Number.isFinite(left.fraction);
+    const rightNumeric = Number.isFinite(right.fraction);
+    if (leftNumeric && rightNumeric) return left.fraction - right.fraction;
+    if (leftNumeric) return -1;
+    if (rightNumeric) return 1;
+    if (left.fraction === 'unpaced' && right.fraction !== 'unpaced') return 1;
+    if (right.fraction === 'unpaced' && left.fraction !== 'unpaced') return -1;
+    return 0;
+  });
+}
+
+function outputRun(entry, conditions, trapReading) {
   const condition = conditionByName(conditions, entry.condition);
   const reading = condition?.reading?.kind === 'control' ? condition.reading : null;
-  return {
+  const output = {
     directory: entry.directory,
     condition: entry.condition,
     outcome: entry.outcome ?? null,
@@ -77,6 +137,8 @@ function outputRun(entry, conditions) {
       ...(reading ? { classification: classifyControlRun(entry, reading) } : {}),
     } : {}),
   };
+  if (condition?.seek && reading) output.trapClass = trapClassForRun(entry, condition, trapReading);
+  return output;
 }
 
 function controlArms(entries, conditions) {
@@ -89,11 +151,23 @@ function controlArms(entries, conditions) {
   return result;
 }
 
-export function buildControlReadingReport({ registerPath, conditionsPath = CONDITIONS_PATH } = {}) {
+export function buildControlReadingReport({ registerPath, conditionsPath = CONDITIONS_PATH, entries: recomputed } = {}) {
   if (!registerPath) throw new Error('registry path is required');
   const conditions = readJson(conditionsPath);
-  const entries = registryEntries(registerPath).map(recomputeControlRun);
-  const runs = entries.map((entry) => outputRun(entry, conditions));
+  const trapCondition = conditionByName(conditions, 'trap-seek');
+  if (!trapCondition?.reading || typeof trapCondition.reading !== 'object') {
+    throw new Error('trap-reading-condition-unavailable');
+  }
+  const trapResult = readJson(appPath(TRAP_RESULT));
+  const trapArm = trapResult?.arms?.['trap-seek'];
+  if (!trapArm || typeof trapArm !== 'object') throw new Error('trap-reading-result-unavailable');
+  for (const key of ['reading', 'readingKey', 'class']) {
+    if (!Object.prototype.hasOwnProperty.call(trapArm, key)) {
+      throw new Error(`trap-reading-result-missing:${key}`);
+    }
+  }
+  const entries = recomputed ?? registryEntries(registerPath).map(recomputeControlRun);
+  const runs = entries.map((entry) => outputRun(entry, conditions, trapCondition.reading));
   const arms = controlArms(entries, conditions);
   const controlRuns = Object.fromEntries(['control-five', 'control-ten'].map((condition) => [condition,
     entries.find((entry) => accepted(entry) && entry.condition === condition) ?? null]));
@@ -105,6 +179,9 @@ export function buildControlReadingReport({ registerPath, conditionsPath = CONDI
     arms,
     goodput: runs.find((entry) => entry.condition === GOODPUT_CONDITION)?.goodput ?? null,
     baseline: baselineTable({ runs: entries, controlRuns }),
+    trapReading: { file: TRAP_RESULT, arm: 'trap-seek', reading: trapArm.reading,
+      readingKey: trapArm.readingKey, class: trapArm.class },
+    sweep: { positions: sweepPositions(runs, conditions) },
   };
 }
 

@@ -254,8 +254,15 @@ function responseAgreement(input, tolerances, pairing) {
   const failures = [];
   const excused = pairing.excused ?? [];
   const excusedKeys = new Set(excused.map((entry) => `${entry.tag}:${entry.requestId}`));
+  const tags = tagsOf(input);
+  const excusalInForce = input.condition?.excusals?.bytelessCancelledReceipt === true;
+  const excusedByteless = {
+    count: 0,
+    byClient: Object.fromEntries(tags.map((tag) => [tag, 0])),
+    receipts: [],
+  };
   let exercised = false;
-  for (const tag of tagsOf(input)) {
+  for (const tag of tags) {
     const entry = pairing.byClient[tag] ?? { receipts: [], attempts: [], pairs: [], unmatchedReceipts: [], unmatchedAttempts: [] };
     const cohortReceipts = entry.receipts.filter(({ receipt }) => inWindow(receipt.endMs, input.window));
     if (cohortReceipts.length || entry.attempts.some((attempt) => inWindow(attempt.endMs, input.window))) exercised = true;
@@ -269,6 +276,16 @@ function responseAgreement(input, tolerances, pairing) {
         continue;
       }
       if (!pair.host) {
+        // design.md D3: no byte moved either way. Dropping a clause excuses a
+        // receipt that carried evidence.
+        const eligible = excusalInForce && receipt.canceled === true && receipt.finished !== true && !finite(receipt.headMs)
+          && receipt.bodyBytes === 0 && (receipt.originResponseId === null || receipt.originResponseId === undefined);
+        if (eligible) {
+          excusedByteless.count += 1;
+          excusedByteless.byClient[tag] += 1;
+          excusedByteless.receipts.push({ tag, requestId: receipt.requestId ?? null });
+          continue;
+        }
         failures.push({ tag, type: 'host-response-unpaired', requestId: receipt.requestId,
           originResponseId: receipt.originResponseId });
         continue;
@@ -306,9 +323,11 @@ function responseAgreement(input, tolerances, pairing) {
     exercised ||= pairing.unreceived.report.count > 0;
     failures.push(...pairing.unreceived.failures);
   }
+  // Published only where declared, so a registered recompute keeps its shape.
   return {
     check: 'response-agreement', passed: failures.length === 0, failures, exercised, excused,
     ...(pairing.unreceived ? { hostResponsesUnreceived: pairing.unreceived.report } : {}),
+    ...(excusalInForce ? { excusedByteless } : {}),
   };
 }
 

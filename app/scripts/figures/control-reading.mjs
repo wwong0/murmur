@@ -1,6 +1,6 @@
 import { PRODUCT_ENGINE_WINDOWS } from '../../public/lib/engine-windows.mjs';
 import { HEADROOM_DEFAULT } from '../../public/lib/send-pace.mjs';
-import { accepted, buildIdsOf, figureOf, imagesOf, sameBuild } from './regimes-reading.mjs';
+import { accepted, buildIdsOf, buildMatch, figureOf, imagesOf } from './regimes-reading.mjs';
 
 const finite = (value) => Number.isFinite(value);
 const CRITERIA = new Set(['multiplier', 'peerFraction', 'startWait', 'seekWait', 'startRecovery', 'seekRecovery']);
@@ -35,15 +35,33 @@ function controlOf(entry) {
   return figureOf(entry).control ?? null;
 }
 
-function steadyFailure(steady) {
+const STEADY_LEGS = {
+  'steady-state-utilisation': 'utilisation',
+  'steady-state-pace-bound': 'paceBound',
+  'steady-state-cap-used': 'capUsed',
+  'steady-state-download-ratio': 'downloadRatio',
+  'steady-state-realtime': 'realtime',
+  'steady-state-bars-undeclared': 'bars-undeclared',
+};
+
+// The failed leg is the steady test's own reason, never the first failed leg in
+// object order (design.md D6). A per-viewer leg publishes each failing viewer.
+export function steadyFailure(steady) {
   if (steady?.steady === true) return null;
-  const listed = steady?.failedLegs?.[0];
-  const fallback = Object.entries(steady?.legs ?? {}).find(([, leg]) => leg?.pass !== true);
-  const raw = listed ?? fallback?.[0] ?? steady?.reason ?? 'steady-unestablished';
-  const leg = typeof raw === 'string' ? raw : raw?.leg ?? 'steady-unestablished';
-  const rawValue = typeof raw === 'object' ? raw.value : steady?.legs?.[leg]?.value;
-  const value = typeof rawValue === 'object' ? rawValue.value ?? null : rawValue ?? null;
-  return { leg, value };
+  const reason = steady?.reason;
+  const leg = STEADY_LEGS[reason] ?? (Object.values(STEADY_LEGS).includes(reason) ? reason : null);
+  if (!leg) return { leg: 'steady-unestablished', value: null };
+  const entry = steady.legs?.[leg];
+  if (leg !== 'downloadRatio' && leg !== 'realtime') {
+    return { leg, value: finite(entry?.value) ? entry.value : null };
+  }
+  const outside = leg === 'downloadRatio'
+    ? (value) => !(value >= entry?.bars?.min && value <= entry?.bars?.max)
+    : (value) => !(value >= entry?.bar);
+  const viewers = Object.keys(entry?.byClient ?? {}).sort()
+    .filter((tag) => !finite(entry.byClient[tag]) || outside(entry.byClient[tag]))
+    .map((tag) => ({ tag, value: finite(entry.byClient[tag]) ? entry.byClient[tag] : null }));
+  return { leg, value: null, viewers };
 }
 
 function result(name, value, bar, outcome, reason = null, extra = {}) {
@@ -160,7 +178,8 @@ function controlSummary(entries, config, acceptedRuns) {
     .map((entry) => {
       const figures = figureOf(entry);
       const peerFraction = finite(figures.peerFractionAggregate) ? figures.peerFractionAggregate : null;
-      const sameBuildAsArm = acceptedRuns.every((run) => sameBuild(entry, run));
+      const matches = acceptedRuns.map((run) => ({ directory: run?.directory ?? null, ...buildMatch(entry, run) }));
+      const sameBuildAsArm = matches.every((match) => match.same === true);
       const topology = topologyPassing(entry);
       const peerId = peerIdEvidence(entry);
       const qualifies = peerFraction !== null && peerFraction >= config.control.peerFractionMin
@@ -172,13 +191,15 @@ function controlSummary(entries, config, acceptedRuns) {
         peerFractionAggregate: peerFraction,
         buildIds: buildIdsOf(entry),
         images: imagesOf(entry),
+        buildMatch: matches,
         topologyPassing: topology,
         peerIdEvidence: peerId,
         sameBuildAsArm,
         qualifies,
         ...(qualifies ? {} : { rejected: [
           ...(peerFraction === null ? ['peer-fraction-unavailable'] : peerFraction < config.control.peerFractionMin ? ['peer-fraction-below-floor'] : []),
-          ...(!sameBuildAsArm ? ['different-build'] : []),
+          ...(matches.some((match) => match.same === false) ? ['different-build']
+            : matches.some((match) => match.same === null) ? ['build-unestablished'] : []),
           ...(!topology ? ['topology-readback-not-passing'] : []),
           ...(!peerId ? ['peer-id-unavailable'] : []),
         ] }),
@@ -188,14 +209,14 @@ function controlSummary(entries, config, acceptedRuns) {
   return { selected: selected ?? null, candidates };
 }
 
-function classification(entry, reading) {
+function classification(entry, reading, isAccepted = accepted) {
   const config = thresholds(reading);
   const figures = figureOf(entry);
   const productRefusal = productInputRefusal(entry, config);
   if (productRefusal) return {
     directory: entry?.directory ?? null,
     condition: conditionOf(entry),
-    accepted: accepted(entry),
+    accepted: isAccepted(entry),
     productInput: productRefusal,
     criteria: {},
     published: {},
@@ -217,7 +238,7 @@ function classification(entry, reading) {
   return {
     directory: entry?.directory ?? null,
     condition: conditionOf(entry),
-    accepted: accepted(entry),
+    accepted: isAccepted(entry),
     productInput: { refused: false },
     criteria,
     published,
@@ -227,8 +248,8 @@ function classification(entry, reading) {
   };
 }
 
-export function classifyControlRun(entry, reading) {
-  return classification(entry, reading);
+export function classifyControlRun(entry, reading, isAccepted = accepted) {
+  return classification(entry, reading, isAccepted);
 }
 
 function majorityResult(summaries, name) {
@@ -247,11 +268,11 @@ function majorityResult(summaries, name) {
   return { ...selected, result: winner[0], runCount: winner[1] };
 }
 
-function runSummary(entry, reading, state = {}) {
+function runSummary(entry, reading, state = {}, isAccepted = accepted) {
   const base = {
     directory: entry?.directory ?? null,
     condition: conditionOf(entry),
-    accepted: accepted(entry),
+    accepted: isAccepted(entry),
     outcome: entry?.outcome ?? null,
     publishes: entry?.publishes ?? null,
     finalization: entry?.finalization ?? null,
@@ -261,7 +282,7 @@ function runSummary(entry, reading, state = {}) {
   if (entry?.recomputeError) return { ...base, recomputeError: entry.recomputeError };
   if (state.notRead) return { ...base, classification: null, ...state };
   if (!entry?.report?.figures && !entry?.figures) return { ...base, classification: null };
-  const classified = classifyControlRun(entry, reading);
+  const classified = classifyControlRun(entry, reading, isAccepted);
   return { ...base, classification: classified, ...state };
 }
 
@@ -269,7 +290,8 @@ function canVote(summary) {
   return summary.accepted && summary.classification && summary.classification.productInput?.refused !== true;
 }
 
-export function classifyControlReading({ runs = [], reading, armNames = [] } = {}) {
+export function classifyControlReading({ runs = [], reading, armNames = [], isAccepted = accepted } = {}) {
+  if (typeof isAccepted !== 'function') throw new TypeError('isAccepted must be a function');
   const config = thresholds(reading);
   const entries = Array.isArray(runs) ? runs : [];
   const conditions = [...new Set([...entries.map(conditionOf), ...armNames]
@@ -281,19 +303,19 @@ export function classifyControlReading({ runs = [], reading, armNames = [] } = {
     let stopped = false;
     let acceptedCount = 0;
     for (const entry of armEntries) {
-      const isAccepted = accepted(entry);
+      const acceptedForRun = isAccepted(entry);
       if (stopped) {
-        summaries.push(runSummary(entry, reading, { notRead: 'arm-stopped' }));
+        summaries.push(runSummary(entry, reading, { notRead: 'arm-stopped' }, isAccepted));
         continue;
       }
       if (armEntries.indexOf(entry) >= config.attemptsMax) {
-        summaries.push({ directory: entry?.directory ?? null, condition, accepted: isAccepted,
+        summaries.push({ directory: entry?.directory ?? null, condition, accepted: acceptedForRun,
           outcome: entry?.outcome ?? null, publishes: entry?.publishes ?? null, notRead: 'budget-exceeded' });
         continue;
       }
-      const summary = runSummary(entry, reading);
+      const summary = runSummary(entry, reading, {}, isAccepted);
       summaries.push(summary);
-      if (!isAccepted || summary.recomputeError || !canVote(summary)) continue;
+      if (!acceptedForRun || summary.recomputeError || !canVote(summary)) continue;
       acceptedCount += 1;
       const acceptedSummaries = summaries.filter(canVote);
       const names = Object.keys(config.criteria);
@@ -301,7 +323,7 @@ export function classifyControlReading({ runs = [], reading, armNames = [] } = {
       if (acceptedCount >= config.acceptedRunsMin && (names.length === 0 || agreeing)) stopped = true;
     }
     const acceptedSummaries = summaries.filter(canVote);
-    const control = controlSummary(entries, config, armEntries.filter((entry) => accepted(entry)));
+    const control = controlSummary(entries, config, armEntries.filter((entry) => isAccepted(entry)));
     const criteria = Object.fromEntries(Object.keys(config.criteria).map((name) => [name, majorityResult(acceptedSummaries, name)]));
     const enough = acceptedCount >= config.acceptedRunsMin;
     const hasControl = Boolean(control.selected);
@@ -336,7 +358,7 @@ export function classifyControlReading({ runs = [], reading, armNames = [] } = {
     criterion: true,
     thresholds: config,
     runs: entries.map((entry) => ({ directory: entry?.directory ?? null, condition: conditionOf(entry),
-      accepted: accepted(entry), outcome: entry?.outcome ?? null, publishes: entry?.publishes ?? null,
+      accepted: isAccepted(entry), outcome: entry?.outcome ?? null, publishes: entry?.publishes ?? null,
       recomputeError: entry?.recomputeError ?? null })),
     arms,
   };
@@ -378,10 +400,12 @@ export function baselineTable({ runs = [], controlRuns = {} } = {}) {
   return Object.fromEntries(['control-five', 'control-ten'].map((condition) => {
     const arm = controlRuns[condition];
     const baselines = acceptedRuns.filter((entry) => conditionOf(entry) === 'baseline-nop2p-steady');
-    const baseline = baselines.find((entry) => arm && sameBuild(entry, arm));
-    const sameBuildBaseline = baseline ? runCell(baseline)
+    const matches = baselines.map((entry) => ({ entry, match: buildMatch(entry, arm) }));
+    const selected = matches.find(({ match }) => match.same === true);
+    const sameBuildBaseline = selected ? { ...runCell(selected.entry), matchedOn: selected.match.matchedOn }
       : staticCell({ capacityMbps: null, viewerCount: null, viewerShaping: null, window: null,
-        reason: baselines.length ? 'baseline-build-mismatch' : 'no-accepted-run' });
+        reason: baselines.length === 0 ? 'no-accepted-run'
+          : matches.some(({ match }) => match.same === null) ? 'baseline-build-unestablished' : 'baseline-build-mismatch' });
     const cells = { sameBuildBaseline, naive7c, trap8aT1 };
     return [condition, {
       multiplier: Object.fromEntries(Object.entries(cells).map(([name, cell]) => [name, cell.multiplier])),

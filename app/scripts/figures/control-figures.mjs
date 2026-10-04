@@ -1,4 +1,5 @@
 import { median, percentile } from '../../public/lib/frame-drift.mjs';
+import { capUsed } from './cap-used.mjs';
 import { paceBoundFraction } from './pace-bound.mjs';
 import { figuresForWindows, linkUtilisation } from './qa-recompute.mjs';
 import { presentedFrameRealtimeFactorByClient, trapFigures } from './trap-figures.mjs';
@@ -182,6 +183,8 @@ export function widenedBars(bars, spanMs, edgeSegments, segmentSeconds) {
     utilisationMax: bars?.steadyUtilisationMax ?? null,
     realtimeMin: bars?.steadyRealtimeMin ?? null,
     paceBoundMax: bars?.steadyPaceBoundMax ?? null,
+    // Present only where declared: a registered span's published bars keep their shape.
+    ...(finite(bars?.steadyCapUsedMax) ? { capUsedMax: bars.steadyCapUsedMax } : {}),
   };
 }
 
@@ -223,21 +226,46 @@ function spanLegs({ input, window, tags, bars, edgeSegments, segmentSeconds, hos
     && tags.every((tag) => finite(realtime[tag]) && realtime[tag] >= widened.realtimeMin);
   const utilisationValue = linkFigure(input.linkSamples, window, input.capacityBitsPerSecond).uplinkUtilisationMean;
   const utilisation = leg(utilisationValue, widened.utilisationMax);
+  // The cap leg is in force only where declared (design.md D2); otherwise the
+  // pace-bound leg is exactly the registered one, so 8b2's figures recompute.
+  const capDeclared = finite(widened.capUsedMax);
+  if (capDeclared && finite(widened.paceBoundMax)) throw new Error('steady-pace-bars-conflict');
+  const paced = finite(input.headroom?.fraction);
+  if (capDeclared && paced && !finite(wallOffsetMs)) {
+    throw new Error('steady-state cap-used wall offset is unavailable');
+  }
+  const cap = paced && finite(wallOffsetMs) && (capDeclared || hostPace?.intervals)
+    ? capUsedFigure({ ...input, hostPace }, window, wallOffsetMs) : null;
   const pace = finite(wallOffsetMs) && hostPace?.intervals
     ? paceBoundFraction({ intervals: hostPace.intervals, window, wallOffsetMs }) : null;
-  const paceLeg = pace ? { ...pace, bar: widened.paceBoundMax,
-    pass: pace.value !== null && finite(widened.paceBoundMax) && pace.value <= widened.paceBoundMax } : null;
+  const paceLeg = capDeclared || !pace ? null : { ...pace, bar: widened.paceBoundMax,
+    pass: pace.value !== null && finite(widened.paceBoundMax) && pace.value <= widened.paceBoundMax };
+  const capLeg = capDeclared && paced ? { ...cap, bar: widened.capUsedMax,
+    pass: finite(cap.value) && cap.value <= widened.capUsedMax } : null;
   const legs = {
     utilisation,
     downloadRatio: { byClient: ratio, bars: { min: widened.downloadRatioMin, max: widened.downloadRatioMax }, pass: ratioPass },
     realtime: { byClient: realtime, bar: widened.realtimeMin, pass: realtimePass },
+    ...(capLeg ? { capUsed: capLeg } : {}),
     ...(paceLeg ? { paceBound: paceLeg } : {}),
   };
+  // Both values are published outside `legs`: every entry of `legs` without
+  // `pass: true` is counted as failed by the readers.
+  const paceSummary = paced && cap && pace ? {
+    tested: capDeclared ? 'capUsed' : finite(widened.paceBoundMax) ? 'paceBound' : null,
+    capUsed: { value: cap.value, handedBytes: cap.handedBytes, allowedBytes: cap.allowedBytes, reason: cap.reason },
+    paceBound: { value: pace.value, pacedMs: pace.pacedMs, reason: pace.reason },
+  } : null;
   const incomplete = tags.some((tag) => coverageGap(input.viewerPolls?.[tag], window) > 1_000)
-    || Boolean(pace?.reason);
+    || Boolean((capDeclared ? capLeg : pace)?.reason);
   const pass = !incomplete && Object.values(legs).every((entry) => entry.pass === true);
-  return { window, bars: widened, legs, incomplete, pass,
+  return { window, bars: widened, legs, ...(paceSummary ? { pace: paceSummary } : {}), incomplete, pass,
     failedLegs: Object.entries(legs).filter(([, entry]) => entry.pass !== true).map(([name]) => name) };
+}
+
+function capUsedFigure(input, window, wallOffsetMs) {
+  return capUsed({ intervals: input.hostPace?.intervals ?? [], window, wallOffsetMs,
+    fraction: input.headroom.fraction, finalEstimateBytesPerSecond: input.hostPaceFinal?.estimate?.bytesPerSecond });
 }
 
 export function recoverySpans({ input = {}, transition, spanMs = 60_000, recordingEnd, bars = input.condition?.bars,
@@ -290,7 +318,9 @@ function sweepSpan(input, window, resumedAtSharedMs) {
   const wallOffsetMs = input.timebase?.wallOffsetMs;
   const paceBound = finite(wallOffsetMs) && input.hostPace?.intervals
     ? paceBoundFraction({ intervals: input.hostPace.intervals, window, wallOffsetMs }) : null;
-  return { window, ...linkFigure(input.linkSamples, window, input.capacityBitsPerSecond), paceBound,
+  const capUsed = finite(input.headroom?.fraction) && finite(wallOffsetMs) && Array.isArray(input.hostPace?.intervals)
+    ? capUsedFigure(input, window, wallOffsetMs) : null;
+  return { window, ...linkFigure(input.linkSamples, window, input.capacityBitsPerSecond), paceBound, capUsed,
     drift, clockHalfWidthMsByClient: halfWidths, displayCadence: context.presentIntervalMsByClient ?? {} };
 }
 

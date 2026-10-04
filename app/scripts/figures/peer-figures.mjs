@@ -7,6 +7,7 @@ import { computeHeldAhead } from './held-ahead.mjs';
 import { computeSpanCourse } from './span-course.mjs';
 import { trapFigures } from './trap-figures.mjs';
 import { segmentIndex } from './seek-evidence.mjs';
+import { capUsed } from './cap-used.mjs';
 import { paceBoundFraction } from './pace-bound.mjs';
 import { cohortSegments, finite, inWindow, originSnapshot, pathOf, recordsOf, responseRecords, safe, sumBytes, tagsOf } from './peer-evidence.mjs';
 
@@ -108,6 +109,9 @@ function downloadRatios(input, tags, cohorts, oneViewing) {
 
 export function steadyState({ input, tags, figures, cohorts, oneViewing, hostPace, wallOffsetMs }) {
   const bars = input.condition?.bars ?? {};
+  const capBar = finite(bars.steadyCapUsedMax);
+  const paceBar = finite(bars.steadyPaceBoundMax);
+  if (capBar && paceBar) throw new Error('steady-pace-bars-conflict');
   const declared = ['steadyUtilisationMax', 'steadyDownloadRatioMin',
     'steadyDownloadRatioMax', 'steadyRealtimeMin'].every((name) => finite(bars[name]));
   const utilisation = {
@@ -133,33 +137,49 @@ export function steadyState({ input, tags, figures, cohorts, oneViewing, hostPac
     && realtimeByClient[tag] >= realtime.bar);
   const publishedPace = hostPace ?? input.hostPace;
   const publishedWallOffsetMs = wallOffsetMs ?? input.wallOffsetMs;
-  const paceBound = finite(bars.steadyPaceBoundMax) && input.headroom?.fraction === 'unpaced'
+  const fraction = input.headroom?.fraction;
+  const hasPaceEvidence = finite(fraction) && finite(publishedWallOffsetMs)
+    && Array.isArray(publishedPace?.intervals) && publishedPace.intervals.length > 0;
+  const capResult = finite(fraction) && (capBar || hasPaceEvidence)
+    ? (() => {
+      if (!finite(publishedWallOffsetMs)) throw new Error('steady-state cap-used wall offset is unavailable');
+      return capUsed({ intervals: publishedPace?.intervals ?? [], window: input.window,
+        wallOffsetMs: publishedWallOffsetMs, fraction,
+        finalEstimateBytesPerSecond: input.hostPaceFinal?.estimate?.bytesPerSecond });
+    })() : null;
+  const paceResult = finite(fraction) && (paceBar || hasPaceEvidence)
+    ? (() => {
+      if (!finite(publishedWallOffsetMs)) throw new Error('steady-state pace-bound wall offset is unavailable');
+      return paceBoundFraction({ intervals: publishedPace?.intervals ?? [], window: input.window,
+        wallOffsetMs: publishedWallOffsetMs });
+    })() : null;
+  const capUsedLeg = capBar && fraction === 'unpaced'
     ? { applies: false, reason: 'unpaced' }
-    : finite(bars.steadyPaceBoundMax) && finite(input.headroom?.fraction)
-      ? (() => {
-        if (!finite(publishedWallOffsetMs)) throw new Error('steady-state pace-bound wall offset is unavailable');
-        const result = paceBoundFraction({ intervals: publishedPace?.intervals ?? [], window: input.window,
-          wallOffsetMs: publishedWallOffsetMs });
-        return {
-          applies: true,
-          value: result.value,
-          pacedMs: result.pacedMs,
-          coveredMs: result.coveredMs,
-          windowMs: result.windowMs,
-          bar: bars.steadyPaceBoundMax,
-          pass: finite(result.value) && result.value <= bars.steadyPaceBoundMax,
-          reason: result.reason,
-        };
-      })()
-      : null;
-  const legs = { utilisation, downloadRatio, realtime, ...(paceBound ? { paceBound } : {}) };
+    : capBar && capResult ? { applies: true, ...capResult, bar: bars.steadyCapUsedMax,
+      pass: finite(capResult.value) && capResult.value <= bars.steadyCapUsedMax } : null;
+  const paceBound = paceBar && fraction === 'unpaced'
+    ? { applies: false, reason: 'unpaced' }
+    : paceBar && paceResult ? { applies: true, value: paceResult.value, pacedMs: paceResult.pacedMs,
+      coveredMs: paceResult.coveredMs, windowMs: paceResult.windowMs, bar: bars.steadyPaceBoundMax,
+      pass: finite(paceResult.value) && paceResult.value <= bars.steadyPaceBoundMax, reason: paceResult.reason } : null;
+  const pace = finite(fraction) && finite(publishedWallOffsetMs) && Array.isArray(publishedPace?.intervals)
+    && publishedPace.intervals.length > 0 ? {
+      tested: capBar ? 'capUsed' : paceBar ? 'paceBound' : null,
+      capUsed: capResult ? { value: capResult.value, handedBytes: capResult.handedBytes,
+        allowedBytes: capResult.allowedBytes, reason: capResult.reason } : null,
+      paceBound: paceResult ? { value: paceResult.value, pacedMs: paceResult.pacedMs, reason: paceResult.reason } : null,
+    } : null;
+  const legs = { utilisation, downloadRatio, realtime,
+    ...(capUsedLeg ? { capUsed: capUsedLeg } : {}),
+    ...(capUsedLeg ? {} : paceBound ? { paceBound } : {}) };
   let reason = null;
   if (!declared) reason = 'steady-state-bars-undeclared';
   else if (!utilisation.pass) reason = 'steady-state-utilisation';
+  else if (capUsedLeg?.applies === true && !capUsedLeg.pass) reason = 'steady-state-cap-used';
   else if (paceBound?.applies === true && !paceBound.pass) reason = 'steady-state-pace-bound';
   else if (!downloadRatio.pass) reason = 'steady-state-download-ratio';
   else if (!realtime.pass) reason = 'steady-state-realtime';
-  return { steady: reason === null, legs, reason };
+  return { steady: reason === null, legs, ...(pace ? { pace } : {}), reason };
 }
 
 function refusalFor(steady) {

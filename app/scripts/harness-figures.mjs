@@ -37,6 +37,26 @@ function counterFrom(value) {
   return value === undefined || value === null ? undefined : (value.counters ?? value);
 }
 
+// The re-read's rule override (design.md D1): a copy of the manifest condition,
+// never the manifest. Absent rules the condition is the registered one.
+export function conditionWithRules(condition, rules) {
+  if (rules === undefined) return condition;
+  if (!rules || typeof rules !== 'object' || Array.isArray(rules)) throw new TypeError('rules must be an object');
+  const bars = rules.bars ?? {};
+  const removeBars = rules.removeBars ?? [];
+  if (!bars || typeof bars !== 'object' || Array.isArray(bars)
+    || Object.values(bars).some((value) => !Number.isFinite(value))) {
+    throw new TypeError('rules.bars must contain finite numbers');
+  }
+  if (!Array.isArray(removeBars) || removeBars.some((key) => typeof key !== 'string')) {
+    throw new TypeError('rules.removeBars must be an array of strings');
+  }
+  const nextBars = { ...(condition?.bars ?? {}) };
+  for (const key of removeBars) delete nextBars[key];
+  Object.assign(nextBars, bars);
+  return { ...(condition ?? {}), bars: nextBars, excusals: rules.excusals };
+}
+
 export function capacityBitsForManifest(manifest = {}) {
   return manifest.condition?.capacityStep
     ? parseRate(manifest.condition.capacityStep.params?.rate)
@@ -51,9 +71,10 @@ function clientStreams(runDir, manifest) {
   });
 }
 
-export function readRunDirectory(runDir) {
+export function readRunDirectory(runDir, options = {}) {
   const manifest = readJson(path.join(runDir, 'manifest.json'), {});
   const arm = armFor(manifest.condition);
+  const condition = conditionWithRules(manifest.condition, options.rules);
   const originStart = counterFrom(readJson(path.join(runDir, 'origin-counters-start.json')));
   const originEnd = counterFrom(readJson(path.join(runDir, 'origin-counters-end.json')));
   const originSettled = counterFrom(readJson(path.join(runDir, 'origin-counters-settled.json')));
@@ -84,7 +105,7 @@ export function readRunDirectory(runDir) {
     multiplierDenominator: manifest.multiplierDenominator ?? 'distinct-completed',
     seek: manifest.seek ?? null,
     capacityStep: manifest.capacityStep ?? null,
-    condition: manifest.condition,
+    condition,
     disturbance: manifest.disturbance ?? null,
     context,
     capacityBitsPerSecond: capacityBitsForManifest(manifest),
@@ -112,7 +133,7 @@ export function readRunDirectory(runDir) {
 }
 
 export function recomputeRunDirectory(runDir, options = {}) {
-  const retained = readRunDirectory(runDir);
+  const retained = readRunDirectory(runDir, options);
   const arm = armFor(retained.input.condition);
   let figures = computeFigures(retained.input);
   if (arm.byteAccountingMethod === 'peer-attempt-cohort-v1') {
