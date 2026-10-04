@@ -155,6 +155,33 @@ export default async function controlFiguresSuite() {
     assertEqual(noSeek.recovery.start.spans.length, 2, 'and its start spans run to the recording end');
   });
 
+  // Mutation proof: the figure entry hands the manifest beside the input, not in
+  // it. Opportunity: a seek run whose second span holds one drift record per
+  // viewer. Action boundary: computeControlFigures(...).sweep[1]. Dropping the
+  // manifest from the sweep's input turned the named points assertion red
+  // (pairwise-no-points, no cadence); restoring it made this check green again.
+  await check('control figures: the sweep reads the display cadence from the manifest the entry hands it', async () => {
+    const at = (harnessMs, state) => ({ harnessBeforeMs: harnessMs - 5, harnessAfterMs: harnessMs + 5,
+      pageWallMs: harnessMs + 1_000, sharedMs: harnessMs + 100, clock: { halfWidthMs: 2 }, state });
+    const played = { held: false, lineage: 'l', version: 4, atSharedMs: 192_100 };
+    const hostPoll = [at(1_000, { held: true, lineage: 'l', version: 1, atSharedMs: 100 }),
+      at(45_000, { held: false, lineage: 'l', version: 2, atSharedMs: 42_600 }),
+      at(200_000, { held: true, lineage: 'l', version: 3, atSharedMs: 190_100 }), at(205_000, played), at(371_000, played)];
+    const record = { displaySharedMs: 250_110, driftMs: 1, epochMs: 1, clock: { delayTermMs: 1, ageTermMs: 1, halfWidthMs: 2 } };
+    // The window ends at its ready instant, so the span course is empty and needs no media evidence.
+    const input = baseInput({ hostPoll, linkSamples: [], capacityBitsPerSecond: 10_000_000, content: { frameRate: 10 },
+      window: { startMs: 0, endMs: 180_000, clientsReadyAtMs: 180_000 },
+      seek: { host: { held: true, lineage: 'l', version: 3, atSharedMs: 190_100, positionMs: 240_000 } },
+      clients: { c01: { records: [record], polls: [] }, c02: { records: [{ ...record, driftMs: 4 }], polls: [] } } });
+    const manifest = { cadence: { c01: { presentIntervalMs: 100 }, c02: { presentIntervalMs: 100 } } };
+    const result = computeControlFigures(input, { manifest });
+    assertEqual(result.sweep.length, 3, 'three seek spans');
+    assertEqual(result.sweep[0].drift, null, 'the span that begins before the resume carries no drift');
+    assertEqual(result.sweep[1].drift.pairwiseDriftPointsUsed, 1, 'the span after the resume has its drift point');
+    assertEqual(result.sweep[1].displayCadence.c01, 100, 'the span publishes the manifest cadence');
+    assertEqual(result.sweep[1].drift.pairwiseDriftAbsMsMedian, 3, 'and the drift is 4 - 1 ms');
+  });
+
   await check('control figures: retained directories without control files recompute null control', async () => {
     assertEqual(computeControlFigures({ condition: { bars: BARS }, hostPoll: [] }), null, 'missing control evidence is not a throw');
   });

@@ -137,10 +137,6 @@ function droppedFraction(client, window) {
   return { available: true, dropped, total, fraction: dropped / total };
 }
 
-function seekAppliedButNotRestarted(input, tag) {
-  return appliedWithoutRestart(input.seek, tag);
-}
-
 export function evaluateRefusals(input = {}) {
   const condition = input.condition ?? {};
   const bars = condition.bars ?? {};
@@ -176,7 +172,7 @@ export function evaluateRefusals(input = {}) {
       const media = records.at(-1).mediaMs - records[0].mediaMs;
       if (finite(display) && display > 0 && finite(media)) realtimeFactorByClient[tag] = media / display;
     }
-    if (!result.available && !(seekAppliedButNotRestarted(input, tag) && result.detail?.reason === 'empty-window')) {
+    if (!result.available && !(appliedWithoutRestart(input.seek, tag) && result.detail?.reason === 'empty-window')) {
       addReason(reasons, 'record-coverage-unavailable', REFUSAL_SCOPE.coverage, { tag, detail: result.detail });
     } else if (!result.passes) {
       addReason(reasons, 'record-coverage-below-declared-fraction', REFUSAL_SCOPE.coverage, {
@@ -204,7 +200,7 @@ export function evaluateRefusals(input = {}) {
     const quality = droppedFraction(client, window);
     dropped[tag] = quality;
     const zeroDroppedDelta = Number(quality.detail?.total) === 0;
-    if (!quality.available && !(seekAppliedButNotRestarted(input, tag) && zeroDroppedDelta)) {
+    if (!quality.available && !(appliedWithoutRestart(input.seek, tag) && zeroDroppedDelta)) {
       addReason(reasons, 'dropped-frame-evidence-unavailable', REFUSAL_SCOPE.qualityEvidence, { tag, detail: quality.detail });
     } else if (quality.fraction > Number(bars.droppedFrameFractionMax)) {
       addReason(reasons, 'dropped-frames-above-declared-bar', REFUSAL_SCOPE.droppedFrames, {
@@ -270,7 +266,7 @@ export function evaluateRefusals(input = {}) {
   reasons.push(...evaluateByteControl({ bars, tags, figures: input.publicationContext ?? {} }));
 
   if (input.capacityStep && input.capacityStep.inForce === false) {
-    addReason(reasons, 'capacity-step-not-in-force', REFUSAL_SCOPE.capacityStep ?? ['byte', 'drift'], {
+    addReason(reasons, 'capacity-step-not-in-force', REFUSAL_SCOPE.capacityStep, {
       declared: input.capacityStep.declared,
       readBack: input.capacityStep.readBack,
     });
@@ -280,7 +276,7 @@ export function evaluateRefusals(input = {}) {
     if (!input.seek.host) {
       for (const tag of tags) {
         const lastReading = input.seek.lastReadings?.[tag] ?? input.seek.viewers?.[tag]?.reading ?? null;
-        addReason(reasons, 'seek-not-applied', REFUSAL_SCOPE.seek ?? ['byte', 'drift'], { tag, lastReading });
+        addReason(reasons, 'seek-not-applied', REFUSAL_SCOPE.seek, { tag, lastReading });
       }
     } else {
       const landing = input.seek.landedOnHeldMedia ? input.seek : appliedSeekEvidence({
@@ -292,13 +288,13 @@ export function evaluateRefusals(input = {}) {
         highDemandTimeWindowMs: input.seek.highDemandTimeWindowMs ?? Number(condition.engineWindows?.highDemandTimeWindow ?? 15) * 1000,
       });
       for (const entry of landing.notApplied ?? []) {
-        addReason(reasons, 'seek-not-applied', REFUSAL_SCOPE.seek ?? ['byte', 'drift'], {
+        addReason(reasons, 'seek-not-applied', REFUSAL_SCOPE.seek, {
           ...entry,
           lastReading: input.seek.lastReadings?.[entry.tag] ?? entry.lastReading ?? null,
         });
       }
       for (const entry of landing.landedOnHeldMedia ?? []) {
-        addReason(reasons, 'seek-landed-on-held-media', REFUSAL_SCOPE.seek ?? ['byte', 'drift'], entry);
+        addReason(reasons, 'seek-landed-on-held-media', REFUSAL_SCOPE.seek, entry);
       }
     }
   }

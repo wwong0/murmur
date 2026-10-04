@@ -416,7 +416,7 @@ export class HybridLoader {
         wait.p2pStartMs = p2pLoading ? (wait.p2pStartMs ?? nowMs) : undefined; // wa-patch: a peer transfer's budget runs from the pass that first saw it
         const held = urgentContext().held; // wa-patch: a held room leaves a progressing peer transfer alone
         const decision = urgentSource({ nowMs, p2pLoading, holders: statuses.filter((status) => status === "loaded").length, loaders: statuses.filter((status) => status === "http-loading").length, p2pFailed: !p2pLoading && (request?.failedAttempts?.p2pAttemptsCount ?? 0) > 0, held, waitStartMs: wait.waitStartMs, p2pStartMs: wait.p2pStartMs, delayMs: wait.delayMs, budgetMs }); // wa-patch: choose peer, wait or host
-        if (p2pLoading && !held && decision.source === "p2p") this.armUrgentWait(segment, { source: "wait", untilMs: wait.p2pStartMs + budgetMs }, nowMs); // wa-patch: wake to switch once the transfer's budget is spent
+        if (p2pLoading && Number.isFinite(decision.wakeMs)) this.armUrgentWait(segment, { source: "wait", untilMs: decision.wakeMs }, nowMs); // wa-patch: wake at the budget's end while it is ahead; a holder's transfer past it arms none
         return decision; // wa-patch: the pure rule's answer
     } // wa-patch: finish the urgent wake helper
     armUrgentWait(segment, decision, nowMs) { // wa-patch: arm the rule's single wake timer

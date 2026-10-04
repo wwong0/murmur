@@ -82,8 +82,15 @@ export function urgentSource({
   finiteNonNegative(budgetMs, 'budgetMs');
   const spentAt = waitStartMs + budgetMs;
   // design.md D8 (l): a transfer under way in a held room is left to finish or to
-  // the engine's own no-bytes timeout; in a playing room its budget runs from its start.
-  if (p2pLoading) return held === true || nowMs < p2pStartMs + budgetMs ? { source: 'p2p' } : { source: 'http' };
+  // the engine's own no-bytes timeout, and so is one from a peer that holds the
+  // segment, whatever the budget. Otherwise its budget runs from its start, and
+  // `wakeMs` is that budget's end while it is still ahead.
+  if (p2pLoading) {
+    const endsAt = p2pStartMs + budgetMs;
+    if (held === true) return { source: 'p2p' };
+    if (nowMs < endsAt) return { source: 'p2p', wakeMs: endsAt };
+    return holders > 0 ? { source: 'p2p' } : { source: 'http' };
+  }
   if (p2pFailed) return { source: 'http' };
   if (holders > 0) return { source: 'p2p' };
   if (loaders > 0) return nowMs < spentAt

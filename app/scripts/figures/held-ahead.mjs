@@ -1,18 +1,10 @@
 import { median } from '../../public/lib/frame-drift.mjs';
 import { finite, recordsOf, tagsOf } from './peer-evidence.mjs';
-import { segmentIndex } from './seek-evidence.mjs';
+import { seekInstants, segmentIndex } from './seek-evidence.mjs';
 
 const orderedDrift = (client) => (Array.isArray(client?.records) ? client.records : [])
   .filter((record) => finite(record?.displaySharedMs) && finite(record?.mediaMs))
   .sort((left, right) => left.displaySharedMs - right.displaySharedMs);
-
-function seekValues(input) {
-  const seek = input.seek ?? input.context?.seek ?? {};
-  const host = seek.host ?? {};
-  const landingMs = Number(seek.landingMs ?? host.positionMs);
-  const effectiveSharedMs = Number(seek.effectiveSharedMs ?? host.atSharedMs);
-  return finite(landingMs) && finite(effectiveSharedMs) ? { landingMs, effectiveSharedMs } : null;
-}
 
 function interpolate(left, right, instant) {
   if (right.displaySharedMs === left.displaySharedMs) return left.mediaMs;
@@ -64,7 +56,7 @@ export function computeHeldAhead({ input = {}, clients = input.clients ?? {}, ta
   if (!finite(startMs) || !finite(endMs) || !(endMs > startMs) || !(segmentMs > 0)) return null;
   const seconds = Math.max(0, Math.floor((endMs - startMs) / 1000));
   if (!seconds) return null;
-  const seek = seekValues(input);
+  const seek = seekInstants(input);
   const times = Array.from({ length: seconds }, (_, index) => startMs + index * 1000);
   const heldValues = Object.fromEntries(tags.map((tag) => [tag, []]));
   const positionsByClient = Object.fromEntries(tags.map((tag) => [tag, []]));

@@ -6,27 +6,11 @@ import {
   createChannelSender,
   parseControl,
   sliceForRange,
-  CHUNK_PAYLOAD_BYTES,
-  DRAIN_POLL_MS,
   FIRST_BYTE_BUDGET_MS,
-  BUFFER_FLOOR_BYTES,
 } from './segment-protocol.mjs';
 import { createHostAccounting } from './host-accounting.mjs';
-import { createSendPace, HEADROOM_DEFAULT, validateHeadroomFraction } from './send-pace.mjs';
-import { classifyInterval, createCapacityEstimate, createProbePlan, createQueuedRun } from './capacity-estimate.mjs';
-import { createEchoDelay, ECHO_MARGIN_MS } from './echo-delay.mjs';
-import { createSendArbiter } from './send-arbiter.mjs';
-
-const INTERVAL_NOMINAL_MS = 1000;
-const INTERVAL_RING_CAPACITY = 3600;
-// Four chunks deep, not one: at one, two channels admitting within a chunk's refill
-// drove the level negative and every link-bound interval read pace-bound, so a paced
-// host never saw its capacity fall (8b d1-findings.md F2).
-export const PACE_CAP_BYTES = 4 * CHUNK_PAYLOAD_BYTES;
-// T14, T15 (design.md D2): a probe follows 10 pace-bound intervals, or each one
-// while the estimate still climbs.
-export const PROBE_AFTER_INTERVALS = 10;
-export const PROBE_FACTOR = 1.1;
+import { HEADROOM_DEFAULT, validateHeadroomFraction } from './send-pace.mjs';
+import { createHostPace } from './host-pace.mjs';
 
 const MEDIA_PREFIX = '/media/';
 const MAP_LINE_RE = /^#EXT-X-MAP:.*$/gm;
@@ -103,208 +87,16 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
   let urgentResponses = 0;
   let protocolErrors = 0;
   const memo = new Map();
-  const channels = new Set();
-  const liveSenders = new Map();
+  let attachedChannels = 0;
   const channelState = new Map(); // channelKey -> { pendingReads }
-  const retiredChannels = new Set();
-
-  // T3 (design.md D2): the one shared bucket and capacity estimate for every
-  // channel this host attaches, plus the interval sampler that feeds them.
-  const sendPace = createSendPace({ capBytes: PACE_CAP_BYTES });
-  const arbiter = createSendArbiter({ pace: sendPace, clock });
-  const capacityEstimate = createCapacityEstimate({});
-  const queuedRun = createQueuedRun({ marginMs: ECHO_MARGIN_MS, chunkBytes: CHUNK_PAYLOAD_BYTES });
-  // design.md D2, the cap: a channel is held while the bytes handed to it that no
-  // echo answer has confirmed pass what its answers confirmed in the last of these.
-  const queueCapMs = Number.isFinite(settings?.firstByteBudgetMs) ? settings.firstByteBudgetMs : FIRST_BYTE_BUDGET_MS;
-  const probePlan = createProbePlan({ after: PROBE_AFTER_INTERVALS, factor: PROBE_FACTOR, marginMs: ECHO_MARGIN_MS });
-  const echo = createEchoDelay();
-  let waitingChannelCount = 0;
-  let samplerTimer = null;
-  let previousCloseMs = null;
-  let currentSamples = [];
-  let closedDrainedTotal = 0;
-  let previousTotalDrained = 0;
-  let closedHandedTotal = 0;
-  let previousTotalHanded = 0;
-  // Readings arrive in order; a sampler restart starts a new generation.
-  let wireGeneration = 0;
-  let previousWire = null;
-  let wireChain = null;
-  let probing = false;
-  let climbing = true;
-  let intervalSeq = 0;
-  let intervalsEvicted = 0;
-  const intervalRing = [];
-
-  function isChannelInProgress(channelKey) {
-    return accounting.openCount(channelKey) > 0 || (channelState.get(channelKey)?.pendingReads ?? 0) > 0;
-  }
-
-  function totalDrainedNow() {
-    let total = closedDrainedTotal;
-    for (const sender of liveSenders.values()) total += sender.drainedBodyBytes();
-    return total;
-  }
-
-  // Every byte the channels moved below `bufferedAmount`: frames and controls.
-  function totalHandedNow() {
-    let total = closedHandedTotal;
-    for (const sender of liveSenders.values()) total += sender.stats().drainedBytes;
-    return total;
-  }
-
-  // Without a transport below the channel (the fake links), the drain is the wire.
-  function readWire(then) {
-    let value;
-    try {
-      value = wire ? wire.read() : totalHandedNow();
-    } catch {
-      value = null;
-    }
-    const settle = (bytes) => then(Number.isFinite(bytes) ? bytes : null);
-    if (value && typeof value.then === 'function') {
-      const previous = wireChain ?? Promise.resolve();
-      wireChain = previous.then(() => value).then(settle, () => settle(null));
-    } else if (wireChain) {
-      wireChain = wireChain.then(() => settle(value));
-    } else {
-      settle(value);
-    }
-  }
-
-  function setPaceRate(nowMs) {
-    if (fraction === 'unpaced') return;
-    const { bytesPerSecond } = capacityEstimate.read();
-    const factor = probing ? PROBE_FACTOR : fraction;
-    sendPace.setRate(bytesPerSecond === null ? null : (factor * bytesPerSecond) / 1000, nowMs);
-  }
-
-  function retireChannel(channelKey, sender) {
-    if (retiredChannels.has(channelKey)) return;
-    retiredChannels.add(channelKey);
-    closedHandedTotal += sender.stats().drainedBytes;
-    closedDrainedTotal += sender.drainedBodyBytes();
-    liveSenders.delete(channelKey);
-    channelState.delete(channelKey);
-    echo.drop(channelKey);
-  }
-
-  // Unpaced and a few times a second, so the answer's delay is the queue below the host.
-  function sendEchoIfDue(channelKey, sender, nowMs, afterChunk = false) {
-    const n = afterChunk ? echo.after(channelKey, nowMs) : echo.due(channelKey, nowMs);
-    if (n === null || !sender.sendControl({ t: 'echo', n })) return;
-    echo.handed(channelKey, n, sender.stats().handedBytes);
-  }
-
-  function channelHeld(channelKey, nowMs) {
-    const seen = echo.confirmed(channelKey, nowMs, queueCapMs);
-    const sender = liveSenders.get(channelKey);
-    if (!seen || !sender) return false;
-    return sender.stats().handedBytes - seen.totalBytes > Math.max(BUFFER_FLOOR_BYTES, seen.windowBytes);
-  }
-
-  function closeSamplerInterval(nowMs) {
-    const startMs = previousCloseMs;
-    const durationMs = nowMs - startMs;
-    if (!(durationMs > 0)) throw new RangeError('host-origin: interval durationMs must be positive');
-    const total = totalDrainedNow();
-    const drainedBodyBytes = total - previousTotalDrained;
-    if (drainedBodyBytes < 0) throw new RangeError('host-origin: drainedBodyBytes delta must not be negative');
-    previousTotalDrained = total;
-    const handedTotal = totalHandedNow();
-    const handedBytes = handedTotal - previousTotalHanded;
-    previousTotalHanded = handedTotal;
-    const paceBoundMs = sendPace.closeInterval(nowMs);
-    if (paceBoundMs < 0 || paceBoundMs > durationMs) throw new RangeError('host-origin: paceBoundMs out of bounds for its interval');
-    const echoed = echo.closeInterval(startMs, nowMs);
-    const interval = { samples: currentSamples, startMs, endMs: nowMs, endWallMs: wallNow(), durationMs, drainedBodyBytes, handedBytes, paceBoundMs, probe: probing, echoed };
-    previousCloseMs = nowMs;
-    currentSamples = [];
-    const generation = wireGeneration;
-    readWire((bytes) => {
-      if (generation !== wireGeneration) return;
-      const wireBytes = bytes === null || previousWire === null ? null : Math.max(0, bytes - previousWire);
-      if (bytes !== null) previousWire = bytes;
-      finishInterval(interval, wireBytes);
-    });
-  }
-
-  function finishInterval(interval, wireBytes) {
-    const { samples, startMs, durationMs, handedBytes, paceBoundMs, probe, echoed } = interval;
-    const verdict = classifyInterval({ samples, startMs, durationMs, paceBoundMs, wireBytes, handedBytes, queueMs: echoed.queueMs, marginMs: ECHO_MARGIN_MS });
-    const reading = queuedRun.add({ wireBytes, durationMs, linkBound: verdict.linkBound, headQueueMs: echoed.headQueueMs, tailQueueMs: echoed.tailQueueMs });
-    if (reading) capacityEstimate.record({ ...reading, linkBound: true });
-    const rate = wireBytes === null ? null : wireBytes * 1000 / durationMs;
-    const plan = probePlan.close({ probe, linkBound: verdict.linkBound, reason: verdict.reason, rate, headQueueMs: echoed.headQueueMs, tailQueueMs: echoed.tailQueueMs }, capacityEstimate.read().bytesPerSecond);
-    if (plan.raiseTo !== null) capacityEstimate.raise(plan.raiseTo);
-    probing = fraction !== 'unpaced' && plan.probeNext;
-    climbing = plan.climbing;
-    setPaceRate(clock.now());
-    intervalSeq += 1;
-    intervalRing.push({
-      seq: intervalSeq,
-      startMs,
-      endMs: interval.endMs,
-      endWallMs: interval.endWallMs,
-      samples: samples.length,
-      drainedBodyBytes: interval.drainedBodyBytes,
-      handedBytes,
-      wireBytes,
-      durationMs,
-      linkBound: verdict.linkBound,
-      queued: verdict.linkBound,
-      reason: verdict.reason,
-      paceBoundMs,
-      probe,
-      queueMs: echoed.queueMs,
-      headQueueMs: echoed.headQueueMs,
-      tailQueueMs: echoed.tailQueueMs,
-      echoSamples: echoed.samples,
-      heldSamples: samples.filter((sample) => sample.channels.some((channel) => channel.held)).length,
-      readingBytesPerSecond: reading ? reading.wireBytes * 1000 / reading.durationMs : null,
-      raised: plan.raiseTo !== null,
-      climbing,
-    });
-    if (intervalRing.length > INTERVAL_RING_CAPACITY) {
-      intervalRing.shift();
-      intervalsEvicted += 1;
-    }
-  }
-
-  function samplerTick() {
-    const now = clock.now();
-    const channelsSample = [];
-    for (const [channelKey, sender] of liveSenders) {
-      channelsSample.push({ inProgress: isChannelInProgress(channelKey), waitingBodyBytes: sender.waitingBodyBytes(), held: channelHeld(channelKey, now) });
-      sendEchoIfDue(channelKey, sender, now);
-    }
-    currentSamples.push({ atMs: now, channels: channelsSample });
-    if (now >= previousCloseMs + INTERVAL_NOMINAL_MS) closeSamplerInterval(now);
-    scheduleSampler();
-  }
-
-  function scheduleSampler() {
-    if (samplerTimer !== null || channels.size === 0) return;
-    samplerTimer = clock.setTimeout(() => {
-      samplerTimer = null;
-      if (channels.size === 0) return;
-      samplerTick();
-    }, DRAIN_POLL_MS);
-  }
-
-  function startSamplerIfIdle() {
-    if (channels.size !== 1) return; // this attach is not the first live channel
-    previousCloseMs = clock.now();
-    currentSamples = [];
-    previousTotalHanded = totalHandedNow();
-    wireGeneration += 1;
-    previousWire = null;
-    wireChain = null;
-    const generation = wireGeneration;
-    readWire((bytes) => { if (generation === wireGeneration) previousWire = bytes; });
-    scheduleSampler();
-  }
+  const hostPace = createHostPace({
+    clock,
+    wallNow,
+    fraction,
+    wire,
+    queueCapMs: Number.isFinite(settings?.firstByteBudgetMs) ? settings.firstByteBudgetMs : FIRST_BYTE_BUDGET_MS,
+    inProgress: (channelKey) => accounting.openCount(channelKey) > 0 || (channelState.get(channelKey)?.pendingReads ?? 0) > 0,
+  });
 
   function nextRid() {
     responseCounter += 1;
@@ -331,34 +123,34 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
       channel,
       clock,
       settings,
-      gate: arbiter,
-      held: () => channelHeld(channelKey, clock.now()),
-      onChunk: () => sendEchoIfDue(channelKey, sender, clock.now(), true),
-      onWaiting(hasWaiting) {
-        waitingChannelCount += hasWaiting ? 1 : -1;
-        sendPace.setWaiting(waitingChannelCount, clock.now());
-      },
+      gate: hostPace.gate,
+      held: () => paced.held(),
+      onChunk: () => paced.chunkSent(),
+      onWaiting: hostPace.waiting,
       onCredited(id, bytes) {
         accounting.credited(channelKey, id, bytes);
         accounting.settleIfDone(channelKey, id, sender.pendingFrames(id));
       },
       onClosed() {
         accounting.closeChannel(channelKey);
-        retireChannel(channelKey, sender);
+        retire();
       },
     });
+    const paced = hostPace.join(channelKey, sender);
+    const retire = () => {
+      paced.retire();
+      channelState.delete(channelKey);
+    };
     const active = new Map();
     let detached = false;
 
-    liveSenders.set(channelKey, sender);
     channelState.set(channelKey, { pendingReads: 0 });
-    echo.add(channelKey);
 
     const onMessage = (event) => {
       const control = parseControl(event?.data);
       if (!control) return;
       if (control.t === 'echo') {
-        echo.answered(channelKey, control.n, clock.now());
+        paced.echoAnswered(control.n);
         return;
       }
       if (control.t === 'abort') {
@@ -417,40 +209,24 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
       active.clear();
       sender.close();
       accounting.closeChannel(channelKey);
-      retireChannel(channelKey, sender);
-      channels.delete(detach);
-      if (channels.size === 0 && samplerTimer !== null) {
-        clock.clearTimeout(samplerTimer);
-        samplerTimer = null;
-      }
+      retire();
+      attachedChannels -= 1;
+      paced.leave();
     };
-    channels.add(detach);
-    startSamplerIfIdle();
-    // The first echo leaves before any body, so the floor is read on an empty channel.
-    sendEchoIfDue(channelKey, sender, clock.now());
+    attachedChannels += 1;
+    paced.start();
     return detach;
   }
 
   return {
     attach,
     snapshot() {
-      for (const sender of liveSenders.values()) sender.flush();
+      for (const sender of hostPace.senders()) sender.flush();
       return accounting.snapshot();
     },
     stats() {
-      return { protocolErrors, responses: responseCounter, urgentResponses, channels: channels.size };
+      return { protocolErrors, responses: responseCounter, urgentResponses, channels: attachedChannels };
     },
-    pace(afterSeq = 0) {
-      const estimate = capacityEstimate.read();
-      const paceBytesPerSecond = fraction === 'unpaced' || estimate.bytesPerSecond === null
-        ? null : fraction * estimate.bytesPerSecond;
-      return {
-        fraction,
-        estimate,
-        paceBytesPerSecond,
-        intervals: intervalRing.filter((entry) => entry.seq > afterSeq),
-        evicted: intervalsEvicted,
-      };
-    },
+    pace: (afterSeq = 0) => hostPace.read(afterSeq),
   };
 }

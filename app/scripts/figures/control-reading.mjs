@@ -1,6 +1,6 @@
 import { PRODUCT_ENGINE_WINDOWS } from '../../public/lib/engine-windows.mjs';
 import { HEADROOM_DEFAULT } from '../../public/lib/send-pace.mjs';
-import { accepted, sameBuild } from './regimes-reading.mjs';
+import { accepted, buildIdsOf, figureOf, imagesOf, sameBuild } from './regimes-reading.mjs';
 
 const finite = (value) => Number.isFinite(value);
 const CRITERIA = new Set(['multiplier', 'peerFraction', 'startWait', 'seekWait', 'startRecovery', 'seekRecovery']);
@@ -9,23 +9,8 @@ function conditionOf(entry) {
   return entry?.condition ?? entry?.manifest?.condition?.name ?? null;
 }
 
-function figuresOf(entry) {
-  return entry?.report?.figures ?? entry?.figures ?? {};
-}
-
 function clientsOf(entry) {
   return entry?.manifest?.clients ?? entry?.clients ?? {};
-}
-
-function buildIdsOf(entry) {
-  return Object.fromEntries(Object.entries(clientsOf(entry))
-    .filter(([, client]) => client?.role !== 'host')
-    .map(([tag, client]) => [tag, client?.buildId ?? null])
-    .sort(([left], [right]) => left.localeCompare(right)));
-}
-
-function imagesOf(entry) {
-  return entry?.manifest?.topology?.regime?.images ?? null;
 }
 
 function thresholds(reading) {
@@ -47,7 +32,7 @@ function thresholds(reading) {
 }
 
 function controlOf(entry) {
-  return figuresOf(entry).control ?? null;
+  return figureOf(entry).control ?? null;
 }
 
 function steadyFailure(steady) {
@@ -162,7 +147,7 @@ function topologyPassing(entry) {
 }
 
 function peerIdEvidence(entry) {
-  const figures = figuresOf(entry);
+  const figures = figureOf(entry);
   if (!finite(figures.peerFractionAggregate) || !figures.peerFractionByClient
     || typeof figures.peerFractionByClient !== 'object') return false;
   const viewers = Object.entries(clientsOf(entry)).filter(([tag, client]) => client?.role !== 'host' && /^c\d+$/.test(tag));
@@ -173,7 +158,7 @@ function peerIdEvidence(entry) {
 function controlSummary(entries, config, acceptedRuns) {
   const candidates = entries.filter((entry) => accepted(entry) && conditionOf(entry) === config.control.condition)
     .map((entry) => {
-      const figures = figuresOf(entry);
+      const figures = figureOf(entry);
       const peerFraction = finite(figures.peerFractionAggregate) ? figures.peerFractionAggregate : null;
       const sameBuildAsArm = acceptedRuns.every((run) => sameBuild(entry, run));
       const topology = topologyPassing(entry);
@@ -205,7 +190,7 @@ function controlSummary(entries, config, acceptedRuns) {
 
 function classification(entry, reading) {
   const config = thresholds(reading);
-  const figures = figuresOf(entry);
+  const figures = figureOf(entry);
   const productRefusal = productInputRefusal(entry, config);
   if (productRefusal) return {
     directory: entry?.directory ?? null,
@@ -377,7 +362,7 @@ function staticCell({ multiplier, peerFraction, capacityMbps, viewerCount, viewe
 
 function runCell(entry) {
   if (!entry) return staticCell({ capacityMbps: null, viewerCount: null, viewerShaping: null, window: null, reason: 'no-accepted-run' });
-  const figures = figuresOf(entry);
+  const figures = figureOf(entry);
   return staticCell({ multiplier: figures.hostUploadMultiplier, peerFraction: figures.peerFractionAggregate,
     ...regime(entry), source: entry.directory });
 }

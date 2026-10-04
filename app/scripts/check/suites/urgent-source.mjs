@@ -121,6 +121,22 @@ export default async function urgentSourceSuite() {
     // (http). Reverted; check green again.
   });
 
+  await check('urgent-source: a transfer from a peer that holds the segment is never switched to the host', async () => {
+    // Joint D1 J1. A playing viewer at or behind the room has no budget; the rule
+    // started its transfer from a holder and the next pass cut it for the host.
+    const behind = { p2pLoading: true, holders: 1, budgetMs: 0, p2pStartMs: 10 };
+    assertEqual(result({ ...behind, nowMs: 10 }).source, 'p2p', 'a holder is kept with no budget');
+    assertEqual(result({ p2pLoading: true, holders: 1, nowMs: 60_000 }).source, 'p2p', 'a holder is kept past a spent budget');
+    assertEqual(result({ p2pLoading: true, holders: 0, loaders: 1, nowMs: PEER_WAIT_LIMIT_MS }).source, 'http', 'a transfer with no holder left keeps the budget');
+    assertEqual(result({ holders: 1, p2pFailed: true, nowMs: 60_000 }).source, 'http', 'a transfer the engine timed out still goes to the host');
+    // The patched queue arms its wake from `wakeMs`. A wake already past would
+    // re-enter the queue on every pass for as long as the transfer runs.
+    assertEqual(result({ ...behind, nowMs: 10 }).wakeMs, undefined, 'no wake once the budget is spent');
+    assertEqual(result({ p2pLoading: true, nowMs: 100 }).wakeMs, PEER_WAIT_LIMIT_MS, 'a wake at the budget\'s end while it runs');
+    assertEqual(result({ p2pLoading: true, held: true, nowMs: 100 }).wakeMs, undefined, 'a held room arms no wake');
+    // Red before the repair: 'a holder is kept with no budget' (http).
+  });
+
   await check('urgent-source: one host copy serves a later waiting viewer', async () => {
     const shared = simulate([0, 400]);
     assertEqual(shared.hostLoads, 1, 'one host load for staggered viewers');

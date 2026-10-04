@@ -287,16 +287,12 @@ export function computePeerFigures(input = {}, pairing = pairResponseEvidence(in
       }
     }
   } else if (trap) {
-    const seek = input.seek ?? input.context?.seek ?? {};
-    const host = seek.host ?? {};
-    const landingMs = Number(seek.landingMs ?? host.positionMs);
-    const effectiveSharedMs = Number(seek.effectiveSharedMs ?? host.atSharedMs);
     result.peerFractionByClient = trap.peerFractionByClient;
     result.peerFractionAggregate = trap.peerFractionAggregate;
     result.peerFractionSteady = false;
     result.hostUploadMultiplierRefusal = {
       reason: 'seek-in-window',
-      detail: { version: seek.version ?? host.version ?? null, L: landingMs, E: effectiveSharedMs },
+      detail: { version: trap.version, L: trap.landingMs, E: trap.effectiveSharedMs },
     };
     delete result.hostUploadMultiplier;
     result.trapLandingSegment = trap.landingSegment;

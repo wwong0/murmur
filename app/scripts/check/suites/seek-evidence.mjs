@@ -1,7 +1,7 @@
 import { assert, assertEqual, check } from '../harness.mjs';
 import { appliedSeekEvidence } from '../../figures/seek-evidence.mjs';
 import { evaluateRefusals } from '../../harness/refusals.mjs';
-import { waitForAppliedSeek } from '../../harness-run.mjs';
+import { waitForAppliedSeek } from '../../harness/seek-sequence.mjs';
 
 const condition = {
   delivery: 'http', clients: 1, bars: { recordCoverageMin: 0.5, droppedFrameFractionMax: 1, driftLogMissedMax: 0 },

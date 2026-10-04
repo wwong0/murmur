@@ -15,7 +15,10 @@ import { armFor, clientTags } from './harness/arms.mjs';
 import { validateEngineWindows } from '../public/lib/engine-windows.mjs';
 import { validateHeadroomFraction } from '../public/lib/send-pace.mjs';
 import { parseRate, parseSize, parseTime } from '../harness/apply-qdisc.mjs';
-import { appliedSeekEvidence } from './figures/seek-evidence.mjs';
+import {
+  capacityBeforeReadings, issuedSeekEvidence, landedSeekEvidence, restartedSeekEvidence, stepThenSeek,
+  waitForAppliedSeek,
+} from './harness/seek-sequence.mjs';
 import { startCpuSampler } from './harness/cpu-sampler.mjs';
 import { createControlEvidence, recordingEndForSeek } from './harness/control-evidence.mjs';
 import { timebaseJoin } from './figures/control-figures.mjs';
@@ -387,94 +390,6 @@ function queuedDrain(session, ndjson, arm, atMs = Date.now()) {
   return session.drainChain;
 }
 
-export async function stepThenSeek({ condition, topology, hostSession, preSeekState = null, readHostState,
-  stepQdisc, seek, drainAll = async () => {}, now = Date.now } = {}) {
-  const seekDeclaration = condition?.seek;
-  if (!seekDeclaration) return { capacityStep: null, seek: null };
-  let capacityStep = null;
-  if (condition.capacityStep) {
-    await drainAll();
-    const stepAtMs = now();
-    const readBackResult = await (stepQdisc ?? ((value) => topology.stepQdisc({ capacityStep: value })))(condition.capacityStep);
-    await drainAll();
-    const readBackAtMs = now();
-    capacityStep = {
-      declared: condition.capacityStep,
-      before: null,
-      readBack: readBackResult?.readings ?? {},
-      stepAtMs,
-      readBackAtMs,
-      inForce: readBackResult?.matches === true,
-    };
-    if (!capacityStep.inForce) return { capacityStep, seek: null };
-  }
-  const before = preSeekState ?? await readHostState?.();
-  if (!before) throw new Error('host playback state is unavailable before seek');
-  await drainAll();
-  const result = await seek(seekDeclaration.deltaMs);
-  // Harness clock, as readBackAtMs is; the page's instant is another machine's clock.
-  const seekIssuedAtMs = now();
-  await drainAll();
-  if (!result || result.issued !== true) throw new Error('harness seek was not issued');
-  return {
-    capacityStep,
-    seek: {
-      declared: seekDeclaration,
-      before,
-      seekIssuedAtMs,
-      pageIssuedAtMs: Number.isFinite(result.atPageMs) ? result.atPageMs : null,
-      issued: true,
-    },
-  };
-}
-
-export async function waitForAppliedSeek({ sessions = [], hostSession, before, timeoutMs, readState,
-  drainAll = async () => {}, now = Date.now, sleepFn = sleep } = {}) {
-  if (!before || !Number.isInteger(before.version) || typeof before.lineage !== 'string') {
-    throw new Error('host playback state before seek is invalid');
-  }
-  const all = [hostSession, ...sessions].filter(Boolean);
-  const lastReadings = {};
-  const matchedAtMs = {};
-  const deadline = now() + timeoutMs;
-  const read = readState ?? ((session) => session.tab.evaluate('__app.playbackState()'));
-  while (true) {
-    const atMs = now();
-    for (const session of all) {
-      const reading = await read(session);
-      lastReadings[session.tag] = reading;
-    }
-    const host = lastReadings[hostSession?.tag];
-    const hostApplied = host?.lineage === before.lineage
-      && Number.isInteger(host.version) && host.version > before.version;
-    if (hostApplied) {
-      // `held` is the host's own reading and is not matched against viewers:
-      // the control figures require it of a seek's held state (8b2 T3 item 8).
-      const expected = { lineage: host.lineage, version: host.version, playing: host.playing, positionMs: host.positionMs, atSharedMs: host.atSharedMs,
-        ...(typeof host.held === 'boolean' ? { held: host.held } : {}) };
-      for (const session of sessions) {
-        const reading = lastReadings[session.tag];
-        if (!matchedAtMs[session.tag] && reading?.lineage === expected.lineage && reading.version === expected.version
-          && reading.playing === expected.playing && reading.positionMs === expected.positionMs
-          && reading.atSharedMs === expected.atSharedMs) matchedAtMs[session.tag] = { atMs, reading };
-      }
-      const viewers = Object.fromEntries(sessions.map((session) => [session.tag, matchedAtMs[session.tag] ?? null]));
-      const allApplied = sessions.every((session) => {
-        const value = lastReadings[session.tag];
-        return value?.lineage === expected.lineage && value.version === expected.version
-          && value.playing === expected.playing && value.positionMs === expected.positionMs
-          && value.atSharedMs === expected.atSharedMs;
-      });
-      if (allApplied) return { host: expected, hostAtMs: atMs, viewers, timedOut: false, lastReadings };
-      if (now() >= deadline) return { host: expected, hostAtMs: atMs, viewers, timedOut: true, lastReadings };
-    }
-    await drainAll();
-    if (now() >= deadline) break;
-    await sleepFn(Math.min(POLL_INTERVAL_MS, Math.max(1, deadline - now())));
-  }
-  return { host: null, hostAtMs: null, viewers: {}, timedOut: true, lastReadings };
-}
-
 export function decideFinalization({ evaluation, recomputed, figureKinds, failure = null, recomputeError = null, retainedOverflow = false, cleanupFailure = null } = {}) {
   const hasKinds = Array.isArray(figureKinds);
   const byteAllowed = !hasKinds || figureKinds.includes('byte');
@@ -596,29 +511,6 @@ async function disposeSession(session) {
   session.clockJoinRecorder?.dispose();
   session.recorder?.dispose();
   if (session.dispose) await session.dispose();
-}
-
-function capacityBeforeReadings(manifest, capacityStep) {
-  const record = (manifest.topology?.qdiscs ?? []).find((entry) =>
-    entry.containerRole === capacityStep.container && entry.discipline === capacityStep.discipline);
-  return record?.readBack?.readings ?? {};
-}
-
-function restartEvidence(boundary, effectiveSharedMs) {
-  const starts = boundary?.playback?.starts ?? [];
-  const candidate = starts.find((start) => Number.isFinite(start.firstStartAtSharedMs)
-    && start.firstStartAtSharedMs >= effectiveSharedMs);
-  if (candidate && Number.isFinite(candidate.startAtSharedMs) && candidate.startAtSharedMs < effectiveSharedMs) {
-    throw new Error('restart-start-before-effective-shared-time');
-  }
-  if (!candidate) return { restarted: false };
-  return {
-    restarted: true,
-    latenessMs: candidate.latenessMs,
-    reparks: candidate.reparks,
-    startAtSharedMs: candidate.startAtSharedMs,
-    positionMs: candidate.positionMs,
-  };
 }
 
 export async function runHarness({ conditionName, condition = conditionForName(conditionName), runDir = null, originUrl, clientOriginUrl = originUrl, hostPageUrl = clientOriginUrl, topology = section3Topology(), clientFactory = noClientFactory, establishCadence = defaultEstablishCadence, qualifyCdpBytes = defaultQualifyCdpBytes, qualifyLinkReceipts = defaultQualifyLinkReceipts } = {}) {
@@ -769,84 +661,54 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       manifestFile.write();
     }
     const drainAll = () => Promise.all(sessions.map((session) => queuedDrain(session, ndjson, arm, Date.now())));
-    if (condition.seek) {
-      const sequence = await stepThenSeek({
-        condition,
-        topology,
+    const writeSeek = (evidence) => {
+      seekEvidence = evidence;
+      manifestFile.merge({ seek: seekEvidence });
+      fs.writeFileSync(path.join(prepared.runDir, 'seek.json'), `${JSON.stringify(seekEvidence, null, 2)}\n`);
+      manifestFile.write();
+    };
+    // A condition that declares no seek gets neither step nor seek back.
+    const sequence = await stepThenSeek({
+      condition,
+      topology,
+      readHostState: () => boundaryOptions.originSession.tab.evaluate('__app.playbackState()'),
+      stepQdisc: topology.stepQdisc ? (capacityStep) => topology.stepQdisc({ capacityStep }) : undefined,
+      seek: (deltaMs) => boundaryOptions.originSession.tab.evaluate(`__app.harnessSeek(${JSON.stringify(deltaMs)})`),
+      drainAll,
+    });
+    if (sequence.capacityStep) {
+      sequence.capacityStep.before = capacityBeforeReadings(manifestFile.get(), condition.capacityStep);
+      manifestFile.merge({ capacityStep: sequence.capacityStep });
+      manifestFile.write();
+    }
+    const startBoundary = await captureBoundary('start', sessions, originUrl, manifestFile.get(), manifestFile, ndjson, fetchSnapshot, boundaryOptions);
+    originStart = startBoundary.origin;
+    Object.assign(hostEvidence, arm.boundaryEvidence('start', startBoundary));
+    if (sequence.seek) {
+      const window = manifestFile.get().window;
+      window.endMs = window.startMs + window.measureWindowMs;
+      window.seekLagMs = window.startMs - window.declaredStartMs;
+      manifestFile.write();
+      const applied = await waitForAppliedSeek({
+        sessions,
         hostSession: boundaryOptions.originSession,
-        readHostState: () => boundaryOptions.originSession.tab.evaluate('__app.playbackState()'),
-        stepQdisc: topology.stepQdisc ? (capacityStep) => topology.stepQdisc({ capacityStep }) : undefined,
-        seek: (deltaMs) => boundaryOptions.originSession.tab.evaluate(`__app.harnessSeek(${JSON.stringify(deltaMs)})`),
+        before: sequence.seek.before,
+        timeoutMs: condition.seek.appliedTimeoutMs,
         drainAll,
+        pollIntervalMs: POLL_INTERVAL_MS,
       });
-      if (sequence.capacityStep) {
-        sequence.capacityStep.before = capacityBeforeReadings(manifestFile.get(), condition.capacityStep);
-        manifestFile.merge({ capacityStep: sequence.capacityStep });
+      seekEvidence = issuedSeekEvidence(sequence.seek, applied, sessions);
+      if (controlEvidence && seekEvidence.host) {
+        const join = timebaseJoin(controlEvidence.hostPoll);
+        const tailEndMs = recordingEndForSeek({ join, seek: seekEvidence });
+        recordingEndTargetMs = Math.max(manifestFile.get().window.endMs, tailEndMs ?? manifestFile.get().window.endMs);
+        manifestFile.merge({ recordingTailMs: Math.max(0, recordingEndTargetMs - manifestFile.get().window.endMs) });
         manifestFile.write();
       }
-      if (sequence.seek) {
-        const startBoundary = await captureBoundary('start', sessions, originUrl, manifestFile.get(), manifestFile, ndjson, fetchSnapshot, boundaryOptions);
-        originStart = startBoundary.origin;
-        Object.assign(hostEvidence, arm.boundaryEvidence('start', startBoundary));
-        const window = manifestFile.get().window;
-        window.endMs = window.startMs + window.measureWindowMs;
-        window.seekLagMs = window.startMs - window.declaredStartMs;
-        manifestFile.write();
-        const applied = await waitForAppliedSeek({
-          sessions,
-          hostSession: boundaryOptions.originSession,
-          before: sequence.seek.before,
-          timeoutMs: condition.seek.appliedTimeoutMs,
-          drainAll,
-        });
-        const viewers = Object.fromEntries(sessions.map((session) => [session.tag, {
-          reading: applied.viewers[session.tag]?.reading ?? null,
-          appliedAtMs: applied.viewers[session.tag]?.atMs ?? null,
-        }]));
-        seekEvidence = {
-          ...sequence.seek,
-          issuedAtMs: sequence.seek.seekIssuedAtMs,
-          host: applied.host,
-          hostAtMs: applied.hostAtMs,
-          viewers,
-          lastReadings: applied.lastReadings,
-          applied: applied.timedOut === false,
-        };
-        if (controlEvidence && seekEvidence.host) {
-          const join = timebaseJoin(controlEvidence.hostPoll);
-          const tailEndMs = recordingEndForSeek({ join, seek: seekEvidence });
-          recordingEndTargetMs = Math.max(manifestFile.get().window.endMs, tailEndMs ?? manifestFile.get().window.endMs);
-          manifestFile.merge({ recordingTailMs: Math.max(0, recordingEndTargetMs - manifestFile.get().window.endMs) });
-          manifestFile.write();
-        }
-        if (applied.host) {
-          const landing = appliedSeekEvidence({
-            host: applied.host,
-            viewers,
-            peerRecords: Object.fromEntries(sessions.map((session) => [session.tag, session.peerRecords ?? []])),
-            declaredClientTags: sessions.map((session) => session.tag),
-            segmentSeconds: manifestFile.get().content?.segmentSeconds ?? 4,
-            highDemandTimeWindowMs: (condition.engineWindows?.highDemandTimeWindow ?? 15) * 1000,
-          });
-          seekEvidence = { ...seekEvidence, ...landing };
-        }
-        seekEvidence = {
-          ...seekEvidence,
-          landingMs: seekEvidence.host?.positionMs ?? null,
-          effectiveSharedMs: seekEvidence.host?.atSharedMs ?? null,
-        };
-        manifestFile.merge({ seek: seekEvidence });
-        fs.writeFileSync(path.join(prepared.runDir, 'seek.json'), `${JSON.stringify(seekEvidence, null, 2)}\n`);
-        manifestFile.write();
-      } else {
-        const startBoundary = await captureBoundary('start', sessions, originUrl, manifestFile.get(), manifestFile, ndjson, fetchSnapshot, boundaryOptions);
-        originStart = startBoundary.origin;
-        Object.assign(hostEvidence, arm.boundaryEvidence('start', startBoundary));
-      }
-    } else {
-      const startBoundary = await captureBoundary('start', sessions, originUrl, manifestFile.get(), manifestFile, ndjson, fetchSnapshot, boundaryOptions);
-      originStart = startBoundary.origin;
-      Object.assign(hostEvidence, arm.boundaryEvidence('start', startBoundary));
+      writeSeek(landedSeekEvidence(seekEvidence, sessions, {
+        segmentSeconds: manifestFile.get().content?.segmentSeconds ?? 4,
+        highDemandTimeWindowMs: (condition.engineWindows?.highDemandTimeWindow ?? 15) * 1000,
+      }));
     }
     recordingEndTargetMs ??= manifestFile.get().window.endMs;
     await waitUntil(deadline, recordingEndTargetMs);
@@ -854,31 +716,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     originEnd = endBoundary.origin;
     Object.assign(hostEvidence, arm.boundaryEvidence('end', endBoundary));
     for (const session of sessions) session.endPlayback = endBoundary.snapshots[session.tag]?.playback;
-    if (seekEvidence?.host) {
-      const landing = appliedSeekEvidence({
-        host: seekEvidence.host,
-        viewers: seekEvidence.viewers,
-        peerRecords: Object.fromEntries(sessions.map((session) => [session.tag, session.peerRecords ?? []])),
-        declaredClientTags: sessions.map((session) => session.tag),
-        segmentSeconds: seekEvidence.segmentSeconds ?? manifestFile.get().content?.segmentSeconds ?? 4,
-        highDemandTimeWindowMs: seekEvidence.highDemandTimeWindowMs ?? Number(condition.engineWindows?.highDemandTimeWindow ?? 15) * 1000,
-      });
-      const viewers = Object.fromEntries(sessions.map((session) => {
-        const current = seekEvidence.viewers[session.tag] ?? {};
-        const refreshed = landing.viewers[session.tag] ?? {};
-        return [session.tag, {
-          ...current,
-          restart: restartEvidence(endBoundary.snapshots[session.tag], seekEvidence.host.atSharedMs),
-          highestSegmentBeforeE: refreshed.highestSegmentBeforeE,
-          heldSegments: refreshed.heldSegments,
-          kL: landing.landingSegment,
-        }];
-      }));
-      seekEvidence = { ...seekEvidence, ...landing, viewers, viewersNotRestarted: Object.keys(viewers).filter((tag) => viewers[tag].restart.restarted === false) };
-      manifestFile.merge({ seek: seekEvidence });
-      fs.writeFileSync(path.join(prepared.runDir, 'seek.json'), `${JSON.stringify(seekEvidence, null, 2)}\n`);
-      manifestFile.write();
-    }
+    if (seekEvidence?.host) writeSeek(restartedSeekEvidence(seekEvidence, sessions, endBoundary.snapshots));
     if (condition.disturbance && injectionHarnessMs !== null) {
       await waitUntil(deadline, injectionHarnessMs + condition.disturbance.observationMs + 2000);
     }

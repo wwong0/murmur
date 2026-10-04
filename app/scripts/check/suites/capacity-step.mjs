@@ -1,6 +1,7 @@
 import { assert, assertEqual, check } from '../harness.mjs';
 import { changeArgv, changeQdisc } from '../../../harness/apply-qdisc.mjs';
-import { conditionValidationReason, stepThenSeek } from '../../harness-run.mjs';
+import { conditionValidationReason } from '../../harness-run.mjs';
+import { stepThenSeek } from '../../harness/seek-sequence.mjs';
 import { evaluateRefusals } from '../../harness/refusals.mjs';
 
 const step = (rate, burst) => ({ container: 'origin', network: 'wa-media', discipline: 'tbf', params: { rate, burst, latency: '400ms' } });

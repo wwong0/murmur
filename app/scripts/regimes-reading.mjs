@@ -2,46 +2,20 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { recomputeRunDirectory } from './harness-figures.mjs';
+import {
+  appPath, argument, CONDITIONS_PATH, finalizationOf, isMain, readJson, registeredDirectory,
+  registryEntries, RESULTS_DIR, runMain, runPath,
+} from './registered-runs.mjs';
 import { classifyRegimesReading, computeViewerUploadRates, median } from './figures/regimes-reading.mjs';
-
-const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const RESULTS_DIR = path.join(APP_DIR, 'results');
-const CONDITIONS_PATH = path.join(APP_DIR, 'harness', 'conditions.json');
-
-function argument(name, argv) {
-  const prefix = `--${name}=`;
-  return argv.find((value) => value.startsWith(prefix))?.slice(prefix.length) ?? null;
-}
-
-function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-}
-
-function appPath(value, fallbackDir = APP_DIR) {
-  return path.isAbsolute(value) ? value : path.resolve(fallbackDir, value);
-}
-
-function runPath(directory) {
-  return path.isAbsolute(directory) ? directory : path.join(RESULTS_DIR, directory);
-}
-
-function registryEntries(filePath) {
-  const register = readJson(filePath);
-  if (!Array.isArray(register.runs)) throw new Error(`${filePath}: runs is not an array`);
-  return register.runs;
-}
 
 // A run the harness aborted has no figures to recompute; it is listed, not classified.
 function recomputeRegisteredRun(entry) {
-  const directory = entry.directory;
-  if (typeof directory !== 'string' || directory.length === 0) throw new Error('registered run has no directory');
+  const directory = registeredDirectory(entry);
   const runDir = runPath(directory);
   const manifest = readJson(path.join(runDir, 'manifest.json'));
-  const refusalReport = path.join(runDir, 'refusal-report.json');
-  const finalization = fs.existsSync(refusalReport) ? readJson(refusalReport).finalization ?? null : null;
+  const finalization = finalizationOf(runDir);
   let report;
   try {
     report = recomputeRunDirectory(runDir);
@@ -134,11 +108,4 @@ export function main(argv = process.argv.slice(2)) {
   return report;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
-  try {
-    main();
-  } catch (error) {
-    console.error(error.stack ?? error);
-    process.exitCode = 1;
-  }
-}
+if (isMain(import.meta.url)) runMain(main);

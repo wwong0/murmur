@@ -1,17 +1,15 @@
 import { attemptDispositions } from '../../public/lib/peer-bytes.mjs';
 import { finite, inWindow, recordsOf, safe, tagsOf } from './peer-evidence.mjs';
-import { segmentIndex } from './seek-evidence.mjs';
+import { seekInstants, segmentIndex } from './seek-evidence.mjs';
 
 function seekValues(input) {
-  const seek = input.seek ?? input.context?.seek ?? {};
-  const host = seek.host ?? {};
-  const landingMs = Number(seek.landingMs ?? host.positionMs);
-  const effectiveSharedMs = Number(seek.effectiveSharedMs ?? host.atSharedMs);
-  if (!finite(landingMs) || !finite(effectiveSharedMs)) throw new Error('trap seek evidence is unavailable');
-  const segmentSeconds = Number(input.segmentSeconds ?? seek.segmentSeconds ?? 4);
+  const instants = seekInstants(input);
+  if (!instants) throw new Error('trap seek evidence is unavailable');
+  const { version, landingMs, effectiveSharedMs } = instants;
+  const segmentSeconds = Number(input.segmentSeconds ?? instants.segmentSeconds ?? 4);
   if (!(segmentSeconds > 0) || !finite(segmentSeconds)) throw new Error('trap segment seconds are invalid');
   return {
-    version: seek.version ?? host.version ?? null,
+    version,
     landingMs,
     effectiveSharedMs,
     landingSegment: Math.floor(landingMs / (segmentSeconds * 1000)),

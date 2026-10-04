@@ -5,7 +5,8 @@
 
 import { assert, assertEqual, check } from '../harness.mjs';
 import { createFakeClock, createFakeLink } from '../fake-channel.mjs';
-import { createHostOrigin, PACE_CAP_BYTES } from '../../../public/lib/host-origin.mjs';
+import { createHostOrigin } from '../../../public/lib/host-origin.mjs';
+import { PACE_CAP_BYTES } from '../../../public/lib/host-pace.mjs';
 import { HEADROOM_DEFAULT } from '../../../public/lib/send-pace.mjs';
 import { encodeControl, parseControl } from '../../../public/lib/segment-protocol.mjs';
 

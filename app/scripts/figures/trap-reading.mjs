@@ -1,26 +1,10 @@
 import { median as medianOfSorted } from '../../public/lib/frame-drift.mjs';
-import { accepted, sameBuild } from './regimes-reading.mjs';
+import { accepted, buildIdsOf, figureOf, imagesOf, sameBuild } from './regimes-reading.mjs';
 
 const finite = (value) => Number.isFinite(value);
 
 function conditionOf(entry) {
   return entry?.condition ?? entry?.manifest?.condition?.name ?? null;
-}
-
-function figuresOf(entry) {
-  return entry?.report?.figures ?? entry?.figures ?? {};
-}
-
-function buildIdsOf(entry) {
-  const clients = entry?.manifest?.clients ?? entry?.clients ?? {};
-  return Object.fromEntries(Object.entries(clients)
-    .filter(([, client]) => client?.role !== 'host')
-    .map(([tag, client]) => [tag, client?.buildId ?? null])
-    .sort(([left], [right]) => left.localeCompare(right)));
-}
-
-function imagesOf(entry) {
-  return entry?.manifest?.topology?.regime?.images ?? null;
 }
 
 function thresholds(reading) {
@@ -43,7 +27,7 @@ function valueOf(figures, name, directory) {
 
 export function classifyTrapRun(entry, reading) {
   const config = thresholds(reading);
-  const figures = figuresOf(entry);
+  const figures = figureOf(entry);
   const directory = entry?.directory ?? null;
   const peerFractionAggregate = valueOf(figures, 'peerFractionAggregate', directory);
   const heldAheadMsRoomMedian = valueOf(figures, 'heldAheadMsRoomMedian', directory);
@@ -99,7 +83,7 @@ function runSummary(entry, reading) {
 function controlSummary(entries, config, acceptedRuns) {
   const candidates = entries.filter((entry) => accepted(entry) && conditionOf(entry) === config.control.condition)
     .map((entry) => {
-      const figures = figuresOf(entry);
+      const figures = figureOf(entry);
       const peerFractionAggregate = finite(figures.peerFractionAggregate)
         ? figures.peerFractionAggregate : null;
       const sameBuildAsArm = acceptedRuns.every((run) => sameBuild(entry, run));

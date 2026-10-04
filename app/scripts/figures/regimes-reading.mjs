@@ -57,7 +57,7 @@ export function accepted(entry) {
     && entry?.finalization?.writeByte === true;
 }
 
-function figureOf(entry) {
+export function figureOf(entry) {
   return entry?.report?.figures ?? entry?.figures ?? {};
 }
 
@@ -66,7 +66,7 @@ function conditionOf(entry) {
 }
 
 // Viewers only: the host tab records no build id.
-function buildIdsOf(entry) {
+export function buildIdsOf(entry) {
   const clients = entry?.manifest?.clients ?? entry?.clients ?? {};
   return Object.fromEntries(Object.entries(clients)
     .filter(([, client]) => client?.role !== 'host')
@@ -74,7 +74,7 @@ function buildIdsOf(entry) {
     .sort(([left], [right]) => left.localeCompare(right)));
 }
 
-function imagesOf(entry) {
+export function imagesOf(entry) {
   return entry?.manifest?.topology?.regime?.images ?? null;
 }
 

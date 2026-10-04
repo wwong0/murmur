@@ -341,7 +341,7 @@ export function computeControlFigures(input = {}, { manifest = input.manifest } 
     recordingEndSharedMs: recordingEndShared,
     recordingTailMs: input.seek ? evidenceRecordingTailMs({ join, seek: input.seek, windowEndMs: input.window?.endMs }) : 0,
     recovery,
-    sweep: input.seek ? sweepFigures({ input: { ...input, timebase: join }, spans, resumedAtSharedMs: seekHold?.resumedAtSharedMs ?? Infinity }) : null,
+    sweep: input.seek ? sweepFigures({ input: { ...input, manifest, timebase: join }, spans, resumedAtSharedMs: seekHold?.resumedAtSharedMs ?? Infinity }) : null,
     spanCourse: input.seek ? computeSpanCourse(input) : null,
     refusals: evidenceRefusals({ hostPace: input.hostPace, resumes: input.resumes, hostPoll: input.hostPoll, seek: input.seek }),
   };

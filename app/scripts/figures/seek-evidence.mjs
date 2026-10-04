@@ -6,6 +6,18 @@ export function segmentIndex(path) {
   return match ? Number(match[1]) : null;
 }
 
+// Where the room's seek landed and when it took effect, as the figures read them from
+// the retained seek evidence; null when either is missing.
+export function seekInstants(input) {
+  const seek = input.seek ?? input.context?.seek ?? {};
+  const host = seek.host ?? {};
+  const landingMs = Number(seek.landingMs ?? host.positionMs);
+  const effectiveSharedMs = Number(seek.effectiveSharedMs ?? host.atSharedMs);
+  if (!Number.isFinite(landingMs) || !Number.isFinite(effectiveSharedMs)) return null;
+  return { version: seek.version ?? host.version ?? null, landingMs, effectiveSharedMs,
+    segmentSeconds: seek.segmentSeconds };
+}
+
 function appliedReading(value) {
   return value && typeof value === 'object'
     && typeof value.lineage === 'string'
@@ -86,8 +98,4 @@ export function appliedWithoutRestart(seek, tag) {
   const viewer = seek?.viewers?.[tag];
   const applied = viewer?.reading ?? viewer?.applied;
   return appliedReading(applied) !== null && viewer?.restart?.restarted === false;
-}
-
-export function seekApplied(reading, expected) {
-  return sameApplied(reading, expected);
 }

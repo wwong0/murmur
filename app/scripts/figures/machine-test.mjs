@@ -151,7 +151,3 @@ export function evaluateMachineTest({ recompute = {}, refusalReport = null, atte
   }
   return { ...common, attempt: 'accepted', availability: 'unavailable', reason: 'cause-not-established', resourceClients, realtimeClients };
 }
-
-export const machineTestVerdict = evaluateMachineTest;
-export const classifyMachineTest = evaluateMachineTest;
-export default evaluateMachineTest;

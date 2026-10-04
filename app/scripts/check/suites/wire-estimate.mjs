@@ -4,7 +4,8 @@
 
 import { assert, assertEqual, check } from '../harness.mjs';
 import { createFakeClock, createFakeLink } from '../fake-channel.mjs';
-import { createHostOrigin, PROBE_AFTER_INTERVALS } from '../../../public/lib/host-origin.mjs';
+import { createHostOrigin } from '../../../public/lib/host-origin.mjs';
+import { PROBE_AFTER_INTERVALS } from '../../../public/lib/host-pace.mjs';
 import { createWireMeter } from '../../../public/lib/wire-meter.mjs';
 import { encodeControl } from '../../../public/lib/segment-protocol.mjs';
 
