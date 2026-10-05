@@ -50,6 +50,38 @@ async function pacedHost(clock, count) {
 }
 
 export default async function sendArbiterSuite() {
+  await check('send-arbiter: urgent, near and normal classes drain in strict order', async () => {
+    const clock = createFakeClock();
+    const sent = [];
+    const pace = { available: () => ({ ok: true }), take: () => {} };
+    const arbiter = createSendArbiter({ pace, clock });
+    const add = (label, className, count) => {
+      let left = count;
+      arbiter.register({
+        offer: () => (left > 0 ? className : null),
+        admitOne: () => {
+          left -= 1;
+          sent.push(label);
+          return 1;
+        },
+      });
+    };
+    add('normal', 'normal', 2);
+    add('near-a', 'near', 2);
+    add('near-b', 'near', 2);
+    add('urgent', 'urgent', 2);
+    arbiter.register({ offer: () => null, admitOne: () => 0 }).poke();
+    assertEqual(JSON.stringify(sent), JSON.stringify([
+      'urgent', 'urgent', 'near-a', 'near-b', 'near-a', 'near-b', 'normal', 'normal',
+    ]), 'every urgent chunk goes first, then near chunks take turns, then normal');
+    // Mutation (a) proof, T6: the opportunity is four handles offering urgent,
+    // near (two turns), and normal; the boundary is strict urgent/near/normal
+    // order. Setting CLASS_RANK.near = 1 made the named assertion red (expected
+    // urgent, urgent, near-a, near-b, near-a, near-b, normal, normal; got normal
+    // before near). `git checkout -- app/public/lib/send-arbiter.mjs` restored
+    // the staged copy, and the rerun was green.
+  });
+
   await check('send-arbiter: every channel waiting at the shared bucket gets its turn', async () => {
     const clock = createFakeClock();
     const { links, paceBytesPerMs, cleanup } = await pacedHost(clock, 5);

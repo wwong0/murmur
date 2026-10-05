@@ -93,12 +93,18 @@ import bytesReadoutSuite from './check/suites/bytes-readout.mjs';
 import peerEngineConfigSuite from './check/suites/peer-engine-config.mjs';
 import engineWindowsSuite from './check/suites/engine-windows.mjs';
 import urgentSourceSuite from './check/suites/urgent-source.mjs';
+import edgeAssignmentSuite from './check/suites/edge-assignment.mjs';
+import edgeSpreadSuite from './check/suites/edge-spread.mjs';
+import edgeSourceSuite from './check/suites/edge-source.mjs';
+import edgeControlSuite from './check/suites/edge-control.mjs';
 import enginePatchSuite from './check/suites/engine-patch.mjs';
+import edgeAsksSuite from './check/suites/edge-asks.mjs';
 import capacityEstimateSuite from './check/suites/capacity-estimate.mjs';
 import sendPaceSuite from './check/suites/send-pace.mjs';
 import hostPaceSuite from './check/suites/host-pace.mjs';
 import sendArbiterSuite from './check/suites/send-arbiter.mjs';
 import urgentRequestSuite from './check/suites/urgent-request.mjs';
+import edgePositionSuite from './check/suites/edge-position.mjs';
 import wireEstimateSuite from './check/suites/wire-estimate.mjs';
 import echoDelaySuite from './check/suites/echo-delay.mjs';
 import harnessJoinOrderSuite from './check/suites/harness-join-order.mjs';
@@ -227,12 +233,18 @@ for (const suite of [
   peerEngineConfigSuite,
   engineWindowsSuite,
   urgentSourceSuite,
+  edgeAssignmentSuite,
+  edgeSpreadSuite,
+  edgeSourceSuite,
+  edgeControlSuite,
   enginePatchSuite,
+  edgeAsksSuite,
   capacityEstimateSuite,
   sendPaceSuite,
   hostPaceSuite,
   sendArbiterSuite,
   urgentRequestSuite,
+  edgePositionSuite,
   wireEstimateSuite,
   echoDelaySuite,
   harnessJoinOrderSuite,

@@ -18,6 +18,19 @@ const json = (value) => JSON.stringify(value);
 // A string only the carried loader's code contains. Not the plugin's banner: that
 // is written whether or not the loader redirect took (8b d1-findings.md F1).
 const PATCHED_CODE = '"urgentWaits"';
+const PATCHED_EDGE_CONTROL = '"edgeControl"';
+let patchedBundle;
+
+async function productBundle() {
+  patchedBundle ??= await esbuild.build({
+    ...buildOptions('engine-patch'),
+    write: false,
+    sourcemap: false,
+    metafile: true,
+    outfile: path.join(process.cwd(), '.scratch', 'engine-patch.bundle.js'),
+  });
+  return patchedBundle;
+}
 
 function changedSourceLines() {
   const result = spawnSync('git', ['diff', '--no-index', '--unified=0', '--ignore-space-at-eol', ORIGINAL_HYBRID_LOADER, PATCHED_HYBRID_LOADER], { encoding: 'utf8' });
@@ -31,18 +44,21 @@ function changedSourceLines() {
 
 export default async function enginePatchSuite() {
   await check('engine-patch: buildOptions carries the pinned patch marker', async () => {
-    const result = await esbuild.build({
-      ...buildOptions('engine-patch'),
-      write: false,
-      sourcemap: false,
-      metafile: true,
-      outfile: path.join(process.cwd(), '.scratch', 'engine-patch.bundle.js'),
-    });
+    const result = await productBundle();
     assert(result.outputFiles[0].text.includes(PATCHED_CODE), 'built product bundle contains the patched loader');
     // Prevention proof: opportunity is a product bundle built through the normal
     // buildOptions path; action boundary is the emitted bundle text. Mutation:
     // the plugin's hybrid-loader onResolve returns null, banner kept. Named red:
     // `built product bundle contains the patched loader`. Restore and rerun green.
+  });
+
+  await check('engine-patch: buildOptions carries the edge-control adapter marker', async () => {
+    const result = await productBundle();
+    assert(result.outputFiles[0].text.includes(PATCHED_EDGE_CONTROL), 'built product bundle contains the edge-control adapter');
+    // Prevention proof: opportunity is the same normal build bundle at its
+    // emitted-text boundary. Mutation: the plugin's hybrid-loader onResolve
+    // returns null, leaving the banner but not this adapter. Named red: `built
+    // product bundle contains the edge-control adapter`. Restore and rerun green.
   });
 
   await check('engine-patch: the installed engine is the pinned 3.0.1 source', async () => {

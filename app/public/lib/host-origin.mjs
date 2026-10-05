@@ -85,6 +85,7 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
   const accounting = createHostAccounting({ wallNow, instanceId });
   let responseCounter = 0;
   let urgentResponses = 0;
+  let nearResponses = 0;
   let protocolErrors = 0;
   const memo = new Map();
   let attachedChannels = 0;
@@ -168,7 +169,11 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
         protocolErrors += 1;
         return;
       }
-      const entry = { aborted: false, urgent: control.urgent === true };
+      const entry = {
+        aborted: false,
+        urgent: control.urgent === true,
+        near: control.near === true && control.urgent !== true,
+      };
       active.set(control.id, entry);
       channelState.get(channelKey).pendingReads += 1;
       Promise.resolve()
@@ -196,7 +201,11 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
         expected: head.length,
       });
       if (entry.urgent) urgentResponses += 1;
-      sender.start(control.id, bytes.subarray(slice.start, slice.start + slice.length), { urgent: entry.urgent });
+      if (entry.near) nearResponses += 1;
+      sender.start(control.id, bytes.subarray(slice.start, slice.start + slice.length), {
+        urgent: entry.urgent,
+        near: entry.near,
+      });
       if (head.length === 0) accounting.settleIfDone(channelKey, control.id, sender.pendingFrames(control.id));
     }
 
@@ -225,7 +234,7 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
       return accounting.snapshot();
     },
     stats() {
-      return { protocolErrors, responses: responseCounter, urgentResponses, channels: attachedChannels };
+      return { protocolErrors, responses: responseCounter, urgentResponses, nearResponses, channels: attachedChannels };
     },
     pace: (afterSeq = 0) => hostPace.read(afterSeq),
   };

@@ -7,11 +7,13 @@ import { createFakeRoomClient, createFakeRtcFactory } from '../fake-rtc.mjs';
 import { createHostLink } from '../../../public/lib/host-link.mjs';
 import { createHostOrigin } from '../../../public/lib/host-origin.mjs';
 import { READY_HELD_AHEAD_MS } from '../../../public/lib/hold-resume.mjs';
-import { parseSegmentTimes, requestIsUrgent, urgentPositionMs } from '../../../public/lib/urgent-request.mjs';
+import { ownPositionMs, parseSegmentTimes, requestClass, requestIsUrgent, urgentPositionMs } from '../../../public/lib/urgent-request.mjs';
 import { offsetView } from '../../../public/lib/playback-state.mjs';
 import { parseControl } from '../../../public/lib/segment-protocol.mjs';
+import { setUrgentContext, urgentContext } from '../../../public/lib/urgent-source.mjs';
 
 const BASE = 'https://media.test/';
+const json = (value) => JSON.stringify(value);
 const PLAYLIST = [
   '#EXTM3U',
   '#EXT-X-TARGETDURATION:4',
@@ -100,6 +102,35 @@ export default async function urgentRequestSuite() {
     assert(!requestIsUrgent({ path: '/media/seg-00000.m4s', positionMs: 0, segments: null, runwayMs: 4000 }), 'no playlist yet: not urgent');
   });
 
+  await check('urgent-request: the middle class follows the supplied high-demand window', async () => {
+    const segments = new Map([
+      ['/media/at.m4s', { startMs: 100_000, endMs: 104_000 }],
+      ['/media/near-1.m4s', { startMs: 104_000, endMs: 108_000 }],
+      ['/media/near-2.m4s', { startMs: 112_000, endMs: 116_000 }],
+      ['/media/far.m4s', { startMs: 116_000, endMs: 120_000 }],
+      ['/media/passed.m4s', { startMs: 96_000, endMs: 100_000 }],
+      ['/media/window.m4s', { startMs: 120_000, endMs: 124_000 }],
+    ]);
+    const args = { control: 'product', positionMs: 100_000, segments, runwayMs: 4_000, nearMs: 15_000 };
+    assertEqual(requestClass({ ...args, path: '/media/at.m4s' }), 'urgent', 'the containing segment remains urgent');
+    assertEqual(requestClass({ ...args, path: '/media/near-1.m4s' }), 'near', 'the segment at the runway boundary is near');
+    assertEqual(requestClass({ ...args, path: '/media/near-2.m4s' }), 'near', 'a segment deeper in the near zone is near');
+    assertEqual(requestClass({ ...args, path: '/media/far.m4s' }), null, 'a segment starting past the near zone is unmarked');
+    assertEqual(requestClass({ ...args, path: '/media/passed.m4s' }), null, 'a segment the viewer has passed is unmarked');
+    assertEqual(requestClass({ ...args, path: '/media/window.m4s', nearMs: 30_000 }), 'near', 'the zone follows the window in force');
+    assertEqual(requestClass({ ...args, path: '/media/window.m4s' }), null, 'the default near window does not reach 20 000 ms ahead');
+    assertEqual(requestClass({ ...args, control: '8b', path: '/media/near-1.m4s' }), null, 'the earlier control has no near class');
+    // Mutation (c) proof, T6: the opportunity is the same near segment under
+    // product and 8b; the boundary is no near class under 8b. Allowing
+    // requestClass to answer 'near' under 8b made the named assertion red
+    // (expected null, got near). `git checkout -- app/public/lib/urgent-request.mjs`
+    // restored the staged copy, and the rerun was green.
+    // Mutation (d) proof, T6: the opportunity is a segment 20 000 ms ahead; the
+    // boundary is supplied nearMs 30 000 versus 15 000. Replacing nearMs with a
+    // constant 15 000 made the named assertion red (expected near, got null).
+    // The same staged checkout restored the copy, and the rerun was green.
+  });
+
   await check('urgent-request: a viewer that loads inside the held creation\'s lead marks its start segment urgent', async () => {
     // 8b2's attempt 4: the first viewer asked for seg-00000 90 ms before the held
     // creation took effect, with no mapping in effect and so no position.
@@ -121,6 +152,51 @@ export default async function urgentRequestSuite() {
     // starts' red (null). Reverted; green.
   });
 
+  await check('urgent-request: own position uses the element only for a playing product viewer', async () => {
+    const playing = { lineage: 'room', version: 1, current: { playing: true, atSharedMs: 0, mediaMs: 130_000 }, previous: null, controlMode: 'open' };
+    const held = { ...playing, current: { ...playing.current, playing: false, held: true, mediaMs: 80_000 } };
+    const segments = new Map([
+      ['/media/own.m4s', { startMs: 100_000, endMs: 104_000 }],
+      ['/media/room.m4s', { startMs: 128_000, endMs: 132_000 }],
+      ['/media/passed.m4s', { startMs: 96_000, endMs: 100_000 }],
+    ]);
+    const own = ownPositionMs({ control: 'product', state: playing, sharedMs: 0, elementMs: 100_000 });
+    assertEqual(own, 100_000, 'a playing viewer uses its element position');
+    assert(requestIsUrgent({ path: '/media/own.m4s', positionMs: own, segments, runwayMs: 4_000 }), 'the viewer’s next segment is urgent');
+    assert(!requestIsUrgent({ path: '/media/room.m4s', positionMs: own, segments, runwayMs: 4_000 }), 'the room position segment is not urgent for a viewer behind');
+    assert(!requestIsUrgent({ path: '/media/passed.m4s', positionMs: own, segments, runwayMs: 4_000 }), 'a segment the viewer has passed is not urgent');
+    assertEqual(ownPositionMs({ control: 'product', state: held, sharedMs: 0, elementMs: 50_000 }), 80_000, 'a held viewer uses its held position');
+    const heldCreation = { ...held, current: { ...held.current, atSharedMs: 10_000 } };
+    assertEqual(ownPositionMs({ control: 'product', state: heldCreation, sharedMs: 9_900, elementMs: 50_000 }), 80_000, 'a held creation lead uses its creation position');
+    assertEqual(ownPositionMs({ control: 'product', state: playing, sharedMs: 0, elementMs: null }), 130_000, 'a playing viewer without an element sample uses state');
+    // The one case under the switch (D8): the first case's inputs, control alone changed.
+    assertEqual(ownPositionMs({ control: '8b', state: playing, sharedMs: 0, elementMs: 100_000 }), 130_000, 'the earlier control restores the room position');
+    // Mutation (a) proof, D3: a playing viewer has an urgent segment at its
+    // sampled element position while the room position is elsewhere. Returning
+    // the state position from step 1.3 turns the first assertion red (the result
+    // is 130000, not 100000). Stage included app/public/lib/urgent-request.mjs;
+    // `git checkout -- app/public/lib/urgent-request.mjs` restored the staged copy,
+    // and the rerun was green.
+    // Mutation (b) proof, D3: a held viewer's element is parked away from its
+    // held state. Removing step 1.2 makes the held assertion red (50000, not
+    // 80000). The same staged checkout restored it and the rerun was green.
+  });
+
+  await check('urgent-request: urgent context keeps own position and a frozen viewer copy', async () => {
+    const viewerIds = ['viewer-b', 'viewer-a'];
+    setUrgentContext({ held: true, roomMediaMs: 130_000, ownMediaMs: 100_000, viewerIds, selfId: 'viewer-a' });
+    const explicit = urgentContext();
+    assertEqual(json(explicit), json({ held: true, roomMediaMs: 130_000, ownMediaMs: 100_000, viewerIds, selfId: 'viewer-a' }), 'context keeps every supplied field');
+    assert(Object.isFrozen(explicit.viewerIds), 'viewer ids are frozen');
+    viewerIds.push('viewer-c');
+    assertEqual(explicit.viewerIds.length, 2, 'context owns a copy of viewer ids');
+    setUrgentContext({ roomMediaMs: 7 });
+    assertEqual(json(urgentContext()), json({ held: false, roomMediaMs: 7, ownMediaMs: 7, viewerIds: [], selfId: null }), 'own position and other fields have the specified defaults');
+    let rejected = false;
+    try { setUrgentContext({ roomMediaMs: 7, ownMediaMs: -1 }); } catch { rejected = true; }
+    assert(rejected, 'negative own position is rejected');
+  });
+
   await check('urgent-request: the host link carries the mark to the host, and keeps the playlist\'s segment times', async () => {
     let marked = new Set(['/media/master.m3u8', '/media/seg-00001.m4s']);
     const rig = linkRig((path) => marked.has(path));
@@ -139,6 +215,24 @@ export default async function urgentRequestSuite() {
     // Mutation probe, staged: host-link.mjs's request() sending the plain req
     // whatever `urgent` was. `npm run check` turned 'the req carries urgent
     // exactly when urgency says so' red (false,false,false). Reverted; green.
+    rig.link.close();
+  });
+
+  await check('urgent-request: the near class crosses the host link and receipt', async () => {
+    const classes = new Map([
+      ['/media/master.m3u8', 'urgent'],
+      ['/media/seg-00001.m4s', 'near'],
+    ]);
+    const rig = linkRig((path) => classes.get(path) ?? null);
+    await flush();
+    await fetchThrough(rig, '/media/master.m3u8');
+    await fetchThrough(rig, '/media/seg-00001.m4s');
+    const nearRequest = rig.reqs[1];
+    assertEqual(nearRequest.near, true, 'the req for a near path carries near');
+    assert(!('urgent' in nearRequest), 'the near req carries no urgent flag');
+    const nearReceipt = rig.link.receipts().records[1];
+    assertEqual(JSON.stringify({ near: nearReceipt.near, urgent: nearReceipt.urgent }), JSON.stringify({ near: true, urgent: false }), 'the receipt records near and not urgent');
+    assertEqual(rig.origin.stats().nearResponses, 1, 'the host counted the near response');
     rig.link.close();
   });
 

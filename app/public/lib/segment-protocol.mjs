@@ -238,18 +238,19 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
     notifyWaiting();
   }
 
-  // The next body in turn among urgent bodies with bytes left, else among all
-  // (design.md D9): a viewer's start segment never waits on its own prefetch.
+  // The next body in turn among urgent, near, then normal bodies (design.md D2).
   function select() {
     let fallback = null;
+    let nearFallback = null;
     for (let scan = 0; scan < order.length; scan++) {
       const index = (roundRobin + scan) % order.length;
       const body = bodies.get(order[index]);
       if (!body || body.offset >= body.bytes.byteLength) continue;
       if (body.urgent) return { body, index };
+      if (body.near) nearFallback ??= { body, index };
       fallback ??= { body, index };
     }
-    return fallback;
+    return nearFallback ?? fallback;
   }
 
   function offer() {
@@ -258,7 +259,7 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
     if (held?.() === true) return null;
     const selected = select();
     if (!selected) return null;
-    return selected.body.urgent ? 'urgent' : 'normal';
+    return selected.body.urgent ? 'urgent' : selected.body.near ? 'near' : 'normal';
   }
 
   // One body chunk, and its `end` when it is the last. Returns the payload
@@ -332,10 +333,17 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
 
   return {
     sendControl,
-    start(id, bytes, { urgent = false } = {}) {
+    start(id, bytes, { urgent = false, near = false } = {}) {
       if (closed || bodies.has(id)) return;
       const payload = asBytes(bytes);
-      const body = { id, bytes: payload, offset: 0, seq: 0, urgent: urgent === true };
+      const body = {
+        id,
+        bytes: payload,
+        offset: 0,
+        seq: 0,
+        urgent: urgent === true,
+        near: near === true && urgent !== true,
+      };
       bodies.set(id, body);
       order.push(id);
       wake();

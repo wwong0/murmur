@@ -1,0 +1,96 @@
+import { assert, assertEqual, check } from '../harness.mjs';
+import fs from 'node:fs';
+import { hostSlotVictim, noteHostAsk, readHostAsks } from '../../../public/lib/urgent-source.mjs';
+import { PATCHED_HYBRID_LOADER } from '../../engine-patch.mjs';
+
+const common = Object.freeze({
+  index: 17,
+  path: '/media/17.ts',
+  startMs: 68_000,
+  rank: 2,
+  atMs: 1_700_000_000_000,
+});
+
+function thrown(action) {
+  try {
+    action();
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
+
+export default async function edgeAsksSuite() {
+  await check('edge-asks: records round-trip and filter by sequence', async () => {
+    const before = readHostAsks();
+    noteHostAsk({ ...common, reason: 'first' });
+    const after = readHostAsks(before.latestSeq);
+    assertEqual(after.records.length, 1, 'one record round-trips');
+    assertEqual(JSON.stringify(after.records[0]), JSON.stringify({ seq: before.latestSeq + 1, index: common.index, path: common.path, startMs: common.startMs, reason: 'first', rank: common.rank, atMs: common.atMs }), 'every record field round-trips');
+    const filtered = readHostAsks(after.records[0].seq);
+    assertEqual(filtered.records.length, 0, 'afterSeq excludes the matching record');
+    after.records[0].path = '/mutated';
+    assertEqual(readHostAsks(before.latestSeq).records[0].path, common.path, 'records are copied');
+  });
+
+  await check('edge-asks: the ring evicts the oldest record and reports the count', async () => {
+    const before = readHostAsks();
+    for (let index = 0; index < 1_024; index += 1) {
+      noteHostAsk({ ...common, index, reason: 'first', atMs: common.atMs + index });
+    }
+    const result = readHostAsks(before.latestSeq);
+    assertEqual(result.records.length, 1_024, 'ring retains its capacity');
+    assertEqual(result.records[0].index, 0, 'ring evicts the first record');
+    // Prevention proof: opportunity is 1,025 valid records crossing the ring's
+    // 1,024-record boundary; action boundary is `readHostAsks`. Mutation:
+    // drop `evicted` from the returned object. Named red: `ring eviction count`
+    // (undefined, not 1). Restore with git checkout -- and rerun green.
+    assertEqual(result.evicted - before.evicted, 1, 'ring eviction count');
+  });
+
+  await check('edge-asks: invalid reason and missing reason are refused', async () => {
+    const missing = thrown(() => noteHostAsk({ ...common }));
+    const invalid = thrown(() => noteHostAsk({ ...common, reason: 'other' }));
+    // Prevention proof: opportunity is a host-ask boundary receiving a missing
+    // or unknown reason; action boundary is `noteHostAsk`. Mutation: accept every
+    // reason without the six-value guard. Named red: `missing reason is refused`
+    // and `unknown reason is refused`. Restore with git checkout -- and rerun green.
+    assert(missing instanceof TypeError, 'missing reason is refused');
+    assert(invalid instanceof TypeError, 'unknown reason is refused');
+  });
+
+  await check('edge-asks: fallback reasons distinguish the three fallback paths', async () => {
+    const before = readHostAsks();
+    const reasons = ['fallback-no-announcement', 'fallback-no-holder', 'fallback-slow-holder'];
+    for (const reason of reasons) noteHostAsk({ ...common, reason });
+    const records = readHostAsks(before.latestSeq).records;
+    const shared = ['index', 'path', 'startMs', 'rank', 'atMs'];
+    const projected = records.map((record) => Object.fromEntries(shared.map((key) => [key, record[key]])));
+    assertEqual(records.map((record) => record.reason).join(','), reasons.join(','), 'fallback reasons are published');
+    assertEqual(new Set(projected.map((record) => JSON.stringify(record))).size, 1, 'fallback records agree in every other field');
+  });
+
+  // The 2026-10-05 browser pass: a viewer's near-zone host load was cancelled for
+  // its own urgent fallback and asked for again, two host copies of one segment.
+  await check('edge-asks: an earlier segment never takes the host slot of a high-demand host load', async () => {
+    const far = { loadingFromHost: true, highDemand: false };
+    const near = { loadingFromHost: true, highDemand: true };
+    const idle = { loadingFromHost: false, highDemand: false };
+    assertEqual(hostSlotVictim([near, near]), -1, 'two high-demand host loads leave no victim');
+    assertEqual(hostSlotVictim([near, far, near]), 1, 'the far host load is the victim, past a later high-demand one');
+    assertEqual(hostSlotVictim([far, idle, far]), 2, 'the last far host load goes first, as the stock scan');
+    assertEqual(hostSlotVictim([idle, { loadingFromHost: false, highDemand: true }]), -1, 'nothing loading from the host leaves no victim');
+    assertEqual(hostSlotVictim(), -1, 'an empty tail leaves no victim');
+    const loader = fs.readFileSync(PATCHED_HYBRID_LOADER, 'utf8');
+    const from = loader.indexOf('if (this.edgeControl !== "8b") { // wa-patch: product control assigns high-demand peers');
+    const to = loader.indexOf('// wa-patch: finish product-control assignment');
+    assert(from > 0 && to > from, 'the product-control branch is found in the carried loader');
+    const branch = loader.slice(from, to);
+    assert(!branch.includes('abortLastHttpLoadingInQueueAfterItem'), 'the product-control branch never frees a host slot by the stock scan');
+    assertEqual(branch.split('this.edgeFreeHostSlot(queue, segment)').length - 1, 2, 'both of its host answers free a slot through the rule');
+    // Mutation probes, each staged, mutated, red, restored, green: dropping
+    // the rule's `highDemand` test turns 'two high-demand host loads leave no
+    // victim' red (1 against -1); putting the stock scan back at the product host
+    // answer turns the two loader assertions red.
+  });
+}

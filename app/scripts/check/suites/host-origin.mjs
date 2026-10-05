@@ -35,8 +35,8 @@ function receive(link) {
   return messages;
 }
 
-function sendRequest(link, id, path, range = null) {
-  link.viewer.send(encodeControl({ t: 'req', id, path, range }));
+function sendRequest(link, id, path, range = null, flags = {}) {
+  link.viewer.send(encodeControl({ t: 'req', id, path, range, ...flags }));
 }
 
 function controls(messages, id) {
@@ -103,6 +103,24 @@ export default async function hostOriginSuite() {
       // Positive control recorded for the refusal guard: serving no-map text
       // unchanged makes `status === 500` red; the pass-through line was reverted
       // before the green run.
+    } finally {
+      detach();
+      link.closeBoth();
+    }
+  });
+
+  await check('host-origin: near requests count separately from urgent requests', async () => {
+    const clock = createFakeClock();
+    const fixture = sources();
+    const link = createFakeLink({ clock, hostDrainBytesPerMs: 1000, viewerDrainBytesPerMs: 1000 });
+    const origin = createHostOrigin({ readSource: fixture.read, clock });
+    const detach = origin.attach(link.host);
+    try {
+      sendRequest(link, 1, '/media/seg-00000.m4s', null, { near: true });
+      sendRequest(link, 2, '/media/seg-00000.m4s', null, { near: true, urgent: true });
+      await settle(clock);
+      assertEqual(origin.stats().nearResponses, 1, 'a near request increments nearResponses');
+      assertEqual(origin.stats().urgentResponses, 1, 'an urgent request does not increment nearResponses');
     } finally {
       detach();
       link.closeBoth();

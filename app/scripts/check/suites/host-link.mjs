@@ -51,7 +51,7 @@ function stats() {
   ]);
 }
 
-function setup({ drain = 1000, answer = true, open = true } = {}) {
+function setup({ drain = 1000, answer = true, open = true, urgency = null } = {}) {
   const clock = createFakeClock();
   const client = createFakeRoomClient({ clientId: 'viewer-1' });
   const origin = createHostOrigin({ clock, readSource: fixtureRead() });
@@ -82,7 +82,7 @@ function setup({ drain = 1000, answer = true, open = true } = {}) {
     return message;
   };
   const changes = [];
-  const link = createHostLink({ client, RTCPeerConnection: rtc.RTCPeerConnection, rtcConfig: { iceServers: [], iceTransportPolicy: 'all' }, clock, onChange: (value) => changes.push(value) });
+  const link = createHostLink({ client, RTCPeerConnection: rtc.RTCPeerConnection, rtcConfig: { iceServers: [], iceTransportPolicy: 'all' }, clock, onChange: (value) => changes.push(value), urgency });
   client.emitEvent('joined', { clientId: 'viewer-1', roster: [{ clientId: 'host-1', role: 'host' }] });
   return { clock, client, origin, rtc, link, changes, get rawLink() { return lastLink; } };
 }
@@ -429,6 +429,26 @@ export default async function hostLinkSuite() {
     assertEqual(rig.link.snapshot().state, 'open', 'a forged presence leaves the link open');
     // Mutation, D1 2026-09-23: the unguarded `client.on('presence', discover)`
     // turned 'a forged presence leaves the link in place' red; restored, green.
+    rig.link.close();
+  });
+
+  await check('host-link: near requests carry only near and receipts retain both class booleans', async () => {
+    const rig = setup({ urgency: () => 'near' });
+    await flush();
+    let ended = false;
+    rig.link.request({
+      path: '/media/seg-00000.m4s',
+      handlers: { onEnd: () => { ended = true; }, onError: (status) => { throw new Error(`near request failed with ${status}`); } },
+    });
+    await settle(rig.clock);
+    assert(ended, 'the near request completes');
+    const req = rig.rawLink.viewer.ledger
+      .map((entry) => typeof entry.data === 'string' ? parseControl(entry.data) : null)
+      .find((value) => value?.t === 'req');
+    assertEqual(req.near, true, 'the req carries near');
+    assert(!('urgent' in req), 'the req carries no urgent flag');
+    assertEqual(JSON.stringify({ near: rig.link.receipts().records[0].near, urgent: rig.link.receipts().records[0].urgent }), JSON.stringify({ near: true, urgent: false }), 'the receipt carries both class booleans');
+    assertEqual(rig.origin.stats().nearResponses, 1, 'the host counts the near response');
     rig.link.close();
   });
 

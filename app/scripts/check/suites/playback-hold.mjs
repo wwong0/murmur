@@ -8,6 +8,7 @@ import {
 } from '../../../public/lib/playback-state.mjs';
 import { createPlaybackAcquisition } from '../../../public/lib/playback-acquisition.mjs';
 import { bundleProductEntry, runEntry } from '../entry-harness.mjs';
+import { TYPE_AHEAD } from '../../../public/lib/envelope.mjs';
 
 const json = (value) => JSON.stringify(value);
 
@@ -165,6 +166,27 @@ export default async function playbackHoldSuite() {
     await drain();
     const httpSnapshot = overHttp.resolveSole({ clientId: 'host-3', nowMs: 10_000 });
     assertEqual(httpSnapshot.held, false, 'a page with http delivery creates playing');
+  });
+
+  await check('playback-hold entry: the last ready report resumes the settled host before the next tick', async () => {
+    const hostPage = page({}, 'host', { delivery: 'host', trackerUrl: 'ws://tracker.test:1', iceServers: [] });
+    await drain();
+    hostPage.resolveSole({ clientId: 'host-1', nowMs: 10_000 });
+    const created = hostPage.app.playbackState();
+    assertEqual(created.held, true, 'the host starts held');
+    hostPage.harness.roster = [
+      { clientId: 'host-1', tabId: 'h', role: 'host', joinedAt: 1 },
+      { clientId: 'v1', tabId: 'v', role: 'viewer', joinedAt: 2 },
+    ];
+    hostPage.harness.sharedNowMs = 10_000;
+    hostPage.tick();
+    hostPage.harness.sharedNowMs = 12_000;
+    hostPage.deliver({ type: TYPE_AHEAD, from: 'v1', payload: { lineage: created.lineage, version: created.version, heldAheadMs: 4_000 } });
+    const plays = hostPage.sent().filter((entry) => entry.payload?.kind === 'play');
+    assertEqual(plays.length, 1, 'the last ready report issues play immediately, before another tick');
+    // Mutation (b): the report is delivered after the roster has settled, so
+    // removing driveHoldResume() from the TYPE_AHEAD handler leaves the named
+    // immediate-play assertion at 0 and turns it red. Restored; check is green.
   });
 
   await check('playback-hold: a rejoin creation copies a held proposal\'s held flag', async () => {

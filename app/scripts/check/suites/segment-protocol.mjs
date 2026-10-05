@@ -9,6 +9,7 @@ import {
   parseControl,
   parseRange,
   sliceForRange,
+  createChannelSender,
 } from '../../../public/lib/segment-protocol.mjs';
 import { createHostLink } from '../../../public/lib/host-link.mjs';
 import { createHostOrigin } from '../../../public/lib/host-origin.mjs';
@@ -53,6 +54,30 @@ export default async function segmentProtocolSuite() {
     assertEqual(JSON.stringify(sliceForRange(10, null)), JSON.stringify({ status: 200, start: 0, end: 9, length: 10 }), 'whole response is 200');
     assertEqual(JSON.stringify(sliceForRange(10, { start: 3, end: 99 })), JSON.stringify({ status: 206, start: 3, end: 9, length: 7 }), 'range end is clamped');
     assertEqual(sliceForRange(10, { start: 10, end: null }).status, 416, 'range past the resource is unsatisfiable');
+  });
+
+  await check('segment protocol: urgent, then near, then normal bodies are selected in order', async () => {
+    const clock = createFakeClock();
+    const channel = createFakeChannel({ clock, drainBytesPerMs: 1000, label: 'class-order' });
+    channel._open();
+    let held = true;
+    const sender = createChannelSender({ channel, clock, held: () => held });
+    sender.start(1, new Uint8Array([1, 1]));
+    sender.start(2, new Uint8Array([2, 2]), { near: true });
+    sender.start(3, new Uint8Array([3, 3]), { urgent: true });
+    held = false;
+    sender.start(4, new Uint8Array());
+    const ids = channel.ledger
+      .filter((entry) => typeof entry.data !== 'string')
+      .map((entry) => decodeFrame(entry.data).id);
+    assertEqual(JSON.stringify(ids), JSON.stringify([3, 2, 1]), 'urgent is sent before near, and near before normal');
+    // Mutation (b) proof, T6: the opportunity is one channel holding normal,
+    // near, and urgent bodies; the boundary is urgent before near before normal.
+    // Making select() ignore near made the named assertion red (expected [3, 2,
+    // 1], got [3, 1, 2]). `git checkout -- app/public/lib/segment-protocol.mjs`
+    // restored the staged copy, and the rerun was green.
+    sender.close();
+    channel.close();
   });
 
   await check('segment 2.8: the data channel, never room signalling, carries requests and responses', async () => {

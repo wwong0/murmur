@@ -48,7 +48,7 @@ function reportStats(stats) {
 }
 
 /**
- * @param {{client: object, RTCPeerConnection: Function, rtcConfig?: object, clock?: object, onChange?: Function, urgency?: (path: string) => boolean}} config
+ * @param {{client: object, RTCPeerConnection: Function, rtcConfig?: object, clock?: object, onChange?: Function, urgency?: (path: string) => boolean|string}} config
  */
 export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, clock, onChange, wallNow = () => Date.now(), receiptCapacity = 4096, urgency = null } = {}) {
   if (!client || typeof client.on !== 'function' || typeof client.onEvent !== 'function') throw new TypeError('createHostLink: client is required');
@@ -81,9 +81,14 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
   let missedReceipts = 0;
   const segmentTimes = new Map();
 
-  // design.md D9: a page's throw marks nothing urgent rather than failing the load.
-  function urgentFor(path) {
-    try { return typeof urgency === 'function' && urgency(path) === true; } catch { return false; }
+  // design.md D2: a page's throw marks nothing rather than failing the load.
+  function requestClassFor(path) {
+    try {
+      const value = typeof urgency === 'function' ? urgency(path) : null;
+      if (value === true || value === 'urgent') return 'urgent';
+      if (value === 'near') return 'near';
+      return null;
+    } catch { return null; }
   }
 
   function keepPlaylist(path, chunks) {
@@ -139,6 +144,7 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
       finished,
       canceled,
       urgent: entry.urgent,
+      near: entry.near,
       source: 'host-link-receipt',
     };
     if (maxReceipts === 0) {
@@ -375,7 +381,9 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
       }
       const id = nextId++;
       const requestId = `${state.linkId}:${id}`;
-      const urgent = urgentFor(path);
+      const requestClass = requestClassFor(path);
+      const urgent = requestClass === 'urgent';
+      const near = requestClass === 'near';
       const playlistChunks = path.endsWith('.m3u8') ? [] : null;
       state.requestsByPath[path] = (state.requestsByPath[path] ?? 0) + 1;
       const entry = {
@@ -386,6 +394,7 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
         head: null,
         bodyBytes: 0,
         urgent,
+        near,
         receiptDone: false,
         onHead: (head) => {
           entry.head = head;
@@ -405,7 +414,10 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
       };
       pending.set(id, entry);
       try {
-        channel.send(encodeControl(urgent ? { t: 'req', id, path, range, urgent: true } : { t: 'req', id, path, range }));
+        const control = { t: 'req', id, path, range };
+        if (urgent) control.urgent = true;
+        else if (near) control.near = true;
+        channel.send(encodeControl(control));
       } catch {
         pending.delete(id);
         finishReceipt(entry, false, true);
@@ -437,4 +449,3 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
     },
   };
 }
-

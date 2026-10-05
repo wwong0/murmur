@@ -33,3 +33,12 @@ export function heldAheadMs({ positionMs, segments }) {
   }
   return Math.floor(runEnd - positionMs);
 }
+
+export function aheadReportDue({
+  nowMs, lastSentMs, lastSentKey, lastSentReady, key,
+  heldAheadMs: aheadMs, readyMs, intervalMs,
+}) {
+  if (lastSentMs === null) return true;
+  if (nowMs - lastSentMs >= intervalMs) return true;
+  return aheadMs >= readyMs && !(lastSentKey === key && lastSentReady);
+}

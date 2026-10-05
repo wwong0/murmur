@@ -19,6 +19,12 @@ export function urgentPositionMs(state, sharedMs) {
   return current.mediaMs;
 }
 
+export function ownPositionMs({ control, state, sharedMs, elementMs }) {
+  if (control === '8b' || state?.current?.held === true) return urgentPositionMs(state, sharedMs);
+  if (Number.isFinite(elementMs) && elementMs >= 0) return elementMs;
+  return urgentPositionMs(state, sharedMs);
+}
+
 function resolvedPath(uri, playlistPath) {
   try {
     return new URL(uri, `http://host.invalid${playlistPath}`).pathname;
@@ -56,4 +62,13 @@ export function requestIsUrgent({ path, positionMs, segments, runwayMs }) {
   if (!span || !Number.isFinite(positionMs) || !Number.isFinite(runwayMs) || runwayMs < 0) return false;
   if (span.endMs <= positionMs) return false;
   return span.startMs <= positionMs || span.startMs < positionMs + runwayMs;
+}
+
+export function requestClass({ control, path, positionMs, segments, runwayMs, nearMs }) {
+  if (requestIsUrgent({ path, positionMs, segments, runwayMs })) return 'urgent';
+  if (control !== 'product' || typeof path !== 'string' || !Number.isFinite(positionMs)
+    || !Number.isFinite(nearMs) || nearMs < 0) return null;
+  const span = segments?.get?.(path);
+  if (!span || span.endMs <= positionMs || span.startMs > positionMs + nearMs) return null;
+  return 'near';
 }

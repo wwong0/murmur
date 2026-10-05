@@ -14,10 +14,10 @@ import {
 } from './lib/envelope.mjs';
 import { createPlayer } from './lib/player.mjs';
 import { createPeerBytes } from './lib/peer-bytes.mjs';
-import { heldAheadMs } from './lib/held-ahead.mjs';
+import { aheadReportDue, heldAheadMs } from './lib/held-ahead.mjs';
 import { createHoldResume, createResumeRing, READY_HELD_AHEAD_MS } from './lib/hold-resume.mjs';
 import { peerEngineConfig } from './lib/peer-engine-config.mjs';
-import { validateEngineWindows } from './lib/engine-windows.mjs';
+import { PRODUCT_ENGINE_WINDOWS, validateEngineWindows } from './lib/engine-windows.mjs';
 import { HEADROOM_DEFAULT, validateHeadroomFraction } from './lib/send-pace.mjs';
 import { createClockSync, websocketProbe } from './lib/clock-sync.mjs';
 import { createRoomTimeline } from './lib/room-timeline.mjs';
@@ -38,9 +38,11 @@ import {
   LATE_START_REPARK_MS, MAX_FUTURE_MS, MAX_LATE_REPARKS, PREPARE_LEAD_MS, PRESENTATION_ADVANCE_MS, TRANSITION_LEAD_MS,
 } from './lib/playback-leads.mjs';
 import { runTickSteps } from './lib/tick-steps.mjs';
-import { setUrgentContext, urgentDelay } from './lib/urgent-source.mjs';
-import { requestIsUrgent, urgentPositionMs } from './lib/urgent-request.mjs';
+import { readHostAsks, setUrgentContext, urgentContext, urgentDelay } from './lib/urgent-source.mjs';
+import { viewerOrder } from './lib/edge-assignment.mjs';
+import { ownPositionMs, requestClass } from './lib/urgent-request.mjs';
 import { createWireMeter } from './lib/wire-meter.mjs';
+import { controlInForce } from './lib/edge-control.mjs';
 
 const BUILD_ID = __BUILD_ID__;
 
@@ -128,6 +130,7 @@ const url = `${wsScheme}//${window.location.host}/ws`;
 // ---------------------------------------------------------------------------
 
 const video = document.getElementById('video');
+let elementPositionMs = null;
 const statusLine = document.getElementById('status-line');
 const clockLine = document.getElementById('clock-line');
 const driftLine = document.getElementById('drift-line');
@@ -288,16 +291,30 @@ async function installHostSide() {
   hostSideInstalled = true;
 }
 
-// T13 (design.md D9): the viewer's own start or resume segments, and the playlist,
-// go to the host marked urgent. A failure here marks nothing urgent.
+// T13 (design.md D2): the viewer's own start or resume segments, and the playlist,
+// go to the host marked urgent; the middle class follows the engine window.
 function urgentRequestFor(path) {
   try {
     const nowSharedMs = clockSync.sharedNow();
-    const positionMs = urgentPositionMs(viewState(), nowSharedMs);
-    return requestIsUrgent({ path, positionMs, segments: link?.segmentTimes() ?? null, runwayMs: READY_HELD_AHEAD_MS });
+    const positionMs = ownPositionMs({
+      control: controlInForce().control,
+      state: viewState(),
+      sharedMs: nowSharedMs,
+      elementMs: elementPositionMs,
+    });
+    const nearMs = (engineWindows.windows?.highDemandTimeWindow
+      ?? PRODUCT_ENGINE_WINDOWS.highDemandTimeWindow) * 1000;
+    return requestClass({
+      control: controlInForce().control,
+      path,
+      positionMs,
+      segments: link?.segmentTimes() ?? null,
+      runwayMs: READY_HELD_AHEAD_MS,
+      nearMs,
+    });
   } catch (error) {
     addNotice(`urgent request: ${error?.message ?? String(error)}`);
-    return false;
+    return null;
   }
 }
 
@@ -376,6 +393,7 @@ client.onEvent('joined', (joined) => {
   }
   addNotice(`joined as ${joined.clientId} (${joined.role})`);
   renderRoster(joined.roster);
+  runTickSteps([['urgent-context', updateUrgentContext]], reportStep);
   schedulePollStart(0);
 });
 
@@ -418,6 +436,7 @@ client.on('presence', (env) => {
   if (env.from === ADDR_SERVER && delivery === 'host' && client.role === 'host') closeDepartedHostPeers(body.roster);
   addNotice(`presence: ${body.event} — ${body.member?.tabId ?? body.member?.clientId}`);
   renderRoster(body.roster);
+  runTickSteps([['urgent-context', updateUrgentContext]], reportStep);
   schedulePollStart(0);
 });
 
@@ -490,6 +509,8 @@ const acquisition = createPlaybackAcquisition({
 // it — held-ahead and the resume rule are both pure modules of their own.
 let heldAheadValue = null;
 let lastAheadSentAtPageMs = null;
+let lastAheadSentKey = null;
+let lastAheadSentReady = false;
 const aheadReports = new Map();
 let malformedAheadReports = 0;
 const holdResume = createHoldResume();
@@ -515,10 +536,22 @@ function sendAheadReport() {
   const state = acquisition.state;
   if (!state || state.current.held !== true || !heldAheadValue) return;
   const nowPageMs = pageNow();
-  if (lastAheadSentAtPageMs !== null && nowPageMs - lastAheadSentAtPageMs < 1000) return;
+  const key = `${state.lineage}:${state.version}`;
+  if (!aheadReportDue({
+    nowMs: nowPageMs,
+    lastSentMs: lastAheadSentAtPageMs,
+    lastSentKey: lastAheadSentKey,
+    lastSentReady: lastAheadSentReady,
+    key,
+    heldAheadMs: heldAheadValue.heldAheadMs,
+    readyMs: READY_HELD_AHEAD_MS,
+    intervalMs: 1000,
+  })) return;
   const host = client.roster.find((member) => member && member.role === 'host');
   if (!host) return;
   lastAheadSentAtPageMs = nowPageMs;
+  lastAheadSentKey = key;
+  lastAheadSentReady = heldAheadValue.heldAheadMs >= READY_HELD_AHEAD_MS;
   client.send(buildAheadEnvelope({
     to: host.clientId,
     lineage: state.lineage,
@@ -535,6 +568,7 @@ onEnvelope(TYPE_AHEAD, 'ahead report', (env) => {
     return;
   }
   aheadReports.set(report.from, { lineage: report.lineage, version: report.version, heldAheadMs: report.heldAheadMs });
+  driveHoldResume();
 });
 
 function driveHoldResume() {
@@ -560,7 +594,20 @@ function updateUrgentContext() {
   const nowSharedMs = clockSync.sharedNow();
   const roomMediaMs = Number.isFinite(nowSharedMs) ? timeline.mediaMsAt(nowSharedMs) : null;
   if (!Number.isFinite(roomMediaMs)) return;
-  setUrgentContext({ held: acquisition.state?.current?.held === true, roomMediaMs });
+  if (elementPositionMs !== null) elementPositionMs = video.currentTime * 1000;
+  const ownMediaMs = ownPositionMs({
+    control: controlInForce().control,
+    state: viewState(),
+    sharedMs: nowSharedMs,
+    elementMs: elementPositionMs,
+  });
+  setUrgentContext({
+    held: acquisition.state?.current?.held === true,
+    roomMediaMs,
+    ownMediaMs: ownMediaMs ?? roomMediaMs,
+    viewerIds: viewerOrder(client.roster),
+    selfId: client.clientId,
+  });
 }
 
 function controlsReady(kind) {
@@ -741,6 +788,15 @@ for (const type of ['canplay', 'canplaythrough', 'seeked']) {
   video.addEventListener(type, () => runTickSteps([['readiness', () => observeElement(type)]], reportStep));
 }
 
+for (const type of ['timeupdate', 'seeking']) {
+  video.addEventListener(type, () => runTickSteps([
+    ['element-position', () => {
+      elementPositionMs = video.currentTime * 1000;
+      updateUrgentContext();
+    }],
+  ], reportStep));
+}
+
 /**
  * One `action` event per action, with `dispatchedAtLocalMs`/`returnedAtLocalMs`
  * bracketing the element or player call itself — not the step around it, which
@@ -847,12 +903,17 @@ function execute(result) {
       readiness = { attemptId: action.attemptId, needsSeeked: action.kind === 'park', prerequisiteSeen: false };
       recordAction(action, { startAtSharedMs: result.startAtSharedMs, seamEpochMs: epochMs }, () => {
         if (action.kind === 'load') {
+          elementPositionMs = null;
           const p2p = roomHasPeerExchange && client.role !== 'host'
             ? {
                 core: peerEngineConfig({ roomId: room, trackerUrl, iceServers, windows: engineWindows.windows }).core,
                 onEngine: (engine) => {
                   peerEngine = engine;
                   peerBytesPublisher.attach(engine);
+                  engine.addEventListener('onSegmentLoaded', () => runTickSteps([
+                    ['held-ahead', updateHeldAhead],
+                    ['ahead-report', sendAheadReport],
+                  ], reportStep));
                   peerBytesRead = (afterSeq = 0) => peerBytesPublisher.read(afterSeq);
                 },
               }
@@ -971,6 +1032,7 @@ window.__app = {
   buildId: BUILD_ID,
   room,
   tabId,
+  control: () => ({ ...controlInForce() }),
   clock: () => clockSync.read(),
   positionOffset: () => ({ ...positionOffset }),
   ...(harnessSeekConfig.enabled ? { harnessSeek } : {}),
@@ -993,6 +1055,8 @@ window.__app = {
   treatmentEvidence: (maxEvents) => treatment.drainEvidence(maxEvents),
   delivery: () => delivery,
   hostLink: () => (link ? link.snapshot() : null),
+  urgentContext,
+  hostAsks: (afterSeq = 0) => readHostAsks(afterSeq),
   hostCounters: () => (hostOrigin ? hostOrigin.snapshot() : null),
   hostReceipts: (afterSeq = 0) => (link ? link.receipts(afterSeq) : null),
   peerExchange: () => peerExchange,

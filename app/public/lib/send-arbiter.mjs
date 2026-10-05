@@ -1,10 +1,10 @@
 // The one turn at the host's shared bucket (design.md D2, D9). Every channel's
-// sender registers here, and the arbiter hands out the bucket's chunks: urgent
-// before normal, and in turn across channels within a class. A sender polling the
+// sender registers here, and the arbiter hands out the bucket's chunks: urgent,
+// near, then normal, and in turn across channels within a class. A sender polling the
 // bucket on its own timer won every refill once it had won one (D2's re-read).
 // The clock is injected; the arbiter's one timer wakes it when the bucket refills.
 
-const CLASS_RANK = Object.freeze({ urgent: 2, normal: 1 });
+const CLASS_RANK = Object.freeze({ urgent: 3, near: 2, normal: 1 });
 
 export function createSendArbiter({ pace, clock }) {
   if (!pace || typeof pace.available !== 'function' || typeof pace.take !== 'function') {
