@@ -7,6 +7,8 @@ import { pairwiseDrift } from './pairwise-drift.mjs';
 import { driftContext } from './drift-context.mjs';
 import { computeSpanCourse } from './span-course.mjs';
 import { evidenceRefusals, recordingTailMs as evidenceRecordingTailMs } from '../harness/control-evidence.mjs';
+import { bracketHalfWidths, coverageGap, heldAheadAt, pollGaps } from './poll-coverage.mjs';
+import { mediaTimeRatio } from './edge-figures.mjs';
 
 const finite = (value) => Number.isFinite(value);
 const ordered = (values) => values.filter(finite).sort((a, b) => a - b);
@@ -59,10 +61,13 @@ export function timebaseJoin(hostPoll = []) {
   if (!finite(bracketHalfWidth) || bracketHalfWidth < 0 || !finite(clockHalfWidth) || clockHalfWidth < 0) {
     throw new Error('timebase join clock half-width is unavailable');
   }
+  const brackets = bracketHalfWidths(usable);
   return {
     offsetMs,
     wallOffsetMs,
     halfWidthMs: bracketHalfWidth + clockHalfWidth,
+    bracketHalfWidthMedianMs: brackets.medianMs,
+    bracketHalfWidthMaxMs: brackets.maxMs,
     sampleCount: usable.length,
     harness: (sharedMs) => sharedMs - offsetMs,
   };
@@ -166,13 +171,6 @@ export function holds({ hostPoll = [], resumes = [], joins = {}, declaredViewers
     reasons: entries.filter((entry) => entry.reason).map((entry) => entry.reason) };
 }
 
-function coverageGap(polls, window) {
-  const values = (polls ?? []).map((poll) => poll.harnessAfterMs ?? poll.harnessBeforeMs)
-    .filter(finite).filter((at) => at >= window.startMs && at <= window.endMs).sort((a, b) => a - b);
-  if (values.length < 2) return Infinity;
-  return Math.max(values[0] - window.startMs, ...values.slice(1).map((at, index) => at - values[index]), window.endMs - values.at(-1));
-}
-
 export function widenedBars(bars, spanMs, edgeSegments, segmentSeconds) {
   const edge = 2 * edgeSegments * segmentSeconds * 1000 / spanMs;
   // An undeclared bar is no value, as steadyState reads it: never a widened NaN.
@@ -256,10 +254,17 @@ function spanLegs({ input, window, tags, bars, edgeSegments, segmentSeconds, hos
     capUsed: { value: cap.value, handedBytes: cap.handedBytes, allowedBytes: cap.allowedBytes, reason: cap.reason },
     paceBound: { value: pace.value, pacedMs: pace.pacedMs, reason: pace.reason },
   } : null;
-  const incomplete = tags.some((tag) => coverageGap(input.viewerPolls?.[tag], window) > 1_000)
+  // The host's polls are tested only where the condition declares it, so a run
+  // registered before 9b recomputes as it read.
+  const edgeDeclared = input.condition?.reading?.hostPollCoverage === true;
+  const hostGap = edgeDeclared && coverageGap(input.hostPoll, window) > 1_000;
+  const incomplete = hostGap || tags.some((tag) => coverageGap(input.viewerPolls?.[tag], window) > 1_000)
     || Boolean((capDeclared ? capLeg : pace)?.reason);
   const pass = !incomplete && Object.values(legs).every((entry) => entry.pass === true);
-  return { window, bars: widened, legs, ...(paceSummary ? { pace: paceSummary } : {}), incomplete, pass,
+  // Published beside the legs and never counted with them (9b design.md D7).
+  const beside = edgeDeclared ? { downloadRatioMediaTime: { byClient: mediaTimeRatio(figures, tags, segmentSeconds) },
+    heldAheadMsByClient: heldAheadAt(input.viewerPolls, tags, window.endMs) } : {};
+  return { window, bars: widened, legs, ...beside, ...(paceSummary ? { pace: paceSummary } : {}), incomplete, pass,
     failedLegs: Object.entries(legs).filter(([, entry]) => entry.pass !== true).map(([name]) => name) };
 }
 
@@ -341,9 +346,12 @@ export function holdRecoveries({ input = {}, join, holds: held, recordingEndHarn
       viewerPolls: input.viewerPolls, hostPace: input.hostPace, wallOffsetMs: join.wallOffsetMs });
     return { ...result, result: recoveryTime(result.spans, spanMs) };
   };
+  // A capacity schedule's drop is a disturbance as the seek is: spans stop at it.
+  const dropAt = input.capacitySchedule?.drop?.appliedAtMs;
+  const beforeDrop = (transition) => (finite(dropAt) && finite(transition) && dropAt > transition ? dropAt : recordingEndHarnessMs);
   return {
-    start: recoveryFrom(harnessOf(held.start?.transitionSharedMs), seekTransition ?? recordingEndHarnessMs),
-    seek: recoveryFrom(seekTransition, recordingEndHarnessMs),
+    start: recoveryFrom(harnessOf(held.start?.transitionSharedMs), seekTransition ?? beforeDrop(harnessOf(held.start?.transitionSharedMs))),
+    seek: recoveryFrom(seekTransition, beforeDrop(seekTransition)),
   };
 }
 
@@ -365,7 +373,9 @@ export function computeControlFigures(input = {}, { manifest = input.manifest } 
   const spans = recovery.seek?.spans ?? [];
   return {
     estimate,
-    timebase: { offsetMs: join.offsetMs, wallOffsetMs: join.wallOffsetMs, halfWidthMs: join.halfWidthMs, sampleCount: join.sampleCount },
+    timebase: { offsetMs: join.offsetMs, wallOffsetMs: join.wallOffsetMs, halfWidthMs: join.halfWidthMs, sampleCount: join.sampleCount,
+      bracketHalfWidthMedianMs: join.bracketHalfWidthMedianMs ?? null, bracketHalfWidthMaxMs: join.bracketHalfWidthMaxMs ?? null },
+    pollGaps: pollGaps({ hostPoll: input.hostPoll, viewerPolls: input.viewerPolls }),
     holds: holdResult,
     recordingEndHarnessMs,
     recordingEndSharedMs: recordingEndShared,

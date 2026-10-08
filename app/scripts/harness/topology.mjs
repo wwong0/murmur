@@ -14,7 +14,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { attach } from '../cdp.mjs';
-import { applyQdiscs, changeQdisc, clearCondition, defaultExec, dockerExec, networkSubnet, resolveInterface } from '../../harness/apply-qdisc.mjs';
+import {
+  applyQdiscs, asyncExec, changeQdisc, clearCondition, defaultExec, dockerExec, networkSubnet, resolveInterface, resolveInterfaceAsync,
+} from '../../harness/apply-qdisc.mjs';
 import { requireDelivery } from '../delivery-pin.mjs';
 import { armFor } from './arms.mjs';
 import { hostSourceOnLoopback, topologyReadback } from './topology-readback.mjs';
@@ -85,10 +87,38 @@ export function readTopology({ containers, exec = defaultExec } = {}) {
   return raw;
 }
 
+const MEDIA_COUNTERS_SCRIPT = "fetch('http://127.0.0.1:8102/harness/counters').then(async (response) => { if (!response.ok) throw new Error('HTTP ' + response.status); process.stdout.write(await response.text()); })";
+
 export function readMediaCounters({ container, exec = defaultExec } = {}) {
   if (!container) throw new Error('origin container is required for media counters');
-  const script = "fetch('http://127.0.0.1:8102/harness/counters').then(async (response) => { if (!response.ok) throw new Error('HTTP ' + response.status); process.stdout.write(await response.text()); })";
-  return JSON.parse(dockerExec(container, ['node', '-e', script], exec));
+  return JSON.parse(dockerExec(container, ['node', '-e', MEDIA_COUNTERS_SCRIPT], exec));
+}
+
+// The boundary's forms: one `docker exec` at a time, each awaited, so the poll
+// loops keep running through a read-back (9b design.md D1, J16).
+export async function readTopologyAsync({ containers, exec = asyncExec } = {}) {
+  const raw = { containers: {} };
+  for (const name of Object.keys(containers ?? {})) {
+    const container = containers[name];
+    const addresses = await dockerExec(container, ['ip', '-json', 'addr', 'show'], exec);
+    const qdiscs = {};
+    for (const ifName of JSON.parse(addresses).map((entry) => entry.ifname).filter(Boolean)) {
+      qdiscs[ifName] = await dockerExec(container, ['tc', 'qdisc', 'show', 'dev', ifName], exec);
+    }
+    raw.containers[name] = {
+      container,
+      addresses,
+      qdiscs,
+      established: await dockerExec(container, ['ss', '-Htn', 'state', 'established'], exec),
+      ...(name === 'origin' ? { listeners: await dockerExec(container, ['ss', '-Htln'], exec) } : {}),
+    };
+  }
+  return raw;
+}
+
+export async function readMediaCountersAsync({ container, exec = asyncExec } = {}) {
+  if (!container) throw new Error('origin container is required for media counters');
+  return JSON.parse(await dockerExec(container, ['node', '-e', MEDIA_COUNTERS_SCRIPT], exec));
 }
 
 export function serviceNames(clients, { delivery = 'http' } = {}) {
@@ -186,14 +216,14 @@ function mediaDefaultRoute({ container, subnet, gateway, exec = defaultExec }) {
   return { container, ifName, gateway, argv, readBack };
 }
 
-function readLoopbackCounter(container, exec = defaultExec) {
-  const value = Number(dockerExec(container, ['cat', '/sys/class/net/lo/statistics/tx_bytes'], exec).trim());
+async function readLoopbackCounter(container, exec = asyncExec) {
+  const value = Number((await dockerExec(container, ['cat', '/sys/class/net/lo/statistics/tx_bytes'], exec)).trim());
   if (!Number.isSafeInteger(value) || value < 0) throw new Error(`invalid loopback tx_bytes for ${container}`);
   return { atMs: Date.now(), txBytes: value };
 }
 
-function readViewerLinkCounter(container, ifName, exec = defaultExec) {
-  const value = Number(dockerExec(container, ['cat', `/sys/class/net/${ifName}/statistics/tx_bytes`], exec).trim());
+async function readViewerLinkCounter(container, ifName, exec = asyncExec) {
+  const value = Number((await dockerExec(container, ['cat', `/sys/class/net/${ifName}/statistics/tx_bytes`], exec)).trim());
   if (!Number.isSafeInteger(value) || value < 0) throw new Error(`invalid viewer tx_bytes for ${container}/${ifName}`);
   return { atMs: Date.now(), txBytes: value, interface: ifName, container };
 }
@@ -336,7 +366,7 @@ export function readSinkCount({ container, exec = defaultExec } = {}) {
  * records the read-back between the two and a failed read-back must stop the
  * run before any client starts (executor-spec.md §3, Boundaries).
  */
-export function createComposeTopology({ project = PROJECT, exec = defaultExec, originUrl = ORIGIN_HOST_URL, samplerIntervalMs = 125, down = true } = {}) {
+export function createComposeTopology({ project = PROJECT, exec = defaultExec, execAsync = asyncExec, originUrl = ORIGIN_HOST_URL, samplerIntervalMs = 125, down = true } = {}) {
   const state = { containers: {}, origin: null, control: null, controlUdpDrop: null, sampler: null, backgroundLoad: null, subnets: new Map(), runDir: null, urls: urlsForDelivery('http'), boundaries: {} };
 
   return {
@@ -467,7 +497,7 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
 
     async readLoopbackCounter() {
       if (!state.containers.origin) throw new Error('origin is not prepared');
-      return readLoopbackCounter(state.containers.origin, exec);
+      return readLoopbackCounter(state.containers.origin, execAsync);
     },
 
     async readViewerLinkCounters() {
@@ -476,19 +506,21 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, o
         const route = state.mediaDefaultRoute[tag];
         const container = state.containers[tag];
         if (!container || !route?.ifName) throw new Error(`viewer media route is unavailable for ${tag}`);
-        clients[tag] = readViewerLinkCounter(container, route.ifName, exec);
+        clients[tag] = await readViewerLinkCounter(container, route.ifName, execAsync);
       }
       return { clients };
     },
 
     async captureBoundary({ kind, condition, runDir, room }) {
       if (condition.delivery !== 'host') return null;
-      const raw = readTopology({ containers: state.containers, exec });
+      const raw = await readTopologyAsync({ containers: state.containers, exec: execAsync });
       const subnet = state.subnets.get(MEDIA_NETWORK);
-      raw.mediaAddresses = Object.fromEntries(['origin', 'server'].map((name) => [name,
-        resolveInterface(state.containers[name], subnet, exec).address]));
+      raw.mediaAddresses = {};
+      for (const name of ['origin', 'server']) {
+        raw.mediaAddresses[name] = (await resolveInterfaceAsync(state.containers[name], subnet, execAsync)).address;
+      }
       const readback = topologyReadback({ raw, declaredViewers: armFor(condition).members(condition).tags });
-      const media = readMediaCounters({ container: state.containers.origin, exec });
+      const media = await readMediaCountersAsync({ container: state.containers.origin, exec: execAsync });
       const boundary = { raw, readback, media };
       state.boundaries[kind] = { ...boundary, room };
       if (kind === 'end') {

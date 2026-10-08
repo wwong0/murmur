@@ -1,9 +1,10 @@
 import { PRODUCT_ENGINE_WINDOWS } from '../../public/lib/engine-windows.mjs';
 import { HEADROOM_DEFAULT } from '../../public/lib/send-pace.mjs';
+import { dropNotExercised, EDGE_CRITERIA, edgeCriterion, edgeReading, edgeThresholds, publishedEdge } from './edge-reading.mjs';
 import { accepted, buildIdsOf, buildMatch, figureOf, imagesOf } from './regimes-reading.mjs';
 
 const finite = (value) => Number.isFinite(value);
-const CRITERIA = new Set(['multiplier', 'peerFraction', 'startWait', 'seekWait', 'startRecovery', 'seekRecovery']);
+const CRITERIA = new Set(['multiplier', 'peerFraction', 'startWait', 'seekWait', 'startRecovery', 'seekRecovery', ...EDGE_CRITERIA]);
 
 function conditionOf(entry) {
   return entry?.condition ?? entry?.manifest?.condition?.name ?? null;
@@ -28,7 +29,7 @@ function thresholds(reading) {
     if (bar[key] < 0) throw new Error(`control-reading-bar-invalid:${name}:${key}`);
   }
   if (!Array.isArray(reading.published ?? [])) throw new Error('control-reading-published-invalid');
-  return reading;
+  return edgeThresholds(reading);
 }
 
 function controlOf(entry) {
@@ -96,8 +97,11 @@ function holdCriterion(name, control, bar) {
 
 function recoveryCriterion(name, control, bar) {
   const kind = name.startsWith('start') ? 'start' : 'seek';
-  const recovery = control?.recovery?.[kind]?.result;
-  if (!recovery) return result(name, null, bar.maxMs, 'unestablished', `recovery-${kind}-unavailable`);
+  return recoveryVerdict(name, control?.recovery?.[kind]?.result, bar, `recovery-${kind}-unavailable`);
+}
+
+function recoveryVerdict(name, recovery, bar, unavailable) {
+  if (!recovery) return result(name, null, bar.maxMs, 'unestablished', unavailable);
   if (recovery.recovered === false) return result(name, recovery.recoveryMs, bar.maxMs, 'failed', 'not-recovered');
   if (finite(recovery.recoveryMs)) {
     return result(name, recovery.recoveryMs, bar.maxMs,
@@ -223,6 +227,7 @@ export function classifyControlRun(entry, reading, isAccepted = accepted) {
   };
   const criteria = Object.fromEntries(Object.entries(config.criteria).map(([name, bar]) => {
     if (name === 'multiplier' || name === 'peerFraction') return [name, steadyCriterion(name, figures, bar)];
+    if (EDGE_CRITERIA.includes(name)) return [name, edgeCriterion(name, entry, bar, { result, recoveryVerdict })];
     if (name.endsWith('Wait')) return [name, holdCriterion(name, controlOf(entry), bar)];
     return [name, recoveryCriterion(name, controlOf(entry), bar)];
   }));
@@ -245,6 +250,8 @@ export function classifyControlRun(entry, reading, isAccepted = accepted) {
     sweep: config.sweep === true ? (control?.sweep ?? null) : null,
     wait: control?.holds ?? null,
     recovery: control?.recovery ?? null,
+    // Only an arm registered under 9b carries these, so an 8b2 run reads as it did.
+    ...(edgeReading(config) ? { notExercised: dropNotExercised(entry, config), edge: publishedEdge(entry) } : {}),
   };
 }
 
@@ -283,7 +290,8 @@ function runSummary(entry, reading, state = {}, isAccepted = accepted) {
 }
 
 function canVote(summary) {
-  return summary.accepted && summary.classification && summary.classification.productInput?.refused !== true;
+  return summary.accepted && summary.classification && summary.classification.productInput?.refused !== true
+    && summary.classification.notExercised !== true;
 }
 
 export function classifyControlReading({ runs = [], reading, armNames = [], isAccepted = accepted } = {}) {
@@ -347,6 +355,7 @@ export function classifyControlReading({ runs = [], reading, armNames = [], isAc
       sweep: classifiedSweep,
       control,
       reasons,
+      ...(edgeReading(config) ? { controlArm: config.controlArm ?? null, declaredCriteria: Object.keys(config.criteria) } : {}),
     };
   }
   return {
@@ -393,7 +402,7 @@ export function baselineTable({ runs = [], controlRuns = {} } = {}) {
   const trap8aT1 = staticCell({ multiplier: null, peerFraction: 0.006987525487601079, capacityMbps: 10, viewerCount: 5,
     viewerShaping: { rate: '10mbit', burst: '32kbit', latency: '400ms' },
     window: { kind: 'seek', durationMs: 180_000 }, source: '8a D4 T1' });
-  return Object.fromEntries(['control-five', 'control-ten'].map((condition) => {
+  return Object.fromEntries(Object.keys(controlRuns).map((condition) => {
     const arm = controlRuns[condition];
     const baselines = acceptedRuns.filter((entry) => conditionOf(entry) === 'baseline-nop2p-steady');
     const matches = baselines.map((entry) => ({ entry, match: buildMatch(entry, arm) }));

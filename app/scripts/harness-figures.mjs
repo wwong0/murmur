@@ -13,6 +13,7 @@ import { evaluateMachineTest } from './figures/machine-test.mjs';
 import { driftSeriesCsv, driftSvg } from './figures/drift-plot.mjs';
 import { armFor } from './harness/arms.mjs';
 import { parseRate } from '../harness/apply-qdisc.mjs';
+import { computeEdgeFigures, readEdgeEvidence } from './figures/edge-publication.mjs';
 
 function readJson(filePath, fallback = undefined) {
   try {
@@ -58,8 +59,10 @@ export function conditionWithRules(condition, rules) {
 }
 
 export function capacityBitsForManifest(manifest = {}) {
-  return manifest.condition?.capacityStep
-    ? parseRate(manifest.condition.capacityStep.params?.rate)
+  // A schedule's figures are read after its rise, at the rise's rate (9b design.md D5).
+  const step = manifest.condition?.capacitySchedule?.rise ?? manifest.condition?.capacityStep;
+  return step
+    ? parseRate(step.params?.rate)
     : (manifest.condition?.capacityBitsPerSecond ?? (manifest.condition?.capacityMbps * 1_000_000));
 }
 
@@ -105,6 +108,7 @@ export function readRunDirectory(runDir, options = {}) {
     multiplierDenominator: manifest.multiplierDenominator ?? 'distinct-completed',
     seek: manifest.seek ?? null,
     capacityStep: manifest.capacityStep ?? null,
+    capacitySchedule: manifest.capacitySchedule ?? null,
     condition,
     disturbance: manifest.disturbance ?? null,
     context,
@@ -139,7 +143,9 @@ export function recomputeRunDirectory(runDir, options = {}) {
   if (arm.byteAccountingMethod === 'peer-attempt-cohort-v1') {
     const control = retained.input.controlAvailable
       ? computeControlFigures({ ...retained.input, figures }, { manifest: retained.manifest }) : null;
-    figures = { ...figures, control };
+    const edge = computeEdgeFigures({ input: retained.input, control,
+      evidence: readEdgeEvidence(runDir, retained.input.declaredClientTags ?? []) });
+    figures = { ...figures, control, ...(edge ? { edge } : {}) };
   }
   if (retained.input.condition?.machineTest) {
     const refusalReport = options.refusalReport

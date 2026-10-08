@@ -524,7 +524,7 @@ export class HybridLoader {
         const slow = p2pLoading && transferIsSlow({ nowMs, startedMs: wait.p2pStartMs, samples: wait.samples }); // wa-patch: classify the transfer by its sampled rate
         wait.episode = nextEdgeEpisode(wait.episode, { nowMs, holders, loaders, withinRunway, slow }); // wa-patch: advance the pure episode once per pass
         if (p2pLoading) this.armUrgentWait(segment, { source: "wait", untilMs: nowMs + EDGE_RECHECK_MS }, nowMs); // wa-patch: revisit every active peer transfer for samples
-        const decision = edgeSource({ nowMs, rank, viewers: ctx.viewerIds.length, held: ctx.held, p2pLoading, p2pFailed, slow, holders, otherHolders, loaders, episode: wait.episode }); // wa-patch: call the pure product-control source rule
+        const decision = edgeSource({ nowMs, rank, viewers: ctx.viewerIds.length, held: ctx.held, p2pLoading, p2pFailed, slow, holders, otherHolders, loaders, episode: wait.episode, notBeforeMs: ctx.notBeforeMs }); // wa-patch: call the pure product-control source rule
         return { ...decision, rank, peers, sender, episode: wait.episode }; // wa-patch: return the answer and adapter state
     } // wa-patch: finish the product-control decision adapter
     edgeSpreadChoice(segment, decision, nowMs, immediate) { // wa-patch: adapt the pure spread choice to engine peers

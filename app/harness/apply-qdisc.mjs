@@ -20,7 +20,8 @@
 // Runs on the HOST and reaches the containers with `docker exec`. Every path
 // and interface name it handles is a container's.
 
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 
 export class QdiscMismatch extends Error {
@@ -38,6 +39,20 @@ export function defaultExec(argv, { input = undefined } = {}) {
 
 export function dockerExec(container, argv, exec = defaultExec) {
   return exec(['docker', 'exec', container, ...argv]);
+}
+
+const execFileAsync = promisify(execFile);
+
+// `defaultExec` without blocking the thread the poll loops run on (9b design.md
+// D1, J16). A non-zero exit throws with `status`, as `execFileSync` does.
+export async function asyncExec(argv) {
+  try {
+    const { stdout } = await execFileAsync(argv[0], argv.slice(1), { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    return stdout ?? '';
+  } catch (error) {
+    if (error && error.status === undefined) error.status = error.code ?? null;
+    throw error;
+  }
 }
 
 // --- resolving the interface --------------------------------------------
@@ -93,7 +108,15 @@ export function networkSubnet(networkName, exec = defaultExec, project = COMPOSE
  * two is the guess this function exists to prevent.
  */
 export function resolveInterface(container, subnet, exec = defaultExec) {
-  const addresses = parseAddresses(dockerExec(container, ['ip', '-json', '-4', 'addr', 'show'], exec));
+  return interfaceOnSubnet(container, subnet, dockerExec(container, ['ip', '-json', '-4', 'addr', 'show'], exec));
+}
+
+export async function resolveInterfaceAsync(container, subnet, exec = asyncExec) {
+  return interfaceOnSubnet(container, subnet, await dockerExec(container, ['ip', '-json', '-4', 'addr', 'show'], exec));
+}
+
+function interfaceOnSubnet(container, subnet, json) {
+  const addresses = parseAddresses(json);
   const matches = addresses.filter((entry) => addressInSubnet(entry.address, subnet));
   if (matches.length !== 1) {
     throw new QdiscMismatch(

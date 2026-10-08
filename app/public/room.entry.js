@@ -38,7 +38,7 @@ import {
   LATE_START_REPARK_MS, MAX_FUTURE_MS, MAX_LATE_REPARKS, PREPARE_LEAD_MS, PRESENTATION_ADVANCE_MS, TRANSITION_LEAD_MS,
 } from './lib/playback-leads.mjs';
 import { runTickSteps } from './lib/tick-steps.mjs';
-import { readHostAsks, setUrgentContext, urgentContext, urgentDelay } from './lib/urgent-source.mjs';
+import { readHostAsks, setUrgentContext, setUrgentOrder, urgentContext, urgentDelay } from './lib/urgent-source.mjs';
 import { viewerOrder } from './lib/edge-assignment.mjs';
 import { ownPositionMs, requestClass } from './lib/urgent-request.mjs';
 import { createWireMeter } from './lib/wire-meter.mjs';
@@ -591,6 +591,8 @@ const timeline = createRoomTimeline({ readState: viewState });
 const roomTimeline = createRoomTimeline({ readState: () => acquisition.state });
 
 function updateUrgentContext() {
+  const viewerIds = viewerOrder(client.roster);
+  setUrgentOrder({ viewerIds, selfId: client.clientId });
   const nowSharedMs = clockSync.sharedNow();
   const roomMediaMs = Number.isFinite(nowSharedMs) ? timeline.mediaMsAt(nowSharedMs) : null;
   if (!Number.isFinite(roomMediaMs)) return;
@@ -601,11 +603,15 @@ function updateUrgentContext() {
     sharedMs: nowSharedMs,
     elementMs: elementPositionMs,
   });
+  const current = acquisition.state?.current;
+  const held = current?.held === true;
   setUrgentContext({
-    held: acquisition.state?.current?.held === true,
+    held,
+    // The held state's instant on the engine's clock, `performance.now()` (design.md D4).
+    notBeforeMs: held && Number.isFinite(current.atSharedMs) ? Math.max(0, performance.now() + current.atSharedMs - nowSharedMs) : 0,
     roomMediaMs,
     ownMediaMs: ownMediaMs ?? roomMediaMs,
-    viewerIds: viewerOrder(client.roster),
+    viewerIds,
     selfId: client.clientId,
   });
 }
@@ -1035,6 +1041,7 @@ window.__app = {
   control: () => ({ ...controlInForce() }),
   clock: () => clockSync.read(),
   positionOffset: () => ({ ...positionOffset }),
+  hostStats: () => (hostOrigin ? hostOrigin.stats() : null),
   ...(harnessSeekConfig.enabled ? { harnessSeek } : {}),
   harnessSeekError: harnessSeekConfig.error,
   engineWindows: () => ({ windows: engineWindows.windows ? { ...engineWindows.windows } : null, error: engineWindows.error }),

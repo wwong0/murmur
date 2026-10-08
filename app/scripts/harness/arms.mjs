@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validateCdpQualification, validateLinkReceiptQualification, CDP_QUALIFICATION_REASON, LINK_RECEIPT_QUALIFICATION_REASON } from './qualification.mjs';
+import { validateCdpQualification, validateLinkReceiptQualification, CDP_QUALIFICATION_REASON, LINK_RECEIPT_QUALIFICATION_REASON, QUALIFICATION_FETCH_TIMEOUT } from './qualification.mjs';
 import { peerPageReadingExpression } from './cdp-records.mjs';
 import { viewerHttpLeak, uplinkVersusDelivered } from '../figures/host-origin-checks.mjs';
 import { declaresResponseSettle } from '../figures/peer-evidence.mjs';
@@ -9,6 +9,7 @@ import { CEILING_MS } from '../harness-cadence.mjs';
 import { ENGINE_WINDOW_DEFAULTS, PRODUCT_ENGINE_WINDOWS } from '../../public/lib/engine-windows.mjs';
 import { HEADROOM_DEFAULT } from '../../public/lib/send-pace.mjs';
 import { evidenceRefusals } from './control-evidence.mjs';
+import { controlInjection, controlRefusals } from './assignment-control.mjs';
 
 export const REFUSAL_SCOPE = Object.freeze({
   neverPlayed: Object.freeze(['byte', 'drift']),
@@ -119,6 +120,8 @@ async function qualifyWith(unavailable, qualify) {
   try {
     return await qualify() ?? failedQualification('qualification-failed:no-result');
   } catch (error) {
+    // A starved fetch is a runner fault, not evidence to refuse on (9b design.md D1).
+    if (error?.code === QUALIFICATION_FETCH_TIMEOUT) throw error;
     return failedQualification(`qualification-error:${error?.message ?? String(error)}`);
   }
 }
@@ -202,6 +205,7 @@ function baseArm({ hostTag, runDirPrefix, readyTimeoutMs }) {
     async openSessions() { return null; },
     // Whether the first viewer is qualified after every viewer has joined.
     qualifyAfterJoins: false,
+    beginQualification: () => null,
     async drain(session, ndjson, atMs, drainClient) { return drainClient(session, ndjson, atMs); },
     clientStreams: (runDir, manifest, files) => clientStreams(runDir, manifest, files, false, false),
   };
@@ -222,7 +226,7 @@ const HTTP_ARM = Object.freeze({
 const oneViewing = (manifest) => manifest.multiplierDenominator === 'one-viewing';
 
 const HOST_ARM = Object.freeze({
-  ...baseArm({ hostTag: 'c00', runDirPrefix: '8b2', readyTimeoutMs: 120_000 }),
+  ...baseArm({ hostTag: 'c00', runDirPrefix: '9b', readyTimeoutMs: 120_000 }),
   qualifyAfterJoins: true,
   // D5's one viewing sizes the played stretch from the content, as the peer arm does.
   recomputeContent: (manifest) => (oneViewing(manifest) ? recomputePeerContent(manifest) : manifest.content),
@@ -314,6 +318,7 @@ const HOST_ARM = Object.freeze({
         reset: session.receiptLogReset === true,
       }])),
       ...(hostEvidence.controlEvidence ? { controlEvidence: hostEvidence.controlEvidence } : {}),
+      ...(hostEvidence.assignmentControl ? { assignmentControl: hostEvidence.assignmentControl } : {}),
     };
   },
   async openSessions({ room, clientOriginUrl, hostPageUrl = clientOriginUrl, clientFactory, condition, runDir, deadline, newSession, prepareHostClient }) {
@@ -326,6 +331,7 @@ const HOST_ARM = Object.freeze({
       ...(Object.prototype.hasOwnProperty.call(condition, 'headroomFraction')
         ? [`globalThis.__waHeadroomFraction = ${JSON.stringify(condition.headroomFraction)};`]
         : []),
+      ...(controlInjection(condition) ? [controlInjection(condition)] : []),
     ].join('\n');
     await prepareHostClient(session, url, deadline, {
       beforeNavigate: hostSource
@@ -336,11 +342,16 @@ const HOST_ARM = Object.freeze({
     });
     return session;
   },
-  async qualify(sessions, { originSession, originContainer, qualifyLinkReceipts }) {
+  // Issued at the first viewer's join and collected after the last (9b design.md D1).
+  beginQualification(sessions, { beginLinkQualification }) {
+    const viewerTab = sessions[0]?.tab;
+    return viewerTab ? beginLinkQualification(viewerTab) : null;
+  },
+  async qualify(sessions, { originSession, originContainer, finishLinkQualification, pending }) {
     const viewerTab = sessions[0]?.tab;
     const hostTab = originSession?.tab;
     return qualifyWith(!originContainer ? 'origin-container' : !viewerTab || !hostTab ? 'host-or-viewer-tab' : null,
-      () => qualifyLinkReceipts(viewerTab, hostTab, { originContainer }));
+      async () => finishLinkQualification(await pending, hostTab, { originContainer }));
   },
   async drain(session, ndjson, atMs, drainClient) {
     const result = await drainClient(session, ndjson, atMs);
@@ -383,6 +394,12 @@ const HOST_ARM = Object.freeze({
     }
     for (const refusal of evidenceRefusals({ ...input.controlEvidence, seek: input.seek, peerExchange: input.condition?.peerExchange === true })) {
       addReason(refusal.reason, REFUSAL_SCOPE.control, refusal.detail);
+    }
+    // Absent only on evidence constructed or retained before 9b; a live run carries it.
+    if (input.assignmentControl) {
+      for (const { reason, ...detail } of controlRefusals(condition, input.assignmentControl.readings)) {
+        addReason(reason, REFUSAL_SCOPE.control, detail);
+      }
     }
   },
 });
@@ -428,6 +445,7 @@ function peerClientOptions({ condition, manifestFile }) {
         ...(Object.prototype.hasOwnProperty.call(condition, 'engineWindows')
           ? [`globalThis.__waEngineWindows = ${JSON.stringify(condition.engineWindows)};`]
           : []),
+        ...(controlInjection(condition) ? [controlInjection(condition)] : []),
       ].join('\n');
       await session.tab.send('Page.addScriptToEvaluateOnNewDocument', {
         source,
@@ -676,7 +694,7 @@ function headroomRefusals(input, addReason) {
 
 const PEER_ARM = Object.freeze({
   ...HOST_ARM,
-  runDirPrefix: '8b2',
+  runDirPrefix: '9b',
   byteAccountingMethod: 'peer-attempt-cohort-v1',
   multiplierDenominator: 'one-viewing',
   recomputeContent: recomputePeerContent,

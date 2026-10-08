@@ -30,7 +30,7 @@ const fixedDelayMs = Number.isFinite(suppliedDelayMs)
   : null;
 
 let randomSource = Math.random;
-let context = { held: false, roomMediaMs: 0, ownMediaMs: 0, viewerIds: Object.freeze([]), selfId: null };
+let context = { held: false, roomMediaMs: 0, ownMediaMs: 0, viewerIds: Object.freeze([]), selfId: null, notBeforeMs: 0 };
 let latestHostAskSeq = 0;
 let evictedHostAsks = 0;
 const hostAsks = [];
@@ -100,17 +100,26 @@ export function drawUrgentDelay() {
   return Math.min(URGENT_DELAY_MAX_MS, Math.max(0, draw));
 }
 
-export function setUrgentContext({ held = false, roomMediaMs = 0, ownMediaMs = roomMediaMs, viewerIds = [], selfId = null } = {}) {
+export function setUrgentContext({ held = false, roomMediaMs = 0, ownMediaMs = roomMediaMs, viewerIds = [], selfId = null, notBeforeMs = 0 } = {}) {
   const room = finiteNonNegative(roomMediaMs, 'roomMediaMs');
   const own = finiteNonNegative(ownMediaMs, 'ownMediaMs');
   if (!Array.isArray(viewerIds)) throw new TypeError('viewerIds must be an array');
+  const notBefore = finiteNonNegative(notBeforeMs, 'notBeforeMs');
   context = {
     held: held === true,
     roomMediaMs: room,
     ownMediaMs: own,
     viewerIds: Object.freeze([...viewerIds]),
     selfId,
+    notBeforeMs: notBefore,
   };
+}
+
+// The order needs no clock, and a page's first host asks can precede its first
+// positioned context: an empty order would rank it first for every segment.
+export function setUrgentOrder({ viewerIds = [], selfId = null } = {}) {
+  if (!Array.isArray(viewerIds)) throw new TypeError('viewerIds must be an array');
+  context = { ...context, viewerIds: Object.freeze([...viewerIds]), selfId };
 }
 
 export function urgentContext() {
@@ -232,8 +241,10 @@ export function edgeSource({
   otherHolders = 0,
   loaders = 0,
   episode,
+  notBeforeMs = 0,
 } = {}) {
   finiteNonNegative(nowMs, 'nowMs');
+  finiteNonNegative(notBeforeMs, 'notBeforeMs');
   if (p2pLoading && !slow) return { source: 'p2p' };
   if (p2pLoading && slow && otherHolders > 0) return { source: 'move' };
   if (p2pLoading && slow && otherHolders === 0 && held) return { source: 'p2p' };
@@ -258,7 +269,9 @@ export function edgeSource({
       : { source: 'http', reason: 'fallback-no-holder' };
   }
   if (rank === 0) return { source: 'http', reason: 'first' };
-  const at = finiteNonNegative(episode?.quietSinceMs, 'quietSinceMs') + rank * EDGE_STEP_MS;
+  // design.md D4: a viewer that parks ahead of a held state's instant counts from
+  // that instant, when the viewers still playing first need the segment.
+  const at = Math.max(finiteNonNegative(episode?.quietSinceMs, 'quietSinceMs'), notBeforeMs) + rank * EDGE_STEP_MS;
   return nowMs < at
     ? { source: 'wait', untilMs: at }
     : { source: 'http', reason: 'fallback-no-announcement' };

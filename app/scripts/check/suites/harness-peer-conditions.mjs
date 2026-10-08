@@ -151,7 +151,7 @@ export default async function harnessPeerConditionsSuite() {
     const host = armFor(conditions['hostorigin-nop2p']);
     const peerArm = armFor(peer);
     assert(Object.isFrozen(peerArm), 'peer arm is frozen');
-    assertEqual(peerArm.runDirPrefix, '8b2', 'peer run prefix');
+    assertEqual(peerArm.runDirPrefix, '9b', 'peer run prefix');
     assertEqual(peerArm.hostTag, host.hostTag, 'peer arm retains host tab');
     assertEqual(peerArm.prepareTopology, host.prepareTopology, 'peer arm inherits topology preparation');
     assertEqual(peerArm.openSessions, host.openSessions, 'peer arm inherits host session');

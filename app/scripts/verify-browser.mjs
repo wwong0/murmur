@@ -86,6 +86,7 @@ import { BAR_DEFINITIONS, barsFromManifest, evaluateSufficiency, readNdjson, red
 import { t9FigureLines } from './drift-browser-report.mjs';
 import { inSyncWithoutCorrection } from './settle-wait.mjs';
 import { TRANSITION_LEAD_MS } from '../public/lib/playback-leads.mjs';
+import { edgeRank } from '../public/lib/edge-assignment.mjs';
 import { WAITING_PAUSED } from '../public/lib/playback-start.mjs';
 import { PRODUCT_ENGINE_WINDOWS } from '../public/lib/engine-windows.mjs';
 import { seamEpochAgreement, startResidual } from './start-residual.mjs';
@@ -219,6 +220,10 @@ function readContentFrameRate() {
 const URL_A = `${ORIGIN}/room.html?room=demo&role=host&tab=A`;
 const URL_B = `${ORIGIN}/room.html?room=demo&role=viewer&tab=B`;
 const URL_C = `${ORIGIN}/room.html?room=demo&role=viewer&tab=C`;
+const URL_D = `${ORIGIN}/room.html?room=demo&role=viewer&tab=D`;
+// E7's viewer under the earlier control and E8's offset viewer (change 9 executor-spec T8).
+const URL_X = `${ORIGIN}/room.html?room=demo&role=viewer&tab=X`;
+const URL_O = `${ORIGIN}/room.html?room=demo&role=viewer&tab=O`;
 const URL_V = `${ORIGIN}/room.html?room=demo&role=viewer&tab=V`;
 const URL_P = `${ORIGIN}/room.html?room=demo&role=viewer&tab=P`;
 // The treatment's event history, on the two measured windows only; the later
@@ -251,19 +256,24 @@ async function attach(label, url, alreadyOpen = false) {
 }
 
 /**
- * Opens a fresh target, installs the urgent-delay fixture before navigation,
- * and only then loads the product. The loader reads this global at module
- * evaluation time, so a reload after an ordinary attach would be too late.
+ * Opens a fresh target, installs harness globals before navigation, and only
+ * then loads the product. The page reads each global at module evaluation
+ * time, so a reload after an ordinary attach would be too late.
  */
-async function attachWithUrgentDelay(label, url, delayMs) {
-  if (!Number.isFinite(delayMs) || delayMs < 0 || delayMs > 500) throw new TypeError(`invalid urgent delay for ${label}`);
+async function attachWithGlobals(label, url, globals) {
   const before = new Set((await cdpHttp('/json/list')).map((t) => t.id));
   spawn(CHROME, [...FLAGS, '--new-window', `--user-data-dir=${profile}`, '--window-size=700,500', 'about:blank'], { stdio: 'ignore' });
   const tab = await attachTo(PORT, 'about:blank', { label, exclude: before });
   await tab.send('Page.enable');
-  await tab.send('Page.addScriptToEvaluateOnNewDocument', { source: `globalThis.__waUrgentDelayMs = ${JSON.stringify(delayMs)};` });
+  const source = Object.entries(globals).map(([name, value]) => `globalThis.${name} = ${JSON.stringify(value)};`).join(' ');
+  await tab.send('Page.addScriptToEvaluateOnNewDocument', { source });
   await tab.send('Page.navigate', { url });
   return tab;
+}
+
+function attachWithUrgentDelay(label, url, delayMs) {
+  if (!Number.isFinite(delayMs) || delayMs < 0 || delayMs > 500) throw new TypeError(`invalid urgent delay for ${label}`);
+  return attachWithGlobals(label, url, { __waUrgentDelayMs: delayMs });
 }
 
 // `currentTime` appears here and NOWHERE ELSE IN THIS FILE, for two questions it
@@ -500,6 +510,13 @@ function expectWhen(label, exercised, cond, detail, qualifier) {
   const approved = [...SETTLE_WITHOUT_CORRECTION_ASSERTIONS, ...O1_WITHOUT_CORRECTION_ASSERTIONS];
   if (!approved.some((stem) => label.endsWith(` ${stem}`))) throw new Error(`assertion is not approved for NOT EXERCISED: ${label}`);
   console.log(`NOT EXERCISED  ${label}${detail ? ` — ${detail}` : ''}`);
+  console.log(`  ${qualifier}`);
+  notExercised.push({ label, qualifier });
+}
+
+/** An edge row (E5, E7) whose event did not occur in its window: no pass is banked. */
+function rowNotExercised(label, qualifier) {
+  console.log(`NOT EXERCISED  ${label}`);
   console.log(`  ${qualifier}`);
   notExercised.push({ label, qualifier });
 }
@@ -1093,102 +1110,357 @@ try {
   const rosterBack = (await pollUntil(() => a.evaluate(PROBE), (probe) => probe.members.length === 2, { everyMs: 500, deadlineAt: Date.now() + 15_000 })).value;
   expect('5.1 closing the late joiner returns the room to two members', rosterBack.members.length === 2, JSON.stringify(rosterBack.members));
 
-  console.log('\n--- T12: one held seek, one host response, and one peer handoff ---');
-  // B draws 0 and C draws 400, so C sees B's announcement before its own
-  // host load (B's amendment 1). C joins after the late joiner has closed. Both globals are
-  // installed before the product document is navigated, so this probes the
-  // loader's once-per-episode draw rather than a post-load seam override.
+  console.log('\n--- T12 / E1–E6: three viewers at one position, one held seek, one host copy (change 9) ---');
+  // Change 9 executor-spec T8. Under the product's control the fixed urgent delays
+  // decide nothing: the first fetcher is whoever ranks 0 for the segment. The
+  // fixture stays so C and D open as B did. C and D join after the late joiner
+  // has closed.
   const c = await attachWithUrgentDelay('C/view', URL_C, 400);
+  const d = await attachWithUrgentDelay('D/view', URL_D, 200);
+  const viewers = [['B', b], ['C', c], ['D', d]];
+  const readViewers = (expression) => Promise.all(viewers.map(([, tab]) => tab.evaluate(expression)));
   const delayReady = await pollUntil(
     async () => ({
       b: await b.evaluate('window.__app?.urgentDelay?.() ?? null'),
       c: await c.evaluate('window.__app?.urgentDelay?.() ?? null'),
-      bPage: await pageOf(b),
-      cPage: await pageOf(c),
+      d: await d.evaluate('window.__app?.urgentDelay?.() ?? null'),
+      pages: await Promise.all(viewers.map(([, tab]) => pageOf(tab))),
     }),
     (reading) => reading.b?.fixedMs === 0
       && reading.c?.fixedMs === 400
-      && reading.bPage.present
-      && reading.cPage.present,
+      && reading.d?.fixedMs === 200
+      && reading.pages.every((page) => page.present),
     { everyMs: 250, deadlineAt: Date.now() + 30_000 },
   );
-  expect('T12 B and C publish their fixed urgent delays', delayReady.ok, JSON.stringify({ b: delayReady.value.b, c: delayReady.value.c }));
+  expect('T12 B, C and D publish their fixed urgent delays', delayReady.ok, JSON.stringify({ b: delayReady.value.b, c: delayReady.value.c, d: delayReady.value.d }));
 
-  const urgentBefore = {
-    host: await a.evaluate('window.__app.hostCounters()'),
-    b: await b.evaluate('window.__app.peerBytes()'),
-    c: await c.evaluate('window.__app.peerBytes()'),
+  const PRODUCT_CONTROL = JSON.stringify({ control: 'product', supplied: false, error: null });
+  for (const [label, tab] of [['A', a], ...viewers]) {
+    const control = await tab.evaluate('window.__app.control()');
+    expect(`E1 ${label} publishes the product's control, not supplied`, JSON.stringify(control) === PRODUCT_CONTROL, JSON.stringify(control));
+  }
+
+  // A waiter sees the first fetcher only over a peer connection. Without all
+  // three connected, a second host copy is the fallback working, not D2 failing.
+  const openPeersOf = (reading) => {
+    const open = new Set();
+    for (const record of reading?.records ?? []) {
+      if (record.kind !== 'peer') continue;
+      if (record.event === 'connect') open.add(record.peerId);
+      else if (record.event === 'close') open.delete(record.peerId);
+    }
+    return open;
   };
-  // +600 s, as 8a's trap seek: past every viewer's 60 s windows, so neither holds
-  // the landing and both need it at once. A +10 s seek lands inside B's buffer.
+  const meshReady = await pollUntil(
+    () => readViewers('window.__app.peerBytes()'),
+    (readings) => readings.every((reading, i) => readings.every((other, j) => i === j
+      || (typeof other?.peerId === 'string' && openPeersOf(reading).has(other.peerId)))),
+    { everyMs: 500, deadlineAt: Date.now() + 45_000 },
+  );
+  expect(
+    'E2 precondition: B, C and D each hold a peer connection to the other two',
+    meshReady.ok,
+    JSON.stringify(meshReady.value.map((reading, i) => ({ viewer: viewers[i][0], peerId: reading?.peerId ?? null, open: [...openPeersOf(reading)] }))),
+  );
+
+  const edgeBefore = {
+    host: await a.evaluate('window.__app.hostCounters()'),
+    hostStats: await a.evaluate('window.__app.hostStats()'),
+    resumes: await a.evaluate('window.__app.resumes()'),
+    peerBytes: await readViewers('window.__app.peerBytes()'),
+    asks: await readViewers('window.__app.hostAsks()'),
+    receipts: await readViewers('window.__app.hostReceipts()'),
+  };
+  const asksShaped = (reading) => Array.isArray(reading?.records) && Number.isFinite(reading.latestSeq) && Number.isFinite(reading.evicted);
+  const receiptsShaped = (reading) => Array.isArray(reading?.records) && Number.isFinite(reading.latestSeq);
+  expect(
+    'E2 every reading has its shape before the seek',
+    edgeBefore.asks.every(asksShaped)
+      && edgeBefore.receipts.every(receiptsShaped)
+      && edgeBefore.peerBytes.every(receiptsShaped)
+      && Array.isArray(edgeBefore.resumes?.records)
+      && Number.isFinite(edgeBefore.hostStats?.nearResponses)
+      && typeof edgeBefore.host?.counters?.byPath === 'object' && edgeBefore.host.counters.byPath !== null,
+    JSON.stringify({ asks: edgeBefore.asks.map((reading) => reading?.latestSeq ?? null), receipts: edgeBefore.receipts.map((reading) => reading?.latestSeq ?? null), hostStats: edgeBefore.hostStats }),
+  );
+  const resumeSeqBefore = Math.max(0, ...(edgeBefore.resumes?.records ?? []).map((record) => record.seq));
+
+  // +600 s, as 8a's trap seek: past every viewer's 60 s windows, so none holds
+  // the landing and all three need it at once. A +10 s seek lands inside B's buffer.
   const seekReady = await pollUntil(() => pageOf(a), (page) => page.buttons?.['forward-10']?.disabled === false, { everyMs: 250, deadlineAt: Date.now() + 15_000 });
   const seekIssue = seekReady.ok ? await a.evaluate('window.__app.harnessSeek(600000)') : null;
-  expect('T12 the host issues a +600 s held seek while B and C are present', seekIssue?.issued === true, JSON.stringify(seekIssue));
+  expect('T12 the host issues a +600 s held seek while B, C and D are present', seekIssue?.issued === true, JSON.stringify(seekIssue));
   const landing = (await pollUntil(() => a.evaluate('window.__app.playbackState()'), (state) => state?.held === true && state.positionMs >= 600_000, { everyMs: 100, deadlineAt: Date.now() + 5_000 })).value;
   const landingMs = landing?.held === true ? landing.positionMs : NaN;
 
-  const urgentEvidence = await pollUntil(
+  // The hold, watched at 100 ms: when every viewer first read ready, and when the
+  // host's resume record first appeared. Both instants are this process's clock.
+  const holdWatch = { allReadyAtMs: null, resumeSeenAtMs: null, pollMs: 100 };
+  const seekResume = await pollUntil(
     async () => {
-      const [host, bReading, cReading] = await Promise.all([
-        a.evaluate('window.__app.hostCounters()'),
-        b.evaluate('window.__app.peerBytes()'),
-        c.evaluate('window.__app.peerBytes()'),
+      const [resumes, ...ahead] = await Promise.all([
+        a.evaluate(`window.__app.resumes(${resumeSeqBefore})`),
+        ...viewers.map(([, tab]) => tab.evaluate('window.__app.heldAhead()')),
       ]);
-      const retainedByPath = (reading, cursor) => {
-        const attempts = new Map(reading.records
-          .filter((record) => record.seq > cursor.latestSeq && record.kind === 'attempt')
-          .map((record) => [record.attemptId, record]));
-        const byPath = new Map();
-        for (const segment of reading.records.filter((record) => record.seq > cursor.latestSeq && record.kind === 'segment')) {
-          const useful = (segment.keptAttemptIds ?? [])
-            .map((attemptId) => attempts.get(attemptId))
-            .filter((attempt) => attempt && (attempt.source === 'http' || attempt.source === 'p2p'));
-          if (useful.length > 0) byPath.set(segment.path, { segment, attempts: useful });
-        }
-        return byPath;
-      };
-      const bByPath = retainedByPath(bReading, urgentBefore.b);
-      const cByPath = retainedByPath(cReading, urgentBefore.c);
-      // The landing segment only, by its media times — never the first path that
-      // happens to show the wanted pattern.
-      const landingPath = [...bByPath.values()]
-        .find(({ segment }) => segment.mediaStartMs <= landingMs && landingMs < segment.mediaEndMs)?.segment.path ?? null;
-      const bEntry = landingPath ? bByPath.get(landingPath) : null;
-      const cEntry = landingPath ? cByPath.get(landingPath) : null;
-      const candidate = bEntry && cEntry
-        ? { path: landingPath, b: bEntry, c: cEntry, bPeerId: bReading.peerId, cPeerId: cReading.peerId }
-        : null;
-      return { host, bReading, cReading, candidate };
+      const atMs = Date.now();
+      if (holdWatch.allReadyAtMs === null && ahead.every((value) => value?.positionMs >= landingMs && value.heldAheadMs >= 4_000)) holdWatch.allReadyAtMs = atMs;
+      if (holdWatch.resumeSeenAtMs === null && (resumes?.records ?? []).length > 0) holdWatch.resumeSeenAtMs = atMs;
+      return { resumes, ahead };
     },
-    ({ candidate }) => candidate !== null,
-    { everyMs: 250, deadlineAt: Date.now() + 45_000 },
+    ({ resumes }) => (resumes?.records ?? []).length > 0,
+    { everyMs: holdWatch.pollMs, deadlineAt: Date.now() + 45_000 },
   );
-  const urgent = urgentEvidence.value;
-  const urgentCandidate = urgent.candidate;
-  const hostByPath = urgent.host?.counters?.byPath ?? {};
-  const hostBeforePath = urgentBefore.host?.counters?.byPath?.[urgentCandidate?.path]?.hits ?? 0;
-  const hostAfterPath = hostByPath[urgentCandidate?.path]?.hits ?? 0;
-  const bAttempt = urgentCandidate?.b.attempts[0] ?? null;
-  const cAttempt = urgentCandidate?.c.attempts[0] ?? null;
+  const seekRecord = seekResume.value.resumes?.records?.[0] ?? null;
+  expect(
+    "E6 the host resumes the seek's hold on ready",
+    seekResume.ok
+      && seekRecord?.cause === 'ready'
+      && seekRecord.identity?.lineage === landing?.lineage
+      && seekRecord.identity?.version === landing?.version,
+    JSON.stringify({ cause: seekRecord?.cause ?? null, identity: seekRecord?.identity ?? null, landing: { lineage: landing?.lineage, version: landing?.version }, viewers: seekRecord?.viewers ?? null }),
+  );
+  console.log(`  E6 reported: hold ${seekRecord?.holdMs ?? 'null'} ms; every viewer first read ready to the resume record first read ${holdWatch.allReadyAtMs !== null && holdWatch.resumeSeenAtMs !== null ? holdWatch.resumeSeenAtMs - holdWatch.allReadyAtMs : 'null'} ms (each end observed at ${holdWatch.pollMs} ms polls)`);
+
+  // Counters are read as a change across the seek, never as a total: the host
+  // link's counts include the page's own player (CONSTRAINTS.md → P2P delivery).
+  const retainedByPath = (reading, cursor) => {
+    const attempts = new Map(reading.records
+      .filter((record) => record.seq > cursor.latestSeq && record.kind === 'attempt')
+      .map((record) => [record.attemptId, record]));
+    const byPath = new Map();
+    for (const segment of reading.records.filter((record) => record.seq > cursor.latestSeq && record.kind === 'segment')) {
+      const useful = (segment.keptAttemptIds ?? [])
+        .map((attemptId) => attempts.get(attemptId))
+        .filter((attempt) => attempt && (attempt.source === 'http' || attempt.source === 'p2p'));
+      if (useful.length > 0) byPath.set(segment.path, { segment, attempts: useful });
+    }
+    return byPath;
+  };
   const sourcesOf = (entry) => [...new Set((entry?.attempts ?? []).map((attempt) => attempt.source))].join(',');
+  const hitsRise = (after, path) => (after?.counters?.byPath?.[path]?.hits ?? 0) - (edgeBefore.host?.counters?.byPath?.[path]?.hits ?? 0);
+  const newAsks = (readings) => viewers.flatMap(([label], i) => (readings[i]?.records ?? [])
+    .filter((record) => record.seq > edgeBefore.asks[i].latestSeq)
+    .map((record) => ({ viewer: label, ...record })));
+  const atResume = {
+    peerBytes: await readViewers('window.__app.peerBytes()'),
+    asks: await readViewers('window.__app.hostAsks()'),
+    host: await a.evaluate('window.__app.hostCounters()'),
+  };
+  const byViewer = atResume.peerBytes.map((reading, i) => retainedByPath(reading, edgeBefore.peerBytes[i]));
+  // The landing segments by their media times — the ones the 4 s ready bar
+  // needs — never the first path that happens to show the wanted pattern.
+  const landingPaths = [...new Set(byViewer.flatMap((byPath) => [...byPath.values()]
+    .filter(({ segment }) => segment.mediaStartMs < landingMs + 4_000 && landingMs < segment.mediaEndMs)
+    .map(({ segment }) => segment.path)))].sort();
   expect(
-    'T12 the held landing has one HTTP attempt for B and one P2P attempt for C',
-    urgentEvidence.ok && sourcesOf(urgentCandidate?.b) === 'http' && sourcesOf(urgentCandidate?.c) === 'p2p',
-    JSON.stringify({ landingMs, path: urgentCandidate?.path, B: urgentCandidate?.b.attempts, C: urgentCandidate?.c.attempts }),
+    'T12 / E2 every viewer retained every landing segment',
+    landingPaths.length > 0 && landingPaths.every((landingPath) => byViewer.every((byPath) => byPath.has(landingPath))),
+    JSON.stringify({ landingMs, landingPaths, retained: byViewer.map((byPath, i) => ({ viewer: viewers[i][0], paths: landingPaths.filter((landingPath) => byPath.has(landingPath)) })) }),
   );
+  const asksAtResume = newAsks(atResume.asks);
+  const landingRows = landingPaths.map((landingPath) => ({
+    path: landingPath,
+    hostHitsRise: hitsRise(atResume.host, landingPath),
+    viewers: viewers.map(([label], i) => {
+      const entry = byViewer[i].get(landingPath);
+      return {
+        viewer: label,
+        peerId: atResume.peerBytes[i]?.peerId ?? null,
+        sources: sourcesOf(entry),
+        fromPeerIds: [...new Set((entry?.attempts ?? []).map((attempt) => attempt.peerId).filter((id) => typeof id === 'string'))],
+        asks: asksAtResume.filter((ask) => ask.viewer === label && ask.path === landingPath).map(({ reason, rank, index, atMs }) => ({ reason, rank, index, atMs })),
+      };
+    }),
+  }));
+  for (const row of landingRows) {
+    const fromHost = row.viewers.filter((viewer) => viewer.sources === 'http');
+    const fromPeer = row.viewers.filter((viewer) => viewer.sources === 'p2p');
+    const detail = JSON.stringify(row);
+    expect(`T12 / E2 ${row.path}: the host's hits for the path rise by exactly 1`, row.hostHitsRise === 1, detail);
+    // Restated after the 2026-10-05 pass (executor-spec E2, post-result): a first
+    // fetcher over 250 ms late hands its turn on, and the room still gets one copy.
+    const hostAsk = fromHost.length === 1 && fromHost[0].asks.length === 1 ? fromHost[0].asks[0] : null;
+    expect(
+      `T12 / E2 ${row.path}: exactly one viewer loads it from the host, with one ask, as the first fetcher or as a fallback with nothing announced`,
+      hostAsk !== null && ((hostAsk.reason === 'first' && hostAsk.rank === 0) || (hostAsk.reason === 'fallback-no-announcement' && hostAsk.rank >= 1)),
+      detail,
+    );
+    console.log(`  E2 ${row.path} reported: the host ask was ${hostAsk === null ? 'none or several' : `${hostAsk.reason} at rank ${hostAsk.rank}, by ${fromHost[0].viewer}`}`);
+    expect(
+      `T12 / E2 ${row.path}: each other viewer loads it from a peer and publishes no ask for it`,
+      fromPeer.length === viewers.length - 1 && fromPeer.every((viewer) => viewer.asks.length === 0),
+      detail,
+    );
+    console.log(`  E3 ${row.path} reported, not asserted: ${fromPeer.map((viewer) => `${viewer.viewer} from ${viewer.fromPeerIds.join('+') || 'null'}`).join('; ')} (first fetcher ${fromHost.map((viewer) => `${viewer.viewer} ${viewer.peerId}`).join(',') || 'none'})`);
+  }
+
+  console.log('\n--- E4 / E5: every host ask from the seek until 20 s after the resume ---');
+  await pumpingWait(recorders, 20_000, CAPTURE_POLL_MS);
+  // Asks, then the host, then asks again: a path whose asks changed between the
+  // two ask readings was in flight at the boundary and is listed, not judged.
+  const asksFirstRead = await readViewers('window.__app.hostAsks()');
+  const edgeAfter = {
+    host: await a.evaluate('window.__app.hostCounters()'),
+    hostStats: await a.evaluate('window.__app.hostStats()'),
+    asks: await readViewers('window.__app.hostAsks()'),
+    receipts: await readViewers('window.__app.hostReceipts()'),
+  };
+  const windowAsks = newAsks(asksFirstRead);
+  const lateAsks = newAsks(edgeAfter.asks);
+  const countByPath = (rows) => rows.reduce((counts, row) => counts.set(row.path, (counts.get(row.path) ?? 0) + 1), new Map());
+  const firstCounts = countByPath(windowAsks);
+  const lateCounts = countByPath(lateAsks);
+  const pathRows = [...firstCounts.keys()].sort().map((askedPath) => {
+    const rows = windowAsks.filter((ask) => ask.path === askedPath).sort((left, right) => left.atMs - right.atMs);
+    const gaps = rows.slice(1).map((ask, i) => ask.atMs - rows[i].atMs);
+    return {
+      path: askedPath,
+      asks: rows.map(({ viewer, reason, rank, atMs }) => ({ viewer, reason, rank, atMs })),
+      firsts: rows.filter((ask) => ask.reason === 'first').length,
+      hostHitsRise: hitsRise(edgeAfter.host, askedPath),
+      minGapMs: gaps.length > 0 ? Math.min(...gaps) : null,
+      settled: lateCounts.get(askedPath) === rows.length,
+    };
+  });
+  const settledRows = pathRows.filter((row) => row.settled);
   expect(
-    'T12 C gets the landing bytes from B',
-    cAttempt?.peerId === urgentCandidate?.bPeerId,
-    JSON.stringify({ B: urgentCandidate?.bPeerId, C: cAttempt?.peerId }),
+    'E4 every ask reading has its shape and evicted nothing',
+    asksFirstRead.every(asksShaped) && edgeAfter.asks.every(asksShaped) && edgeAfter.asks.every((reading) => reading.evicted === 0),
+    JSON.stringify(edgeAfter.asks.map((reading, i) => ({ viewer: viewers[i][0], latestSeq: reading?.latestSeq ?? null, evicted: reading?.evicted ?? null }))),
   );
+  expect('E4 the viewers published asks in the window', settledRows.length > 0, `${windowAsks.length} ask(s) over ${pathRows.length} path(s), ${settledRows.length} settled`);
+  const offenders = (rows) => JSON.stringify(rows.slice(0, 6));
+  const manyFirsts = pathRows.filter((row) => row.firsts > 1);
+  expect('E4 each path has at most one first', manyFirsts.length === 0, manyFirsts.length === 0 ? `${pathRows.length} path(s)` : offenders(manyFirsts));
+  const hitMismatch = settledRows.filter((row) => row.hostHitsRise !== row.asks.length);
+  expect("E4 the host's hits for each path equal the asks published for it", hitMismatch.length === 0, hitMismatch.length === 0 ? `${settledRows.length} settled path(s)` : offenders(hitMismatch));
+  const closeAsks = pathRows.filter((row) => row.minGapMs !== null && row.minGapMs < 100);
+  expect('E4 no two asks for one path are within 100 ms', closeAsks.length === 0, closeAsks.length === 0 ? `${pathRows.filter((row) => row.minGapMs !== null).length} path(s) with more than one ask` : offenders(closeAsks));
+  const reasonCounts = Object.fromEntries([...windowAsks.reduce((counts, ask) => counts.set(ask.reason, (counts.get(ask.reason) ?? 0) + 1), new Map())]);
+  console.log(`  E4 asks by reason: ${JSON.stringify(reasonCounts)}; paths in flight at the boundary: ${pathRows.length - settledRows.length}`);
+  for (const ask of windowAsks.filter((row) => row.reason !== 'first')) {
+    console.log(`  E4 fallback ask: ${JSON.stringify({ viewer: ask.viewer, path: ask.path, reason: ask.reason, rank: ask.rank, atMs: ask.atMs })}`);
+  }
+
+  const newReceipts = viewers.map(([label], i) => (edgeAfter.receipts[i]?.records ?? [])
+    .filter((receipt) => receipt.seq > edgeBefore.receipts[i].latestSeq)
+    .map((receipt) => ({ viewer: label, ...receipt })));
   expect(
-    'T12 the host serves exactly one response for the landing path',
-    urgentCandidate !== null && hostAfterPath - hostBeforePath === 1,
-    JSON.stringify({ path: urgentCandidate?.path, before: hostBeforePath, after: hostAfterPath, counters: urgent.host?.counters }),
+    'E5 every host receipt records both classes as booleans',
+    edgeAfter.receipts.every(receiptsShaped) && newReceipts.flat().length > 0 && newReceipts.flat().every((receipt) => typeof receipt.near === 'boolean' && typeof receipt.urgent === 'boolean'),
+    `${newReceipts.flat().length} receipt(s) since the seek`,
   );
-  await cdpHttp(`/json/close/${c.targetId}`);
+  const nearReceipts = newReceipts.flat().filter((receipt) => receipt.near === true && receipt.urgent === false
+    && windowAsks.some((ask) => ask.viewer === receipt.viewer && ask.path === receipt.url));
+  const nearRise = (edgeAfter.hostStats?.nearResponses ?? NaN) - (edgeBefore.hostStats?.nearResponses ?? NaN);
+  if (nearReceipts.length === 0) {
+    rowNotExercised(
+      'E5 a viewer’s receipt records the middle class for a segment its asks name',
+      `no near-zone host load that was not urgent finished between the seek and 20 s after the resume (host nearResponses rose by ${nearRise}), so the middle class made no claim in a browser`,
+    );
+  } else {
+    expect('E5 a viewer’s receipt records the middle class for a segment its asks name', true, `${nearReceipts.length} receipt(s); first ${JSON.stringify({ viewer: nearReceipts[0].viewer, url: nearReceipts[0].url, near: nearReceipts[0].near, urgent: nearReceipts[0].urgent })}`);
+    expect('E5 the host’s nearResponses rose by at least 1', Number.isFinite(nearRise) && nearRise >= 1, JSON.stringify({ before: edgeBefore.hostStats, after: edgeAfter.hostStats }));
+  }
+
+  console.log('\n--- E7: a viewer opened under the earlier control ---');
+  const x = await attachWithGlobals('X/view', URL_X, { __waControl: '8b' });
+  const readX = async () => {
+    try {
+      return { control: await x.evaluate('window.__app?.control?.() ?? null'), asks: await x.evaluate('window.__app?.hostAsks?.() ?? null') };
+    } catch {
+      return { control: null, asks: null };
+    }
+  };
+  await pollUntil(readX, (reading) => reading.control !== null && (reading.asks?.records?.length ?? 0) > 0, { everyMs: 500, deadlineAt: Date.now() + 40_000 });
+  await pumpingWait(recorders, 5_000, CAPTURE_POLL_MS);
+  const xReading = await readX();
+  expect(
+    'E7 a page given the earlier control publishes it, marked supplied',
+    JSON.stringify(xReading.control) === JSON.stringify({ control: '8b', supplied: true, error: null }),
+    JSON.stringify(xReading.control),
+  );
+  expect('E7 the ask reading has its shape', asksShaped(xReading.asks), JSON.stringify({ latestSeq: xReading.asks?.latestSeq ?? null, evicted: xReading.asks?.evicted ?? null }));
+  const xAsks = xReading.asks?.records ?? [];
+  if (asksShaped(xReading.asks) && xAsks.length === 0) {
+    rowNotExercised('E7 every ask under the earlier control has reason control-8b', 'the viewer under the earlier control published no host ask within 45 s of opening');
+  } else {
+    expect('E7 every ask under the earlier control has reason control-8b', xAsks.length > 0 && xAsks.every((ask) => ask.reason === 'control-8b'), `${xAsks.length} ask(s); reasons ${JSON.stringify([...new Set(xAsks.map((ask) => ask.reason))])}`);
+  }
+  await cdpHttp(`/json/close/${x.targetId}`);
+  const rosterAfterX = (await pollUntil(() => a.evaluate(PROBE), (probe) => probe.members.length === 4, { everyMs: 500, deadlineAt: Date.now() + 15_000 })).value;
+  expect('E7 closing the earlier-control viewer returns the room to A, B, C and D', rosterAfterX.members.length === 4, JSON.stringify(rosterAfterX.members));
+
+  console.log('\n--- E8: a viewer alone at its position, 120 s from the room ---');
+  const o = await attachWithGlobals('O/view', URL_O, { __waPositionOffsetMs: 120_000 });
+  const readO = async () => {
+    try {
+      return {
+        offset: await o.evaluate('window.__app?.positionOffset?.() ?? null'),
+        control: await o.evaluate('window.__app?.control?.() ?? null'),
+        asks: await o.evaluate('window.__app?.hostAsks?.() ?? null'),
+        receipts: await o.evaluate('window.__app?.hostReceipts?.() ?? null'),
+      };
+    } catch {
+      return { offset: null, control: null, asks: null, receipts: null };
+    }
+  };
+  const matchedAsks = (reading, wanted) => (reading.asks?.records ?? [])
+    .filter(wanted)
+    .filter((ask) => (reading.receipts?.records ?? []).some((receipt) => receipt.url === ask.path));
+  const isFirst = (ask) => ask.reason === 'first' && ask.rank === 0;
+  const isQuietFallback = (ask) => ask.reason === 'fallback-no-announcement' && ask.rank >= 1;
+  const oResult = await pollUntil(
+    readO,
+    (reading) => matchedAsks(reading, isFirst).length > 0 && matchedAsks(reading, isQuietFallback).length > 0,
+    { everyMs: 500, deadlineAt: Date.now() + 60_000 },
+  );
+  const oReading = oResult.value;
+  const rosterAtO = await a.evaluate(PROBE);
+  const viewerMembers = rosterAtO.members.filter((member) => / · viewer/.test(member));
+  const oSummary = JSON.stringify({
+    asks: (oReading.asks?.records ?? []).map(({ index, path: askedPath, reason, rank }) => ({ index, path: askedPath, reason, rank })).slice(0, 12),
+    receipts: (oReading.receipts?.records ?? []).length,
+  });
+  expect(
+    'E8 the offset viewer runs the product’s control 120 000 ms from the room, among at least two viewers',
+    oReading.offset?.ms === 120_000 && oReading.offset?.error === null && JSON.stringify(oReading.control) === PRODUCT_CONTROL && viewerMembers.length >= 2,
+    JSON.stringify({ offset: oReading.offset, control: oReading.control, viewers: viewerMembers }),
+  );
+  expect('E8 the ask and receipt readings have their shape', asksShaped(oReading.asks) && receiptsShaped(oReading.receipts), JSON.stringify({ asks: oReading.asks?.latestSeq ?? null, receipts: oReading.receipts?.latestSeq ?? null }));
+  // Added 2026-10-05 (design.md D4, C2's observation): a page's first asks were
+  // published at rank 0 with no order. The roster holds B, C, D and O for all of E8.
+  const idOf = (member) => / · (c-[0-9a-f]+)$/.exec(member)?.[1] ?? null;
+  const orderAtO = viewerMembers.map(idOf).sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+  const oId = idOf(viewerMembers.find((member) => member.startsWith('O · ')) ?? '');
+  const offOrder = (oReading.asks?.records ?? [])
+    .map(({ index, reason, rank }) => ({ index, reason, rank, orderRank: edgeRank({ viewerIds: orderAtO, selfId: oId, segmentIndex: index }) }))
+    .filter((ask) => ask.rank !== ask.orderRank);
+  expect(
+    'E8 every ask carries the rank the room’s order gives it, the first asks included',
+    oId !== null && orderAtO.length === viewerMembers.length && !orderAtO.includes(null) && (oReading.asks?.records ?? []).length > 0 && offOrder.length === 0,
+    JSON.stringify({ order: orderAtO, self: oId, asks: (oReading.asks?.records ?? []).length, offOrder }),
+  );
+  expect('E8 it asks the host as the first fetcher, matched by a host receipt for the path', matchedAsks(oReading, isFirst).length > 0, oSummary);
+  expect('E8 it asks the host as a fallback with nothing announced, at rank 1 or more, matched by a host receipt', matchedAsks(oReading, isQuietFallback).length > 0, oSummary);
+
+  fs.writeFileSync(path.join(RUN_DIR, 'edge-assignment-readings.json'), `${JSON.stringify({
+    landingMs,
+    landing,
+    seekRecord,
+    holdWatch,
+    landingRows,
+    pathRows,
+    reasonCounts,
+    nearReceipts: nearReceipts.map(({ viewer, url, near, urgent, startMs, endMs }) => ({ viewer, url, near, urgent, startMs, endMs })),
+    hostStats: { before: edgeBefore.hostStats, after: edgeAfter.hostStats },
+    earlierControl: xReading,
+    offsetViewer: oReading,
+  }, null, 2)}\n`);
+
+  for (const tab of [c, d, o]) await cdpHttp(`/json/close/${tab.targetId}`);
   const rosterAfterUrgent = (await pollUntil(() => a.evaluate(PROBE), (probe) => probe.members.length === 2, { everyMs: 500, deadlineAt: Date.now() + 15_000 })).value;
-  expect('T12 closing C returns the measured room to two members', rosterAfterUrgent.members.length === 2, JSON.stringify(rosterAfterUrgent.members));
+  expect('T12 closing C, D and the offset viewer returns the measured room to two members', rosterAfterUrgent.members.length === 2, JSON.stringify(rosterAfterUrgent.members));
 
   // T14 (design.md D2, reversed): a real Chrome's wire reading advances while bodies drain.
   console.log('\n--- T14: the host reads its wire ---');

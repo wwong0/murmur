@@ -211,7 +211,10 @@ export default async function engineWindowsSuite() {
     const undeclared = [];
     // 8b2's conditions run the product's own windows: declaring them is what
     // their product-input refusal refuses, so they must not.
-    const productInputs = ['shakedown/control-qual', 'control-five', 'control-ten', 'control-seek', 'sweep-070', 'sweep-095', 'sweep-unpaced'];
+    const productInputs = ['shakedown/control-qual', 'control-five', 'control-ten', 'control-seek', 'sweep-070', 'sweep-095', 'sweep-unpaced',
+      // 9b's eleven copy them and run the product's windows as they do.
+      'shakedown/edge-qual', 'edge-five', 'edge-ten', 'edge-seek', 'edge-control-ten', 'edge-control-seek', 'edge-drop', 'edge-slow',
+      'edge-sweep-070', 'edge-sweep-095', 'edge-sweep-unpaced'];
     const supplied = [];
     const walk = (group, label) => {
       for (const [name, condition] of Object.entries(group)) {

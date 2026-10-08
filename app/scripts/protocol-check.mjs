@@ -108,6 +108,15 @@ import edgePositionSuite from './check/suites/edge-position.mjs';
 import wireEstimateSuite from './check/suites/wire-estimate.mjs';
 import echoDelaySuite from './check/suites/echo-delay.mjs';
 import harnessJoinOrderSuite from './check/suites/harness-join-order.mjs';
+import qualificationEarlySuite from './check/suites/qualification-early.mjs';
+import boundaryAsyncSuite from './check/suites/boundary-async.mjs';
+import assignmentControlSuite from './check/suites/assignment-control.mjs';
+import capacityScheduleSuite from './check/suites/capacity-schedule.mjs';
+import scheduleRecoverySuite from './check/suites/schedule-recovery.mjs';
+import askEvidenceSuite from './check/suites/ask-evidence.mjs';
+import edgeFiguresSuite from './check/suites/edge-figures.mjs';
+import edgeReadingSuite from './check/suites/edge-reading.mjs';
+import edgeConditionsSuite from './check/suites/edge-conditions.mjs';
 import paceBoundSuite from './check/suites/pace-bound.mjs';
 import capUsedSuite from './check/suites/cap-used.mjs';
 import steadyCapUsedSuite from './check/suites/steady-cap-used.mjs';
@@ -248,6 +257,15 @@ for (const suite of [
   wireEstimateSuite,
   echoDelaySuite,
   harnessJoinOrderSuite,
+  qualificationEarlySuite,
+  boundaryAsyncSuite,
+  assignmentControlSuite,
+  capacityScheduleSuite,
+  scheduleRecoverySuite,
+  askEvidenceSuite,
+  edgeFiguresSuite,
+  edgeReadingSuite,
+  edgeConditionsSuite,
   paceBoundSuite,
   capUsedSuite,
   steadyCapUsedSuite,

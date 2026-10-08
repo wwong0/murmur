@@ -184,14 +184,14 @@ export default async function urgentRequestSuite() {
 
   await check('urgent-request: urgent context keeps own position and a frozen viewer copy', async () => {
     const viewerIds = ['viewer-b', 'viewer-a'];
-    setUrgentContext({ held: true, roomMediaMs: 130_000, ownMediaMs: 100_000, viewerIds, selfId: 'viewer-a' });
+    setUrgentContext({ held: true, roomMediaMs: 130_000, ownMediaMs: 100_000, viewerIds, selfId: 'viewer-a', notBeforeMs: 4_300 });
     const explicit = urgentContext();
-    assertEqual(json(explicit), json({ held: true, roomMediaMs: 130_000, ownMediaMs: 100_000, viewerIds, selfId: 'viewer-a' }), 'context keeps every supplied field');
+    assertEqual(json(explicit), json({ held: true, roomMediaMs: 130_000, ownMediaMs: 100_000, viewerIds, selfId: 'viewer-a', notBeforeMs: 4_300 }), 'context keeps every supplied field');
     assert(Object.isFrozen(explicit.viewerIds), 'viewer ids are frozen');
     viewerIds.push('viewer-c');
     assertEqual(explicit.viewerIds.length, 2, 'context owns a copy of viewer ids');
     setUrgentContext({ roomMediaMs: 7 });
-    assertEqual(json(urgentContext()), json({ held: false, roomMediaMs: 7, ownMediaMs: 7, viewerIds: [], selfId: null }), 'own position and other fields have the specified defaults');
+    assertEqual(json(urgentContext()), json({ held: false, roomMediaMs: 7, ownMediaMs: 7, viewerIds: [], selfId: null, notBeforeMs: 0 }), 'own position and other fields have the specified defaults');
     let rejected = false;
     try { setUrgentContext({ roomMediaMs: 7, ownMediaMs: -1 }); } catch { rejected = true; }
     assert(rejected, 'negative own position is rejected');

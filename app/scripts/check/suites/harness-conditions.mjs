@@ -120,7 +120,9 @@ export default async function harnessConditionsSuite() {
     assertEqual(JSON.stringify(absent), JSON.stringify([]), 'no base condition disappeared');
     // 8b2 registers its conditions in a commit of their own, so they may be absent here.
     const registeredBy8b2 = ['control-five', 'control-seek', 'control-ten', 'shakedown/control-qual', 'sweep-070', 'sweep-095', 'sweep-unpaced'];
-    const added = [...currentEntries.keys()].filter((name) => !baseEntries.has(name) && !registeredBy8b2.includes(name));
+    // 9b's eleven likewise; scripts/check/suites/edge-conditions.mjs holds them to all or none.
+    const registeredBy9b = (name) => name.startsWith('edge-') || name === 'shakedown/edge-qual';
+    const added = [...currentEntries.keys()].filter((name) => !baseEntries.has(name) && !registeredBy8b2.includes(name) && !registeredBy9b(name));
     assertEqual(JSON.stringify(added.sort()), JSON.stringify(['baseline-nop2p-steady', 'capacity-ten', 'hostorigin-nop2p', 'hostorigin-uncapped', 'p2p-naive', 'p2p-scattered', 'regimes-default-shaped', 'regimes-limited-shaped', 'regimes-starved', 'shakedown/cap20', 'shakedown/hostorigin-qual', 'shakedown/p2p-qual', 'shakedown/regimes-qual', 'shakedown/trap-qual', 'trap-seek', 'trap-seek-short']), 'only declared change conditions are new');
   });
 

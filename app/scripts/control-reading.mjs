@@ -7,6 +7,7 @@ import {
   classifyControlReading,
   classifyControlRun,
 } from './figures/control-reading.mjs';
+import { edgeReading, gain } from './figures/edge-reading.mjs';
 import { classifyTrapRun } from './figures/trap-reading.mjs';
 import { accepted } from './figures/regimes-reading.mjs';
 import {
@@ -14,7 +15,7 @@ import {
   registryEntries, runMain, runPath,
 } from './registered-runs.mjs';
 
-const DEFAULT_OUTPUT = 'results/8b2-control-reading.json';
+const EDGE_CHANGE = '9b';
 const GOODPUT_CONDITION = 'shakedown/cap10';
 const TRAP_RESULT = 'results/8a-trap-reading-d9.json';
 const TRAP_BAR_KEYS = ['behindHeldAheadMsBelow', 'reproducedPeerFractionMax',
@@ -86,11 +87,18 @@ export function trapClassForRun(entry, condition, trapReading) {
   }
 }
 
-export function sweepPositions(runs, conditions) {
-  const entries = [...conditionEntries(conditions).values()].filter((condition) => {
-    if (condition?.reading?.kind !== 'control') return false;
+// A register reads the arms of its own change: 9b's are the ones declaring the
+// host's poll coverage, so 8b2's reading does not gain an empty arm per 9b condition.
+function armsOf(conditions, change) {
+  return [...conditionEntries(conditions).values()].filter((condition) => condition?.reading?.kind === 'control'
+    && edgeReading(condition.reading) === (change === EDGE_CHANGE));
+}
+
+export function sweepPositions(runs, conditions, change = null) {
+  const entries = armsOf(conditions, change).filter((condition) => {
     const declared = Object.prototype.hasOwnProperty.call(condition, 'headroomFraction');
-    return condition.reading.sweep === true || (condition.seek && !declared);
+    // The product's own position is the seek arm's, not its control arm's.
+    return condition.reading.sweep === true || (condition.seek && !declared && !condition.assignmentControl);
   });
   const positions = entries.map((condition) => {
     const declared = Object.prototype.hasOwnProperty.call(condition, 'headroomFraction');
@@ -141,10 +149,10 @@ function outputRun(entry, conditions, trapReading) {
   return output;
 }
 
-function controlArms(entries, conditions) {
+function controlArms(entries, conditions, change) {
   const result = {};
-  for (const [name, condition] of conditionEntries(conditions)) {
-    if (condition.reading?.kind !== 'control') continue;
+  for (const condition of armsOf(conditions, change)) {
+    const name = condition.name;
     const classified = classifyControlReading({ runs: entries, reading: condition.reading, armNames: [name] });
     result[name] = classified.arms[name];
   }
@@ -166,13 +174,15 @@ export function buildControlReadingReport({ registerPath, conditionsPath = CONDI
       throw new Error(`trap-reading-result-missing:${key}`);
     }
   }
+  const change = readJson(registerPath).change ?? '8b2';
+  const edge = change === EDGE_CHANGE;
   const entries = recomputed ?? registryEntries(registerPath).map(recomputeControlRun);
   const runs = entries.map((entry) => outputRun(entry, conditions, trapCondition.reading));
-  const arms = controlArms(entries, conditions);
-  const controlRuns = Object.fromEntries(['control-five', 'control-ten'].map((condition) => [condition,
+  const arms = controlArms(entries, conditions, change);
+  const controlRuns = Object.fromEntries((edge ? Object.keys(arms) : ['control-five', 'control-ten']).map((condition) => [condition,
     entries.find((entry) => accepted(entry) && entry.condition === condition) ?? null]));
   return {
-    change: '8b2',
+    change,
     registry: registerPath,
     writtenBy: 'scripts/control-reading.mjs',
     runs,
@@ -181,16 +191,16 @@ export function buildControlReadingReport({ registerPath, conditionsPath = CONDI
     baseline: baselineTable({ runs: entries, controlRuns }),
     trapReading: { file: TRAP_RESULT, arm: 'trap-seek', reading: trapArm.reading,
       readingKey: trapArm.readingKey, class: trapArm.class },
-    sweep: { positions: sweepPositions(runs, conditions) },
+    sweep: { positions: sweepPositions(runs, conditions, change) },
+    ...(edge ? { gain: gain({ arms }) } : {}),
   };
 }
 
 export function main(argv = process.argv.slice(2)) {
   const register = argument('registry', argv);
-  const output = argument('out', argv) ?? DEFAULT_OUTPUT;
   if (!register) throw new Error('usage: node scripts/control-reading.mjs --registry=<file> [--out=<file>]');
-  const outputPath = appPath(output);
   const report = buildControlReadingReport({ registerPath: appPath(register) });
+  const outputPath = appPath(argument('out', argv) ?? `results/${report.change}-control-reading.json`);
   fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`);
   return report;
 }

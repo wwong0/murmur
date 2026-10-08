@@ -111,6 +111,24 @@ export default async function edgeSourceSuite() {
     assertEqual(later.every((decision) => decision.source === 'p2p'), true, 'later ranks use the holder');
   });
 
+  // Mutation proof, 2026-10-04: counting from quietSinceMs alone made this case red
+  // at "rank 1 waits at 250 ms" (actual http, expected wait); restored, green.
+  await check('edge-source: a viewer that needs a segment before the held instant counts its turn from that instant', async () => {
+    const episode = next(null, { nowMs: 0 });
+    const args = { rank: 1, viewers: 3, holders: 0, loaders: 0, episode, notBeforeMs: 300 };
+    const early = edgeSource({ ...args, nowMs: 250 });
+    const justBefore = edgeSource({ ...args, nowMs: 549 });
+    const due = edgeSource({ ...args, nowMs: 550 });
+    const first = edgeSource({ ...args, rank: 0, nowMs: 0 });
+    const afterInstant = edgeSource({ ...args, episode: next(null, { nowMs: 400 }), nowMs: 650 });
+    assertEqual(early.source, 'wait', 'rank 1 waits at 250 ms');
+    assertEqual(early.untilMs, 550, 'rank 1 is due one step after the held instant');
+    assertEqual(justBefore.source, 'wait', 'rank 1 waits at 549 ms');
+    assertEqual(due.reason, 'fallback-no-announcement', 'rank 1 asks at 550 ms');
+    assertEqual(first.reason, 'first', 'the first fetcher still asks at once');
+    assertEqual(afterInstant.reason, 'fallback-no-announcement', 'a need after the instant counts from the need');
+  });
+
   await check('edge-source: held waits are staggered by six seconds', async () => {
     const episode = next(null, { nowMs: 0, loaders: 1 });
     const instants = [1, 2, 3, 4].map((rank) => {

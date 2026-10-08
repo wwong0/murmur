@@ -122,6 +122,8 @@ export function createControlEvidence({ hostSession, ndjson, runDir, now = () =>
   let paceCursor = 0;
   let resumeCursor = 0;
   let lastPace = null;
+  // One entry per host poll, for a reader that needs the estimate at an instant.
+  const estimates = [];
 
   async function pollHost() {
     const harnessBeforeMs = now();
@@ -142,6 +144,7 @@ export function createControlEvidence({ hostSession, ndjson, runDir, now = () =>
       lastPace = paceReading;
       append(ndjson, 'host-pace.ndjson', paceResult.records);
     }
+    estimates.push({ atMs: harnessAfterMs, bytesPerSecond: paceReading?.estimate?.bytesPerSecond ?? null });
     const resumeReading = await hostSession.tab.evaluate(`__app.resumes(${resumeCursor})`);
     const resumeResult = drainResult(resumeReading, resumeCursor, 'host resume');
     resumes.evicted = Math.max(resumes.evicted, resumeResult.evicted);
@@ -187,6 +190,7 @@ export function createControlEvidence({ hostSession, ndjson, runDir, now = () =>
   return {
     hostPoll,
     viewerPolls,
+    estimates,
     pollHost,
     pollViewer,
     finalize,

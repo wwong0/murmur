@@ -3,6 +3,7 @@ import { CDP_QUALIFICATION_REASON } from './qualification.mjs';
 import { evaluateByteControl } from './byte-control.mjs';
 import { armFor, REFUSAL_SCOPE } from './arms.mjs';
 import { appliedSeekEvidence, appliedWithoutRestart } from '../figures/seek-evidence.mjs';
+import { scheduleRefusals } from './capacity-schedule.mjs';
 
 export const REFUSAL_REASONS = Object.freeze([
   'client-never-began-playback',
@@ -49,6 +50,7 @@ export const REFUSAL_REASONS = Object.freeze([
   'position-offset-mismatch',
   'build-mismatch',
   'capacity-step-not-in-force',
+  'capacity-schedule-not-in-force',
   'seek-not-applied',
   'seek-landed-on-held-media',
 ]);
@@ -270,6 +272,9 @@ export function evaluateRefusals(input = {}) {
       declared: input.capacityStep.declared,
       readBack: input.capacityStep.readBack,
     });
+  }
+  for (const { reason, ...detail } of scheduleRefusals(input.capacitySchedule)) {
+    addReason(reasons, reason, REFUSAL_SCOPE.capacityStep, detail);
   }
 
   if (condition.seek && input.seek) {

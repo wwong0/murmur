@@ -79,33 +79,89 @@ function linkReceiptsAgree({ statSizeBytes, fetchedBytes, receiptBodyBytes, host
     && hostRecord?.aborted === false;
 }
 
-async function waitForOpen(tab, timeoutMs = 30_000) {
-  const until = Date.now() + timeoutMs;
-  while (Date.now() < until) {
+async function waitForOpen(tab, { timeoutMs = 30_000, now = Date.now, pause = sleep } = {}) {
+  const until = now() + timeoutMs;
+  while (now() < until) {
     const snapshot = await tab.evaluate('__app.hostLink()');
     if (snapshot?.state === 'open') return snapshot;
-    await sleep(100);
+    await pause(100);
   }
   throw new Error('host link did not open before qualification timeout');
 }
 
-export async function qualifyLinkReceipts(viewerTab, hostTab, { originContainer, segment = 'seg-01500.m4s', exec = defaultExec } = {}) {
+export const QUALIFICATION_FETCH_TIMEOUT = 'qualification-fetch-timeout';
+// 180 s since 2026-10-08, after 9b's first qualification attempt timed out at 30 s:
+// a far fetch waits behind every urgent and near request while the viewers fill.
+export const LINK_QUALIFICATION_TIMEOUT_MS = 180_000;
+const QUALIFICATION_SLOT = '__waLinkQualification';
+
+// The page keeps the fetch's outcome, so nothing in the runner awaits the body.
+function issueFetchExpression(segment) {
+  return `(() => {
+    const slot = globalThis.${QUALIFICATION_SLOT} = { done: false, bytes: null, error: null, completedWallMs: null };
+    fetch('/media/${segment}', { cache: 'no-store' }).then((r) => r.arrayBuffer())
+      .then((b) => { slot.bytes = b.byteLength; }, (e) => { slot.error = String(e?.message ?? e); })
+      .finally(() => { slot.completedWallMs = Date.now(); slot.done = true; });
+    return Date.now();
+  })()`;
+}
+
+/**
+ * Issues the qualification fetch as soon as the viewer's host link is open, and
+ * returns without awaiting its body (9b design.md D1, J6): at that point the host
+ * has no estimate and no pace to starve it behind.
+ */
+export async function beginLinkQualification(viewerTab, { segment = 'seg-01500.m4s', now = Date.now, pause = sleep } = {}) {
+  const beginAtMs = now();
+  await waitForOpen(viewerTab, { now, pause });
+  const beforeMs = now();
+  const pageWallMs = Number(await viewerTab.evaluate(issueFetchExpression(segment)));
+  const fetchIssuedAtMs = now();
+  if (!finite(pageWallMs)) throw new Error('link qualification fetch was not issued');
+  return { viewerTab, segment, beginAtMs, fetchIssuedAtMs, wallOffsetMs: pageWallMs - (beforeMs + fetchIssuedAtMs) / 2 };
+}
+
+/** The host poll nearest an instant, and whether the host had an estimate at it. */
+export function hostEstimateNear(readings = [], atMs) {
+  if (!finite(atMs) || readings.length === 0) return null;
+  const nearest = readings.reduce((best, entry) => (Math.abs(entry.atMs - atMs) < Math.abs(best.atMs - atMs) ? entry : best));
+  return { pollAtMs: nearest.atMs, bytesPerSecond: nearest.bytesPerSecond, hadEstimate: finite(nearest.bytesPerSecond) && nearest.bytesPerSecond > 0 };
+}
+
+/**
+ * Collects the fetch `beginLinkQualification` issued. A body not complete
+ * `timeoutMs` after it was issued is a runner fault and throws; the four-way
+ * agreement is otherwise the one 8b2 qualified with.
+ */
+export async function finishLinkQualification(handle, hostTab, { originContainer, timeoutMs = LINK_QUALIFICATION_TIMEOUT_MS, now = Date.now, pause = sleep, exec = defaultExec } = {}) {
+  const { viewerTab, segment } = handle;
+  let slot = null;
+  while (true) {
+    slot = await viewerTab.evaluate(`globalThis.${QUALIFICATION_SLOT} ?? null`);
+    if (slot?.done === true) break;
+    const elapsedMs = now() - handle.fetchIssuedAtMs;
+    if (elapsedMs >= timeoutMs) {
+      throw Object.assign(new Error(`${QUALIFICATION_FETCH_TIMEOUT}: ${segment} not complete after ${elapsedMs} ms`),
+        { code: QUALIFICATION_FETCH_TIMEOUT, elapsedMs });
+    }
+    await pause(100);
+  }
+  if (slot.error !== null) throw new Error(`link qualification fetch failed: ${slot.error}`);
+  const fetchedBytes = Number(slot.bytes);
   const statSizeBytes = Number(dockerExec(originContainer, ['stat', '-c', '%s', `/media/${segment}`], exec).trim());
-  await waitForOpen(viewerTab);
-  const fetchedBytes = await viewerTab.evaluate(`fetch('/media/${segment}', { cache: 'no-store' }).then((r) => r.arrayBuffer()).then((b) => b.byteLength)`);
-  const until = Date.now() + 30_000;
+  const until = now() + 30_000;
   let receipt = null;
   let hostRecord = null;
   let viewerLink = null;
   let hostCounters = null;
-  while (Date.now() < until) {
+  while (now() < until) {
     viewerLink = await viewerTab.evaluate('__app.hostLink()');
     const receipts = await viewerTab.evaluate('__app.hostReceipts()');
     hostCounters = await hostTab.evaluate('__app.hostCounters()');
     receipt = receipts?.records?.filter((entry) => entry.url === `/media/${segment}`).at(-1) ?? null;
     hostRecord = hostCounters?.counters?.responseRecords?.find((entry) => entry.originResponseId === receipt?.originResponseId) ?? null;
     if (receipt && hostRecord) break;
-    await sleep(100);
+    await pause(100);
   }
   const receiptBodyBytes = Number(receipt?.bodyBytes);
   const hostDeliveredBytes = Number(hostRecord?.delivered);
@@ -121,6 +177,12 @@ export async function qualifyLinkReceipts(viewerTab, hostTab, { originContainer,
     hostRecord,
     hostLink: viewerLink,
     source: 'host-link-receipt',
+    instants: {
+      beginAtMs: handle.beginAtMs,
+      fetchIssuedAtMs: handle.fetchIssuedAtMs,
+      fetchCompletedAtMs: finite(slot.completedWallMs) ? slot.completedWallMs - handle.wallOffsetMs : null,
+      finishAtMs: now(),
+    },
     measuredAt: new Date().toISOString(),
   };
 }
