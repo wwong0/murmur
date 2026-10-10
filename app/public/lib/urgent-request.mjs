@@ -2,6 +2,7 @@
 // the segments from its own position across D3's ready runway. Pure: the page
 // supplies the position, and the playlist text the host link already carried.
 
+import { CONTROL_8B, CONTROL_PRODUCT } from './edge-control.mjs';
 import { mediaMsAt } from './playback-state.mjs';
 
 const EXTINF_RE = /^#EXTINF:\s*([0-9.]+)/;
@@ -20,7 +21,7 @@ export function urgentPositionMs(state, sharedMs) {
 }
 
 export function ownPositionMs({ control, state, sharedMs, elementMs }) {
-  if (control === '8b' || state?.current?.held === true) return urgentPositionMs(state, sharedMs);
+  if (control === CONTROL_8B || state?.current?.held === true) return urgentPositionMs(state, sharedMs);
   if (Number.isFinite(elementMs) && elementMs >= 0) return elementMs;
   return urgentPositionMs(state, sharedMs);
 }
@@ -66,7 +67,7 @@ export function requestIsUrgent({ path, positionMs, segments, runwayMs }) {
 
 export function requestClass({ control, path, positionMs, segments, runwayMs, nearMs }) {
   if (requestIsUrgent({ path, positionMs, segments, runwayMs })) return 'urgent';
-  if (control !== 'product' || typeof path !== 'string' || !Number.isFinite(positionMs)
+  if (control !== CONTROL_PRODUCT || typeof path !== 'string' || !Number.isFinite(positionMs)
     || !Number.isFinite(nearMs) || nearMs < 0) return null;
   const span = segments?.get?.(path);
   if (!span || span.endMs <= positionMs || span.startMs > positionMs + nearMs) return null;

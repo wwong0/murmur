@@ -12,8 +12,11 @@ const segmentIndex = (path) => {
   return match ? Number(match[1]) : null;
 };
 const sorted = (values) => values.slice().sort((a, b) => a - b);
-const distribution = (values) => (values.length ? { count: values.length, minMs: sorted(values)[0], medianMs: median(sorted(values)),
-  maxMs: sorted(values).at(-1) } : { count: 0, minMs: null, medianMs: null, maxMs: null });
+const distribution = (values) => {
+  const ascending = sorted(values);
+  return ascending.length ? { count: ascending.length, minMs: ascending[0], medianMs: median(ascending), maxMs: ascending.at(-1) }
+    : { count: 0, minMs: null, medianMs: null, maxMs: null };
+};
 
 /**
  * Host copies per segment asked for at the edge. `asksByClient[tag]` is

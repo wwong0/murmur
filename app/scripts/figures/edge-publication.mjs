@@ -6,11 +6,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseRate } from '../../harness/apply-qdisc.mjs';
 import { aheadWhenRecovered, hostCopies, prefetchWait, roomPosition, slowExit } from './edge-figures.mjs';
+import { edgeReading } from './edge-reading.mjs';
 import { scheduleRecovery } from './schedule-recovery.mjs';
 
 const finite = (value) => Number.isFinite(value);
-
-export const declaresEdge = (condition) => condition?.reading?.hostPollCoverage === true;
 
 function readJson(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
@@ -45,7 +44,7 @@ function slowTags(condition) {
 }
 
 export function computeEdgeFigures({ input = {}, control = null, evidence = {} } = {}) {
-  if (!declaresEdge(input.condition)) return null;
+  if (!edgeReading(input.condition?.reading)) return null;
   const reading = input.condition.reading;
   const tags = input.declaredClientTags ?? Object.keys(input.clients ?? {});
   const window = input.window;

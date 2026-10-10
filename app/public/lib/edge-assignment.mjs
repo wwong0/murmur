@@ -1,8 +1,11 @@
+function sortIds(ids) {
+  return [...ids].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+}
+
 export function viewerOrder(roster = []) {
-  return (roster ?? [])
+  return sortIds((roster ?? [])
     .filter((member) => member?.role === 'viewer')
-    .map((member) => member.clientId)
-    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+    .map((member) => member.clientId));
 }
 
 export function edgeRank({ viewerIds = [], selfId, segmentIndex } = {}) {
@@ -17,10 +20,6 @@ export function edgeRank({ viewerIds = [], selfId, segmentIndex } = {}) {
 }
 
 export const SPREAD_START_ANYWAY_MS = 1_500;
-
-function sortIds(ids) {
-  return [...ids].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
-}
 
 export function spreadChoice({
   selfPeerId,

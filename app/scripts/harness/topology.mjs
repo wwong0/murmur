@@ -89,11 +89,6 @@ export function readTopology({ containers, exec = defaultExec } = {}) {
 
 const MEDIA_COUNTERS_SCRIPT = "fetch('http://127.0.0.1:8102/harness/counters').then(async (response) => { if (!response.ok) throw new Error('HTTP ' + response.status); process.stdout.write(await response.text()); })";
 
-export function readMediaCounters({ container, exec = defaultExec } = {}) {
-  if (!container) throw new Error('origin container is required for media counters');
-  return JSON.parse(dockerExec(container, ['node', '-e', MEDIA_COUNTERS_SCRIPT], exec));
-}
-
 // The boundary's forms: one `docker exec` at a time, each awaited, so the poll
 // loops keep running through a read-back (9b design.md D1, J16).
 export async function readTopologyAsync({ containers, exec = asyncExec } = {}) {

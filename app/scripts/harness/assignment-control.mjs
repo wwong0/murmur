@@ -4,9 +4,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { CONTROL_8B, CONTROL_PRODUCT } from '../../public/lib/edge-control.mjs';
 
-export const CONTROL_8B = '8b';
-export const CONTROL_PRODUCT = 'product';
 export const CONTROL_FILE = 'assignment-control.json';
 
 const declares = (condition) => Object.prototype.hasOwnProperty.call(condition ?? {}, 'assignmentControl');

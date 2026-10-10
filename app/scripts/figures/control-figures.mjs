@@ -9,6 +9,7 @@ import { computeSpanCourse } from './span-course.mjs';
 import { evidenceRefusals, recordingTailMs as evidenceRecordingTailMs } from '../harness/control-evidence.mjs';
 import { bracketHalfWidths, coverageGap, heldAheadAt, pollGaps } from './poll-coverage.mjs';
 import { mediaTimeRatio } from './edge-figures.mjs';
+import { edgeReading } from './edge-reading.mjs';
 
 const finite = (value) => Number.isFinite(value);
 const ordered = (values) => values.filter(finite).sort((a, b) => a - b);
@@ -256,7 +257,7 @@ function spanLegs({ input, window, tags, bars, edgeSegments, segmentSeconds, hos
   } : null;
   // The host's polls are tested only where the condition declares it, so a run
   // registered before 9b recomputes as it read.
-  const edgeDeclared = input.condition?.reading?.hostPollCoverage === true;
+  const edgeDeclared = edgeReading(input.condition?.reading);
   const hostGap = edgeDeclared && coverageGap(input.hostPoll, window) > 1_000;
   const incomplete = hostGap || tags.some((tag) => coverageGap(input.viewerPolls?.[tag], window) > 1_000)
     || Boolean((capDeclared ? capLeg : pace)?.reason);
