@@ -16,7 +16,7 @@ const schedule = (overrides = {}) => ({ drop: step('2mbit', 120_000), rise: step
 // One poll per viewer 100 ms before each span's end, at `aheadAt(tag, spanIndex)`.
 function input(aheadAt = () => 20_000, earlyMs = 100) {
   const viewerPolls = Object.fromEntries(TAGS.map((tag) => [tag, [0, 1, 2, 3, 4].map((index) => ({
-    harnessAfterMs: RISE_AT_MS + (index + 1) * 60_000 - earlyMs, heldAhead: { heldAheadMs: aheadAt(tag, index) } }))]));
+    harnessAfterMs: RISE_AT_MS + (index + 1) * 60_000 - earlyMs, heldAhead: { heldAheadMs: aheadAt(tag, index) }, state: { playing: false, held: true } }))]));
   return { declaredClientTags: TAGS, viewerPolls,
     condition: { reading: { aheadMsMin: 15_000 }, capacitySchedule: { recordAfterRiseMs: 300_000 } } };
 }

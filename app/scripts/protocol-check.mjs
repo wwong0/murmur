@@ -113,6 +113,7 @@ import boundaryAsyncSuite from './check/suites/boundary-async.mjs';
 import assignmentControlSuite from './check/suites/assignment-control.mjs';
 import capacityScheduleSuite from './check/suites/capacity-schedule.mjs';
 import scheduleRecoverySuite from './check/suites/schedule-recovery.mjs';
+import runwaySuite from './check/suites/runway.mjs';
 import askEvidenceSuite from './check/suites/ask-evidence.mjs';
 import edgeFiguresSuite from './check/suites/edge-figures.mjs';
 import edgeReadingSuite from './check/suites/edge-reading.mjs';
@@ -262,6 +263,7 @@ for (const suite of [
   assignmentControlSuite,
   capacityScheduleSuite,
   scheduleRecoverySuite,
+  runwaySuite,
   askEvidenceSuite,
   edgeFiguresSuite,
   edgeReadingSuite,

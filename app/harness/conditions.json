@@ -2225,7 +2225,8 @@
         "multiplier": { "max": 1.5 },
         "peerFraction": { "min": 0.6 },
         "startWait": { "maxMs": 6000 },
-        "startRecovery": { "maxMs": 120000 }
+        "startRecovery": { "maxMs": 120000 },
+        "prefetchWait": { "maxMs": 15000, "of": "duration" }
       },
       "hostPollCoverage": true,
       "aheadMsMin": 15000,

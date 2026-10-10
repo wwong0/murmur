@@ -14,6 +14,8 @@ const SCHEDULE = { dropAfterReadyMs: 120_000, drop: step('2mbit'), rise: step('1
 const CONDITION = { delivery: 'host', peerExchange: true, excludedPrefixMs: 120_000, capacitySchedule: SCHEDULE };
 const TAGS = ['c01', 'c02', 'c03', 'c04', 'c05'];
 const DROP_AT_MS = 120_000;
+// A held room publishes its runway as it stands; the playing case is the runway suite's.
+const HELD = { playing: false, held: true };
 
 // The clock moves only in `sleep`, and every viewer polls at each tick: `heldAhead`
 // gives its published value `sinceDropMs` after the drop, or undefined for no poll.
@@ -25,7 +27,7 @@ function world({ heldAhead, matches = () => true }) {
     t += ms;
     for (const tag of TAGS) {
       const value = heldAhead(tag, t - DROP_AT_MS);
-      if (value !== undefined) viewerPolls[tag].push({ harnessAfterMs: t, heldAhead: { heldAheadMs: value } });
+      if (value !== undefined) viewerPolls[tag].push({ harnessAfterMs: t, heldAhead: { heldAheadMs: value }, state: HELD });
     }
   };
   const stepQdisc = async (declared) => {

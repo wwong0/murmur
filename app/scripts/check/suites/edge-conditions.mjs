@@ -26,13 +26,14 @@ const ARMS = {
 };
 const QUAL = { copies: 'control-seek', differs: ['capacitySchedule', 'publishes', 'qdiscs'] };
 const CRITERIA = {
-  'edge-five': '{"multiplier":{"max":1.5},"peerFraction":{"min":0.6},"startWait":{"maxMs":6000},"startRecovery":{"maxMs":120000}}',
+  'edge-five': '{"multiplier":{"max":1.5},"peerFraction":{"min":0.6},"startWait":{"maxMs":6000},"startRecovery":{"maxMs":120000},"prefetchWait":{"maxMs":15000,"of":"duration"}}',
+  'edge-slow': '{"multiplier":{"max":1.5},"peerFraction":{"min":0.6},"startWait":{"maxMs":6000},"startRecovery":{"maxMs":120000}}',
   'edge-ten': '{"multiplier":{"max":2}}',
   'edge-seek': '{"seekWait":{"maxMs":6000},"seekRecovery":{"maxMs":120000}}',
   'edge-drop': '{"dropRecovery":{"maxMs":240000}}',
   'edge-sweep-070': '{}',
 };
-const criteriaOf = (name) => CRITERIA[name] ?? CRITERIA[{ 'edge-control-ten': 'edge-ten', 'edge-control-seek': 'edge-seek', 'edge-slow': 'edge-five' }[name] ?? 'edge-sweep-070'];
+const criteriaOf = (name) => CRITERIA[name] ?? CRITERIA[{ 'edge-control-ten': 'edge-ten', 'edge-control-seek': 'edge-seek' }[name] ?? 'edge-sweep-070'];
 const step = (rate) => `{"container":"origin","network":"wa-media","discipline":"tbf","params":{"rate":"${rate}","burst":"32kbit","latency":"400ms"}}`;
 const schedule = (dropAfterReadyMs) => `{"dropAfterReadyMs":${dropAfterReadyMs},"drop":${step('2mbit')},"edgeHeldAheadMsBelow":15000,"ceilingMs":240000,"rise":${step('10mbit')},"recordAfterRiseMs":300000}`;
 const rates = (condition) => condition.qdiscs.map((row) => `${row.container}=${row.params.rate}/${row.params.burst}/${row.params.latency}`).join(' ');
@@ -95,8 +96,9 @@ export default async function edgeConditionsSuite() {
       assertEqual(JSON.stringify(read.control), '{"condition":"p2p-scattered","peerFractionMin":0.5}', `${name} control`);
       assertEqual(read.productInputs, !name.startsWith('edge-sweep-'), `${name} product inputs`);
       assertEqual(read.sweep === true, name.startsWith('edge-sweep-'), `${name} sweep`);
-      // The owner set no copies bar (Open Question 1), and the prefetch limit waits on Open Question 3.
-      assertEqual('hostCopies' in read.criteria || 'prefetchWait' in read.criteria, false, `${name} registers neither owner bar as a criterion`);
+      // The owner set no copies bar (Open Question 1); the prefetch limit is edge-five's alone, on the whole duration (Open Question 3).
+      assertEqual('hostCopies' in read.criteria, false, `${name} registers no copies bar`);
+      assertEqual('prefetchWait' in read.criteria, name === 'edge-five', `${name} and the prefetch limit`);
       attempts += read.attemptsMax;
     }
     assertEqual(`${registered['edge-ten'].reading.controlArm}/${registered['edge-seek'].reading.controlArm}`, 'edge-control-ten/edge-control-seek', 'the two arms that name a control arm');

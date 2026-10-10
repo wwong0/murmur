@@ -44,15 +44,30 @@ export function bracketHalfWidths(polls) {
 }
 
 /**
- * Each viewer's published held-ahead at `atMs`: its last poll at or before the
- * instant, when that poll is no more than 1 000 ms before it. Otherwise no value.
+ * A viewer's runway at one poll. The page publishes its held-ahead from the
+ * playback mapping's anchor, which is the playhead only while the room is held
+ * or paused; while playing the runway is that figure less the time played since
+ * the anchor, floored at zero. A poll with no state, or no instant, has no value.
+ */
+export function runwayMs(poll, tag = 'a viewer') {
+  const published = poll?.heldAhead?.heldAheadMs;
+  if (!finite(published)) return null;
+  if (published < 0) throw new RangeError(`${tag} published a held-ahead below zero: ${published}`);
+  const state = poll.state;
+  if (!state || typeof state !== 'object') return null;
+  if (state.playing !== true || state.held === true) return published;
+  const playedMs = poll.heldAhead.atPageMs + poll.clock?.offsetMs - state.atSharedMs;
+  return finite(playedMs) ? Math.max(0, published - Math.max(0, playedMs)) : null;
+}
+
+/**
+ * Each viewer's runway at `atMs`, from its last poll at or before the instant,
+ * when that poll is no more than 1 000 ms before it. Otherwise no value.
  */
 export function heldAheadAt(viewerPolls, tags, atMs, freshMs = 1_000) {
   return Object.fromEntries(tags.map((tag) => {
     const before = (viewerPolls?.[tag] ?? []).filter((poll) => finite(instantOf(poll)) && instantOf(poll) <= atMs);
     const poll = before.length ? before.reduce((last, entry) => (instantOf(entry) >= instantOf(last) ? entry : last)) : null;
-    const value = poll && atMs - instantOf(poll) <= freshMs ? poll.heldAhead?.heldAheadMs : null;
-    if (finite(value) && value < 0) throw new RangeError(`${tag} published a held-ahead below zero: ${value}`);
-    return [tag, finite(value) ? value : null];
+    return [tag, poll && atMs - instantOf(poll) <= freshMs ? runwayMs(poll, tag) : null];
   }));
 }

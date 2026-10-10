@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseRate, parseSize, parseTime } from '../../harness/apply-qdisc.mjs';
+import { runwayMs } from '../figures/poll-coverage.mjs';
 
 export const SCHEDULE_FILE = 'capacity-schedule.json';
 export const SCHEDULE_TICK_MS = 250;
@@ -51,9 +52,7 @@ function heldAheadNow(viewerPolls, tags, atMs) {
   return Object.fromEntries(tags.map((tag) => {
     const poll = viewerPolls?.[tag]?.at(-1);
     const fresh = poll && finite(poll.harnessAfterMs) && atMs - poll.harnessAfterMs <= POLL_FRESH_MS;
-    const value = fresh ? poll.heldAhead?.heldAheadMs : null;
-    if (finite(value) && value < 0) throw new Error(`capacity schedule: ${tag} published a held-ahead below zero: ${value}`);
-    return [tag, finite(value) ? value : null];
+    return [tag, fresh ? runwayMs(poll, `capacity schedule: ${tag}`) : null];
   }));
 }
 
