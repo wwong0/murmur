@@ -286,6 +286,12 @@ export function createDriftController({ log, clock, apply, settings: overrides =
     if (deviation > settings.MAX_RATE_DEVIATION + COMMAND_TOLERANCE) throw new RangeError(`drift-controller: applied deviation ${deviation} exceeds the rate authority ${settings.MAX_RATE_DEVIATION}`);
   }
 
+  /** The correction law measures the excess from U, never from S. */
+  function correctionFor(estimate, band) {
+    const excess = Math.sign(estimate) * Math.max(0, Math.abs(estimate) - band);
+    return Math.max(-settings.MAX_RATE_DEVIATION, Math.min(settings.MAX_RATE_DEVIATION, -excess / settings.TIME_CONSTANT_MS));
+  }
+
   function applyRate(nextRate, atMs) {
     if (Math.abs(nextRate - rate) <= settings.RATE_EPSILON && !transitionRequiresWrite(nextRate)) return;
     assertCommandInRange(nextRate);
@@ -430,13 +436,23 @@ export function createDriftController({ log, clock, apply, settings: overrides =
       // shortage counted from the two ends, and it reports one reason.
       hold(atMs, 'waiting', 'too-few-records');
     } else if (positiveFloor && requiredStoppingThresholdMs > settings.MAX_STOPPING_THRESHOLD_MS) {
-      // THE INPUT WAS VALID AND THE ANSWER IS A REFUSAL: measurement plus
-      // allowance needs more room than the ceiling allows, so there is no S to
-      // stop inside. `hold` publishes exact unity, no accepted S and no close,
-      // and clears the dwell; the required S stays published and `settlingMs`
-      // stays as history (design.md D8).
-      budgetRefusals += 1;
-      hold(atMs, 'resolution-budget-hold', 'stopping-threshold-over-budget');
+      if (Math.abs(estimateMs) <= requiredStoppingThresholdMs) {
+        // A client inside the required threshold still has no accepted S when
+        // the ceiling refuses it, so this is the existing counted hold.
+        budgetRefusals += 1;
+        hold(atMs, 'resolution-budget-hold', 'stopping-threshold-over-budget');
+      } else {
+        // Outside S the direction is known even when S cannot be accepted.
+        // Keep the correction running, but publish the threshold as unusable.
+        unlatch();
+        stoppingThresholdMs = null;
+        thresholdUsable = false;
+        fastestCloseMs = shortestCloseMs(estimateMs, requiredStoppingThresholdMs, settings.MAX_RATE_DEVIATION);
+        applyRate(BASE_RATE + correctionFor(estimateMs, bandMs), atMs);
+        mode = fastestCloseMs === null || fastestCloseMs > settings.CLOSE_BUDGET_MS
+          ? 'beyond-rate-authority' : 'correcting';
+        reason = 'stopping-threshold-over-budget';
+      }
     } else {
       // The one branch that acts on the measurement, so the one that accepts a
       // threshold. THE CORRECTION IS STILL MEASURED FROM U: S is where the
@@ -444,9 +460,8 @@ export function createDriftController({ log, clock, apply, settings: overrides =
       // two are the same number anyway (design.md D3).
       stoppingThresholdMs = requiredStoppingThresholdMs;
       thresholdUsable = true;
-      const excess = Math.sign(estimateMs) * Math.max(0, Math.abs(estimateMs) - bandMs);
       fastestCloseMs = shortestCloseMs(estimateMs, stoppingThresholdMs, settings.MAX_RATE_DEVIATION);
-      const correction = Math.max(-settings.MAX_RATE_DEVIATION, Math.min(settings.MAX_RATE_DEVIATION, -excess / settings.TIME_CONSTANT_MS));
+      const correction = correctionFor(estimateMs, bandMs);
       const inside = Math.abs(estimateMs) <= stoppingThresholdMs;
       // ONE POLL DOES NOT UNLATCH `settled`. The window's composition is
       // occasionally unrepresentative for a single poll, so an excursion is

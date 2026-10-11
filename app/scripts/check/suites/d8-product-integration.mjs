@@ -53,7 +53,7 @@ function parityView(snapshot) {
  */
 function positiveHistory(sim) {
   sim.state.halfWidthMs = OVER_BAND_MS;
-  sim.poll(-40);
+  sim.poll(0);
   sim.state.halfWidthMs = BAND_MS;
   sim.run(-40, 3);
   sim.run(30, 2);

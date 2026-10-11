@@ -1006,8 +1006,8 @@
         }
       ],
       "backgroundLoadMbps": null,
-      "runLengthMs": 90000,
-      "excludedPrefixMs": 30000,
+      "runLengthMs": 120000,
+      "excludedPrefixMs": 60000,
       "measureWindowMs": 60000,
       "content": { "dir": "/media", "identity": "step0-content-media-v1" },
       "bars": {

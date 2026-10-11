@@ -24,7 +24,7 @@ const records = (driftAt, { firstSeq = 1, count = 400 } = {}) => Array.from({ le
  * c03 skips at the observation's second poll and its skip start follows seq 100.
  * Its drift after the skip is `c03Drift(ms since its first frame)`; the others sit at 0.
  */
-function run({ c03Drift = () => 0, skipStart = {}, starts, otherLast = {}, omit = null } = {}) {
+function run({ c03Drift = () => 0, skipStart = {}, starts, otherLast = {}, otherPolls = {}, omit = null } = {}) {
   const polls = [
     { atMs: 1000, playback: { ...COUNTERS, skips: 0, lastSkipAbandonedMs: null } },
     { atMs: 3000, playback: { ...COUNTERS, skips: 1, begun: 2, lastSkipAbandonedMs: -1500 } },
@@ -43,6 +43,7 @@ function run({ c03Drift = () => 0, skipStart = {}, starts, otherLast = {}, omit 
     records: records(() => 0),
     starts: [first],
   }]));
+  for (const [tag, list] of Object.entries(otherPolls)) others[tag].polls = list;
   return behindReading({
     condition: CONDITION,
     disturbance: DISTURBANCE,
@@ -90,6 +91,10 @@ export default async function harnessBehindPastSuite() {
     assertEqual(row(run({ skipStart: { reparks: 1 } }), 'B6').status, 'missed', 'a re-parked skip start misses');
     const absent = run({ omit: 'c04' });
     assertEqual(JSON.stringify([row(absent, 'B7').status, row(absent, 'B8').status]), '["evidence-failure","evidence-failure"]', 'a missing viewer is an evidence failure in both rows');
+    const unread = run({ otherPolls: { c04: undefined } });
+    assertEqual(row(unread, 'B8').status, 'evidence-failure', 'a viewer present with no poll stream was not read, which is not a miss');
+    const onePoll = run({ otherPolls: { c04: [{ atMs: 3000, playback: { skips: 0, opens: 1, begun: 1, retargets: 0, reparks: 0 } }] } });
+    assertEqual(row(onePoll, 'B8').status, 'evidence-failure', 'one poll in the observation cannot show a counter holding');
   });
 
   await check('behind past: another viewer whose counters move misses B8, one field at a time', async () => {

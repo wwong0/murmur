@@ -67,10 +67,31 @@ export function capacityBitsForManifest(manifest = {}) {
     : (manifest.condition?.capacityBitsPerSecond ?? (manifest.condition?.capacityMbps * 1_000_000));
 }
 
+/** The behind figure's reader: a stream cut mid-line is a missing stream, not a crash. */
+function readWholeNdjson(filePath) {
+  try {
+    return readNdjson(filePath);
+  } catch (error) {
+    if (error instanceof SyntaxError) return undefined;
+    throw error;
+  }
+}
+
+/** The behind figure's disturbance is the run's own record, never the manifest's copy. */
+function retainedDisturbance(runDir) {
+  try {
+    return readJson(path.join(runDir, 'disturbance.json'), null);
+  } catch (error) {
+    if (error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
+
 function clientStreams(runDir, manifest) {
+  const behind = manifest.condition?.figureKinds?.includes?.('behind');
   return armFor(manifest.condition).clientStreams(runDir, manifest, {
     names: fs.readdirSync(runDir),
-    readNdjson,
+    readNdjson: behind ? readWholeNdjson : readNdjson,
     join: path.join,
   });
 }
@@ -250,7 +271,7 @@ export function recomputeRunDirectory(runDir, options = {}) {
       const others = Object.fromEntries(Object.entries(clients).filter(([tag]) => tag !== targetTag));
       report.behind = behindReading({
         condition: retained.input.condition,
-        disturbance,
+        disturbance: retainedDisturbance(runDir),
         polls: target.polls,
         records: target.records,
         starts: target.starts,

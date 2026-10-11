@@ -185,6 +185,11 @@ export function behindReading({ condition = {}, disturbance, polls, records, sta
   const declared = declaredDisturbance(condition, disturbance);
   const injected = declared.injected === true;
   const caseName = condition.behind?.case;
+  // No record of the injection is not the same as a recorded refusal to inject.
+  if (typeof declared.injected !== 'boolean') {
+    return (caseName === 'inside' ? ['B1', 'B2', 'B3', 'B4', 'B9'] : ['B5', 'B6', 'B7', 'B8', 'B9'])
+      .map((name) => row(name, 'evidence-failure', { cause: 'no-disturbance-record' }));
+  }
   const pollList = Array.isArray(polls) ? polls : null;
   const recordList = Array.isArray(records) ? records : null;
   const observedPolls = pollList ? observationWindow(declared, pollList) : [];
@@ -315,7 +320,9 @@ export function behindReading({ condition = {}, disturbance, polls, records, sta
       const fields = ['skips', 'opens', 'begun', 'reparks', 'retargets'];
       const tags = Object.keys(others ?? {}).filter((key) => key !== 'pairs');
       const expectedTags = Array.from({ length: Number(condition.clients ?? 5) }, (_, index) => `c${String(index + 1).padStart(2, '0')}`).filter((tag) => tag !== 'c03');
-      const clientsPresent = expectedTags.every((tag) => tags.includes(tag));
+      // A viewer whose polls are missing or do not span the observation was not read.
+      const clientsPresent = expectedTags.every((tag) => tags.includes(tag)
+        && observationWindow(declared, pollsFor(others[tag])).length >= 2);
       const stable = clientsPresent && expectedTags.every((tag) => {
         const clientPolls = observationWindow(declared, pollsFor(others[tag]));
         const firstPoll = clientPolls[0];

@@ -101,4 +101,24 @@ export default async function harnessBehindSuite() {
     const reading = behindReading({ condition: condition('inside'), disturbance: disturbance(400, false), polls: insidePolls(100), records: [] });
     assert(reading.filter((candidate) => candidate.status === 'not-exercised').length >= 4, 'no injection makes the inside rows not exercised');
   });
+
+  await check('behind figures: a run with no disturbance record is an evidence failure in every row', async () => {
+    for (const [caseName, names] of [['inside', 'B1,B2,B3,B4,B9'], ['past', 'B5,B6,B7,B8,B9']]) {
+      for (const absent of [undefined, null, {}, { results: { c03: { pauseCallLocalMs: 0 } } }]) {
+        const reading = behindReading({ condition: condition(caseName), disturbance: absent, polls: insidePolls(100), records: [] });
+        assertEqual(reading.map((candidate) => candidate.row).join(','), names, `the ${caseName} case keeps its rows`);
+        assert(reading.every((candidate) => candidate.status === 'evidence-failure'), `${JSON.stringify(absent)} is no record, so no row passes or reads not exercised`);
+      }
+    }
+  });
+
+  await check('behind figures: an injected run whose poll stream is missing is an evidence failure, not a pass', async () => {
+    const inside = behindReading({ condition: condition('inside'), disturbance: disturbance(400), polls: undefined, records: [] });
+    assertEqual(row(inside, 'B1').status, 'evidence-failure', 'B1 cannot be read without the polls');
+    assertEqual(row(inside, 'B4').status, 'evidence-failure', 'B4 cannot be read without the polls');
+    assert(inside.every((candidate) => candidate.status !== 'met'), 'nothing passes on a missing stream');
+    const past = behindReading({ condition: condition('past'), disturbance: disturbance(1500), polls: undefined, records: [], starts: [] });
+    assertEqual(row(past, 'B5').status, 'evidence-failure', 'B5 cannot be read without the polls');
+    assert(past.every((candidate) => candidate.status !== 'met'), 'nothing passes on a missing stream');
+  });
 }

@@ -24,6 +24,7 @@ import {
   CONTROLLER_LINE_BEYOND_RE,
   CONTROLLER_LINE_BEYOND_UNAVAILABLE_RE,
   CONTROLLER_LINE_BUDGET_RE,
+  CONTROLLER_LINE_OVER_BUDGET_RE,
   CONTROLLER_LINE_CORRECTING_RE,
   CONTROLLER_LINE_ACTING_RE,
   CONTROLLER_LINE_MEASUREMENT_LIMIT_RE,
@@ -142,6 +143,23 @@ const controllerCases = [
     state: makeHeldState({ mode: 'waiting', reason: 'too-few-records', windowRecords: 0 }),
     expected: 'controller: rate 1.000000 · waiting · too-few-records over 0 frames',
     shape: CONTROLLER_LINE_HELD_RE,
+  },
+  {
+    name: 'diagnostics overlay: an over-budget correction publishes its unusable threshold',
+    state: makeControllerState({
+      rate: 1.01,
+      mode: 'correcting',
+      reason: 'stopping-threshold-over-budget',
+      estimateMs: -250,
+      bandMs: 16.72,
+      requiredStoppingThresholdMs: 21.264,
+      stoppingThresholdMs: null,
+      thresholdUsable: false,
+      fastestCloseMs: 22873.6,
+      windowRecords: 20,
+    }),
+    expected: 'controller: rate 1.010000 · correcting · stopping-threshold-over-budget · error -250.0ms · U 16.7ms · required S 21.3ms · ceiling 20.0ms refused · close lower bound 22.9s (close budget 60.0s) over 20 frames',
+    shape: CONTROLLER_LINE_OVER_BUDGET_RE,
   },
   {
     // 687.9ms of excess takes 68.79s at the rate authority, which is past the
@@ -338,7 +356,7 @@ export default async function diagnosticsOverlaySuite() {
         assert(!CONTROLLER_LINE_ACTING_RE.test(broken), `${label}: and by the acting union`);
       }
     }
-    assertEqual(negated, 24, 'every magnitude field in every acting arm was negated and refused');
+    assertEqual(negated, 28, 'every magnitude field in every acting arm was negated and refused');
 
     // The signed field keeps both signs, and now REQUIRES one: `signed()` always
     // writes a `+` or a `-`, so a line with a bare error magnitude is no more a

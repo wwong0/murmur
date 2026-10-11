@@ -186,7 +186,7 @@ export default async function harnessConditionsSuite() {
     common(conditions['behind-past'], 1500, 90000, 240000, 120000, 120000);
     assertEqual(JSON.stringify(conditions['behind-past'].behind), JSON.stringify({ case: 'past', attemptsMax: 3, skipDecisionMaxMs: 4000, abandonedToleranceMs: 300, startLatenessMaxMs: 600, resync: { windowMs: 1000, medianMaxMs: 40, holdMs: 30000, maxMs: 2000 } }), 'behind-past limits');
     const qual = conditions.shakedown['behind-qual'];
-    common(qual, 1500, 50000, 90000, 30000, 60000);
+    common(qual, 1500, 50000, 120000, 60000, 60000);
     assertEqual(qual.publishes, false, 'behind qualification does not publish');
     assertEqual(JSON.stringify(qual.behind), JSON.stringify(conditions['behind-past'].behind), 'behind qualification keeps past limits');
   });

@@ -50,6 +50,9 @@ export const CONTROLLER_LINE_ACTUATOR_LIMIT_RE = new RegExp(
 export const CONTROLLER_LINE_BUDGET_RE = new RegExp(
   `^controller: rate ${CONTROLLER_RATE} · resolution-budget-hold · stopping-threshold-over-budget · required S ${CONTROLLER_MAGNITUDE}ms · ceiling 20\\.0ms refused ${CONTROLLER_TAIL}$`,
 );
+export const CONTROLLER_LINE_OVER_BUDGET_RE = new RegExp(
+  `^controller: rate ${CONTROLLER_RATE} \u00b7 (?:correcting|beyond-rate-authority) \u00b7 stopping-threshold-over-budget \u00b7 error ${CONTROLLER_NUM}ms \u00b7 U ${CONTROLLER_MAGNITUDE}ms \u00b7 required S ${CONTROLLER_MAGNITUDE}ms \u00b7 ceiling 20\\.0ms refused \u00b7 close lower bound ${CONTROLLER_MAGNITUDE}s \\(close budget ${CONTROLLER_MAGNITUDE}s\\) ${CONTROLLER_TAIL}$`,
+);
 export const CONTROLLER_LINE_SETTLED_RE = new RegExp(
   `^controller: rate ${CONTROLLER_RATE} · settled · error ${CONTROLLER_NUM}ms · U ${CONTROLLER_MAGNITUDE}ms · actuator allowance ${CONTROLLER_MAGNITUDE}ms · stopping threshold ${CONTROLLER_MAGNITUDE}ms · applied rate ${CONTROLLER_RATE} ${CONTROLLER_TAIL}$`,
 );
@@ -72,6 +75,7 @@ export const CONTROLLER_LINE_ACTING_RE = new RegExp([
   CONTROLLER_LINE_MEASUREMENT_LIMIT_RE.source,
   CONTROLLER_LINE_ACTUATOR_LIMIT_RE.source,
   CONTROLLER_LINE_BUDGET_RE.source,
+  CONTROLLER_LINE_OVER_BUDGET_RE.source,
   CONTROLLER_LINE_SETTLED_RE.source,
   CONTROLLER_LINE_CORRECTING_RE.source,
   CONTROLLER_LINE_BEYOND_RE.source,
@@ -113,6 +117,16 @@ function controllerText(state) {
         ? state.settings.MAX_STOPPING_THRESHOLD_MS
         : MAX_STOPPING_THRESHOLD_MS;
       return `${head} · stopping-threshold-over-budget · required S ${state.requiredStoppingThresholdMs.toFixed(1)}ms · ceiling ${ceiling.toFixed(1)}ms refused ${tail}`;
+    }
+    if ((state.mode === 'correcting' || state.mode === 'beyond-rate-authority')
+      && state.reason === 'stopping-threshold-over-budget'
+      && Number.isFinite(state.estimateMs)
+      && Number.isFinite(state.bandMs)
+      && Number.isFinite(state.requiredStoppingThresholdMs)
+      && Number.isFinite(state.fastestCloseMs)) {
+      const closeBudgetMs = Number.isFinite(state.settings?.CLOSE_BUDGET_MS)
+        ? state.settings.CLOSE_BUDGET_MS : CLOSE_BUDGET_MS;
+      return `${head} · stopping-threshold-over-budget · error ${signed(state.estimateMs)} · U ${state.bandMs.toFixed(1)}ms · required S ${state.requiredStoppingThresholdMs.toFixed(1)}ms · ceiling ${MAX_STOPPING_THRESHOLD_MS.toFixed(1)}ms refused · close lower bound ${(state.fastestCloseMs / 1000).toFixed(1)}s (close budget ${(closeBudgetMs / 1000).toFixed(1)}s) ${tail}`;
     }
     return state.reason ? `${head} · ${state.reason} ${tail}` : `${head} ${tail}`;
   }

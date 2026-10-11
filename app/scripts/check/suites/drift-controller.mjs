@@ -11,10 +11,34 @@ import { check, assert, assertEqual, assertNear } from '../harness.mjs';
 import { plant, recordRig, runUntil } from '../drift-plant.mjs';
 import { createClockFilter } from '../../../public/lib/clock-filter.mjs';
 import { createDriftLog, deriveDriftRecord } from '../../../public/lib/frame-drift.mjs';
-import { createDriftController } from '../../../public/lib/drift-controller.mjs';
+import { createDriftController, D8_COMMAND_THRESHOLD } from '../../../public/lib/drift-controller.mjs';
 
 const MILLISECONDS_TOLERANCE = 0.05;
 const RATE_TOLERANCE = 1e-12;
+const WIDE_SPREAD_MS = 16.72;
+
+function wideValues(medianMs) {
+  const low = medianMs - WIDE_SPREAD_MS / 2;
+  const high = medianMs + WIDE_SPREAD_MS / 2;
+  return Array.from({ length: 20 }, (_, index) => [low, medianMs, high][index % 3]);
+}
+
+function sharedWideValues(medianMs) {
+  return [
+    -29.36, -29.36, -29, -28, -27, -26, -24, -23, -22, medianMs, medianMs,
+    -20, -19, -18, -17, -16, -15, -14, -12.64, -12.64,
+  ];
+}
+
+function rigForValues(values) {
+  const rig = recordRig({ halfWidthMs: 4, settings: { MIN_COMMAND_DEVIATION: D8_COMMAND_THRESHOLD } });
+  for (const value of values) rig.add(value);
+  return { rig, values, state: rig.controller.poll() };
+}
+
+function wideRig(medianMs) {
+  return rigForValues(wideValues(medianMs));
+}
 
 export default async function driftControllerSuite() {
   await check('drift-controller: both sides stay within rate authority and leave unity', async () => {
@@ -343,6 +367,77 @@ export default async function driftControllerSuite() {
     const result = runUntil(sim, (next) => next.mode === 'settled', floor + state.settings.SETTLED_FOR_MS + 30000);
     assert(result.elapsedMs > floor, `the real close took ${result.elapsedMs}ms, above floor ${floor}ms`);
     assert(sim.applied.every((rate) => Number.isFinite(rate)), 'the only values applied are finite rates');
+  });
+
+  await check('drift-controller K1: an outside estimate corrects through an unusable stopping threshold', async () => {
+    const { rig, values, state: first } = wideRig(-250);
+    const states = [first];
+    for (let i = 0; i < 3000; i++) {
+      rig.add(values[i % values.length]);
+      states.push(rig.controller.poll());
+    }
+    assertEqual(states.length, 3001, 'the wide-spread run covers 60 seconds of controller time');
+    for (const [index, state] of states.entries()) {
+      assertEqual(state.rate, 1 + state.settings.MAX_RATE_DEVIATION, `poll ${index}: correction stays at full authority`);
+      assertEqual(state.thresholdUsable, false, `poll ${index}: the over-budget threshold stays unusable`);
+      assertEqual(state.mode, 'correcting', `poll ${index}: the outside estimate keeps correcting`);
+      assertEqual(state.settlingMs, first.settlingMs, `poll ${index}: settling history is unchanged`);
+      assertEqual(state.counters.budgetRefusals, first.counters.budgetRefusals, `poll ${index}: no budget refusal is counted`);
+      assertNear(state.bandMs, WIDE_SPREAD_MS, 0.01, `poll ${index}: U is the 16.72 ms spread`);
+      assertNear(state.requiredStoppingThresholdMs, WIDE_SPREAD_MS + D8_COMMAND_THRESHOLD * 4000, 0.01, `poll ${index}: S is U plus the adopted allowance`);
+    }
+  });
+
+  await check('drift-controller K2: the required-threshold boundary separates holding from correction', async () => {
+    const inside = rigForValues(sharedWideValues(-21));
+    const outside = rigForValues(sharedWideValues(-21.3));
+    assert(inside.values.every((value, index) => value === outside.values[index] || index === 9 || index === 10), 'the pair differs only in its median values');
+    assertNear(inside.state.estimateMs, -21, 0, 'the inside median is exactly -21 ms');
+    assertNear(outside.state.estimateMs, -21.3, 1e-9, 'the outside median is exactly -21.3 ms');
+    assertEqual(inside.state.rate, 1, 'inside S holds unity');
+    assertEqual(inside.state.mode, 'resolution-budget-hold', 'inside S is the counted budget hold');
+    assertEqual(inside.state.reason, 'stopping-threshold-over-budget', 'the hold names the refusal');
+    assertEqual(inside.state.thresholdUsable, false, 'the refused threshold is unusable');
+    assertEqual(inside.state.fastestCloseMs, null, 'the hold has no close figure');
+    assertEqual(inside.state.counters.budgetRefusals, 1, 'the inside poll counts one refusal');
+    assertEqual(outside.state.mode, 'correcting', 'outside S corrects');
+    assertEqual(outside.state.thresholdUsable, false, 'the correcting threshold remains unusable');
+    assert(Number.isFinite(outside.state.fastestCloseMs), 'the correcting poll publishes a close figure');
+    assertEqual(outside.state.counters.budgetRefusals, 0, 'the outside poll is not a refusal');
+    assert(outside.state.rate > 1, 'the negative estimate commands a speed-up');
+  });
+
+  await check('drift-controller K3: a far outside estimate reports beyond-rate authority', async () => {
+    const { state } = wideRig(-25_000);
+    assertNear(state.fastestCloseMs, (25_000 - (WIDE_SPREAD_MS + D8_COMMAND_THRESHOLD * 4000)) / 0.01, 1, 'the close lower bound uses the required threshold');
+    assertEqual(state.mode, 'beyond-rate-authority', 'the far estimate exceeds the close budget');
+    assertEqual(state.thresholdUsable, false, 'the required threshold remains unusable');
+    assertEqual(state.reason, 'stopping-threshold-over-budget', 'the branch retains the budget reason');
+    assertEqual(state.rate, 1 + state.settings.MAX_RATE_DEVIATION, 'the correction saturates at authority');
+    assertEqual(state.counters.budgetRefusals, 0, 'a far correction is not a refusal');
+  });
+
+  await check('drift-controller K4: narrowing the spread demands a fresh settling dwell', async () => {
+    const wide = wideRig(-250);
+    for (let i = 0; i < 3000; i++) {
+      wide.rig.add(wide.values[i % wide.values.length]);
+      wide.rig.controller.poll();
+    }
+    wide.rig.advance(1001);
+    const narrowValues = [-2.5, -2.5, -2, -1.5, -1, -0.5, -0.25, -0.1, 0, 0, 0, 0.1, 0.25, 0.5, 1, 1.5, 2, 2.5, 2.5, 2.5];
+    for (const value of narrowValues) wide.rig.add(value);
+    const firstInside = wide.rig.controller.poll();
+    assertEqual(firstInside.mode, 'declining', 'the first usable narrow poll starts declining');
+    assertNear(firstInside.spreadMs, 5, 0.01, 'the narrow spread is 5 ms');
+    const beforeSettled = [];
+    for (let i = 0; i < 249; i++) {
+      wide.rig.add(narrowValues[i % narrowValues.length]);
+      beforeSettled.push(wide.rig.controller.poll());
+    }
+    assert(beforeSettled.every((state) => state.mode !== 'settled'), 'no settled claim appears before 5000 ms of the fresh dwell');
+    wide.rig.add(0);
+    const settled = wide.rig.controller.poll();
+    assertEqual(settled.mode, 'settled', 'the claim appears at the fresh dwell boundary');
   });
 
   await check('drift-controller: the apply seam receives rates only', async () => {

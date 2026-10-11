@@ -19,7 +19,7 @@
 import { check, assert, assertEqual } from '../harness.mjs';
 import { plant, runUntil } from '../drift-plant.mjs';
 import { acceptedStoppingThresholdMs } from '../../drift-figures.mjs';
-import { D8_COMMAND_THRESHOLD } from '../../../public/lib/drift-controller.mjs';
+import { D8_COMMAND_THRESHOLD, MAX_RATE_DEVIATION, TIME_CONSTANT_MS } from '../../../public/lib/drift-controller.mjs';
 
 const POLL_EVERY_FRAMES = 6;          // 250ms at 24fps — room.entry.js's interval
 const RUN_FRAMES = POLL_EVERY_FRAMES * 960;   // 240 simulated seconds
@@ -197,6 +197,28 @@ export default async function driftConvergenceSuite() {
     // produces none, so that check could not fail. Its fixture at f is in
     // d8-product-integration.mjs.
     closeSteps(ADOPTED, 'f: ');
+  });
+
+  await check('drift-convergence K5: a wide plant stays at full authority until its excess closes', async () => {
+    const sim = plant({ standingError: -250, refreshHz: 60, settings: ADOPTED });
+    const rows = [];
+    for (let i = 0; i < 2000; i++) {
+      sim.deliver();
+      const state = sim.history.at(-1);
+      rows.push({ atMs: sim.now, state, excessMs: Math.abs(state.estimateMs ?? 0) - (state.bandMs ?? 0) });
+      if (rows.length > 1 && rows.at(-1).excessMs < MAX_RATE_DEVIATION * TIME_CONSTANT_MS
+        && rows.at(-2).state.rate === 1 + MAX_RATE_DEVIATION) break;
+    }
+    const first = rows.findIndex(({ state }) => state.rate === 1 + MAX_RATE_DEVIATION);
+    assert(first >= 0, 'the plant reaches a full-authority correction');
+    const terminal = rows.findIndex((row, index) => index >= first && row.excessMs < MAX_RATE_DEVIATION * TIME_CONSTANT_MS);
+    assert(terminal > first, 'the plant reaches the 40 ms excess boundary after correction begins');
+    const run = rows.slice(first, terminal);
+    assert(run.every(({ state }) => state.rate === 1 + MAX_RATE_DEVIATION), 'every poll before the boundary stays at full authority');
+    assert(run.every(({ state }) => state.rate !== 1), 'no poll inside the saturated run returns to unity');
+    assert(rows[terminal].excessMs < MAX_RATE_DEVIATION * TIME_CONSTANT_MS, 'the terminal poll is below the 40 ms excess bar');
+    assert(rows[terminal].atMs - rows[first].atMs >= 15_000, 'the saturated run lasts at least 15 seconds');
+    assert(run.some(({ state }) => state.requiredStoppingThresholdMs > 20), 'the 60 Hz cadence supplies the over-budget spread trap');
   });
 }
 

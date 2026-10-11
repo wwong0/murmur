@@ -50,7 +50,7 @@ export function simulate({ preSettleHold = true, videoOptions = {}, after = () =
   const ctx = { step, control, treatment, rig: controllerRig };
   if (preSettleHold) {
     controllerRig.state.halfWidthMs = 16;
-    for (let index = 0; index < 3; index += 1) step(40);
+    for (let index = 0; index < 3; index += 1) step(0);
     controllerRig.state.halfWidthMs = 4;
   }
   for (let index = 0; index < 4; index += 1) step(12);

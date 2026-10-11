@@ -560,20 +560,37 @@ function evaluateResidual({ label, fileStem = label, seam, records, retainedReco
   return residual;
 }
 
-/** Judge every retained scheduled start, keeping one RES line and artifact per start. */
+/** Starts already judged, by window: the page's bounded log drops an old start's records. */
+const judgedStarts = new Set();
+/** Every retained stream a window has written, so a start the page log rolled past is still read. */
+const retainedByWindow = new Map();
+
+/**
+ * Judge every scheduled start once, at the first seam that shows it, one RES line
+ * and artifact per start. A start whose first record the page no longer holds is
+ * judged from the window's retained streams, and fails by name if they lack it too,
+ * rather than borrowing a later start's records.
+ */
 function evaluateAllResiduals({ label, fileStem, seam, records, retainedRecords, frameIntervalMs }) {
   const starts = Array.isArray(seam?.playback?.starts) ? seam.playback.starts : [];
   if (!starts.length) return evaluateResidual({ label, fileStem, seam, records, retainedRecords, frameIntervalMs });
-  return starts.map((start, index) => evaluateResidual({
-    label: `${label} start ${index + 1}`,
-    fileStem: `${fileStem}-start-${index + 1}`,
-    seam,
-    records,
-    retainedRecords,
-    frameIntervalMs,
-    start,
-    startIndex: index,
-  }));
+  const windowName = label.split(' ')[0];
+  const readers = retainedByWindow.get(windowName) ?? [];
+  retainedByWindow.set(windowName, [...readers, retainedRecords]);
+  const holds = (list, start) => list.some((record) => record?.seq === start?.afterSeq + 1);
+  return starts.map((start, index) => {
+    const key = `${windowName}:${start?.attemptId}:${start?.afterSeq}`;
+    if (judgedStarts.has(key)) return null;
+    judgedStarts.add(key);
+    const startLabel = `${label} start ${index + 1}`;
+    if (!holds(records, start)) {
+      const earlier = [...new Map(readers.flatMap((read) => read()).map((record) => [record?.seq, record])).values()];
+      expect(`RES ${startLabel} population is retained`, holds(earlier, start), `seq ${start?.afterSeq + 1} is not in the page log (${records[0]?.seq ?? 'none'}..${records.at(-1)?.seq ?? 'none'}); the window's ${readers.length} earlier retained stream(s) hold ${earlier[0]?.seq ?? 'none'}..${earlier.at(-1)?.seq ?? 'none'}, and the residual is read from them`);
+      if (!holds(earlier, start)) return null;
+      return evaluateResidual({ label: startLabel, fileStem: `${fileStem}-start-${index + 1}`, seam, records: earlier, retainedRecords: () => earlier, frameIntervalMs, start, startIndex: index });
+    }
+    return evaluateResidual({ label: startLabel, fileStem: `${fileStem}-start-${index + 1}`, seam, records, retainedRecords, frameIntervalMs, start, startIndex: index });
+  }).filter(Boolean);
 }
 
 /**
