@@ -5,6 +5,17 @@ import { median } from '../../public/lib/frame-drift.mjs';
 
 const finite = (value) => Number.isFinite(value);
 const instantOf = (poll) => poll?.harnessAfterMs ?? poll?.harnessBeforeMs;
+export const POLL_FRESH_MS = 1_000;
+
+/** The latest poll at or before `atMs`, only when its reading is still fresh. */
+export function pollAt(polls, atMs, readAt = instantOf, freshMs = POLL_FRESH_MS) {
+  if (!finite(atMs)) return null;
+  const eligible = (polls ?? []).map((poll) => ({ poll, atMs: readAt(poll) }))
+    .filter(({ atMs: pollAtMs }) => finite(pollAtMs) && pollAtMs <= atMs);
+  if (!eligible.length) return null;
+  const latest = eligible.reduce((current, entry) => (entry.atMs >= current.atMs ? entry : current));
+  return atMs - latest.atMs <= freshMs ? latest.poll : null;
+}
 
 /** The largest stretch of `window` with no poll in it, its two edges included. */
 export function coverageGap(polls, window) {
@@ -50,6 +61,11 @@ export function bracketHalfWidths(polls) {
  * the anchor, floored at zero. A poll with no state, or no instant, has no value.
  */
 export function runwayMs(poll, tag = 'a viewer') {
+  const own = poll?.heldAhead?.ownHeldAheadMs;
+  if (finite(own)) {
+    if (own < 0) throw new RangeError(`${tag} own held-ahead below zero: ${own}`);
+    return own;
+  }
   const published = poll?.heldAhead?.heldAheadMs;
   if (!finite(published)) return null;
   if (published < 0) throw new RangeError(`${tag} published a held-ahead below zero: ${published}`);
@@ -60,14 +76,17 @@ export function runwayMs(poll, tag = 'a viewer') {
   return finite(playedMs) ? Math.max(0, published - Math.max(0, playedMs)) : null;
 }
 
+export function runwaySource(poll) {
+  return finite(poll?.heldAhead?.ownHeldAheadMs) ? 'own' : 'room';
+}
+
 /**
  * Each viewer's runway at `atMs`, from its last poll at or before the instant,
  * when that poll is no more than 1 000 ms before it. Otherwise no value.
  */
-export function heldAheadAt(viewerPolls, tags, atMs, freshMs = 1_000) {
+export function heldAheadAt(viewerPolls, tags, atMs, freshMs = POLL_FRESH_MS) {
   return Object.fromEntries(tags.map((tag) => {
-    const before = (viewerPolls?.[tag] ?? []).filter((poll) => finite(instantOf(poll)) && instantOf(poll) <= atMs);
-    const poll = before.length ? before.reduce((last, entry) => (instantOf(entry) >= instantOf(last) ? entry : last)) : null;
-    return [tag, poll && atMs - instantOf(poll) <= freshMs ? runwayMs(poll, tag) : null];
+    const poll = pollAt(viewerPolls?.[tag], atMs, instantOf, freshMs);
+    return [tag, poll ? runwayMs(poll, tag) : null];
   }));
 }

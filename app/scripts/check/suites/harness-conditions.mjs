@@ -122,7 +122,12 @@ export default async function harnessConditionsSuite() {
     const registeredBy8b2 = ['control-five', 'control-seek', 'control-ten', 'shakedown/control-qual', 'sweep-070', 'sweep-095', 'sweep-unpaced'];
     // 9b's eleven likewise; scripts/check/suites/edge-conditions.mjs holds them to all or none.
     const registeredBy9b = (name) => name.startsWith('edge-') || name === 'shakedown/edge-qual';
-    const added = [...currentEntries.keys()].filter((name) => !baseEntries.has(name) && !registeredBy8b2.includes(name) && !registeredBy9b(name));
+    // 10b's fourteen, held literal by this suite's own 10b check.
+    const registeredBy10b = ['baseline-join', 'baseline-leave-clean', 'baseline-leave-silent', 'join', 'leave-clean', 'leave-silent', 'leave-first',
+      'drop-socket', 'drop-recover', 'shakedown/churn-join', 'shakedown/churn-leave-clean', 'shakedown/churn-leave-silent',
+      'shakedown/churn-drop-socket', 'shakedown/churn-leave-first'];
+    const added = [...currentEntries.keys()].filter((name) => !baseEntries.has(name) && !registeredBy8b2.includes(name) && !registeredBy9b(name)
+      && !registeredBy10b.includes(name));
     assertEqual(JSON.stringify(added.sort()), JSON.stringify(['baseline-nop2p-steady', 'behind-inside', 'behind-past', 'capacity-ten', 'hostorigin-nop2p', 'hostorigin-uncapped', 'p2p-naive', 'p2p-scattered', 'regimes-default-shaped', 'regimes-limited-shaped', 'regimes-starved', 'shakedown/behind-qual', 'shakedown/cap20', 'shakedown/hostorigin-qual', 'shakedown/p2p-qual', 'shakedown/regimes-qual', 'shakedown/trap-qual', 'trap-seek', 'trap-seek-short']), 'only declared change conditions are new');
   });
 
@@ -189,6 +194,87 @@ export default async function harnessConditionsSuite() {
     common(qual, 1500, 50000, 120000, 60000, 60000);
     assertEqual(qual.publishes, false, 'behind qualification does not publish');
     assertEqual(JSON.stringify(qual.behind), JSON.stringify(conditions['behind-past'].behind), 'behind qualification keeps past limits');
+  });
+
+  await check('harness conditions: 10b registers the churn arms, their baselines and their limits', async () => {
+    const text = (value) => JSON.stringify(value);
+    const stall = { gapMs: 250, beforeMs: 60000, afterMs: 60000 };
+    const joinChurn = { attemptsMax: 3, stall, firstFrameMaxMs: 6000,
+      resync: { windowMs: 1000, medianMaxMs: 40, holdMs: 30000, maxMs: 2000 },
+      fill: { overMs: 60000, peerFractionMin: 0.6, hostBodiesMax: 3 }, runwayMinMs: 15000, horizonMs: 60000 };
+    const leaveChurn = { attemptsMax: 3, stall, runwayMinMs: 15000, horizonMs: 60000 };
+    const at = 'measure-window-start';
+    const five = conditions['edge-five'];
+    const base = (condition, name, kinds) => {
+      assertEqual(condition.name, name, `${name} is named for its key`);
+      for (const field of ['delivery', 'peerExchange', 'clients', 'capacityMbps', 'qdiscs', 'bars', 'excusals', 'content', 'positionOffsetMsByClient']) {
+        assertEqual(text(condition[field]), text(five[field]), `${name} keeps edge-five's ${field}`);
+      }
+      assertEqual(condition.delivery, 'host', `${name} host delivery`);
+      assertEqual(condition.peerExchange, true, `${name} peer exchange`);
+      assertEqual(condition.clients, 5, `${name} five viewers`);
+      assertEqual(text(condition.figureKinds), text(kinds), `${name} figure kinds`);
+    };
+    const lengths = (condition, runLengthMs, excludedPrefixMs, measureWindowMs) => assertEqual(
+      text([condition.runLengthMs, condition.excludedPrefixMs, condition.measureWindowMs]),
+      text([runLengthMs, excludedPrefixMs, measureWindowMs]), `${condition.name} lengths`);
+    const arms = [
+      ['baseline-join', { kind: 'join', client: 'c05', at }, joinChurn],
+      ['join', { kind: 'join', client: 'c05', at }, joinChurn],
+      ['baseline-leave-clean', { kind: 'leave-clean', client: 'c03', at }, leaveChurn],
+      ['leave-clean', { kind: 'leave-clean', client: 'c03', at }, leaveChurn],
+      ['baseline-leave-silent', { kind: 'leave-silent', client: 'c03', at }, leaveChurn],
+      ['leave-silent', { kind: 'leave-silent', client: 'c03', at }, leaveChurn],
+      ['drop-socket', { kind: 'drop-socket', client: 'c03', at }, { attemptsMax: 3, stall, runwayMinMs: 15000 }],
+    ];
+    for (const [name, rosterEvent, churn] of arms) {
+      const condition = conditions[name];
+      base(condition, name, ['roster-event']);
+      assertEqual(condition.publishes, true, `${name} publishes`);
+      assertEqual(Object.hasOwn(condition, 'reading'), false, `${name} has no reading`);
+      assertEqual(Object.hasOwn(condition, 'capacitySchedule'), false, `${name} has no capacity schedule`);
+      lengths(condition, 240000, 120000, 120000);
+      assertEqual(text(condition.rosterEvent), text(rosterEvent), `${name} roster event`);
+      assertEqual(text(condition.churn), text(churn), `${name} churn limits`);
+    }
+    for (const name of ['join', 'leave-clean', 'leave-silent']) {
+      assertEqual(text({ ...conditions[`baseline-${name}`], name }), text(conditions[name]), `baseline-${name} differs from ${name} in name only`);
+    }
+
+    const step = (rate) => ({ container: 'origin', network: 'wa-media', discipline: 'tbf', params: { rate, burst: '32kbit', latency: '400ms' } });
+    const first = conditions['leave-first'];
+    base(first, 'leave-first', ['roster-event']);
+    assertEqual(Object.hasOwn(first, 'reading'), false, 'leave-first has no reading');
+    lengths(first, 480000, 120000, 120000);
+    assertEqual(text(first.rosterEvent), text({ kind: 'leave-first', at: 'capacity-schedule-edge' }), 'leave-first roster event');
+    assertEqual(text(first.churn), text({ attemptsMax: 3, stall, horizonMs: 15000 }), 'leave-first churn limits carry no runway bar');
+    assertEqual(text(first.capacitySchedule), text({ dropAfterReadyMs: 120000, drop: step('2mbit'), edgeHeldAheadMsBelow: 15000,
+      ceilingMs: 240000, rise: step('10mbit'), recordAfterRiseMs: 120000, riseOn: 'first-fetcher-edge' }), 'leave-first capacity schedule');
+
+    const recover = conditions['drop-recover'];
+    const drop = conditions['edge-drop'];
+    assertEqual(text(recover.figureKinds), text(['byte', 'distance-behind']), 'drop-recover figure kinds');
+    assertEqual(text(recover.reading.criteria.distanceBehind), text({ maxMs: 600, windowMs: 2000, minRecords: 20 }), 'drop-recover distance-behind limits');
+    assertEqual(text(recover.reading.criteria.dropRecovery), text({ maxMs: 240000 }), 'drop-recover keeps the recovery limit');
+    assertEqual(Object.hasOwn(recover, 'rosterEvent') || Object.hasOwn(recover, 'churn'), false, 'drop-recover has no roster event');
+    const { distanceBehind, ...criteria } = recover.reading.criteria;
+    assertEqual(text({ ...recover, name: drop.name, figureKinds: drop.figureKinds, reading: { ...recover.reading, criteria } }), text(drop),
+      'drop-recover is edge-drop whole but for its name, its figure kinds and the distance limits');
+
+    for (const kind of ['join', 'leave-clean', 'leave-silent', 'drop-socket']) {
+      const qual = conditions.shakedown[`churn-${kind}`];
+      assertEqual(qual.publishes, false, `churn-${kind} qualification does not publish`);
+      lengths(qual, 135000, 60000, 75000);
+      assertEqual(text({ ...qual, name: kind, publishes: true, runLengthMs: 240000, excludedPrefixMs: 120000, measureWindowMs: 120000 }),
+        text(conditions[kind]), `churn-${kind} qualification is its arm but for its lengths`);
+    }
+    const qualFirst = conditions.shakedown['churn-leave-first'];
+    assertEqual(qualFirst.name, 'shakedown/churn-leave-first', 'churn-leave-first qualification name');
+    assertEqual(qualFirst.publishes, false, 'churn-leave-first qualification does not publish');
+    lengths(qualFirst, 255000, 60000, 75000);
+    assertEqual(text(qualFirst.capacitySchedule), text({ ...first.capacitySchedule, dropAfterReadyMs: 60000, ceilingMs: 120000, recordAfterRiseMs: 75000 }),
+      'churn-leave-first qualification schedule');
+    assertEqual(text([qualFirst.rosterEvent, qualFirst.churn]), text([first.rosterEvent, first.churn]), 'churn-leave-first qualification keeps the arm');
   });
 
   await check('harness conditions: F2 ready manifest keeps the host rig measures', async () => {

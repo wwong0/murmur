@@ -14,7 +14,7 @@ import {
 } from './lib/envelope.mjs';
 import { createPlayer } from './lib/player.mjs';
 import { createPeerBytes } from './lib/peer-bytes.mjs';
-import { aheadReportDue, heldAheadMs } from './lib/held-ahead.mjs';
+import { aheadReportDue, edgeIndexAfter, heldAheadMs } from './lib/held-ahead.mjs';
 import { createHoldResume, createResumeRing, READY_HELD_AHEAD_MS } from './lib/hold-resume.mjs';
 import { peerEngineConfig } from './lib/peer-engine-config.mjs';
 import { PRODUCT_ENGINE_WINDOWS, validateEngineWindows } from './lib/engine-windows.mjs';
@@ -526,9 +526,24 @@ function updateHeldAhead() {
   if (client.role === 'host') return;
   const state = viewState();
   if (!state) return;
+  const segments = peerBytesPublisher.finishedSegments();
   const positionMs = state.current.mediaMs;
+  const sharedMs = clockSync.sharedNow();
+  const ownPosition = ownPositionMs({
+    control: controlInForce().control,
+    state,
+    sharedMs,
+    elementMs: elementPositionMs,
+  });
+  const ownHeldAhead = Number.isFinite(ownPosition)
+    ? heldAheadMs({ positionMs: ownPosition, segments })
+    : null;
+  const edgeIndex = Number.isFinite(ownPosition) ? edgeIndexAfter({ positionMs: ownPosition, segments }) : null;
   heldAheadValue = {
-    heldAheadMs: heldAheadMs({ positionMs, segments: peerBytesPublisher.finishedSegments() }),
+    heldAheadMs: heldAheadMs({ positionMs, segments }),
+    ownPositionMs: ownPosition,
+    ownHeldAheadMs: ownHeldAhead,
+    edgeIndex,
     positionMs,
     atPageMs: pageNow(),
   };

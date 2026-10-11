@@ -4,10 +4,12 @@ import { fileURLToPath } from 'node:url';
 import { optionsFromEnv, startRoomServer } from '../server/room-server.mjs';
 import { requireTrackerStarted, startTracker, trackerFailure } from '../scripts/runner/tracker.mjs';
 import { createOriginProxy } from './origin-proxy.mjs';
+import { startSocketControl } from './socket-control.mjs';
 
 let roomServer = null;
 let proxy = null;
 let tracker = null;
+let socketControl = null;
 let shuttingDown = false;
 
 function closeServer(server) {
@@ -23,6 +25,7 @@ async function shutdown(code) {
   if (shuttingDown) return;
   shuttingDown = true;
   await closeProxy(proxy);
+  if (socketControl) await socketControl.close();
   await closeServer(roomServer);
   if (tracker && tracker.exitCode === null) tracker.kill();
   process.exit(code);
@@ -51,6 +54,7 @@ async function startServerRole(env) {
   if (trackerPort) serverEnv.APP_TRACKER_URL = `ws://${trackerHost}:${trackerPort}`;
   else delete serverEnv.APP_TRACKER_URL;
   roomServer = startRoomServer({ ...optionsFromEnv(serverEnv), host: env.APP_HOST ?? '0.0.0.0' });
+  socketControl = startSocketControl({ roomServer, port: Number(env.APP_SOCKET_CONTROL_PORT ?? 8190), host: '127.0.0.1' });
   roomServer.ready.then((port) => console.log(`[origin] ready on ${port}`));
   return trackerState;
 }

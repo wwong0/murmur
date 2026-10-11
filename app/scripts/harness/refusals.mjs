@@ -53,6 +53,8 @@ export const REFUSAL_REASONS = Object.freeze([
   'capacity-schedule-not-in-force',
   'seek-not-applied',
   'seek-landed-on-held-media',
+  'roster-event-not-issued',
+  'roster-event-not-observed',
 ]);
 
 const PUBLICATION_ONLY_REASONS = new Set([CDP_QUALIFICATION_REASON]);
@@ -86,6 +88,45 @@ function clientRecords(client) {
 
 function clientPolls(client) {
   return client?.polls ?? [];
+}
+
+function rosterEventRefusal(input, addReason) {
+  const condition = input.condition ?? {};
+  if (!(condition.figureKinds ?? []).includes('roster-event')) return;
+  const event = input.rosterEvent;
+  if (!event || typeof event !== 'object') {
+    addReason('roster-event-not-issued', REFUSAL_SCOPE.churn, { figure: 'roster-event' });
+    return;
+  }
+  const tags = input.declaredClientTags ?? Object.keys(input.presence ?? {});
+  const others = tags.filter((tag) => tag !== event.client);
+  const presence = input.presence ?? {};
+  const expected = event.kind === 'join' ? 'join' : 'leave';
+  const seq = event.presence?.seq;
+  const observed = Number.isSafeInteger(seq) && others.every((tag) => (presence[tag] ?? []).some((record) =>
+    record?.seq === seq && record?.event === expected && record?.tabId === event.tabId));
+  if (!observed) addReason('roster-event-not-observed', REFUSAL_SCOPE.churn, {
+    figure: 'roster-event', missingTags: others.filter((tag) => !(presence[tag] ?? []).some((record) =>
+      record?.seq === seq && record?.event === expected && record?.tabId === event.tabId)),
+  });
+}
+
+// 10b design.md D7: the member a leave removed ends its streams at the event by design,
+// and a joiner was not in the room when the cadence was established. Their reasons are
+// kept, named, beside the ones the run is judged on.
+function excusedByRosterEvent(condition, event, reasons) {
+  const kind = condition.rosterEvent?.kind;
+  const tag = event?.client;
+  if (typeof tag !== 'string') return [];
+  const departs = kind === 'leave-clean' || kind === 'leave-silent' || kind === 'leave-first';
+  const excused = [];
+  for (let index = reasons.length - 1; index >= 0; index -= 1) {
+    const entry = reasons[index];
+    if (entry.tag === tag && (departs || (kind === 'join' && entry.reason === 'client-cadence-unavailable'))) {
+      excused.unshift(...reasons.splice(index, 1));
+    }
+  }
+  return excused;
 }
 
 function coverageFor(tag, client, window, minimum) {
@@ -149,6 +190,8 @@ export function evaluateRefusals(input = {}) {
   const coverage = {};
   const dropped = {};
   const realtimeFactorByClient = {};
+
+  rosterEventRefusal(input, (reason, scope, detail) => addReason(reasons, reason, scope, detail));
 
   if (input.capacityStep && input.seek
     && Number.isFinite(input.capacityStep.readBackAtMs)
@@ -306,6 +349,7 @@ export function evaluateRefusals(input = {}) {
 
   const arm = armFor(condition);
   arm.refusals(input, (reason, scope, detail) => addReason(reasons, reason, scope, detail));
+  const excused = excusedByRosterEvent(condition, input.rosterEvent, reasons);
 
   const uniqueReasonSet = [...new Set(reasons.map((entry) => entry.reason))];
   const duplicateReasons = reasons.map((entry) => entry.reason).filter((reason, index, all) => all.indexOf(reason) !== index);
@@ -320,6 +364,7 @@ export function evaluateRefusals(input = {}) {
     publicationRefused: reasons.some((entry) => entry.reason.startsWith('required-context-absent:')
       || PUBLICATION_ONLY_REASONS.has(entry.reason)),
     reasons,
+    excused,
     reasonSet: uniqueReasonSet,
     duplicateReasons: [...new Set(duplicateReasons)],
     coverage,

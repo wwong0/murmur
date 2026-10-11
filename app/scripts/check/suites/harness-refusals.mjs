@@ -357,6 +357,40 @@ export default async function harnessRefusalsSuite() {
     assertEqual(result.figures.drift, true, 'unaffected drift figure remains available');
   });
 
+  await check('10b refusal: a roster event that was never issued suppresses its dependent rows', async () => {
+    const result = evaluateRefusals({ ...evidence(), condition: { ...evidence().condition, figureKinds: ['roster-event'] } });
+    assert(has(result, 'roster-event-not-issued'), 'missing event is refused by name');
+    assertEqual(result.runRefused, true, 'the run is refused');
+  });
+
+  await check('10b refusal: a roster event missing one receipt is not observed', async () => {
+    const base = evidence();
+    const client = base.clients.c01;
+    const result = evaluateRefusals({ ...base,
+      condition: { ...base.condition, clients: 2, figureKinds: ['roster-event'] },
+      declaredClientTags: ['c01', 'c02'], clients: { c01: client, c02: client },
+      rosterEvent: { kind: 'join', client: 'c01', tabId: 'c01', presence: { event: 'join', seq: 4 } },
+      presence: { c01: [{ event: 'join', seq: 4, tabId: 'c01' }], c02: [] },
+    });
+    assert(has(result, 'roster-event-not-observed'), 'missing receipt is refused by name');
+    assertEqual(result.runRefused, true, 'the run is refused');
+  });
+
+  await check('10b refusal: the member a leave removed is excused by name, and only under a leave', async () => {
+    const base = evidence();
+    const input = (kind) => ({ ...base, condition: { ...base.condition, clients: 2, figureKinds: ['roster-event'], rosterEvent: { kind, client: 'c02' } },
+      declaredClientTags: ['c01', 'c02'], clients: { c01: base.clients.c01, c02: {} },
+      rosterEvent: { kind, client: 'c02', tabId: 'c02', presence: { event: 'leave', seq: 4 } },
+      presence: { c01: [{ event: 'leave', seq: 4, tabId: 'c02' }], c02: [] } });
+    const left = evaluateRefusals(input('leave-clean'));
+    assertEqual(left.reasons.filter((entry) => entry.tag === 'c02').length, 0, 'no reason names the leaver');
+    assert(left.excused.some((entry) => entry.reason === 'client-holds-no-drift-records' && entry.tag === 'c02'), 'its absence is kept, named');
+    const dropped = evaluateRefusals(input('drop-socket'));
+    assert(dropped.reasons.some((entry) => entry.reason === 'client-holds-no-drift-records' && entry.tag === 'c02'),
+      'a member that only lost its socket is still judged');
+    assertEqual(dropped.excused.length, 0, 'and nothing is excused');
+  });
+
   await check('harness-refusals: stall epoch discontinuity is publication-only', async () => {
     const result = evaluateRefusals(evidence({ client: { polls: polls(['e1', 'e2']) } }));
     assert(has(result, 'required-context-absent:stallCountByClient[c01]'), 'stall context reason');

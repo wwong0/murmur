@@ -1044,6 +1044,477 @@
         "startLatenessMaxMs": 600,
         "resync": { "windowMs": 1000, "medianMaxMs": 40, "holdMs": 30000, "maxMs": 2000 }
       }
+    },
+    "churn-join": {
+      "name": "shakedown/churn-join",
+      "delivery": "host",
+      "publishes": false,
+      "clients": 5,
+      "capacityMbps": 10,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": {
+            "rate": "10mbit",
+            "burst": "32kbit",
+            "latency": "400ms"
+          }
+        },
+        {
+          "container": "client",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": {
+            "rate": "10mbit",
+            "burst": "32kbit",
+            "latency": "400ms"
+          }
+        }
+      ],
+      "backgroundLoadMbps": null,
+      "runLengthMs": 135000,
+      "excludedPrefixMs": 60000,
+      "measureWindowMs": 75000,
+      "content": {
+        "dir": "/media",
+        "identity": "step0-content-media-v1"
+      },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "driftLogMissedMax": 0,
+        "responseCutShortMaxBytes": 1129000,
+        "responseSettleGapMs": 3000,
+        "conservationChannelBytes": 131071,
+        "conservationRelativeMax": 0.05,
+        "conservationDeliveryGapMs": 3000,
+        "steadyUtilisationMax": 0.9,
+        "steadyDownloadRatioMin": 0.95,
+        "steadyDownloadRatioMax": 1.25,
+        "steadyRealtimeMin": 0.98,
+        "steadyCapUsedMax": 0.9
+      },
+      "peerExchange": true,
+      "positionOffsetMsByClient": {
+        "c01": 0,
+        "c02": 0,
+        "c03": 0,
+        "c04": 0,
+        "c05": 0
+      },
+      "figureKinds": [
+        "roster-event"
+      ],
+      "excusals": {
+        "bytelessCancelledReceipt": true
+      },
+      "rosterEvent": {
+        "kind": "join",
+        "client": "c05",
+        "at": "measure-window-start"
+      },
+      "churn": {
+        "attemptsMax": 3,
+        "stall": {
+          "gapMs": 250,
+          "beforeMs": 60000,
+          "afterMs": 60000
+        },
+        "firstFrameMaxMs": 6000,
+        "resync": {
+          "windowMs": 1000,
+          "medianMaxMs": 40,
+          "holdMs": 30000,
+          "maxMs": 2000
+        },
+        "fill": {
+          "overMs": 60000,
+          "peerFractionMin": 0.6,
+          "hostBodiesMax": 3
+        },
+        "runwayMinMs": 15000,
+        "horizonMs": 60000
+      }
+    },
+    "churn-leave-clean": {
+      "name": "shakedown/churn-leave-clean",
+      "delivery": "host",
+      "publishes": false,
+      "clients": 5,
+      "capacityMbps": 10,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": {
+            "rate": "10mbit",
+            "burst": "32kbit",
+            "latency": "400ms"
+          }
+        },
+        {
+          "container": "client",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": {
+            "rate": "10mbit",
+            "burst": "32kbit",
+            "latency": "400ms"
+          }
+        }
+      ],
+      "backgroundLoadMbps": null,
+      "runLengthMs": 135000,
+      "excludedPrefixMs": 60000,
+      "measureWindowMs": 75000,
+      "content": {
+        "dir": "/media",
+        "identity": "step0-content-media-v1"
+      },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "driftLogMissedMax": 0,
+        "responseCutShortMaxBytes": 1129000,
+        "responseSettleGapMs": 3000,
+        "conservationChannelBytes": 131071,
+        "conservationRelativeMax": 0.05,
+        "conservationDeliveryGapMs": 3000,
+        "steadyUtilisationMax": 0.9,
+        "steadyDownloadRatioMin": 0.95,
+        "steadyDownloadRatioMax": 1.25,
+        "steadyRealtimeMin": 0.98,
+        "steadyCapUsedMax": 0.9
+      },
+      "peerExchange": true,
+      "positionOffsetMsByClient": {
+        "c01": 0,
+        "c02": 0,
+        "c03": 0,
+        "c04": 0,
+        "c05": 0
+      },
+      "figureKinds": [
+        "roster-event"
+      ],
+      "excusals": {
+        "bytelessCancelledReceipt": true
+      },
+      "rosterEvent": {
+        "kind": "leave-clean",
+        "client": "c03",
+        "at": "measure-window-start"
+      },
+      "churn": {
+        "attemptsMax": 3,
+        "stall": {
+          "gapMs": 250,
+          "beforeMs": 60000,
+          "afterMs": 60000
+        },
+        "runwayMinMs": 15000,
+        "horizonMs": 60000
+      }
+    },
+    "churn-leave-silent": {
+      "name": "shakedown/churn-leave-silent",
+      "delivery": "host",
+      "publishes": false,
+      "clients": 5,
+      "capacityMbps": 10,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": {
+            "rate": "10mbit",
+            "burst": "32kbit",
+            "latency": "400ms"
+          }
+        },
+        {
+          "container": "client",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": {
+            "rate": "10mbit",
+            "burst": "32kbit",
+            "latency": "400ms"
+          }
+        }
+      ],
+      "backgroundLoadMbps": null,
+      "runLengthMs": 135000,
+      "excludedPrefixMs": 60000,
+      "measureWindowMs": 75000,
+      "content": {
+        "dir": "/media",
+        "identity": "step0-content-media-v1"
+      },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "driftLogMissedMax": 0,
+        "responseCutShortMaxBytes": 1129000,
+        "responseSettleGapMs": 3000,
+        "conservationChannelBytes": 131071,
+        "conservationRelativeMax": 0.05,
+        "conservationDeliveryGapMs": 3000,
+        "steadyUtilisationMax": 0.9,
+        "steadyDownloadRatioMin": 0.95,
+        "steadyDownloadRatioMax": 1.25,
+        "steadyRealtimeMin": 0.98,
+        "steadyCapUsedMax": 0.9
+      },
+      "peerExchange": true,
+      "positionOffsetMsByClient": {
+        "c01": 0,
+        "c02": 0,
+        "c03": 0,
+        "c04": 0,
+        "c05": 0
+      },
+      "figureKinds": [
+        "roster-event"
+      ],
+      "excusals": {
+        "bytelessCancelledReceipt": true
+      },
+      "rosterEvent": {
+        "kind": "leave-silent",
+        "client": "c03",
+        "at": "measure-window-start"
+      },
+      "churn": {
+        "attemptsMax": 3,
+        "stall": {
+          "gapMs": 250,
+          "beforeMs": 60000,
+          "afterMs": 60000
+        },
+        "runwayMinMs": 15000,
+        "horizonMs": 60000
+      }
+    },
+    "churn-drop-socket": {
+      "name": "shakedown/churn-drop-socket",
+      "delivery": "host",
+      "publishes": false,
+      "clients": 5,
+      "capacityMbps": 10,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": {
+            "rate": "10mbit",
+            "burst": "32kbit",
+            "latency": "400ms"
+          }
+        },
+        {
+          "container": "client",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": {
+            "rate": "10mbit",
+            "burst": "32kbit",
+            "latency": "400ms"
+          }
+        }
+      ],
+      "backgroundLoadMbps": null,
+      "runLengthMs": 135000,
+      "excludedPrefixMs": 60000,
+      "measureWindowMs": 75000,
+      "content": {
+        "dir": "/media",
+        "identity": "step0-content-media-v1"
+      },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "driftLogMissedMax": 0,
+        "responseCutShortMaxBytes": 1129000,
+        "responseSettleGapMs": 3000,
+        "conservationChannelBytes": 131071,
+        "conservationRelativeMax": 0.05,
+        "conservationDeliveryGapMs": 3000,
+        "steadyUtilisationMax": 0.9,
+        "steadyDownloadRatioMin": 0.95,
+        "steadyDownloadRatioMax": 1.25,
+        "steadyRealtimeMin": 0.98,
+        "steadyCapUsedMax": 0.9
+      },
+      "peerExchange": true,
+      "positionOffsetMsByClient": {
+        "c01": 0,
+        "c02": 0,
+        "c03": 0,
+        "c04": 0,
+        "c05": 0
+      },
+      "figureKinds": [
+        "roster-event"
+      ],
+      "excusals": {
+        "bytelessCancelledReceipt": true
+      },
+      "rosterEvent": {
+        "kind": "drop-socket",
+        "client": "c03",
+        "at": "measure-window-start"
+      },
+      "churn": {
+        "attemptsMax": 3,
+        "stall": {
+          "gapMs": 250,
+          "beforeMs": 60000,
+          "afterMs": 60000
+        },
+        "runwayMinMs": 15000
+      }
+    },
+    "churn-leave-first": {
+      "name": "shakedown/churn-leave-first",
+      "delivery": "host",
+      "publishes": false,
+      "clients": 5,
+      "capacityMbps": 10,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": {
+            "rate": "10mbit",
+            "burst": "32kbit",
+            "latency": "400ms"
+          }
+        },
+        {
+          "container": "client",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": {
+            "rate": "10mbit",
+            "burst": "32kbit",
+            "latency": "400ms"
+          }
+        }
+      ],
+      "backgroundLoadMbps": null,
+      "runLengthMs": 255000,
+      "excludedPrefixMs": 60000,
+      "measureWindowMs": 75000,
+      "content": {
+        "dir": "/media",
+        "identity": "step0-content-media-v1"
+      },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "driftLogMissedMax": 0,
+        "responseCutShortMaxBytes": 1129000,
+        "responseSettleGapMs": 3000,
+        "conservationChannelBytes": 131071,
+        "conservationRelativeMax": 0.05,
+        "conservationDeliveryGapMs": 3000,
+        "steadyUtilisationMax": 0.9,
+        "steadyDownloadRatioMin": 0.95,
+        "steadyDownloadRatioMax": 1.25,
+        "steadyRealtimeMin": 0.98,
+        "steadyCapUsedMax": 0.9
+      },
+      "peerExchange": true,
+      "positionOffsetMsByClient": {
+        "c01": 0,
+        "c02": 0,
+        "c03": 0,
+        "c04": 0,
+        "c05": 0
+      },
+      "figureKinds": [
+        "roster-event"
+      ],
+      "excusals": {
+        "bytelessCancelledReceipt": true
+      },
+      "rosterEvent": {
+        "kind": "leave-first",
+        "at": "capacity-schedule-edge"
+      },
+      "churn": {
+        "attemptsMax": 3,
+        "stall": {
+          "gapMs": 250,
+          "beforeMs": 60000,
+          "afterMs": 60000
+        },
+        "horizonMs": 15000
+      },
+      "capacitySchedule": {
+        "dropAfterReadyMs": 60000,
+        "drop": {
+          "container": "origin",
+          "network": "wa-media",
+          "discipline": "tbf",
+          "params": {
+            "rate": "2mbit",
+            "burst": "32kbit",
+            "latency": "400ms"
+          }
+        },
+        "edgeHeldAheadMsBelow": 15000,
+        "ceilingMs": 120000,
+        "rise": {
+          "container": "origin",
+          "network": "wa-media",
+          "discipline": "tbf",
+          "params": {
+            "rate": "10mbit",
+            "burst": "32kbit",
+            "latency": "400ms"
+          }
+        },
+        "recordAfterRiseMs": 75000,
+        "riseOn": "first-fetcher-edge"
+      }
     }
   },
   "hostorigin-nop2p": {
@@ -3110,5 +3581,878 @@
       "behindHeldAheadMsBelow": 15000
     },
     "excusals": { "bytelessCancelledReceipt": true }
+  },
+  "baseline-join": {
+    "name": "baseline-join",
+    "delivery": "host",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 10,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      },
+      {
+        "container": "client",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "runLengthMs": 240000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 120000,
+    "content": {
+      "dir": "/media",
+      "identity": "step0-content-media-v1"
+    },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "driftLogMissedMax": 0,
+      "responseCutShortMaxBytes": 1129000,
+      "responseSettleGapMs": 3000,
+      "conservationChannelBytes": 131071,
+      "conservationRelativeMax": 0.05,
+      "conservationDeliveryGapMs": 3000,
+      "steadyUtilisationMax": 0.9,
+      "steadyDownloadRatioMin": 0.95,
+      "steadyDownloadRatioMax": 1.25,
+      "steadyRealtimeMin": 0.98,
+      "steadyCapUsedMax": 0.9
+    },
+    "peerExchange": true,
+    "positionOffsetMsByClient": {
+      "c01": 0,
+      "c02": 0,
+      "c03": 0,
+      "c04": 0,
+      "c05": 0
+    },
+    "figureKinds": [
+      "roster-event"
+    ],
+    "excusals": {
+      "bytelessCancelledReceipt": true
+    },
+    "rosterEvent": {
+      "kind": "join",
+      "client": "c05",
+      "at": "measure-window-start"
+    },
+    "churn": {
+      "attemptsMax": 3,
+      "stall": {
+        "gapMs": 250,
+        "beforeMs": 60000,
+        "afterMs": 60000
+      },
+      "firstFrameMaxMs": 6000,
+      "resync": {
+        "windowMs": 1000,
+        "medianMaxMs": 40,
+        "holdMs": 30000,
+        "maxMs": 2000
+      },
+      "fill": {
+        "overMs": 60000,
+        "peerFractionMin": 0.6,
+        "hostBodiesMax": 3
+      },
+      "runwayMinMs": 15000,
+      "horizonMs": 60000
+    }
+  },
+  "join": {
+    "name": "join",
+    "delivery": "host",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 10,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      },
+      {
+        "container": "client",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "runLengthMs": 240000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 120000,
+    "content": {
+      "dir": "/media",
+      "identity": "step0-content-media-v1"
+    },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "driftLogMissedMax": 0,
+      "responseCutShortMaxBytes": 1129000,
+      "responseSettleGapMs": 3000,
+      "conservationChannelBytes": 131071,
+      "conservationRelativeMax": 0.05,
+      "conservationDeliveryGapMs": 3000,
+      "steadyUtilisationMax": 0.9,
+      "steadyDownloadRatioMin": 0.95,
+      "steadyDownloadRatioMax": 1.25,
+      "steadyRealtimeMin": 0.98,
+      "steadyCapUsedMax": 0.9
+    },
+    "peerExchange": true,
+    "positionOffsetMsByClient": {
+      "c01": 0,
+      "c02": 0,
+      "c03": 0,
+      "c04": 0,
+      "c05": 0
+    },
+    "figureKinds": [
+      "roster-event"
+    ],
+    "excusals": {
+      "bytelessCancelledReceipt": true
+    },
+    "rosterEvent": {
+      "kind": "join",
+      "client": "c05",
+      "at": "measure-window-start"
+    },
+    "churn": {
+      "attemptsMax": 3,
+      "stall": {
+        "gapMs": 250,
+        "beforeMs": 60000,
+        "afterMs": 60000
+      },
+      "firstFrameMaxMs": 6000,
+      "resync": {
+        "windowMs": 1000,
+        "medianMaxMs": 40,
+        "holdMs": 30000,
+        "maxMs": 2000
+      },
+      "fill": {
+        "overMs": 60000,
+        "peerFractionMin": 0.6,
+        "hostBodiesMax": 3
+      },
+      "runwayMinMs": 15000,
+      "horizonMs": 60000
+    }
+  },
+  "baseline-leave-clean": {
+    "name": "baseline-leave-clean",
+    "delivery": "host",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 10,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      },
+      {
+        "container": "client",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "runLengthMs": 240000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 120000,
+    "content": {
+      "dir": "/media",
+      "identity": "step0-content-media-v1"
+    },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "driftLogMissedMax": 0,
+      "responseCutShortMaxBytes": 1129000,
+      "responseSettleGapMs": 3000,
+      "conservationChannelBytes": 131071,
+      "conservationRelativeMax": 0.05,
+      "conservationDeliveryGapMs": 3000,
+      "steadyUtilisationMax": 0.9,
+      "steadyDownloadRatioMin": 0.95,
+      "steadyDownloadRatioMax": 1.25,
+      "steadyRealtimeMin": 0.98,
+      "steadyCapUsedMax": 0.9
+    },
+    "peerExchange": true,
+    "positionOffsetMsByClient": {
+      "c01": 0,
+      "c02": 0,
+      "c03": 0,
+      "c04": 0,
+      "c05": 0
+    },
+    "figureKinds": [
+      "roster-event"
+    ],
+    "excusals": {
+      "bytelessCancelledReceipt": true
+    },
+    "rosterEvent": {
+      "kind": "leave-clean",
+      "client": "c03",
+      "at": "measure-window-start"
+    },
+    "churn": {
+      "attemptsMax": 3,
+      "stall": {
+        "gapMs": 250,
+        "beforeMs": 60000,
+        "afterMs": 60000
+      },
+      "runwayMinMs": 15000,
+      "horizonMs": 60000
+    }
+  },
+  "leave-clean": {
+    "name": "leave-clean",
+    "delivery": "host",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 10,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      },
+      {
+        "container": "client",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "runLengthMs": 240000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 120000,
+    "content": {
+      "dir": "/media",
+      "identity": "step0-content-media-v1"
+    },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "driftLogMissedMax": 0,
+      "responseCutShortMaxBytes": 1129000,
+      "responseSettleGapMs": 3000,
+      "conservationChannelBytes": 131071,
+      "conservationRelativeMax": 0.05,
+      "conservationDeliveryGapMs": 3000,
+      "steadyUtilisationMax": 0.9,
+      "steadyDownloadRatioMin": 0.95,
+      "steadyDownloadRatioMax": 1.25,
+      "steadyRealtimeMin": 0.98,
+      "steadyCapUsedMax": 0.9
+    },
+    "peerExchange": true,
+    "positionOffsetMsByClient": {
+      "c01": 0,
+      "c02": 0,
+      "c03": 0,
+      "c04": 0,
+      "c05": 0
+    },
+    "figureKinds": [
+      "roster-event"
+    ],
+    "excusals": {
+      "bytelessCancelledReceipt": true
+    },
+    "rosterEvent": {
+      "kind": "leave-clean",
+      "client": "c03",
+      "at": "measure-window-start"
+    },
+    "churn": {
+      "attemptsMax": 3,
+      "stall": {
+        "gapMs": 250,
+        "beforeMs": 60000,
+        "afterMs": 60000
+      },
+      "runwayMinMs": 15000,
+      "horizonMs": 60000
+    }
+  },
+  "baseline-leave-silent": {
+    "name": "baseline-leave-silent",
+    "delivery": "host",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 10,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      },
+      {
+        "container": "client",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "runLengthMs": 240000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 120000,
+    "content": {
+      "dir": "/media",
+      "identity": "step0-content-media-v1"
+    },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "driftLogMissedMax": 0,
+      "responseCutShortMaxBytes": 1129000,
+      "responseSettleGapMs": 3000,
+      "conservationChannelBytes": 131071,
+      "conservationRelativeMax": 0.05,
+      "conservationDeliveryGapMs": 3000,
+      "steadyUtilisationMax": 0.9,
+      "steadyDownloadRatioMin": 0.95,
+      "steadyDownloadRatioMax": 1.25,
+      "steadyRealtimeMin": 0.98,
+      "steadyCapUsedMax": 0.9
+    },
+    "peerExchange": true,
+    "positionOffsetMsByClient": {
+      "c01": 0,
+      "c02": 0,
+      "c03": 0,
+      "c04": 0,
+      "c05": 0
+    },
+    "figureKinds": [
+      "roster-event"
+    ],
+    "excusals": {
+      "bytelessCancelledReceipt": true
+    },
+    "rosterEvent": {
+      "kind": "leave-silent",
+      "client": "c03",
+      "at": "measure-window-start"
+    },
+    "churn": {
+      "attemptsMax": 3,
+      "stall": {
+        "gapMs": 250,
+        "beforeMs": 60000,
+        "afterMs": 60000
+      },
+      "runwayMinMs": 15000,
+      "horizonMs": 60000
+    }
+  },
+  "leave-silent": {
+    "name": "leave-silent",
+    "delivery": "host",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 10,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      },
+      {
+        "container": "client",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "runLengthMs": 240000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 120000,
+    "content": {
+      "dir": "/media",
+      "identity": "step0-content-media-v1"
+    },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "driftLogMissedMax": 0,
+      "responseCutShortMaxBytes": 1129000,
+      "responseSettleGapMs": 3000,
+      "conservationChannelBytes": 131071,
+      "conservationRelativeMax": 0.05,
+      "conservationDeliveryGapMs": 3000,
+      "steadyUtilisationMax": 0.9,
+      "steadyDownloadRatioMin": 0.95,
+      "steadyDownloadRatioMax": 1.25,
+      "steadyRealtimeMin": 0.98,
+      "steadyCapUsedMax": 0.9
+    },
+    "peerExchange": true,
+    "positionOffsetMsByClient": {
+      "c01": 0,
+      "c02": 0,
+      "c03": 0,
+      "c04": 0,
+      "c05": 0
+    },
+    "figureKinds": [
+      "roster-event"
+    ],
+    "excusals": {
+      "bytelessCancelledReceipt": true
+    },
+    "rosterEvent": {
+      "kind": "leave-silent",
+      "client": "c03",
+      "at": "measure-window-start"
+    },
+    "churn": {
+      "attemptsMax": 3,
+      "stall": {
+        "gapMs": 250,
+        "beforeMs": 60000,
+        "afterMs": 60000
+      },
+      "runwayMinMs": 15000,
+      "horizonMs": 60000
+    }
+  },
+  "drop-socket": {
+    "name": "drop-socket",
+    "delivery": "host",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 10,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      },
+      {
+        "container": "client",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "runLengthMs": 240000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 120000,
+    "content": {
+      "dir": "/media",
+      "identity": "step0-content-media-v1"
+    },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "driftLogMissedMax": 0,
+      "responseCutShortMaxBytes": 1129000,
+      "responseSettleGapMs": 3000,
+      "conservationChannelBytes": 131071,
+      "conservationRelativeMax": 0.05,
+      "conservationDeliveryGapMs": 3000,
+      "steadyUtilisationMax": 0.9,
+      "steadyDownloadRatioMin": 0.95,
+      "steadyDownloadRatioMax": 1.25,
+      "steadyRealtimeMin": 0.98,
+      "steadyCapUsedMax": 0.9
+    },
+    "peerExchange": true,
+    "positionOffsetMsByClient": {
+      "c01": 0,
+      "c02": 0,
+      "c03": 0,
+      "c04": 0,
+      "c05": 0
+    },
+    "figureKinds": [
+      "roster-event"
+    ],
+    "excusals": {
+      "bytelessCancelledReceipt": true
+    },
+    "rosterEvent": {
+      "kind": "drop-socket",
+      "client": "c03",
+      "at": "measure-window-start"
+    },
+    "churn": {
+      "attemptsMax": 3,
+      "stall": {
+        "gapMs": 250,
+        "beforeMs": 60000,
+        "afterMs": 60000
+      },
+      "runwayMinMs": 15000
+    }
+  },
+  "leave-first": {
+    "name": "leave-first",
+    "delivery": "host",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 10,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      },
+      {
+        "container": "client",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "runLengthMs": 480000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 120000,
+    "content": {
+      "dir": "/media",
+      "identity": "step0-content-media-v1"
+    },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "driftLogMissedMax": 0,
+      "responseCutShortMaxBytes": 1129000,
+      "responseSettleGapMs": 3000,
+      "conservationChannelBytes": 131071,
+      "conservationRelativeMax": 0.05,
+      "conservationDeliveryGapMs": 3000,
+      "steadyUtilisationMax": 0.9,
+      "steadyDownloadRatioMin": 0.95,
+      "steadyDownloadRatioMax": 1.25,
+      "steadyRealtimeMin": 0.98,
+      "steadyCapUsedMax": 0.9
+    },
+    "peerExchange": true,
+    "positionOffsetMsByClient": {
+      "c01": 0,
+      "c02": 0,
+      "c03": 0,
+      "c04": 0,
+      "c05": 0
+    },
+    "figureKinds": [
+      "roster-event"
+    ],
+    "excusals": {
+      "bytelessCancelledReceipt": true
+    },
+    "rosterEvent": {
+      "kind": "leave-first",
+      "at": "capacity-schedule-edge"
+    },
+    "churn": {
+      "attemptsMax": 3,
+      "stall": {
+        "gapMs": 250,
+        "beforeMs": 60000,
+        "afterMs": 60000
+      },
+      "horizonMs": 15000
+    },
+    "capacitySchedule": {
+      "dropAfterReadyMs": 120000,
+      "drop": {
+        "container": "origin",
+        "network": "wa-media",
+        "discipline": "tbf",
+        "params": {
+          "rate": "2mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      },
+      "edgeHeldAheadMsBelow": 15000,
+      "ceilingMs": 240000,
+      "rise": {
+        "container": "origin",
+        "network": "wa-media",
+        "discipline": "tbf",
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      },
+      "recordAfterRiseMs": 120000,
+      "riseOn": "first-fetcher-edge"
+    }
+  },
+  "drop-recover": {
+    "name": "drop-recover",
+    "delivery": "host",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 10,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      },
+      {
+        "container": "client",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "runLengthMs": 660000,
+    "excludedPrefixMs": 120000,
+    "measureWindowMs": 300000,
+    "content": {
+      "dir": "/media",
+      "identity": "step0-content-media-v1"
+    },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "driftLogMissedMax": 0,
+      "responseCutShortMaxBytes": 1129000,
+      "responseSettleGapMs": 3000,
+      "conservationChannelBytes": 131071,
+      "conservationRelativeMax": 0.05,
+      "conservationDeliveryGapMs": 3000,
+      "steadyUtilisationMax": 0.9,
+      "steadyDownloadRatioMin": 0.95,
+      "steadyDownloadRatioMax": 1.25,
+      "steadyRealtimeMin": 0.98,
+      "steadyCapUsedMax": 0.9
+    },
+    "peerExchange": true,
+    "positionOffsetMsByClient": {
+      "c01": 0,
+      "c02": 0,
+      "c03": 0,
+      "c04": 0,
+      "c05": 0
+    },
+    "figureKinds": [
+      "byte",
+      "distance-behind"
+    ],
+    "reading": {
+      "kind": "control",
+      "productInputs": true,
+      "spanMs": 60000,
+      "spanEdgeSegments": 1,
+      "acceptedRunsMin": 2,
+      "attemptsMax": 3,
+      "control": {
+        "condition": "p2p-scattered",
+        "peerFractionMin": 0.5
+      },
+      "criteria": {
+        "dropRecovery": {
+          "maxMs": 240000
+        },
+        "distanceBehind": {
+          "maxMs": 600,
+          "windowMs": 2000,
+          "minRecords": 20
+        }
+      },
+      "published": [
+        "startWait",
+        "startRecovery"
+      ],
+      "hostPollCoverage": true,
+      "aheadMsMin": 15000,
+      "scatteredSpreadMsAbove": 4000,
+      "behindHeldAheadMsBelow": 15000
+    },
+    "excusals": {
+      "bytelessCancelledReceipt": true
+    },
+    "capacitySchedule": {
+      "dropAfterReadyMs": 120000,
+      "drop": {
+        "container": "origin",
+        "network": "wa-media",
+        "discipline": "tbf",
+        "params": {
+          "rate": "2mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      },
+      "edgeHeldAheadMsBelow": 15000,
+      "ceilingMs": 240000,
+      "rise": {
+        "container": "origin",
+        "network": "wa-media",
+        "discipline": "tbf",
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      },
+      "recordAfterRiseMs": 300000
+    }
   }
 }

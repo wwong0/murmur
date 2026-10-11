@@ -13,7 +13,8 @@
     "build": "node scripts/check-structure.mjs && node scripts/build.mjs",
     "check": "node scripts/check-structure.mjs && node scripts/protocol-check.mjs",
     "ratios": "node scripts/check-structure.mjs --ratios",
-    "verify:browser": "node scripts/verify-browser.mjs"
+    "verify:browser": "node scripts/verify-browser.mjs",
+    "harness:build": "node scripts/harness/images.mjs"
   },
   "dependencies": {
     "bittorrent-tracker": "11.2.3",

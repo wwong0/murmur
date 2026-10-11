@@ -6,7 +6,7 @@ import { createDeadline, createManifestFile, createNdjson, prepareRunDirectory, 
 import { startOriginMonitor, stopOriginMonitor } from './runner/origin-monitor.mjs';
 import { recomputeRunDirectory } from './harness-figures.mjs';
 import { isPublishedFigure } from './figures/publication.mjs';
-import { attachClockJoinRecorder, attachTabTakenDetector, boundaryExpression, createRequestRecorder, installStallRecorder, pollExpression } from './harness/cdp-records.mjs';
+import { attachClockJoinRecorder, attachPresenceRecorder, attachTabTakenDetector, boundaryExpression, createRequestRecorder, installStallRecorder, pollExpression } from './harness/cdp-records.mjs';
 import { urlsForDelivery } from './harness/topology.mjs';
 import { maybeInjectDisturbance } from './harness/disturbance.mjs';
 import {
@@ -28,6 +28,8 @@ import { timebaseJoin } from './figures/control-figures.mjs';
 import { assignmentControlReason, recordControls } from './harness/assignment-control.mjs';
 import { capacityScheduleReason, recordSchedule, scheduleLengthMs } from './harness/capacity-schedule.mjs';
 import { createAskEvidence, recordHostStats } from './harness/ask-evidence.mjs';
+import { finalizeRosterEvent, isHeldJoin, issueRosterEvent, rosterEventTarget } from './harness/roster-event.mjs';
+import { viewerOrder } from '../public/lib/edge-assignment.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -164,7 +166,9 @@ function defaultRunDir(conditionName, condition = conditionForName(conditionName
 }
 
 function newSession(tag, role) {
-  return { tag, role, records: [], polls: [], driftLogMissed: 0, cursor: 0, maxDrainGapMs: 0, lastDrainAt: null, stallEpoch: crypto.randomUUID(), tabCollision: false, endPlayback: null };
+  return { tag, role, records: [], polls: [], driftLogMissed: 0, cursor: 0, maxDrainGapMs: 0,
+    lastDrainAt: null, stallEpoch: crypto.randomUUID(), tabCollision: false, endPlayback: null,
+    active: false, expectedEvent: false, measureLoops: [], controlLoop: null };
 }
 
 function clientDeclaration(tags, roles) {
@@ -306,6 +310,7 @@ async function prepareClient(session, url, deadline, readyTimeoutMs = 30_000, op
   recorder.setPageMapping(pageClock);
   session.removeCollisionListener = attachTabTakenDetector(tab, () => { session.tabCollision = true; });
   session.clockJoinRecorder = attachClockJoinRecorder(tab);
+  session.presenceRecorder = attachPresenceRecorder(tab);
   const navigatedAt = Date.now();
   await options.beforeNavigate?.(session);
   await tab.send('Page.navigate', { url });
@@ -317,7 +322,9 @@ async function prepareClient(session, url, deadline, readyTimeoutMs = 30_000, op
 }
 
 async function prepareHostClient(session, url, deadline, options = {}) {
+  await session.tab.send('Network.enable');
   await session.tab.send('Page.enable');
+  session.presenceRecorder = attachPresenceRecorder(session.tab);
   await options.beforeNavigate?.(session);
   await session.tab.send('Page.navigate', { url });
   await deadline.waitFor(`host ${session.tag}`, () => session.tab.evaluate('Boolean(window.__app && __app.hostCounters())'), Boolean, 30_000, 100);
@@ -419,13 +426,17 @@ export function decideFinalization({ evaluation, recomputed, figureKinds, failur
     // run refusal leaves drift eligible (6a design.md D5; d1-findings.md F2).
     writeDrift: driftAllowed && evaluation?.figures?.drift === true && publishedDrift,
     ...(behindAllowed ? { writeBehind: behindFigure !== null } : {}),
+    // The churn readings are rows that carry their own refusals, as the behind rows do.
+    ...(hasKinds && figureKinds.includes('roster-event') ? { writeRosterEvent: Array.isArray(recomputed?.rosterEvent) } : {}),
+    ...(hasKinds && figureKinds.includes('distance-behind') ? { writeDistanceBehind: Boolean(recomputed?.distanceBehind) } : {}),
   };
   if (evaluation?.runRefused) return { status: 'refused', outcome: 'refused', exitCode: 1, ...writes, reason: 'run-refusal' };
   return { status: 'complete', outcome: 'pass', exitCode: 0, ...writes, reason: evaluation?.refused ? 'publication-refusal' : 'published' };
 }
 
 function clearPublishedOutputs(runDir) {
-  for (const name of ['published-figures.json', 'bytes-by-client.csv', 'utilisation.csv', 'published-drift.json', 'drift-series.csv', 'drift.svg', 'published-behind.json']) {
+  for (const name of ['published-figures.json', 'bytes-by-client.csv', 'utilisation.csv', 'published-drift.json', 'drift-series.csv', 'drift.svg', 'published-behind.json',
+    'published-roster-event.json', 'published-distance-behind.json']) {
     fs.rmSync(path.join(runDir, name), { force: true });
   }
 }
@@ -456,6 +467,8 @@ export function settleFinalization({ decision, manifestFile, runDir, recomputed,
       if (!Array.isArray(recomputed?.behind)) throw new Error('behind output is not an array of rows');
       outputs.push(['published-behind.json', `${JSON.stringify(recomputed.behind, null, 2)}\n`]);
     }
+    if (decision.writeRosterEvent) outputs.push(['published-roster-event.json', `${JSON.stringify(recomputed.rosterEvent, null, 2)}\n`]);
+    if (decision.writeDistanceBehind) outputs.push(['published-distance-behind.json', `${JSON.stringify(recomputed.distanceBehind, null, 2)}\n`]);
     for (const [name, contents] of outputs) {
       const tempPath = path.join(runDir, `.${name}.${crypto.randomUUID()}.tmp`);
       temporary.push(tempPath);
@@ -466,6 +479,8 @@ export function settleFinalization({ decision, manifestFile, runDir, recomputed,
     if (decision.writeByte) figures.byte = recomputed.publishedByte;
     if (decision.writeDrift) figures.drift = recomputed.publishedDrift;
     if (decision.writeBehind) figures.behind = recomputed.behind;
+    if (decision.writeRosterEvent) figures.rosterEvent = recomputed.rosterEvent;
+    if (decision.writeDistanceBehind) figures.distanceBehind = recomputed.distanceBehind;
     manifestFile.merge({
       status: decision.status,
       outcome: decision.outcome,
@@ -519,6 +534,15 @@ function evidenceFor(sessions, originStart, originEnd, manifest, runDir, hostEvi
     seek: manifest.seek ?? null,
     capacityStep: manifest.capacityStep ?? null,
     capacitySchedule: manifest.capacitySchedule ?? null,
+    rosterEvent: (() => {
+      try { return JSON.parse(fs.readFileSync(path.join(runDir, 'roster-event.json'), 'utf8')); } catch { return null; }
+    })(),
+    presence: Object.fromEntries(manifest.declaredClientTags.map((tag) => {
+      try {
+        return [tag, fs.readFileSync(path.join(runDir, `client-${tag}.presence.ndjson`), 'utf8')
+          .split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line))];
+      } catch { return [tag, []]; }
+    })),
     topologyBoundaries: manifest.topology?.boundaries ?? null,
   };
   return { ...base, ...arm.evidence(sessions, hostEvidence, runDir) };
@@ -527,6 +551,7 @@ function evidenceFor(sessions, originStart, originEnd, manifest, runDir, hostEvi
 async function disposeSession(session) {
   session.removeCollisionListener?.();
   session.clockJoinRecorder?.dispose();
+  session.presenceRecorder?.dispose();
   session.recorder?.dispose();
   if (session.dispose) await session.dispose();
 }
@@ -561,6 +586,8 @@ export async function runHarness({ conditionName, condition = conditionForName(c
   const deadline = createDeadline({ startedAt, maxWallMs });
   const room = `harness-${crypto.randomUUID()}`;
   const sessions = tags.map((tag, index) => ({ ...newSession(tag, roles[index]), receiptCursor: 0, receiptLogMissed: 0, receiptLogReset: false }));
+  const heldTag = isHeldJoin(condition) ? rosterEventTarget(condition) : null;
+  const activeSessions = () => sessions.filter((session) => session.active === true);
   let originSession = null;
   let allSessions = sessions;
   const loops = [];
@@ -577,6 +604,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
   let controlEvidence = null;
   let askEvidence = null;
   let recordingEndTargetMs = null;
+  let rosterEvent = null;
   try {
     const preparedTopology = await topology.prepare({ condition, runDir: prepared.runDir, manifest: manifestFile.get() });
     manifestFile.merge({ topology: { status: 'prepared', ...preparedTopology } });
@@ -607,7 +635,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       const hostPoll = startLoop(() => controlEvidence.pollHost(), 250, (error) => { failure ??= error; });
       loops.push(hostPoll);
     }
-    boundaryOptions = arm.boundaryOptions(allSessions);
+    boundaryOptions = arm.boundaryOptions(originSession ? [originSession, ...sessions] : sessions);
     boundaryOptions.loopbackReader = () => topology.readLoopbackCounter();
     boundaryOptions.viewerLinkReader = () => topology.readViewerLinkCounters?.() ?? null;
     boundaryOptions.topologyBoundaryReader = (kind, room) => topology.captureBoundary?.({
@@ -616,7 +644,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     let pendingQualification = null;
     let lastJoinAtMs = null;
     const qualifyFirst = async () => {
-      const qualification = await arm.qualify(sessions, {
+      const qualification = await arm.qualify(activeSessions(), {
         originSession,
         originContainer: preparedTopology.containers?.origin,
         qualifyCdpBytes,
@@ -634,10 +662,49 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       manifestFile.write();
     };
     const startEcho = (session) => session.startEcho?.({ room: `${room}-probe`, out: `/results/${path.basename(prepared.runDir)}/client-${session.tag}.echo.ndjson`, intervalMs: ECHO_INTERVAL_MS, condition });
+    const startControlLoop = (session) => {
+      if (!controlEvidence || session.controlLoop) return;
+      const viewerPoll = startLoop(async () => { await controlEvidence.pollViewer(session); await askEvidence.drain(session); },
+        250, (error) => { if (!session.expectedEvent) failure ??= error; });
+      session.controlLoop = viewerPoll;
+      loops.push(viewerPoll);
+    };
+    const startMeasureLoops = (session) => {
+      if (session.measureLoops?.length) return;
+      const poll = startLoop(async () => {
+        const value = await session.tab.evaluate(pollExpression());
+        session.polls.push(value);
+        ndjson.append(`client-${session.tag}.poll.ndjson`, [value]);
+      }, POLL_INTERVAL_MS, (error) => { if (!session.expectedEvent) failure ??= error; });
+      const drain = startLoop(() => queuedDrain(session, ndjson, arm, Date.now()), DRAIN_INTERVAL_MS,
+        (error) => { if (!session.expectedEvent) failure ??= error; });
+      session.measureLoops = [poll, drain];
+      loops.push(poll, drain);
+    };
+    const stopSessionLoops = async (session, { keepControl = false } = {}) => {
+      for (const loop of session.measureLoops ?? []) loop.stop();
+      if (!keepControl) session.controlLoop?.stop();
+      await Promise.all([...(session.measureLoops ?? []), ...(keepControl ? [] : [session.controlLoop])]
+        .filter(Boolean).map((loop) => loop.promise.catch(() => {})));
+      session.measureLoops = [];
+      if (!keepControl) session.controlLoop = null;
+    };
+    const activateHeldJoiner = async (session) => {
+      const clientUrl = `${clientOriginUrl}/room.html?room=${encodeURIComponent(room)}&role=${session.role}&tab=${session.tag}`;
+      await prepareClient(session, clientUrl, deadline, arm.clientReadyTimeoutMs(condition), arm.prepareClientOptions({
+        condition, manifestFile, runDir: prepared.runDir,
+      }));
+      session.active = true;
+      startControlLoop(session);
+      startMeasureLoops(session);
+      await startEcho(session);
+      return { navigated: true, pageReadyMs: session.pageReadyMs };
+    };
     for (const [index, session] of sessions.entries()) {
       const clientUrl = `${clientOriginUrl}/room.html?room=${encodeURIComponent(room)}&role=${session.role}&tab=${session.tag}`;
       const acquired = await clientFactory({ tag: session.tag, role: session.role, room, url: clientUrl, condition, runDir: prepared.runDir });
       Object.assign(session, acquired);
+      if (session.tag === heldTag) continue;
       if (index === 0 && !session.tab) {
         manifestFile.merge({ cdpQualification: failedCdpQualification('qualification-unavailable:first-client-tab') });
         manifestFile.write();
@@ -648,15 +715,17 @@ export async function runHarness({ conditionName, condition = conditionForName(c
         manifestFile,
         runDir: prepared.runDir,
       }));
+      session.active = true;
       if (controlEvidence) {
         const viewerPoll = startLoop(async () => { await controlEvidence.pollViewer(session); await askEvidence.drain(session); },
-          250, (error) => { failure ??= error; });
+          250, (error) => { if (!session.expectedEvent) failure ??= error; });
+        session.controlLoop = viewerPoll;
         loops.push(viewerPoll);
       }
       if (index === 0 && !arm.qualifyAfterJoins) await qualifyFirst();
       // Not awaited: the joins go on while the first viewer's fetch is in flight.
       if (index === 0 && arm.qualifyAfterJoins) {
-        pendingQualification = Promise.resolve(arm.beginQualification(sessions, { beginLinkQualification }));
+        pendingQualification = Promise.resolve(arm.beginQualification(activeSessions(), { beginLinkQualification }));
         pendingQualification.catch(() => {});
       }
       if (!arm.qualifyAfterJoins) await startEcho(session);
@@ -666,11 +735,11 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     if (arm.qualifyAfterJoins) {
       lastJoinAtMs = Date.now();
       await qualifyFirst();
-      for (const session of sessions) await startEcho(session);
+      for (const session of activeSessions()) await startEcho(session);
     }
     const readControl = async () => {
       if (!originSession) return;
-      hostEvidence.assignmentControl = await recordControls({ condition, sessions: allSessions,
+      hostEvidence.assignmentControl = await recordControls({ condition, sessions: originSession ? [originSession, ...activeSessions()] : activeSessions(),
         record: hostEvidence.assignmentControl, runDir: prepared.runDir, manifestFile });
     };
     await readControl();
@@ -679,23 +748,37 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     // cadence cannot be established cannot produce a criterion-1 figure this
     // project may quote (design.md D6).
     await arm.openWindow({
-      sessions, condition, deadline, establishCadence, manifestFile, placeWindow,
-      drainAll: () => Promise.all(sessions.map((session) => queuedDrain(session, ndjson, arm, Date.now()))),
+      sessions: activeSessions(), condition, deadline, establishCadence, manifestFile, placeWindow,
+      drainAll: () => Promise.all(activeSessions().map((session) => queuedDrain(session, ndjson, arm, Date.now()))),
       drainEveryMs: DRAIN_INTERVAL_MS,
     });
     manifestFile.write();
 
-    for (const session of sessions) {
-      const poll = startLoop(async () => {
-        const value = await session.tab.evaluate(pollExpression());
-        session.polls.push(value);
-        ndjson.append(`client-${session.tag}.poll.ndjson`, [value]);
-      }, POLL_INTERVAL_MS, (error) => { failure ??= error; });
-      const drain = startLoop(() => queuedDrain(session, ndjson, arm, Date.now()), DRAIN_INTERVAL_MS, (error) => { failure ??= error; });
-      loops.push(poll, drain);
-    }
+    for (const session of activeSessions()) startMeasureLoops(session);
     await waitUntil(deadline, manifestFile.get().window.startMs);
-    const injection = await maybeInjectDisturbance(sessions, condition.disturbance);
+    const latestRoster = () => activeSessions().flatMap((session) => session.presenceRecorder?.snapshot?.() ?? [])
+      .filter((record) => Array.isArray(record?.roster)).sort((left, right) => left.seq - right.seq).at(-1)?.roster ?? [];
+    const viewerIds = () => viewerOrder(latestRoster());
+    const clientIds = () => Object.fromEntries(latestRoster().map((member) => [member.tabId, member.clientId]));
+    const issueEvent = async ({ client = null } = {}) => {
+      const kind = condition.rosterEvent?.kind;
+      const targetTag = client ?? rosterEventTarget(condition, kind);
+      const target = sessions.find((session) => session.tag === targetTag);
+      if (!target) throw new Error(`roster event target is unavailable: ${targetTag}`);
+      target.expectedEvent = true;
+      rosterEvent = await issueRosterEvent({ condition, topology, sessions, targetSession: target, room,
+        client: targetTag, runDir: prepared.runDir,
+        activateJoin: targetTag === heldTag ? activateHeldJoiner : undefined,
+        stopSession: ['leave-clean', 'leave-first'].includes(kind)
+          ? (session) => stopSessionLoops(session)
+          : undefined,
+        disposeSession: () => target.dispose?.(),
+      });
+      if (kind !== 'drop-socket') target.active = false;
+      return rosterEvent;
+    };
+    if (condition.rosterEvent && condition.rosterEvent.kind !== 'leave-first') await issueEvent();
+    const injection = await maybeInjectDisturbance(activeSessions(), condition.disturbance);
     if (injection) {
       injectionHarnessMs = injection.injectionHarnessMs;
       const disturbance = { ...condition.disturbance, ...injection };
@@ -703,7 +786,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       fs.writeFileSync(path.join(prepared.runDir, 'disturbance.json'), `${JSON.stringify(disturbance, null, 2)}\n`);
       manifestFile.write();
     }
-    const drainAll = () => Promise.all(sessions.map((session) => queuedDrain(session, ndjson, arm, Date.now())));
+    const drainAll = () => Promise.all(activeSessions().map((session) => queuedDrain(session, ndjson, arm, Date.now())));
     const writeSeek = (evidence) => {
       seekEvidence = evidence;
       manifestFile.merge({ seek: seekEvidence });
@@ -727,9 +810,10 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     // The deep phase runs with the poll and drain loops already going (9b design.md D5).
     const scheduled = () => recordSchedule({ condition, window: manifestFile.get().window, tags,
       viewerPolls: controlEvidence.viewerPolls, stepQdisc: (capacityStep) => topology.stepQdisc({ capacityStep }),
+      viewerIds, clientIds, onEdge: async (edge) => issueEvent({ client: edge.leaver }),
       manifestFile, runDir: prepared.runDir });
     if (condition.capacitySchedule && !condition.seek) recordingEndTargetMs = await scheduled();
-    const startBoundary = await captureBoundary('start', sessions, originUrl, manifestFile.get(), manifestFile, ndjson, fetchSnapshot, boundaryOptions);
+    const startBoundary = await captureBoundary('start', activeSessions(), originUrl, manifestFile.get(), manifestFile, ndjson, fetchSnapshot, boundaryOptions);
     originStart = startBoundary.origin;
     Object.assign(hostEvidence, arm.boundaryEvidence('start', startBoundary));
     if (originSession) await recordHostStats({ kind: 'start', hostSession: originSession, runDir: prepared.runDir });
@@ -739,14 +823,14 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       window.seekLagMs = window.startMs - window.declaredStartMs;
       manifestFile.write();
       const applied = await waitForAppliedSeek({
-        sessions,
+        sessions: activeSessions(),
         hostSession: boundaryOptions.originSession,
         before: sequence.seek.before,
         timeoutMs: condition.seek.appliedTimeoutMs,
         drainAll,
         pollIntervalMs: POLL_INTERVAL_MS,
       });
-      seekEvidence = issuedSeekEvidence(sequence.seek, applied, sessions);
+      seekEvidence = issuedSeekEvidence(sequence.seek, applied, activeSessions());
       if (controlEvidence && seekEvidence.host) {
         const join = timebaseJoin(controlEvidence.hostPoll);
         const tailEndMs = recordingEndForSeek({ join, seek: seekEvidence });
@@ -754,7 +838,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
         manifestFile.merge({ recordingTailMs: Math.max(0, recordingEndTargetMs - manifestFile.get().window.endMs) });
         manifestFile.write();
       }
-      writeSeek(landedSeekEvidence(seekEvidence, sessions, {
+      writeSeek(landedSeekEvidence(seekEvidence, activeSessions(), {
         segmentSeconds: manifestFile.get().content?.segmentSeconds ?? 4,
         highDemandTimeWindowMs: (condition.engineWindows?.highDemandTimeWindow ?? 15) * 1000,
       }));
@@ -762,19 +846,19 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     recordingEndTargetMs ??= manifestFile.get().window.endMs;
     if (condition.capacitySchedule && condition.seek) recordingEndTargetMs = Math.max(recordingEndTargetMs, await scheduled());
     await waitUntil(deadline, recordingEndTargetMs);
-    const endBoundary = await captureBoundary('end', sessions, originUrl, manifestFile.get(), manifestFile, ndjson, fetchSnapshot, boundaryOptions);
+    const endBoundary = await captureBoundary('end', activeSessions(), originUrl, manifestFile.get(), manifestFile, ndjson, fetchSnapshot, boundaryOptions);
     originEnd = endBoundary.origin;
     Object.assign(hostEvidence, arm.boundaryEvidence('end', endBoundary));
     await readControl();
     if (originSession) await recordHostStats({ kind: 'end', hostSession: originSession, runDir: prepared.runDir });
-    for (const session of sessions) session.endPlayback = endBoundary.snapshots[session.tag]?.playback;
-    if (seekEvidence?.host) writeSeek(restartedSeekEvidence(seekEvidence, sessions, endBoundary.snapshots));
+    for (const session of activeSessions()) session.endPlayback = endBoundary.snapshots[session.tag]?.playback;
+    if (seekEvidence?.host) writeSeek(restartedSeekEvidence(seekEvidence, activeSessions(), endBoundary.snapshots));
     if (condition.disturbance && injectionHarnessMs !== null) {
       await waitUntil(deadline, injectionHarnessMs + condition.disturbance.observationMs + 2000);
     }
-    await Promise.all(sessions.map((session) => queuedDrain(session, ndjson, arm, Date.now())));
+    await Promise.all(activeSessions().map((session) => queuedDrain(session, ndjson, arm, Date.now())));
     Object.assign(hostEvidence, await arm.finalEvidence({
-      originUrl, fetchSnapshot, runDir: prepared.runDir, sessions, ndjson, condition, deadline,
+      originUrl, fetchSnapshot, runDir: prepared.runDir, sessions: activeSessions(), ndjson, condition, deadline,
       window: manifestFile.get().window, originSession: boundaryOptions.originSession,
       startInstanceId: boundaryOptions.startInstanceId,
       drainAll,
@@ -792,6 +876,8 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     if (monitor) await stopOriginMonitor(monitor);
     for (const session of allSessions) {
       try {
+        const presence = session.presenceRecorder?.snapshot?.() ?? [];
+        if (presence.length) ndjson.append(`client-${session.tag}.presence.ndjson`, presence);
         const requests = session.recorder?.flush() ?? [];
         if (requests.length) ndjson.append(`client-${session.tag}.requests.ndjson`, requests);
         if (session.echoRecords?.length) ndjson.append(`client-${session.tag}.echo.ndjson`, session.echoRecords);
@@ -815,6 +901,10 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       } catch (error) {
         cleanupFailure ??= error;
       }
+    }
+    try { finalizeRosterEvent(rosterEvent, sessions, prepared.runDir); } catch (error) { cleanupFailure ??= error; }
+    for (const session of allSessions) {
+      try { session.presenceRecorder?.dispose?.(); } catch (error) { cleanupFailure ??= error; }
     }
     try {
       await topology.teardown({ condition, runDir: prepared.runDir, manifest: manifestFile.get() });

@@ -34,6 +34,19 @@ export function heldAheadMs({ positionMs, segments }) {
   return Math.floor(runEnd - positionMs);
 }
 
+/**
+ * The playlist index of the first segment past the contiguous finished run from
+ * `positionMs`: the engine's index of the run's last segment, plus one. `null`
+ * when no finished segment brackets the position or the run's end has no index.
+ */
+export function edgeIndexAfter({ positionMs, segments }) {
+  let last = segments.find((segment) => segment.mediaStartMs <= positionMs && positionMs < segment.mediaEndMs);
+  if (!last) return null;
+  for (let next = last; next; next = segments.find((segment) => segment.mediaEndMs > last.mediaEndMs
+    && Math.abs(segment.mediaStartMs - last.mediaEndMs) <= CONTIGUITY_TOLERANCE_MS)) last = next;
+  return Number.isSafeInteger(last.index) ? last.index + 1 : null;
+}
+
 export function aheadReportDue({
   nowMs, lastSentMs, lastSentKey, lastSentReady, key,
   heldAheadMs: aheadMs, readyMs, intervalMs,

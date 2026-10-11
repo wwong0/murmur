@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { buildOptions, makeBuildId } from './build.mjs';
 import { requireTrackerStarted, startTracker, trackerFailure } from './runner/tracker.mjs';
 import { optionsFromEnv, startRoomServer } from '../server/room-server.mjs';
+import { startSocketControl } from '../harness/socket-control.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,12 +39,14 @@ const APP_TRACKER_URL = `ws://127.0.0.1:${TRACKER_PORT}`;
 let buildContext = null;
 let roomServer = null;
 let tracker = null;
+let socketControl = null;
 let shuttingDown = false;
 
 async function shutdown(exitCode) {
   if (shuttingDown) return;
   shuttingDown = true;
   process.exitCode = exitCode;
+  if (socketControl) await socketControl.close();
   if (roomServer) await roomServer.close();
   if (buildContext) await buildContext.dispose();
   if (tracker && tracker.exitCode === null) tracker.kill();
@@ -67,6 +70,9 @@ async function main() {
   await requireTrackerStarted(trackerState);
 
   roomServer = startRoomServer(optionsFromEnv({ ...process.env, APP_TRACKER_URL }));
+  if (process.env.APP_SOCKET_CONTROL_PORT) {
+    socketControl = startSocketControl({ roomServer, port: Number(process.env.APP_SOCKET_CONTROL_PORT), host: '127.0.0.1' });
+  }
   console.log('[dev] room server started (server/room-server.mjs)');
 
   trackerState.exited.then(async (result) => {

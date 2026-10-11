@@ -617,6 +617,50 @@ async function pollUntil(read, done, { everyMs, deadlineAt, first }) {
   return { value, ok: true };
 }
 
+const SOCKET_COUNTERS = ['opens', 'begun', 'retargets', 'reparks', 'skips'];
+
+// Returns whether the drop was exercised: the caller shows the counters can move.
+async function verifySocketRecovery(viewer) {
+  const port = Number(process.env.APP_SOCKET_CONTROL_PORT);
+  if (!Number.isInteger(port) || port <= 0) {
+    console.log('NOT EXERCISED  10b socket recovery — APP_SOCKET_CONTROL_PORT is unset');
+    return false;
+  }
+  const before = await viewer.evaluate(`({ state: __app.playbackState(), playback: __app.playback(), pitch: __app.pitch ? __app.pitch() : null })`);
+  let response;
+  try {
+    response = await fetch(`http://127.0.0.1:${port}/terminate`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ room: 'demo', tabId: 'B' }),
+      signal: AbortSignal.timeout(3000),
+    });
+  } catch (error) {
+    console.log(`NOT EXERCISED  10b socket recovery — control unreachable (${error.message})`);
+    return false;
+  }
+  if (!response.ok) {
+    console.log(`NOT EXERCISED  10b socket recovery — control HTTP ${response.status}`);
+    return false;
+  }
+  const rejoined = await pollUntil(
+    () => viewer.evaluate('__app.playbackState()'),
+    (state) => state?.lineage === before.state?.lineage && state?.version === before.state?.version,
+    { everyMs: 250, deadlineAt: Date.now() + 30_000 },
+  );
+  const after = await viewer.evaluate(`({ state: __app.playbackState(), playback: __app.playback(), pitch: __app.pitch ? __app.pitch() : null })`);
+  const countersEqual = SOCKET_COUNTERS.every((field) => before.playback?.[field] === after.playback?.[field]);
+  const pitchBefore = pitchReference(before.pitch);
+  const pitchAfter = pitchReference(after.pitch);
+  const pitchEqual = pitchBefore !== null && JSON.stringify(pitchBefore) === JSON.stringify(pitchAfter);
+  expect('10b socket recovery keeps lineage and version', rejoined.ok && after.state?.lineage === before.state?.lineage
+    && after.state?.version === before.state?.version, JSON.stringify({ before: before.state, after: after.state }));
+  expect('10b socket recovery writes no playback operation', countersEqual
+    && before.playback?.starts?.length === after.playback?.starts?.length, JSON.stringify({ before: before.playback, after: after.playback }));
+  expect('10b socket recovery preserves inactive pitch treatment', pitchAfter?.current?.value === false
+    && after.pitch?.fault === null && pitchEqual, JSON.stringify({ before: pitchBefore, after: pitchAfter }));
+  return true;
+}
+
 async function pumpAll(recorders, atMs = Date.now()) {
   for (const recorder of recorders) {
     if (recorder) await recorder.pump(atMs);
@@ -999,6 +1043,9 @@ try {
   }
   console.log(`  windows needing a correction: ${settleStates.filter((state) => state.path !== 'in-sync').length} of ${settleStates.length}`);
 
+  console.log('\n--- 10b: socket recovery ---');
+  const socketDropped = await verifySocketRecovery(b);
+
   console.log('\n--- RES: where each scheduled start landed ---');
   const frameIntervalMs = Number.isFinite(contentFps) ? 1000 / contentFps : NaN;
   await pumpAll(recorders);
@@ -1227,6 +1274,8 @@ try {
 
   // +600 s, as 8a's trap seek: past every viewer's 60 s windows, so none holds
   // the landing and all three need it at once. A +10 s seek lands inside B's buffer.
+  const socketCounters = (playback) => Object.fromEntries(SOCKET_COUNTERS.map((field) => [field, playback?.[field] ?? null]));
+  const countersBeforeSeek = socketDropped ? socketCounters(await b.evaluate('__app.playback()')) : null;
   const seekReady = await pollUntil(() => pageOf(a), (page) => page.buttons?.['forward-10']?.disabled === false, { everyMs: 250, deadlineAt: Date.now() + 15_000 });
   const seekIssue = seekReady.ok ? await a.evaluate('window.__app.harnessSeek(600000)') : null;
   expect('T12 the host issues a +600 s held seek while B, C and D are present', seekIssue?.issued === true, JSON.stringify(seekIssue));
@@ -1260,6 +1309,15 @@ try {
     JSON.stringify({ cause: seekRecord?.cause ?? null, identity: seekRecord?.identity ?? null, landing: { lineage: landing?.lineage, version: landing?.version }, viewers: seekRecord?.viewers ?? null }),
   );
   console.log(`  E6 reported: hold ${seekRecord?.holdMs ?? 'null'} ms; every viewer first read ready to the resume record first read ${holdWatch.allReadyAtMs !== null && holdWatch.resumeSeenAtMs !== null ? holdWatch.resumeSeenAtMs - holdWatch.allReadyAtMs : 'null'} ms (each end observed at ${holdWatch.pollMs} ms polls)`);
+
+  if (socketDropped) {
+    // The counters held still across the drop; this seek shows the same counters can move.
+    const moved = await pollUntil(async () => socketCounters(await b.evaluate('__app.playback()')),
+      (counters) => SOCKET_COUNTERS.some((field) => counters[field] !== countersBeforeSeek[field]),
+      { everyMs: 100, deadlineAt: Date.now() + 10_000 });
+    expect('10b socket recovery: a host seek after the readback moves a counter', moved.ok,
+      JSON.stringify({ before: countersBeforeSeek, after: moved.value }));
+  }
 
   // Counters are read as a change across the seek, never as a total: the host
   // link's counts include the page's own player (CONSTRAINTS.md → P2P delivery).

@@ -45,6 +45,27 @@ export function attachClockJoinRecorder(tab) {
   };
 }
 
+/** Record the room's shared-clock roster envelopes before any navigation. */
+export function attachPresenceRecorder(tab) {
+  const records = [];
+  const off = tab.on('Network.webSocketFrameReceived', (params) => {
+    const message = framePayload(params);
+    const body = message?.payload;
+    const at = finite(params?.timestamp) ? params.timestamp * 1000 : null;
+    if (message?.type !== 'presence' || !finite(at) || !body || !Number.isSafeInteger(message.seq)) return;
+    const member = body.member;
+    if ((body.event !== 'join' && body.event !== 'leave') || typeof member?.tabId !== 'string'
+      || typeof member?.clientId !== 'string' || !Array.isArray(body.roster)) return;
+    records.push({ cdpMs: at, seq: message.seq, recvSharedMs: message.ts?.recv ?? null,
+      event: body.event, tabId: member.tabId, clientId: member.clientId,
+      roster: body.roster.map((entry) => ({ clientId: entry?.clientId, tabId: entry?.tabId, role: entry?.role })) });
+  });
+  return {
+    snapshot() { return records.map((record) => ({ ...record, roster: record.roster.map((entry) => ({ ...entry })) })); },
+    dispose() { off(); },
+  };
+}
+
 export function attachTabTakenDetector(tab, onCollision) {
   return tab.on('Network.webSocketFrameReceived', (params) => {
     if (isTabTakenNetworkFrame(params)) onCollision(params);

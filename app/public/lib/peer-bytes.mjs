@@ -228,7 +228,7 @@ export function createPeerBytes({ wallNow = () => Date.now(), capacity = 65536 }
     const mediaStartMs = Number(segment.startTime) * 1000;
     const mediaEndMs = Number(segment.endTime) * 1000;
     const hasTimes = Number.isFinite(mediaStartMs) && Number.isFinite(mediaEndMs);
-    if (hasTimes) finishedByRuntimeId.set(segment.runtimeId, { mediaStartMs, mediaEndMs });
+    if (hasTimes) finishedByRuntimeId.set(segment.runtimeId, { mediaStartMs, mediaEndMs, index: segment.externalId });
     else finishedWithoutTimes += 1;
     append({
       kind: 'segment',

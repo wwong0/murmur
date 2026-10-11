@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { computeFigures, guardRegimes } from './figures/harness-figures.mjs';
+import { computeFigures, computeHarnessFigureKinds, guardRegimes } from './figures/harness-figures.mjs';
 import { pairwiseDrift } from './figures/pairwise-drift.mjs';
 import { driftContext, driftFigure } from './figures/drift-context.mjs';
 import { computeControlFigures, timebaseJoin } from './figures/control-figures.mjs';
@@ -77,6 +77,16 @@ function readWholeNdjson(filePath) {
   }
 }
 
+function readEvidenceJson(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return undefined;
+    if (error instanceof SyntaxError) return { __evidenceFailure: 'json-truncated' };
+    throw error;
+  }
+}
+
 /** The behind figure's disturbance is the run's own record, never the manifest's copy. */
 function retainedDisturbance(runDir) {
   try {
@@ -88,16 +98,21 @@ function retainedDisturbance(runDir) {
 }
 
 function clientStreams(runDir, manifest) {
-  const behind = manifest.condition?.figureKinds?.includes?.('behind');
+  const figureKinds = manifest.condition?.figureKinds ?? [];
+  const behind = figureKinds.includes('behind');
+  const tolerateTruncation = behind || figureKinds.includes('roster-event') || figureKinds.includes('distance-behind');
   return armFor(manifest.condition).clientStreams(runDir, manifest, {
     names: fs.readdirSync(runDir),
-    readNdjson: behind ? readWholeNdjson : readNdjson,
+    readNdjson: tolerateTruncation ? readWholeNdjson : readNdjson,
     join: path.join,
   });
 }
 
 export function readRunDirectory(runDir, options = {}) {
   const manifest = readJson(path.join(runDir, 'manifest.json'), {});
+  const figureKinds = manifest.condition?.figureKinds ?? [];
+  const tolerateTruncation = figureKinds.includes('roster-event') || figureKinds.includes('distance-behind');
+  const readStream = tolerateTruncation ? readWholeNdjson : readNdjson;
   const arm = armFor(manifest.condition);
   const condition = conditionWithRules(manifest.condition, options.rules);
   const originStart = counterFrom(readJson(path.join(runDir, 'origin-counters-start.json')));
@@ -107,16 +122,20 @@ export function readRunDirectory(runDir, options = {}) {
   const context = manifest.context ?? manifest;
   const tags = manifest.declaredClientTags ?? manifest.clientTags ?? manifest.condition?.clientTags
     ?? Object.keys(manifest.clients ?? {});
-  const hostPoll = readNdjson(path.join(runDir, 'host-control-poll.ndjson')) ?? [];
-  const hostPaceRecords = readNdjson(path.join(runDir, 'host-pace.ndjson')) ?? [];
-  const resumes = readNdjson(path.join(runDir, 'host-resumes.ndjson')) ?? [];
+  const hostPoll = readStream(path.join(runDir, 'host-control-poll.ndjson')) ?? [];
+  const hostPaceRecords = readStream(path.join(runDir, 'host-pace.ndjson')) ?? [];
+  const resumes = readStream(path.join(runDir, 'host-resumes.ndjson')) ?? [];
   const hostPaceFinal = readJson(path.join(runDir, 'host-pace-final.json'));
   const viewerPolls = Object.fromEntries([...new Set(tags)].map((tag) => [tag,
-    readNdjson(path.join(runDir, `viewer-control-${tag}.ndjson`)) ?? []]));
+    readStream(path.join(runDir, `viewer-control-${tag}.ndjson`)) ?? []]));
   const controlAvailable = hostPoll.length > 0;
   const timebase = controlAvailable ? timebaseJoin(hostPoll) : null;
   const capacityBeforeReadings = (manifest.topology?.qdiscs ?? [])
     .find((entry) => entry.containerRole === 'origin')?.readBack?.readings ?? null;
+  const presence = Object.fromEntries([...new Set(tags)].map((tag) => [tag,
+    readWholeNdjson(path.join(runDir, `client-${tag}.presence.ndjson`))]));
+  const asks = Object.fromEntries([...new Set(tags)].map((tag) => [tag,
+    readWholeNdjson(path.join(runDir, `viewer-asks-${tag}.ndjson`))]));
   const input = {
     byteAccountingMethod: arm.recomputeAccountingMethod(manifest),
     window,
@@ -152,6 +171,9 @@ export function readRunDirectory(runDir, options = {}) {
     // The steady test's pace leg applies on the host's published fraction.
     headroom: readJson(path.join(runDir, 'host-headroom.json'), null),
     controlAvailable,
+    rosterEvent: readEvidenceJson(path.join(runDir, 'roster-event.json')),
+    presence,
+    asks,
     // Peer checks and host waste exclude the qualification's response by its ids.
     ...arm.recomputeInputExtras(manifest),
   };
@@ -265,6 +287,22 @@ export function recomputeRunDirectory(runDir, options = {}) {
       requalification.maxRateCompletion = maxRateCompletion(evidence);
     }
     report.requalification = requalification;
+    let distanceBehindAtMs;
+    let distanceBehindUnavailableReason;
+    if (figureKinds.includes('distance-behind')) {
+      const recovery = figures.edge?.dropRecovery;
+      const spanMs = recovery?.spanMs;
+      const recoveryMs = recovery?.result?.recoveryMs;
+      const span = recovery && recovery.notExercised !== true && Number.isFinite(spanMs) && Number.isFinite(recoveryMs)
+        ? recovery.spans?.[Math.floor(recoveryMs / spanMs)] : null;
+      const spanEndHarnessMs = span?.window?.endMs;
+      distanceBehindAtMs = Number.isFinite(spanEndHarnessMs) && Number.isFinite(retained.input.timebase?.offsetMs)
+        ? spanEndHarnessMs + retained.input.timebase.offsetMs : undefined;
+      distanceBehindUnavailableReason = recovery?.notExercised ? 'recovery-not-exercised'
+        : !Number.isFinite(retained.input.timebase?.offsetMs) ? 'timebase-offset-missing' : 'recovery-unavailable';
+    }
+    Object.assign(report, computeHarnessFigureKinds({ ...retained.input, distanceBehindAtMs,
+      distanceBehindUnavailableReason }));
     if (figureKinds.includes('behind')) {
       const targetTag = retained.input.condition?.behind?.clientTag ?? 'c03';
       const target = clients[targetTag] ?? {};

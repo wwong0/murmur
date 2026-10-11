@@ -12,6 +12,7 @@ import {
   readPlaybackState,
   stateIdentity,
 } from './playback-state.mjs';
+import { electCreator } from './state-election.mjs';
 
 export const ACQUISITION_REQUEST_TIMEOUT_MS = 1000;
 export const ACQUISITION_BACKOFF_MS = 500;
@@ -135,8 +136,8 @@ export function createPlaybackAcquisition({
   function applyOperation(env) {
     const result = holder.apply(env, roster);
     outcome(env, result.outcome);
-    if (result.outcome === 'applied' && env.payload?.kind === 'create') {
-      if (env.from === client.clientId) created += 1;
+    if (result.outcome === 'applied') {
+      if (env.payload?.kind === 'create' && env.from === client.clientId) created += 1;
       proposal = holder.state;
     }
     if (Number.isInteger(env.seq)) lastFoldedSeq = Math.max(lastFoldedSeq ?? env.seq, env.seq);
@@ -202,17 +203,44 @@ export function createPlaybackAcquisition({
   function becomeSole() {
     if (!soleMember()) return;
     creationEligible = true;
-    if (!holder.awaitingCreation && !holder.state) {
-      clearWork();
-      holder.expectCreation();
+    clearWork();
+    if (!holder.state) {
+      if (!holder.awaitingCreation) holder.expectCreation();
       foldForCreation();
     }
     tryCreation();
   }
 
+  function currentOtherMembers() {
+    return [...new Set(roster
+      .map((member) => member?.clientId)
+      .filter((clientId) => typeof clientId === 'string' && clientId !== client.clientId))];
+  }
+
+  function electFrom(pass) {
+    const members = currentOtherMembers();
+    if (!members.length || !members.every((clientId) => pass.answers.get(clientId)?.state === null)) {
+      return false;
+    }
+    const winner = electCreator({
+      selfId: client.clientId,
+      selfHeldVersion: Number.isInteger(proposal?.version) ? proposal.version : null,
+      answers: members.map((clientId) => ({ clientId, heldVersion: pass.answers.get(clientId).heldVersion })),
+    });
+    if (winner !== client.clientId) return false;
+    creationEligible = true;
+    if (!holder.awaitingCreation) holder.expectCreation();
+    tryCreation();
+    return true;
+  }
+
   function validAnswer(body) {
     if (!object(body) || !('state' in body)) return null;
-    if (body.state === null) return { state: null };
+    if (body.state === null) {
+      if (!('heldVersion' in body)
+        || !(body.heldVersion === null || Number.isInteger(body.heldVersion))) return null;
+      return { state: null, heldVersion: body.heldVersion };
+    }
     const state = readPlaybackState(body.state);
     if (!state || !Number.isInteger(body.throughSeq)
       || body.throughSeq <= joinedSeq || body.throughSeq < state.version) return null;
@@ -222,15 +250,16 @@ export function createPlaybackAcquisition({
   function finishPass(pass) {
     if (activePass !== pass || !currentGeneration(pass.generation)) return;
     activePass = null;
+    if (electFrom(pass)) return;
     passTimer = timer(() => {
       passTimer = null;
-      if (!holder.state && !holder.awaitingCreation) beginPass();
+      if (!holder.state) beginPass();
     }, backoffMs);
   }
 
   function advance(pass) {
     if (activePass !== pass || !currentGeneration(pass.generation)
-      || holder.state || holder.awaitingCreation) return;
+      || holder.state) return;
     while (passIndex < passTargets.length) {
       const target = passTargets[passIndex++];
       if (!hasMember(target)) continue;
@@ -272,6 +301,7 @@ export function createPlaybackAcquisition({
       return;
     }
     if (answer.state === null) {
+      activePass.answers.set(request.target, answer);
       advance(activePass);
       return;
     }
@@ -286,8 +316,9 @@ export function createPlaybackAcquisition({
   }
 
   function beginPass() {
-    if (disposed || holder.state || holder.awaitingCreation || activePass || passTimer) return;
-    const pass = { generation, token: ++requestToken };
+    if (disposed || holder.state || creationIssued || creationEligible || activePass || passTimer) return;
+    if (!holder.awaitingCreation) holder.expectCreation();
+    const pass = { generation, token: ++requestToken, answers: new Map() };
     activePass = pass;
     passTargets = roster
       .map((member) => member?.clientId)
@@ -305,10 +336,11 @@ export function createPlaybackAcquisition({
     joinedSeq = Number.isInteger(joined?.seq) ? joined.seq : 0;
     lastFoldedSeq = joinedSeq;
     buffer = [];
-    creationEligible = soleMember();
+    creationEligible = false;
     creationIssued = false;
-    if (creationEligible) {
-      holder.expectCreation();
+    if (!holder.state) holder.expectCreation();
+    if (soleMember()) {
+      creationEligible = true;
       tryCreation();
     } else {
       beginPass();
@@ -331,6 +363,7 @@ export function createPlaybackAcquisition({
         advance(activePass);
       }
       if (soleMember()) becomeSole();
+      else beginPass();
       return;
     }
     applyPresence(env);
@@ -341,7 +374,10 @@ export function createPlaybackAcquisition({
     if (!holder.state) {
       buffer.push(env);
       if (env.type === TYPE_PLAYBACK_OPERATION) bufferedOperations += 1;
-      if (holder.awaitingCreation && env.payload?.kind === 'create') foldForCreation();
+      if (env.payload?.kind === 'create') {
+        if (!holder.awaitingCreation) holder.expectCreation();
+        foldForCreation();
+      }
       return;
     }
     applyOperation(env);
@@ -349,7 +385,12 @@ export function createPlaybackAcquisition({
 
   function handleRequest(env) {
     const state = holder.state;
-    const payload = state ? { state, throughSeq: lastFoldedSeq } : { state: null };
+    const payload = state
+      ? { state, throughSeq: lastFoldedSeq }
+      : {
+        state: null,
+        heldVersion: Number.isInteger(proposal?.version) ? proposal.version : null,
+      };
     try {
       client.send(buildPlaybackStateAnswerEnvelope({
         to: env.from,
@@ -413,8 +454,8 @@ export function createPlaybackAcquisition({
       if (disposed) return;
       if (!holder.state) {
         tryCreation();
-        if (!holder.awaitingCreation && soleMember()) becomeSole();
-        else if (!holder.awaitingCreation) beginPass();
+        if (soleMember()) becomeSole();
+        else beginPass();
       }
     },
     issue,

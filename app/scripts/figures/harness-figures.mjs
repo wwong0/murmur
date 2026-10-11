@@ -6,12 +6,46 @@ import { computePeerFigures, PEER_ATTEMPT_COHORT_METHOD } from './peer-figures.m
 import { computePeerChecks, pairResponseEvidence } from './peer-checks.mjs';
 import { peerSpacing } from './peer-spacing.mjs';
 import { computeNoP2pSteady } from './nop2p-steady.mjs';
+import { distanceBehindRows } from './distance-behind.mjs';
+import { rosterEventReading } from './roster-event.mjs';
 
 export const PEER_FRACTION_ABS_MAX = 0.02;
 
 const finite = (value) => Number.isFinite(value);
 const present = (value) => value !== undefined && value !== null;
 const numberOr = (value, fallback = undefined) => (finite(value) ? value : fallback);
+
+function peerRecordsByKind(clients, kind) {
+  return Object.fromEntries(Object.entries(clients ?? {}).map(([tag, client]) => [tag,
+    Array.isArray(client?.peerRecords) ? client.peerRecords.filter((record) => record?.kind === kind) : undefined]));
+}
+
+/** Dispatch the two churn readers after the retained streams have been loaded. */
+export function computeHarnessFigureKinds(input = {}) {
+  const kinds = input.condition?.figureKinds ?? [];
+  const result = {};
+  if (kinds.includes('roster-event')) {
+    const clients = input.clients ?? {};
+    result.rosterEvent = rosterEventReading({ condition: input.condition, event: input.rosterEvent,
+      presence: input.presence, drift: Object.fromEntries(Object.entries(clients)
+        .map(([tag, client]) => [tag, client?.records])),
+      polls: { ...input.viewerPolls, host: input.hostPoll }, attempts: peerRecordsByKind(clients, 'attempt'),
+      segments: peerRecordsByKind(clients, 'segment'), asks: input.asks, timebase: input.timebase,
+      content: input.content, pagePolls: Object.fromEntries(Object.entries(clients)
+        .map(([tag, client]) => [tag, client?.polls])),
+      starts: Object.fromEntries(Object.entries(clients).map(([tag, client]) => [tag, client?.starts])) });
+  }
+  if (kinds.includes('distance-behind')) {
+    result.distanceBehind = finite(input.distanceBehindAtMs)
+      ? distanceBehindRows({ condition: input.condition, clients: input.clients, viewerPolls: input.viewerPolls,
+        pagePolls: Object.fromEntries(Object.entries(input.clients ?? {})
+          .map(([tag, client]) => [tag, client?.polls])), hostPoll: input.hostPoll,
+        capacitySchedule: input.capacitySchedule, timebase: input.timebase, atMs: input.distanceBehindAtMs })
+      : { status: input.distanceBehindUnavailableReason === 'timebase-offset-missing' ? 'evidence-failure' : 'not-exercised',
+        rows: [], reason: input.distanceBehindUnavailableReason ?? 'recovery-unavailable' };
+  }
+  return result;
+}
 
 function difference(after, before, field) {
   const right = Number(after?.[field] ?? 0);

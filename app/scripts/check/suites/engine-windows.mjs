@@ -214,7 +214,11 @@ export default async function engineWindowsSuite() {
     const productInputs = ['shakedown/control-qual', 'control-five', 'control-ten', 'control-seek', 'sweep-070', 'sweep-095', 'sweep-unpaced',
       // 9b's eleven copy them and run the product's windows as they do.
       'shakedown/edge-qual', 'edge-five', 'edge-ten', 'edge-seek', 'edge-control-ten', 'edge-control-seek', 'edge-drop', 'edge-slow',
-      'edge-sweep-070', 'edge-sweep-095', 'edge-sweep-unpaced'];
+      'edge-sweep-070', 'edge-sweep-095', 'edge-sweep-unpaced',
+      // 10b's fourteen are edge-five and edge-drop, and judge the product as it ships.
+      'baseline-join', 'baseline-leave-clean', 'baseline-leave-silent', 'join', 'leave-clean', 'leave-silent', 'leave-first',
+      'drop-socket', 'drop-recover', 'shakedown/churn-join', 'shakedown/churn-leave-clean', 'shakedown/churn-leave-silent',
+      'shakedown/churn-drop-socket', 'shakedown/churn-leave-first'];
     const supplied = [];
     const walk = (group, label) => {
       for (const [name, condition] of Object.entries(group)) {

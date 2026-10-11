@@ -19,6 +19,7 @@ import debug from "debug";
 import { EDGE_RECHECK_MS, SLOW_WINDOW_MS, drawUrgentDelay, edgeSource, nextEdgeEpisode, transferIsSlow, hostSlotVictim, urgentBudgetMs, urgentContext, urgentSource, noteHostAsk as recordHostAsk } from "./urgent-source.mjs"; // wa-patch: use the product's urgent-load decisions and ask record
 import { controlInForce } from "../../public/lib/edge-control.mjs"; // wa-patch: read the selected queue control
 import { edgeRank, spreadChoice, SPREAD_START_ANYWAY_MS } from "../../public/lib/edge-assignment.mjs"; // wa-patch: call the pure assignment helpers
+import { edgeRequestStep } from "../../public/lib/edge-request.mjs"; // wa-patch: carry out one selected edge request step
 import { READY_HELD_AHEAD_MS } from "../../public/lib/hold-resume.mjs"; // wa-patch: use the shared near-runway bound
 const FAILED_ATTEMPTS_CLEAR_INTERVAL = 60000;
 const PEER_UPDATE_LATENCY = 1000;
@@ -335,25 +336,31 @@ export class HybridLoader {
             if (shouldStartLoadImmediatelyEngineRequest) {
                 // Don't abort requests when processing engine request
                 // to avoid race condition with aborts in the requests queue
+                const queuedEngineItem = queue.find((item) => item.segment.runtimeId === segment.runtimeId); // wa-patch: retain the queued demand class
+                const productHighDemandEngineRequest = this.edgeControl !== "8b" && // wa-patch: hand product urgent requests to the queue branch
+                    (queuedEngineItem === null || queuedEngineItem === void 0 ? void 0 : queuedEngineItem.statuses.isHighDemand) === true; // wa-patch: identify the flagged product segment
                 const canLoadThroughHttp = !isInitialHttpWait &&
                     ((_b = request === null || request === void 0 ? void 0 : request.failedAttempts.httpAttemptsCount) !== null && _b !== void 0 ? _b : 0) < httpErrorRetries &&
                     this.requests.executingHttpCount < simultaneousHttpDownloads;
-                if (canLoadThroughHttp) {
-                    const urgent = queue.find((item) => item.segment.runtimeId === segment.runtimeId)?.statuses.isHighDemand; // wa-patch: keep non-urgent engine requests stock
-                    const decision = urgent // wa-patch: branch the engine request by control
-                        ? this.edgeControl === "8b" ? this.urgentDecision(segment, request, now) : this.edgeDecision(segment, request, now) // wa-patch: call only the selected control
-                        : { source: "http" }; // wa-patch: consult the selected urgent source before HTTP
-                    if (decision.source === "p2p") { // wa-patch: a holder serves an urgent engine request
-                        const canLoadThroughP2P = this.p2pLoaders.currentLoader.isSegmentLoadedBySomeone(segment) && this.requests.executingP2PCount < simultaneousP2PDownloads; // wa-patch: preserve the P2P slot bound
-                        if (canLoadThroughP2P) this.loadThroughP2P(segment); // wa-patch: load from the holder
-                    } else if (decision.source === "wait") { // wa-patch: let a peer announcement arrive
-                        this.armUrgentWait(segment, decision, now); // wa-patch: wake this segment at its bound
-                    } else { // wa-patch: complete the urgent engine-request decision
-                        if (urgent) this.noteHostAsk(segment, decision); // wa-patch: record only urgent host asks
-                        this.loadThroughHttp(segment); // wa-patch: source rule selected the host
-                    } // wa-patch: finish the urgent engine-request source branch
-                } // wa-patch: finish the engine-request loading gate
-                else { // wa-patch: preserve the stock non-urgent engine-request path
+                if (productHighDemandEngineRequest) { // wa-patch: the queue branch below owns this request
+                    // wa-patch: the queue branch below owns the product decision
+                } else if (canLoadThroughHttp) { // wa-patch: preserve the archived engine path
+                    const urgent = (queuedEngineItem === null || queuedEngineItem === void 0 ? void 0 : queuedEngineItem.statuses.isHighDemand) === true; // wa-patch: retain the old urgency test
+                    if (urgent && this.edgeControl === "8b") { // wa-patch: preserve the archived control
+                        const decision = this.urgentDecision(segment, request, now); // wa-patch: keep the archived decision
+                        if (decision.source === "p2p") { // wa-patch: preserve the archived peer arm
+                            const canLoadThroughP2P = this.p2pLoaders.currentLoader.isSegmentLoadedBySomeone(segment) && this.requests.executingP2PCount < simultaneousP2PDownloads; // wa-patch: preserve the archived P2P slot bound
+                            if (canLoadThroughP2P) this.loadThroughP2P(segment); // wa-patch: preserve the archived P2P load
+                        } else if (decision.source === "wait") { // wa-patch: preserve the archived wait arm
+                            this.armUrgentWait(segment, decision, now); // wa-patch: preserve the archived wake
+                        } else { // wa-patch: preserve the archived host arm
+                            this.noteHostAsk(segment, decision); // wa-patch: preserve the archived ask
+                            this.loadThroughHttp(segment); // wa-patch: preserve the archived host load
+                        } // wa-patch: finish the archived engine arm
+                    } else if (!urgent) { // wa-patch: preserve ordinary engine requests
+                        this.loadThroughHttp(segment); // wa-patch: preserve the ordinary host load
+                    } // wa-patch: finish the archived engine path
+                } else { // wa-patch: preserve the stock non-urgent engine-request path
                     const canLoadThroughP2P = this.p2pLoaders.currentLoader.isSegmentLoadedBySomeone(segment) &&
                         this.requests.executingP2PCount < simultaneousP2PDownloads;
                     if (canLoadThroughP2P) {
@@ -374,64 +381,44 @@ export class HybridLoader {
                 const canLoadThroughHttp = !isInitialHttpWait &&
                     ((_c = request === null || request === void 0 ? void 0 : request.failedAttempts.httpAttemptsCount) !== null && _c !== void 0 ? _c : 0) < httpErrorRetries;
                 if (this.edgeControl !== "8b") { // wa-patch: product control assigns high-demand peers
-                    if ((request === null || request === void 0 ? void 0 : request.status) === "loading") { // wa-patch: inspect the product transfer state
-                        if (request.downloadSource !== "p2p") continue; // wa-patch: leave an HTTP transfer to the stock request loop
-                        if (urgent.source === "move") { // wa-patch: move a slow transfer only after finding a spare holder
-                            const choice = this.edgeSpreadChoice(segment, urgent, now, true); // wa-patch: choose a spare holder immediately
-                            const peer = choice.holderId ? this.findEdgePeer(choice.holderId) : undefined; // wa-patch: resolve the chosen engine peer
-                            if (peer && peer.downloadingSegment === undefined) { // wa-patch: check availability before cancelling bytes
-                                request.cancel(); // wa-patch: keep bytes before the synchronous re-issue
-                                peer.downloadSegment(request); // wa-patch: re-issue on the selected peer in this step
-                                this.resetEdgeTransfer(segment, now); // wa-patch: restart the slow sample window after a move
-                            } // wa-patch: finish the availability check
-                            continue; // wa-patch: a blocked move waits for the next pass
-                        } // wa-patch: finish the move branch
-                        if (urgent.source === "p2p") { // wa-patch: retain the transfer while it is healthy or awaiting its wake
-                            if (Number.isFinite(urgent.wakeMs)) this.armUrgentWait(segment, urgent, now); // wa-patch: wake a slow sole-holder transfer
-                            continue; // wa-patch: never fall through while a peer load runs
-                        } // wa-patch: finish the peer-retain branch
-                        if (urgent.source === "http") { // wa-patch: only the slow-holder fallback reaches HTTP
-                            const shouldSwitchFromP2PToHttp = canLoadThroughHttp && // wa-patch: gate the slow-holder fallback
-                                (this.requests.executingHttpCount < simultaneousHttpDownloads || // wa-patch: retain the HTTP slot test
-                                    this.edgeFreeHostSlot(queue, segment)); // wa-patch: free a slot without cancelling a high-demand host load
-                            if (shouldSwitchFromP2PToHttp) { // wa-patch: switch only when an HTTP slot exists
-                                request.cancel(); // wa-patch: preserve bytes before the host re-issue
-                                this.noteHostAsk(segment, urgent); // wa-patch: record the slow-holder fallback
-                                this.loadThroughHttp(segment); // wa-patch: switch in the same queue pass
-                            } // wa-patch: finish the host switch
-                        } // wa-patch: finish the slow-holder answer
-                        continue; // wa-patch: close the product loading branch
-                    } // wa-patch: finish the product loading branch
-                    if (urgent.source === "wait") { // wa-patch: wait for a holder or the staged deadline
-                        this.armUrgentWait(segment, urgent, now); // wa-patch: one timer re-enters processQueue
-                        continue; // wa-patch: do not issue the host request yet
-                    } // wa-patch: finish the holder choice
-                    if (urgent.source === "p2p") { // wa-patch: spread a near-zone request over available holders
-                        const choice = this.edgeSpreadChoice(segment, urgent, now, false); // wa-patch: apply the episode's holder rise
-                        if (choice.holderId) { // wa-patch: start when a holder is assigned
-                            const peer = this.findEdgePeer(choice.holderId); // wa-patch: resolve the chosen engine peer
-                            const available = peer && peer.downloadingSegment === undefined; // wa-patch: busy peers are never selected
-                            const canLoadThroughP2P = available && // wa-patch: require an available holder
-                                (this.requests.executingP2PCount < simultaneousP2PDownloads || // wa-patch: preserve the P2P slot test
-                                    this.abortLastP2PLoadingInQueueAfterItem(queue, segment)); // wa-patch: preserve today's P2P slot test
-                            if (canLoadThroughP2P) peer.downloadSegment(this.requests.getOrCreateRequest(segment)); // wa-patch: start on the assigned holder
-                            else this.armUrgentWait(segment, { source: "wait", untilMs: now + EDGE_RECHECK_MS }, now); // wa-patch: retry a transiently unavailable holder
-                        } // wa-patch: finish the assigned-holder branch
-                        else if (Number.isFinite(choice.waitUntilMs)) { // wa-patch: honor the spread wake
-                            this.armUrgentWait(segment, { source: "wait", untilMs: choice.waitUntilMs }, now); // wa-patch: wait for the next holder slot
-                        } // wa-patch: finish the spread-wait branch
-                        else { // wa-patch: handle busy holders
-                            this.armUrgentWait(segment, { source: "wait", untilMs: now + EDGE_RECHECK_MS }, now); // wa-patch: recheck when all holders are busy
-                        } // wa-patch: finish the busy-holder branch
-                        continue; // wa-patch: never fall through to the host for a peer answer
-                    } // wa-patch: finish the product spread branch
-                    const shouldLoadThroughHttp = canLoadThroughHttp && // wa-patch: gate the product host answer
-                        (this.requests.executingHttpCount < simultaneousHttpDownloads || // wa-patch: retain the HTTP slot test
-                            this.edgeFreeHostSlot(queue, segment)); // wa-patch: free a slot without cancelling a high-demand host load
-                    if (shouldLoadThroughHttp) { // wa-patch: issue only with an available host slot
-                        this.noteHostAsk(segment, urgent); // wa-patch: record the product-control host answer
-                        this.loadThroughHttp(segment); // wa-patch: issue the selected host request
-                    } // wa-patch: finish the product host branch
+                    const loading = (request === null || request === void 0 ? void 0 : request.status) === "loading"; // wa-patch: inspect the product transfer state
+                    const loadingFromP2P = loading && request.downloadSource === "p2p"; // wa-patch: retain only peer transfers
+                    if (loading && !loadingFromP2P) continue; // wa-patch: leave HTTP transfers to the stock loop
+                    const immediate = loadingFromP2P && urgent.source === "move"; // wa-patch: move only a slow peer transfer
+                    const needsSpread = immediate || (!loadingFromP2P && urgent.source === "p2p"); // wa-patch: spread only a new or moving peer request
+                    const choice = needsSpread ? this.edgeSpreadChoice(segment, urgent, now, immediate) : undefined; // wa-patch: gather the pure spread choice
+                    const peer = choice?.holderId ? this.findEdgePeer(choice.holderId) : undefined; // wa-patch: resolve the selected engine peer
+                    const peerAvailable = peer !== undefined && peer.downloadingSegment === undefined; // wa-patch: check the selected peer
+                    const canLoadThroughP2P = !loadingFromP2P && choice?.holderId && peerAvailable && // wa-patch: retain the P2P slot boundary
+                        (this.requests.executingP2PCount < simultaneousP2PDownloads || // wa-patch: use an open P2P slot
+                            this.abortLastP2PLoadingInQueueAfterItem(queue, segment)); // wa-patch: preserve the stock P2P eviction
+                    const hostSlotFree = urgent.source === "http" && canLoadThroughHttp && // wa-patch: gather the host slot only for a host answer
+                        (loadingFromP2P // wa-patch: the two host answers, a slow holder's and a new request's
+                            ? this.requests.executingHttpCount < simultaneousHttpDownloads || this.edgeFreeHostSlot(queue, segment) // wa-patch: free only a safe later host request
+                            : this.requests.executingHttpCount < simultaneousHttpDownloads || this.edgeFreeHostSlot(queue, segment)); // wa-patch: free only a safe later host request
+                    const step = edgeRequestStep({ // wa-patch: select one pure edge action
+                        edgeSource: urgent, // wa-patch: carry the source decision
+                        spreadChoice: choice, // wa-patch: carry the spread decision
+                        request, // wa-patch: carry the engine request state
+                        nowMs: now, // wa-patch: carry the shared queue instant
+                        canLoadThroughP2P, // wa-patch: carry the P2P capacity result
+                        peerAvailable, // wa-patch: carry the selected peer state
+                        canLoadThroughHttp, // wa-patch: carry the HTTP capacity result
+                        hostSlotFree, // wa-patch: carry the host slot result
+                    }); // wa-patch: finish pure edge selection
+                    if (step.do === "move") { // wa-patch: carry out a selected peer move
+                        request.cancel(); // wa-patch: preserve bytes before the re-issue
+                        peer.downloadSegment(request); // wa-patch: re-issue on the selected peer
+                        this.resetEdgeTransfer(segment, now); // wa-patch: restart the move sample window
+                    } else if (step.do === "wait" || step.do === "recheck") { // wa-patch: carry out a selected wake
+                        this.armUrgentWait(segment, { source: "wait", untilMs: step.untilMs }, now); // wa-patch: arm the one product wake
+                    } else if (step.do === "peer") { // wa-patch: carry out a selected peer load
+                        peer.downloadSegment(this.requests.getOrCreateRequest(segment)); // wa-patch: start on the spread holder
+                    } else if (step.do === "host") { // wa-patch: carry out a selected host load
+                        if (step.cancel) request.cancel(); // wa-patch: preserve bytes before the host re-issue
+                        this.noteHostAsk(segment, step); // wa-patch: record the selected host ask
+                        this.loadThroughHttp(segment); // wa-patch: start the selected host load
+                    } // wa-patch: finish the selected edge action
                     continue; // wa-patch: close the product high-demand branch
                 } // wa-patch: finish product-control assignment
                 if ((request === null || request === void 0 ? void 0 : request.status) === "loading") {

@@ -42,6 +42,13 @@ function changedSourceLines() {
   });
 }
 
+function engineRequestBlock() {
+  const source = fs.readFileSync(PATCHED_HYBRID_LOADER, 'utf8');
+  const start = source.indexOf('const { engineRequest }');
+  const end = source.indexOf('for (const item of queue)', start);
+  return source.slice(start, end);
+}
+
 export default async function enginePatchSuite() {
   await check('engine-patch: buildOptions carries the pinned patch marker', async () => {
     const result = await productBundle();
@@ -59,6 +66,20 @@ export default async function enginePatchSuite() {
     // emitted-text boundary. Mutation: the plugin's hybrid-loader onResolve
     // returns null, leaving the banner but not this adapter. Named red: `built
     // product bundle contains the edge-control adapter`. Restore and rerun green.
+  });
+
+  await check('engine-patch: product engine requests have no private stock path', async () => {
+    const block = engineRequestBlock();
+    const start = block.indexOf('if (productHighDemandEngineRequest)');
+    const end = block.indexOf('} else if (canLoadThroughHttp)', start);
+    assert(start >= 0 && end > start, 'engine request has a product queue handoff');
+    const productBranch = block.slice(start, end);
+    assert(!productBranch.includes('loadThroughP2P'), 'product engine branch does not call stock loadThroughP2P');
+    assert(!productBranch.includes('edgeDecision('), 'product engine branch does not decide privately');
+    // Prevention proof under CONSTRAINTS.md → Verification: opportunity is the
+    // product engine branch in the carried source. Mutation: restore stock
+    // loadThroughP2P in that branch → the named assertion is red; restoration
+    // and the green check run are recorded in the worker report.
   });
 
   await check('engine-patch: the installed engine is the pinned 3.0.1 source', async () => {

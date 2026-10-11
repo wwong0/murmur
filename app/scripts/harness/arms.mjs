@@ -44,6 +44,7 @@ export const REFUSAL_SCOPE = Object.freeze({
   capacityStep: Object.freeze(['byte', 'drift']),
   seek: Object.freeze(['byte', 'drift']),
   build: Object.freeze(['byte', 'drift']),
+  churn: Object.freeze(['byte', 'drift']),
   topology: Object.freeze(['byte', 'drift']),
   control: Object.freeze(['byte', 'drift']),
 });
@@ -82,6 +83,73 @@ function readJson(file) {
 
 const STEP0_CONTENT_MANIFEST = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
   '../../../step0/content/content-manifest.json');
+const BUNDLE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../public/room.bundle.js');
+
+export function readBundleBuildId(file = BUNDLE_PATH) {
+  try {
+    const source = fs.readFileSync(file, 'utf8');
+    return source.match(/\bBUILD_ID\s*=\s*["']([^"']+)["']/)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function readPageBuildId(session) {
+  try {
+    const value = await session.tab.evaluate('window.__app && typeof window.__app.buildId === "string" ? window.__app.buildId : null');
+    return typeof value === 'string' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function recordPageBuildIds(kind, { sessions = [], hostSession = null, runDir }) {
+  const host = hostSession ?? sessions.find((session) => session.role === 'host') ?? null;
+  const viewers = sessions.filter((session) => session.role === 'viewer');
+  const hostBuildId = host ? await readPageBuildId(host) : null;
+  const viewerBuildIds = Object.fromEntries(await Promise.all(viewers.map(async (session) => {
+    const buildId = await readPageBuildId(session);
+    session.pageBuildId = buildId;
+    return [session.tag, buildId];
+  })));
+  if (host) host.pageBuildId = hostBuildId;
+  // Read at the boundary: a later recompute must not judge the run by a later build.
+  const identity = { host: hostBuildId, viewers: viewerBuildIds, disk: readBundleBuildId() };
+  writeJson(path.join(runDir, `build-ids-${kind}.json`), identity);
+  return identity;
+}
+
+function buildIdentityFromRun(runDir) {
+  const identity = readJson(path.join(runDir, 'build-ids-end.json'))
+    ?? readJson(path.join(runDir, 'build-ids-start.json'));
+  return identity ?? null;
+}
+
+export function buildRefusalDetails(identity) {
+  if (!identity) return [];
+  const details = [];
+  const hostBuildId = identity.host ?? null;
+  const diskBuildId = identity.disk ?? null;
+  for (const [tag, viewerBuildId] of Object.entries(identity.viewers ?? {})) {
+    if (hostBuildId === null || viewerBuildId === null || hostBuildId !== viewerBuildId) {
+      details.push({ pair: 'host-viewer', viewer: tag, hostBuildId, viewerBuildId });
+    }
+    if (viewerBuildId === null || diskBuildId === null || viewerBuildId !== diskBuildId) {
+      details.push({ pair: 'viewer-disk', viewer: tag, viewerBuildId, diskBuildId });
+    }
+  }
+  if (hostBuildId === null || diskBuildId === null || hostBuildId !== diskBuildId) {
+    details.push({ pair: 'host-disk', hostBuildId, diskBuildId });
+  }
+  return details;
+}
+
+function buildRefusals(input, addReason) {
+  if (!input.buildIdentity) return;
+  for (const detail of buildRefusalDetails(input.buildIdentity)) {
+    addReason('build-mismatch', REFUSAL_SCOPE.build, detail);
+  }
+}
 
 function contentManifestOf(manifest) {
   return readJson(manifest.content?.manifestPath ?? STEP0_CONTENT_MANIFEST);
@@ -180,17 +248,21 @@ function baseArm({ hostTag, runDirPrefix, readyTimeoutMs }) {
     driftContextExtras: () => ({}),
     driftRequiredFields: Object.freeze([]),
     trackerPort: null,
-    streams: Object.freeze(['drift', 'poll', 'requests', 'echo']),
+    streams: Object.freeze(['drift', 'poll', 'requests', 'echo', 'presence']),
     members: (condition) => members(condition, hostTag),
     clientReadyTimeoutMs: () => readyTimeoutMs,
     boundaryOptions: () => ({}),
     boundaryEvidence: () => ({}),
-    async captureBoundaryExtras(kind, { room, runDir }) {
+    async captureBoundaryExtras(kind, { room, sessions, runDir }) {
       writeJson(path.join(runDir, `origin-counters-${kind}.json`), room);
+      await recordPageBuildIds(kind, { sessions, runDir });
       return { origin: room, room };
     },
     finalEvidence: () => ({}),
-    evidence: () => ({}),
+    evidence: (sessions, hostEvidence, runDir) => {
+      const buildIdentity = buildIdentityFromRun(runDir);
+      return buildIdentity ? { buildIdentity } : {};
+    },
     sessionManifest: () => ({}),
     prepareTopology: async () => ({}),
     topologyEvidence: () => ({}),
@@ -219,6 +291,7 @@ const HTTP_ARM = Object.freeze({
       () => qualifyCdpBytes(tab, { originContainer }));
   },
   refusals(input, addReason) {
+    buildRefusals(input, addReason);
     qualificationRefusal(input, addReason, validateCdpQualification, CDP_QUALIFICATION_REASON);
   },
 });
@@ -270,6 +343,7 @@ const HOST_ARM = Object.freeze({
     const originSession = options.originSession;
     const origin = await originSession.tab.evaluate('__app.hostCounters()');
     if (!origin) throw new Error(`host counter snapshot missing at ${kind} boundary`);
+    await recordPageBuildIds(kind, { sessions, hostSession: originSession, runDir });
     if (kind === 'start') {
       const headroom = await readHeadroom(originSession);
       writeJson(path.join(runDir, 'host-headroom.json'), headroom);
@@ -307,6 +381,7 @@ const HOST_ARM = Object.freeze({
     return { roomFinal: room };
   },
   evidence(sessions, hostEvidence, runDir) {
+    const buildIdentity = buildIdentityFromRun(runDir);
     return {
       roomStart: hostEvidence.roomStart,
       roomEnd: hostEvidence.roomEnd,
@@ -319,6 +394,7 @@ const HOST_ARM = Object.freeze({
       }])),
       ...(hostEvidence.controlEvidence ? { controlEvidence: hostEvidence.controlEvidence } : {}),
       ...(hostEvidence.assignmentControl ? { assignmentControl: hostEvidence.assignmentControl } : {}),
+      ...(buildIdentity ? { buildIdentity } : {}),
     };
   },
   async openSessions({ room, clientOriginUrl, hostPageUrl = clientOriginUrl, clientFactory, condition, runDir, deadline, newSession, prepareHostClient }) {
@@ -368,6 +444,7 @@ const HOST_ARM = Object.freeze({
   },
   clientStreams: (runDir, manifest, files) => clientStreams(runDir, manifest, files, true),
   refusals(input, addReason) {
+    buildRefusals(input, addReason);
     qualificationRefusal(input, addReason, validateLinkReceiptQualification, LINK_RECEIPT_QUALIFICATION_REASON);
     const condition = input.condition ?? {};
     const tags = input.declaredClientTags ?? Object.keys(input.clients ?? {});
@@ -887,8 +964,10 @@ const PEER_ARM = Object.freeze({
       const actual = readings[tag]?.positionOffset?.ms;
       if (readings[tag] && actual !== expected) addReason('position-offset-mismatch', REFUSAL_SCOPE.positionOffset, { tag, expected, actual });
     }
-    const buildIds = tags.filter((tag) => readings[tag]).map((tag) => readings[tag].buildId ?? null);
-    if (new Set(buildIds).size > 1 || buildIds.includes(null)) addReason('build-mismatch', REFUSAL_SCOPE.build, { buildIds });
+    if (!input.buildIdentity) {
+      const buildIds = tags.filter((tag) => readings[tag]).map((tag) => readings[tag].buildId ?? null);
+      if (new Set(buildIds).size > 1 || buildIds.includes(null)) addReason('build-mismatch', REFUSAL_SCOPE.build, { buildIds });
+    }
     const publication = input.publicationContext;
     if (!publication || publication.byteAccountingMethod !== 'peer-attempt-cohort-v1') return;
     for (const reason of publication.peerRefusalReasons ?? []) {

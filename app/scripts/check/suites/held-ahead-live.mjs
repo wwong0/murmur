@@ -83,7 +83,7 @@ export default async function heldAheadLiveSuite() {
     const record = reading.records.find((entry) => entry.kind === 'segment');
     assertEqual(record.mediaStartMs, 0, 'the default fixture segment starts at 0s');
     assertEqual(record.mediaEndMs, 4000, 'the default fixture segment ends at 4s (startTime/endTime x 1000)');
-    assertEqual(JSON.stringify(value.finishedSegments()), JSON.stringify([{ mediaStartMs: 0, mediaEndMs: 4000 }]), 'finishedSegments holds the same span, outside the ring');
+    assertEqual(JSON.stringify(value.finishedSegments()), JSON.stringify([{ mediaStartMs: 0, mediaEndMs: 4000, index: rig.segment.externalId }]), 'finishedSegments holds the same span and the engine index, outside the ring');
     assertEqual(value.finishedWithoutTimes, 0, 'a segment with finite times is not counted as without them');
   });
 

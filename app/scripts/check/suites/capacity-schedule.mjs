@@ -7,6 +7,7 @@ import {
 } from '../../harness/capacity-schedule.mjs';
 import { conditionValidationReason } from '../../harness-run.mjs';
 import { capacityBitsForManifest } from '../../harness-figures.mjs';
+import { heldAheadAt } from '../../figures/poll-coverage.mjs';
 
 const step = (rate) => ({ container: 'origin', network: 'wa-media', discipline: 'tbf', params: { rate, burst: '32kbit', latency: '400ms' } });
 const SCHEDULE = { dropAfterReadyMs: 120_000, drop: step('2mbit'), rise: step('10mbit'),
@@ -27,14 +28,15 @@ function world({ heldAhead, matches = () => true }) {
     t += ms;
     for (const tag of TAGS) {
       const value = heldAhead(tag, t - DROP_AT_MS);
-      if (value !== undefined) viewerPolls[tag].push({ harnessAfterMs: t, heldAhead: { heldAheadMs: value }, state: HELD });
+      if (value !== undefined) viewerPolls[tag].push({ harnessAfterMs: t,
+        heldAhead: { heldAheadMs: value, ownPositionMs: 0, ownHeldAheadMs: value, edgeIndex: 7 }, state: HELD });
     }
   };
   const stepQdisc = async (declared) => {
     steps.push(`${t}:${declared.params.rate}`);
     return { readings: { rate: { wanted: declared.params.rate } }, matches: matches(declared) };
   };
-  return { run: () => runSchedule({ condition: CONDITION, state: { readyAtMs: 0, tags: TAGS }, viewerPolls, stepQdisc, now: () => t, sleep }), steps };
+  return { run: () => runSchedule({ condition: CONDITION, state: { readyAtMs: 0, tags: TAGS }, viewerPolls, stepQdisc, now: () => t, sleep }), steps, viewerPolls, now: () => t };
 }
 
 async function thrownBy(run) {
@@ -71,6 +73,10 @@ export default async function capacityScheduleSuite() {
     assertEqual(schedule.exercised, true, 'the run is exercised');
     assertEqual(`${schedule.drop.appliedAtMs}/${schedule.drop.readBackAtMs}/${schedule.drop.inForce}`, '120000/120000/true', 'the drop is recorded with its read-back');
     assertEqual(schedule.rise.declared.params.rate, '10mbit', 'the rise is the declared one');
+    assertEqual(heldAheadAt(fake.viewerPolls, ['c05'], schedule.edge.atMs).c05, schedule.edge.heldAheadMsByClient.c05,
+      'the schedule edge and heldAheadAt count the same poll at the same instant');
+    assertEqual(heldAheadAt(fake.viewerPolls, ['c05'], schedule.edge.atMs + 1_001).c05, null,
+      'the same poll is stale 1 001 ms later');
   });
 
   await check('capacity schedule: a room that never reaches its edge rises at the ceiling and is not exercised', async () => {
@@ -113,5 +119,37 @@ export default async function capacityScheduleSuite() {
     const inForce = await world({ heldAhead: () => 9_000 }).run();
     assertEqual(scheduleRefusals(inForce).length, 0, 'a schedule in force refuses nothing');
     assertEqual(scheduleRefusals(null).length, 0, 'and a run with no schedule has none to refuse');
+  });
+
+  await check('10b H13: first-fetcher edge waits for another viewer and records the edge owner', async () => {
+    let clock = 0;
+    let tick = 0;
+    const viewerPolls = { c01: [], c02: [] };
+    const events = [];
+    const schedule = { dropAfterReadyMs: 1, drop: step('2mbit'), rise: step('10mbit'),
+      edgeHeldAheadMsBelow: 15_000, ceilingMs: 750, recordAfterRiseMs: 1, riseOn: 'first-fetcher-edge' };
+    const condition = { delivery: 'host', excludedPrefixMs: 1, capacitySchedule: schedule };
+    const sleep = async (ms) => {
+      clock += ms;
+      tick += 1;
+      viewerPolls.c01.push({ harnessAfterMs: clock, heldAhead: { ownHeldAheadMs: 10_000, edgeIndex: 0 } });
+      if (tick > 1) viewerPolls.c02.push({ harnessAfterMs: clock, heldAhead: { ownHeldAheadMs: 10_000, edgeIndex: 0 } });
+    };
+    const result = await runSchedule({ condition, state: { readyAtMs: 0, tags: ['c01', 'c02'],
+      viewerIds: ['id-a', 'id-b'], clientIds: { c01: 'id-a', c02: 'id-b' } }, viewerPolls,
+      stepQdisc: async (declared) => ({ readings: {}, matches: true }), now: () => clock, sleep,
+      onEdge: async (event) => { events.push(event); } });
+    assertEqual(events.length, 1, 'one event is issued');
+    assertEqual(events[0].viewer, 'c02', 'the viewer that is not first is selected');
+    assertEqual(events[0].leaver, 'c01', 'edgeRank names the first fetcher');
+    assertEqual(events[0].index, 0, 'the held poll edge index is retained');
+    assertEqual(result.exercised, true, 'the event exercises the schedule');
+
+    let ceiling = 0;
+    const noEvent = await runSchedule({ condition, state: { readyAtMs: 0, tags: ['c01', 'c02'],
+      viewerIds: ['id-a', 'id-b'], clientIds: { c01: 'id-a', c02: 'id-b' } }, viewerPolls: { c01: [], c02: [] },
+      stepQdisc: async () => ({ readings: {}, matches: true }), now: () => ceiling,
+      sleep: async (ms) => { ceiling += ms; } });
+    assertEqual(noEvent.exercised, false, 'the ceiling without an event is not exercised');
   });
 }

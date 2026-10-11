@@ -39,6 +39,7 @@ import harnessByteCohortSuite from './check/suites/harness-byte-cohort.mjs';
 import receiptCohortSuite from './check/suites/receipt-cohort.mjs';
 import harnessRefusalsSuite from './check/suites/harness-refusals.mjs';
 import harnessArmsSuite from './check/suites/harness-arms.mjs';
+import harnessImagesSuite from './check/suites/harness-images.mjs';
 import harnessArmRecomputeSuite from './check/suites/harness-arm-recompute.mjs';
 import harnessCadenceSuite from './check/suites/harness-cadence.mjs';
 import harnessPollShapeSuite from './check/suites/harness-poll-shape.mjs';
@@ -47,6 +48,10 @@ import trackerSpawnSuite from './check/suites/tracker-spawn.mjs';
 import harnessConditionsSuite from './check/suites/harness-conditions.mjs';
 import harnessBehindSuite from './check/suites/harness-behind.mjs';
 import harnessBehindPastSuite from './check/suites/harness-behind-past.mjs';
+import harnessFrameStallsSuite from './check/suites/harness-frame-stalls.mjs';
+import harnessDistanceBehindSuite from './check/suites/harness-distance-behind.mjs';
+import harnessRosterEventSuite from './check/suites/harness-roster-event.mjs';
+import harnessSocketControlSuite from './check/suites/harness-socket-control.mjs';
 import harnessPeerConditionsSuite from './check/suites/harness-peer-conditions.mjs';
 import harnessPeerTopologySuite from './check/suites/harness-peer-topology.mjs';
 import topologyReadbackSuite from './check/suites/topology-readback.mjs';
@@ -98,6 +103,8 @@ import urgentSourceSuite from './check/suites/urgent-source.mjs';
 import edgeAssignmentSuite from './check/suites/edge-assignment.mjs';
 import edgeSpreadSuite from './check/suites/edge-spread.mjs';
 import edgeSourceSuite from './check/suites/edge-source.mjs';
+import edgeRequestSuite from './check/suites/edge-request.mjs';
+import runwayEntrySuite from './check/suites/runway-entry.mjs';
 import edgeControlSuite from './check/suites/edge-control.mjs';
 import enginePatchSuite from './check/suites/engine-patch.mjs';
 import edgeAsksSuite from './check/suites/edge-asks.mjs';
@@ -150,6 +157,7 @@ import playbackStateSuite from './check/suites/playback-state.mjs';
 import playbackStateRulesSuite from './check/suites/playback-state-rules.mjs';
 import playbackAcquisitionSuite from './check/suites/playback-acquisition.mjs';
 import playbackAcquisitionTimingSuite from './check/suites/playback-acquisition-timing.mjs';
+import playbackElectionSuite from './check/suites/playback-election.mjs';
 import driftSuite from './check/suites/drift.mjs';
 import driftControllerSuite from './check/suites/drift-controller.mjs';
 import driftLoadSuite from './check/suites/drift-load.mjs';
@@ -194,6 +202,7 @@ for (const suite of [
   receiptCohortSuite,
   harnessRefusalsSuite,
   harnessArmsSuite,
+  harnessImagesSuite,
   harnessArmRecomputeSuite,
   harnessCadenceSuite,
   harnessPollShapeSuite,
@@ -202,6 +211,10 @@ for (const suite of [
   harnessConditionsSuite,
   harnessBehindSuite,
   harnessBehindPastSuite,
+  harnessFrameStallsSuite,
+  harnessDistanceBehindSuite,
+  harnessRosterEventSuite,
+  harnessSocketControlSuite,
   harnessPeerConditionsSuite,
   harnessPeerTopologySuite,
   topologyReadbackSuite,
@@ -253,6 +266,8 @@ for (const suite of [
   edgeAssignmentSuite,
   edgeSpreadSuite,
   edgeSourceSuite,
+  edgeRequestSuite,
+  runwayEntrySuite,
   edgeControlSuite,
   enginePatchSuite,
   edgeAsksSuite,
@@ -305,6 +320,7 @@ for (const suite of [
   playbackStateRulesSuite,
   playbackAcquisitionSuite,
   playbackAcquisitionTimingSuite,
+  playbackElectionSuite,
   driftSuite,
   driftControllerSuite,
   driftLoadSuite,

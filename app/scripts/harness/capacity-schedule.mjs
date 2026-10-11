@@ -5,18 +5,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseRate, parseSize, parseTime } from '../../harness/apply-qdisc.mjs';
-import { runwayMs } from '../figures/poll-coverage.mjs';
+import { edgeRank } from '../../public/lib/edge-assignment.mjs';
+import { POLL_FRESH_MS, pollAt, runwayMs } from '../figures/poll-coverage.mjs';
+
+export { POLL_FRESH_MS };
 
 export const SCHEDULE_FILE = 'capacity-schedule.json';
 export const SCHEDULE_TICK_MS = 250;
-export const POLL_FRESH_MS = 1_000;
 const SEEK_SETTLE_MS = 120_000;
 const SCHEDULE_KEYS = 'ceilingMs,drop,dropAfterReadyMs,edgeHeldAheadMsBelow,recordAfterRiseMs,rise';
+const EDGE_SCHEDULE_KEYS = `${SCHEDULE_KEYS},riseOn`;
 
 const finite = (value) => Number.isFinite(value);
 const object = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const keysOf = (value) => (object(value) ? Object.keys(value).sort().join(',') : '');
 const realSleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
 
 /** The shape 8a's `capacityStep` must have: the origin's tbf on the media network, three parsed parameters. */
 export function stepShapeValid(step) {
@@ -31,11 +35,12 @@ export function capacityScheduleReason(condition = {}) {
   if (!Object.prototype.hasOwnProperty.call(condition, 'capacitySchedule')) return null;
   const schedule = condition.capacitySchedule;
   const durations = ['dropAfterReadyMs', 'edgeHeldAheadMsBelow', 'ceilingMs', 'recordAfterRiseMs'];
-  const valid = keysOf(schedule) === SCHEDULE_KEYS
+  const valid = [SCHEDULE_KEYS, EDGE_SCHEDULE_KEYS].includes(keysOf(schedule))
     && durations.every((name) => finite(schedule[name]) && schedule[name] > 0)
     && stepShapeValid(schedule.drop) && stepShapeValid(schedule.rise)
     && condition.delivery === 'host'
     && !Object.prototype.hasOwnProperty.call(condition, 'capacityStep')
+    && (schedule.riseOn === undefined || schedule.riseOn === 'first-fetcher-edge')
     && (condition.seek ? schedule.dropAfterReadyMs >= condition.seek.issueAfterReadyMs + SEEK_SETTLE_MS
       : schedule.dropAfterReadyMs >= condition.excludedPrefixMs);
   return valid ? null : 'capacity-schedule-invalid';
@@ -45,15 +50,6 @@ export function capacityScheduleReason(condition = {}) {
 export function scheduleLengthMs(condition = {}) {
   const schedule = condition.capacitySchedule;
   return schedule ? schedule.dropAfterReadyMs + schedule.ceilingMs + schedule.recordAfterRiseMs : 0;
-}
-
-// A viewer with no poll in the last second has no value, and no value is not below the figure.
-function heldAheadNow(viewerPolls, tags, atMs) {
-  return Object.fromEntries(tags.map((tag) => {
-    const poll = viewerPolls?.[tag]?.at(-1);
-    const fresh = poll && finite(poll.harnessAfterMs) && atMs - poll.harnessAfterMs <= POLL_FRESH_MS;
-    return [tag, fresh ? runwayMs(poll, `capacity schedule: ${tag}`) : null];
-  }));
 }
 
 async function applyStep(declared, stepQdisc, now) {
@@ -67,7 +63,34 @@ async function applyStep(declared, stepQdisc, now) {
  * append to. A step read back at another rate ends the schedule there, and the
  * run is refused by it.
  */
-export async function runSchedule({ condition, state, viewerPolls, stepQdisc, now = Date.now, sleep = realSleep }) {
+function firstFetcherEdge({ state, viewerPolls, atMs, schedule } = {}) {
+  const tags = state.tags ?? [];
+  const viewerIds = typeof state.viewerIds === 'function' ? state.viewerIds() : state.viewerIds;
+  const ids = Array.isArray(viewerIds) ? viewerIds : [];
+  if (!ids.length) return null;
+  const candidates = [];
+  for (const tag of tags) {
+    const poll = pollAt(viewerPolls?.[tag], atMs, (entry) => entry?.harnessAfterMs, POLL_FRESH_MS);
+    const heldAhead = poll?.heldAhead;
+    const edgeIndex = heldAhead?.edgeIndex;
+    if (!poll || !finite(edgeIndex) || runwayMs(poll, `capacity schedule: ${tag}`) >= schedule.edgeHeldAheadMsBelow) continue;
+    const clientIds = typeof state.clientIds === 'function' ? state.clientIds() : state.clientIds;
+    const selfId = clientIds?.[tag] ?? tag;
+    const ranked = tags.map((candidate) => ({
+      tag: candidate,
+      rank: edgeRank({ viewerIds: ids, selfId: clientIds?.[candidate] ?? candidate, segmentIndex: edgeIndex }),
+    })).sort((left, right) => left.rank - right.rank || left.tag.localeCompare(right.tag));
+    const first = ranked[0];
+    if (first && first.tag !== tag && edgeRank({ viewerIds: ids, selfId, segmentIndex: edgeIndex }) !== 0) {
+      candidates.push({ viewer: tag, index: edgeIndex, leaver: first.tag, roster: ids.slice(), atMs,
+        heldAheadMs: runwayMs(poll, `capacity schedule: ${tag}`) });
+    }
+  }
+  return candidates.sort((left, right) => left.viewer.localeCompare(right.viewer))[0] ?? null;
+}
+
+export async function runSchedule({ condition, state, viewerPolls, stepQdisc, now = Date.now, sleep = realSleep,
+  onEdge = null }) {
   const schedule = condition.capacitySchedule;
   const dropAtMs = state.readyAtMs + schedule.dropAfterReadyMs;
   while (now() < dropAtMs) await sleep(Math.min(SCHEDULE_TICK_MS, dropAtMs - now()));
@@ -77,10 +100,20 @@ export async function runSchedule({ condition, state, viewerPolls, stepQdisc, no
   while (!edge) {
     await sleep(SCHEDULE_TICK_MS);
     const atMs = now();
-    const heldAheadMsByClient = heldAheadNow(viewerPolls, state.tags, atMs);
-    const reached = state.tags.length > 0
-      && state.tags.every((tag) => heldAheadMsByClient[tag] !== null && heldAheadMsByClient[tag] < schedule.edgeHeldAheadMsBelow);
-    if (reached || atMs - drop.readBackAtMs >= schedule.ceilingMs) edge = { reached, atMs, heldAheadMsByClient };
+    const heldAheadMsByClient = Object.fromEntries(state.tags.map((tag) => {
+      const poll = pollAt(viewerPolls?.[tag], atMs, (entry) => entry?.harnessAfterMs, POLL_FRESH_MS);
+      return [tag, poll ? runwayMs(poll, `capacity schedule: ${tag}`) : null];
+    }));
+    const event = schedule.riseOn === 'first-fetcher-edge'
+      ? firstFetcherEdge({ state, viewerPolls, atMs, schedule }) : null;
+    const reached = schedule.riseOn === 'first-fetcher-edge'
+      ? Boolean(event)
+      : state.tags.length > 0
+        && state.tags.every((tag) => heldAheadMsByClient[tag] !== null && heldAheadMsByClient[tag] < schedule.edgeHeldAheadMsBelow);
+    if (reached || atMs - drop.readBackAtMs >= schedule.ceilingMs) {
+      edge = { reached, atMs, heldAheadMsByClient, ...(event ?? {}) };
+      if (event) await onEdge?.(event);
+    }
   }
   const rise = await applyStep(schedule.rise, stepQdisc, now);
   return { drop, rise, edge, exercised: edge.reached };
@@ -91,8 +124,9 @@ export async function runSchedule({ condition, state, viewerPolls, stepQdisc, no
  * the condition declares no seek, opens the measure window at the rise's
  * read-back. Returns the instant the recording may end.
  */
-export async function recordSchedule({ condition, window, tags, viewerPolls, stepQdisc, manifestFile, runDir, now, sleep }) {
-  const schedule = await runSchedule({ condition, state: { readyAtMs: window.clientsReadyAtMs, tags }, viewerPolls, stepQdisc, now, sleep });
+export async function recordSchedule({ condition, window, tags, viewerPolls, stepQdisc, manifestFile, runDir, now, sleep,
+  viewerIds, clientIds, onEdge }) {
+  const schedule = await runSchedule({ condition, state: { readyAtMs: window.clientsReadyAtMs, tags, viewerIds, clientIds }, viewerPolls, stepQdisc, now, sleep, onEdge });
   fs.writeFileSync(path.join(runDir, SCHEDULE_FILE), `${JSON.stringify(schedule, null, 2)}\n`);
   manifestFile.merge({ capacitySchedule: schedule });
   if (!schedule.rise) { manifestFile.write(); return window.endMs; }
