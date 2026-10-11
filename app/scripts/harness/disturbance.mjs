@@ -9,7 +9,8 @@ export function disturbanceExpression(declared = {}) {
     const pageNow = () => performance.timeOrigin + performance.now();
     const snapshot = () => {
       const playback = __app.playback();
-      return { opens: playback?.opens, begun: playback?.begun, retargets: playback?.retargets };
+      return { opens: playback?.opens, begun: playback?.begun, retargets: playback?.retargets,
+        skips: playback?.skips };
     };
     const callbacksBefore = __app.playback()?.callbacks;
     await new Promise((resolve) => setTimeout(resolve, 500));

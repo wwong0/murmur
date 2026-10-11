@@ -38,6 +38,14 @@ export function createPlayer({ video }) {
   harness().log('player-created');
   return {
     onError() {},
+    finishedSegments() { return harness().finished; },
+    onFinished(fn) {
+      harness().finishedHandlers.push(fn);
+      return () => {
+        const index = harness().finishedHandlers.indexOf(fn);
+        if (index >= 0) harness().finishedHandlers.splice(index, 1);
+      };
+    },
     load(options) {
       harness().log('load', options);
       harness().onLoad?.();
@@ -62,12 +70,27 @@ export function createPlaybackStart(options) {
       harness().log('playback-start-poll', input);
       if (harness().pollThrows) throw new Error('scripted poll failure');
       const actions = harness().pendingActions.splice(0);
-      return { ...harness().startState, actions, nextAtSharedMs: null };
+      return { ...harness().startState, playing: harness().playing, skips: harness().skips ?? 0, actions, nextAtSharedMs: null };
+    },
+    skip({ abandonedDriftMs = null } = {}) {
+      if (harness().acceptSkip !== true || harness().playing !== true) return false;
+      harness().playing = false;
+      harness().skips = (harness().skips ?? 0) + 1;
+      const skipOf = harness().startState.attemptId ?? 1;
+      harness().pendingActions.push(
+        { kind: 'pause', attemptId: skipOf },
+        {
+          kind: 'park', attemptId: skipOf + 1, positionMs: harness().skipPositionMs ?? 1234,
+          scheduledPositionMs: harness().skipPositionMs ?? 1234, advanceMs: 0, seamEpochMs: 0,
+          skipOf, abandonedDriftMs,
+        },
+      );
+      return true;
     },
     ready(attemptId, observedSharedMs) { harness().log('ready', { attemptId, observedSharedMs }); },
     playResolved(attemptId) { harness().log('play-resolved', attemptId); },
     playRejected(attemptId, error) { harness().log('play-rejected', { attemptId, error }); },
     click() { harness().log('start-click'); },
-    state: () => ({ ...harness().startState, playing: harness().playing }),
+    state: () => ({ ...harness().startState, playing: harness().playing, skips: harness().skips ?? 0 }),
   };
 }

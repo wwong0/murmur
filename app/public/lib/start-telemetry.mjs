@@ -49,6 +49,8 @@ const KIND_FIELDS = Object.freeze({
     seamEpochMs: 'number', startAtSharedMs: 'number', latenessMs: 'number', elementPausedBefore: 'boolean',
     elementCurrentTimeMs: 'number', dispatchedAtLocalMs: 'number', returnedAtLocalMs: 'number', threw: 'string',
     reparkOf: 'number', reparks: 'number', abandonedLatenessMs: 'number', firstStartAtSharedMs: 'number',
+    reprojections: 'number', reprojectionOf: 'number', projectionMs: 'number', coverElapsedMs: 'number',
+    skipOf: 'number', abandonedDriftMs: 'number',
   },
   'element-event': {
     type: 'string', readyState: 'number', paused: 'boolean', elementCurrentTimeMs: 'number',

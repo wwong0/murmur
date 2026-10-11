@@ -38,6 +38,9 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientT
 
   /** @type {Set<Function>} */
   const errorHandlers = new Set();
+  /** @type {Set<Function>} */
+  const finishedHandlers = new Set();
+  const finished = new Map();
   let hls = null;
 
   function emitError(detail) {
@@ -59,6 +62,7 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientT
    */
   function load({ startPositionMs = null, p2p = null } = {}) {
     const startPosition = Number.isFinite(startPositionMs) ? startPositionMs / 1000 : -1;
+    finished.clear();
     if (hls) {
       hls.destroy();
       hls = null;
@@ -68,7 +72,7 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientT
       // rule; `hlsConfig` is construction-time config, and letting it silently
       // win would put playback somewhere no decision named.
       const HlsConstructor = p2p ? HlsP2P : Hls;
-      hls = new HlsConstructor({
+      const instance = new HlsConstructor({
         ...playerConfig,
         startPosition,
         ...(p2p ? {
@@ -78,27 +82,42 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientT
           },
         } : {}),
       });
-      hls.on(Hls.Events.ERROR, (_event, data) => {
+      hls = instance;
+      instance.on(Hls.Events.FRAG_BUFFERED, (_event, data) => {
+        if (hls !== instance) return;
+        const frag = data?.frag;
+        if (frag?.type !== 'main' || !Number.isFinite(frag.sn)
+          || !Number.isFinite(frag.start) || !Number.isFinite(frag.end)) return;
+        finished.set(frag.sn, { mediaStartMs: frag.start * 1000, mediaEndMs: frag.end * 1000 });
+        for (const fn of finishedHandlers) {
+          try {
+            fn();
+          } catch {
+            // A broken subscriber must not take the player down with it.
+          }
+        }
+      });
+      instance.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) {
           emitError({ fatal: true, type: data.type, details: data.details, error: data.error });
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              hls.startLoad();
+              instance.startLoad();
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
-              hls.recoverMediaError();
+              instance.recoverMediaError();
               break;
             default:
-              hls.destroy();
+              instance.destroy();
               break;
           }
         } else {
           console.log('[player] non-fatal hls.js error', data.type, data.details);
         }
       });
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-        hls.loadSource(src);
+      instance.attachMedia(video);
+      instance.on(Hls.Events.MEDIA_ATTACHED, () => {
+        instance.loadSource(src);
       });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       // A media fragment, not a seek — the position is part of the source the
@@ -127,6 +146,14 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientT
     load,
     park,
     destroy,
+    finishedSegments() {
+      if (!Hls.isSupported()) return null;
+      return [...finished.values()].map((segment) => ({ ...segment }));
+    },
+    onFinished(fn) {
+      finishedHandlers.add(fn);
+      return () => finishedHandlers.delete(fn);
+    },
     /** Subscribe to fatal player errors. Returns an unsubscribe function. */
     onError(fn) {
       errorHandlers.add(fn);

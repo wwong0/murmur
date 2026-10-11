@@ -123,7 +123,7 @@ export default async function harnessConditionsSuite() {
     // 9b's eleven likewise; scripts/check/suites/edge-conditions.mjs holds them to all or none.
     const registeredBy9b = (name) => name.startsWith('edge-') || name === 'shakedown/edge-qual';
     const added = [...currentEntries.keys()].filter((name) => !baseEntries.has(name) && !registeredBy8b2.includes(name) && !registeredBy9b(name));
-    assertEqual(JSON.stringify(added.sort()), JSON.stringify(['baseline-nop2p-steady', 'capacity-ten', 'hostorigin-nop2p', 'hostorigin-uncapped', 'p2p-naive', 'p2p-scattered', 'regimes-default-shaped', 'regimes-limited-shaped', 'regimes-starved', 'shakedown/cap20', 'shakedown/hostorigin-qual', 'shakedown/p2p-qual', 'shakedown/regimes-qual', 'shakedown/trap-qual', 'trap-seek', 'trap-seek-short']), 'only declared change conditions are new');
+    assertEqual(JSON.stringify(added.sort()), JSON.stringify(['baseline-nop2p-steady', 'behind-inside', 'behind-past', 'capacity-ten', 'hostorigin-nop2p', 'hostorigin-uncapped', 'p2p-naive', 'p2p-scattered', 'regimes-default-shaped', 'regimes-limited-shaped', 'regimes-starved', 'shakedown/behind-qual', 'shakedown/cap20', 'shakedown/hostorigin-qual', 'shakedown/p2p-qual', 'shakedown/regimes-qual', 'shakedown/trap-qual', 'trap-seek', 'trap-seek-short']), 'only declared change conditions are new');
   });
 
   await check('harness conditions: host arms enumerate their frozen field equalities', async () => {
@@ -148,6 +148,47 @@ export default async function harnessConditionsSuite() {
     assertEqual(qual.delivery, 'host', 'qualification host delivery');
     assertEqual(qual.feeds.join(','), '7a2-runner-qualification', 'qualification host feed');
     for (const field of ['clients', 'capacityMbps', 'qdiscs', 'backgroundLoadMbps', 'runLengthMs', 'excludedPrefixMs', 'measureWindowMs', 'content', 'bars']) fieldEqual(qual, filler, field, 'qualification host');
+  });
+
+  await check('harness conditions: behind arms keep their settled literals', async () => {
+    const qdisc = (container) => ({ container, network: 'wa-media', interface: '<resolved at runtime>', direction: 'egress', discipline: 'tbf', order: 1, params: { rate: '10mbit', burst: '32kbit', latency: '400ms' } });
+    const bars = {
+      recordCoverageMin: 0.95,
+      droppedFrameFractionMax: 0.02,
+      driftLogMissedMax: 0,
+      responseCutShortMaxBytes: 1129000,
+      responseSettleGapMs: 3000,
+      conservationChannelBytes: 131071,
+      conservationRelativeMax: 0.05,
+      conservationDeliveryGapMs: 3000,
+      steadyUtilisationMax: 0.9,
+      steadyDownloadRatioMin: 0.95,
+      steadyDownloadRatioMax: 1.25,
+      steadyRealtimeMin: 0.98,
+      steadyCapUsedMax: 0.9,
+    };
+    const common = (condition, pauseMs, observationMs, runLengthMs, excludedPrefixMs, measureWindowMs) => {
+      assertEqual(condition.delivery, 'host', `${condition.name} host delivery`);
+      assertEqual(condition.peerExchange, true, `${condition.name} peer exchange`);
+      assertEqual(condition.clients, 5, `${condition.name} five viewers`);
+      assertEqual(JSON.stringify(condition.qdiscs), JSON.stringify([qdisc('origin'), qdisc('client')]), `${condition.name} origin and client tbf`);
+      assertEqual(JSON.stringify(condition.figureKinds), JSON.stringify(['behind']), `${condition.name} behind figure kind`);
+      assertEqual(Object.hasOwn(condition, 'reading'), false, `${condition.name} has no reading`);
+      assertEqual(JSON.stringify(condition.disturbance), JSON.stringify({ kind: 'local-pause-play', clients: ['c03'], pauseMs, at: 'measure-window-start', observationMs }), `${condition.name} disturbance`);
+      assertEqual(condition.runLengthMs, runLengthMs, `${condition.name} run length`);
+      assertEqual(condition.excludedPrefixMs, excludedPrefixMs, `${condition.name} excluded prefix`);
+      assertEqual(condition.measureWindowMs, measureWindowMs, `${condition.name} measure window`);
+      assertEqual(JSON.stringify(condition.bars), JSON.stringify(bars), `${condition.name} bars`);
+      assertEqual(condition.positionOffsetMsByClient.c03, 0, `${condition.name} c03 offset`);
+    };
+    common(conditions['behind-inside'], 400, 90000, 240000, 120000, 120000);
+    assertEqual(JSON.stringify(conditions['behind-inside'].behind), JSON.stringify({ case: 'inside', attemptsMax: 3, settleAllowanceMs: 11500, saturatedMinPolls: 80 }), 'behind-inside limits');
+    common(conditions['behind-past'], 1500, 90000, 240000, 120000, 120000);
+    assertEqual(JSON.stringify(conditions['behind-past'].behind), JSON.stringify({ case: 'past', attemptsMax: 3, skipDecisionMaxMs: 4000, abandonedToleranceMs: 300, startLatenessMaxMs: 600, resync: { windowMs: 1000, medianMaxMs: 40, holdMs: 30000, maxMs: 2000 } }), 'behind-past limits');
+    const qual = conditions.shakedown['behind-qual'];
+    common(qual, 1500, 50000, 90000, 30000, 60000);
+    assertEqual(qual.publishes, false, 'behind qualification does not publish');
+    assertEqual(JSON.stringify(qual.behind), JSON.stringify(conditions['behind-past'].behind), 'behind qualification keeps past limits');
   });
 
   await check('harness conditions: F2 ready manifest keeps the host rig measures', async () => {

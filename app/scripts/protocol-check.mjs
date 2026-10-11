@@ -45,6 +45,8 @@ import harnessPollShapeSuite from './check/suites/harness-poll-shape.mjs';
 import harnessRecordsSuite from './check/suites/harness-records.mjs';
 import trackerSpawnSuite from './check/suites/tracker-spawn.mjs';
 import harnessConditionsSuite from './check/suites/harness-conditions.mjs';
+import harnessBehindSuite from './check/suites/harness-behind.mjs';
+import harnessBehindPastSuite from './check/suites/harness-behind-past.mjs';
 import harnessPeerConditionsSuite from './check/suites/harness-peer-conditions.mjs';
 import harnessPeerTopologySuite from './check/suites/harness-peer-topology.mjs';
 import topologyReadbackSuite from './check/suites/topology-readback.mjs';
@@ -157,6 +159,9 @@ import driftReportingSuite from './check/suites/drift-reporting.mjs';
 import driftSettlingSuite from './check/suites/drift-settling.mjs';
 import playbackStartSuite from './check/suites/playback-start.mjs';
 import playbackStartReparkSuite from './check/suites/playback-start-repark.mjs';
+import playbackStartCoverSuite from './check/suites/playback-start-cover.mjs';
+import farSkipSuite from './check/suites/far-skip.mjs';
+import farSkipEntrySuite from './check/suites/far-skip-entry.mjs';
 import tickStepsSuite from './check/suites/tick-steps.mjs';
 import settleWaitSuite from './check/suites/settle-wait.mjs';
 import startResidualSuite from './check/suites/start-residual.mjs';
@@ -195,6 +200,8 @@ for (const suite of [
   harnessRecordsSuite,
   trackerSpawnSuite,
   harnessConditionsSuite,
+  harnessBehindSuite,
+  harnessBehindPastSuite,
   harnessPeerConditionsSuite,
   harnessPeerTopologySuite,
   topologyReadbackSuite,
@@ -307,6 +314,9 @@ for (const suite of [
   driftSettlingSuite,
   playbackStartSuite,
   playbackStartReparkSuite,
+  playbackStartCoverSuite,
+  farSkipSuite,
+  farSkipEntrySuite,
   tickStepsSuite,
   settleWaitSuite,
   startResidualSuite,

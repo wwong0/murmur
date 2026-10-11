@@ -4,6 +4,7 @@
 // instant and the returned actions; this module owns no timer, DOM or clock.
 
 import { epochMsAt, mediaMsAt } from './playback-state.mjs';
+import { heldAheadMs } from './held-ahead.mjs';
 
 /** The advance's accepted range (executor-spec.md §2.5 C1 amendment). */
 const ADVANCE_RANGE_MS = Object.freeze([0, 250]);
@@ -36,7 +37,15 @@ function targetFor(state) {
   return { playing: false, effectiveMs: current.atSharedMs, positionMs: current.mediaMs };
 }
 
-export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0, reparkAfterMs = Infinity, maxReparks = 0 } = {}) {
+export function createPlaybackStart({
+  prepareLeadMs,
+  presentationAdvanceMs = 0,
+  reparkAfterMs = Infinity,
+  maxReparks = 0,
+  coverMarginMs = 0,
+  projectionMs = prepareLeadMs,
+  projectionMaxMs = projectionMs,
+} = {}) {
   if (!Number.isFinite(prepareLeadMs) || prepareLeadMs < 0) {
     throw new TypeError('prepareLeadMs must be a finite non-negative number');
   }
@@ -53,6 +62,11 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0, 
   if (!Number.isInteger(maxReparks) || maxReparks < 0) {
     throw new TypeError('maxReparks must be a non-negative integer');
   }
+  for (const [name, value] of [['coverMarginMs', coverMarginMs], ['projectionMs', projectionMs], ['projectionMaxMs', projectionMaxMs]]) {
+    if (!Number.isFinite(value) || value < 0) throw new TypeError(`${name} must be a finite non-negative number`);
+  }
+  if (projectionMs < prepareLeadMs) throw new TypeError('projectionMs must be at least prepareLeadMs');
+  if (projectionMaxMs < projectionMs) throw new TypeError('projectionMaxMs must be at least projectionMs');
 
   let nextAttemptId = 1;
   let attempt = null;
@@ -69,9 +83,18 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0, 
   let begun = 0;
   let retargets = 0;
   let reparks = 0;
+  let skips = 0;
   let lastLatenessMs = null;
   let lastPlayError = null;
   let linkOpen = true;
+  let finished = null;
+  let pendingSkip = null;
+
+  function covered(positionMs) {
+    return coverMarginMs === 0 || finished === null
+      || (Number.isFinite(positionMs) && Array.isArray(finished) && finished.length > 0
+        && heldAheadMs({ positionMs, segments: finished }) >= coverMarginMs);
+  }
 
   function snapshot() {
     const playing = presented?.playing === true;
@@ -96,10 +119,13 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0, 
       begun,
       retargets,
       reparks,
+      skips,
       lastLatenessMs,
       lastPlayError,
       attemptId: attempt?.id ?? null,
       startAtSharedMs: attempt?.target.playing ? attempt.S : null,
+      projectedAtSharedMs: attempt?.target.playing ? attempt.P : null,
+      reprojections: attempt?.target.playing ? attempt.reprojections : 0,
     };
   }
 
@@ -134,14 +160,15 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0, 
 
   function newPlayingAttempt(state, target, nowSharedMs, lineage = null) {
     const id = nextAttemptId++;
-    const S = Math.max(target.effectiveMs, nowSharedMs + prepareLeadMs);
-    // Both through the mapping's own arithmetic, never by adding the advance to
-    // a position: the timeline decides what media instant S + advance is (C1-6).
+    const S0 = Math.max(target.effectiveMs, nowSharedMs + prepareLeadMs);
+    const chosen = covered(mediaMsAt(state, S0 + presentationAdvanceMs));
+    const P = chosen ? S0 : Math.max(target.effectiveMs, nowSharedMs + (lineage?.nextProjectionMs ?? projectionMs));
+    const S = chosen ? S0 : null;
     const mapping = {
-      positionMs: mediaMsAt(state, S + presentationAdvanceMs),
-      scheduledPositionMs: mediaMsAt(state, S),
+      positionMs: mediaMsAt(state, P + presentationAdvanceMs),
+      scheduledPositionMs: mediaMsAt(state, P),
       advanceMs: presentationAdvanceMs,
-      seamEpochMs: epochMsAt(state, S),
+      seamEpochMs: epochMsAt(state, P),
     };
     if (![mapping.positionMs, mapping.scheduledPositionMs, mapping.seamEpochMs].every(Number.isFinite)) {
       missing = MISSING_STATE;
@@ -151,17 +178,41 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0, 
     attempt = {
       id,
       target,
+      P,
       S,
       mapping,
+      preparedAtSharedMs: nowSharedMs,
       readyAtSharedMs: null,
       playDispatched: false,
       parked: true,
       reparks: lineage?.reparks ?? 0,
       firstStartAtSharedMs: lineage?.firstStartAtSharedMs ?? S,
+      reprojections: lineage?.reprojections ?? 0,
+      reprojectionOf: lineage?.reprojectionOf ?? null,
+      projectionMs: lineage?.nextProjectionMs ?? projectionMs,
+      reportProjectionMs: lineage?.reportProjectionMs ?? (lineage?.nextProjectionMs ?? projectionMs),
+      coverElapsedMs: lineage?.coverElapsedMs ?? null,
+      skipOf: lineage?.skipOf,
+      abandonedDriftMs: lineage?.abandonedDriftMs,
     };
     pauseAction(actions, id);
     setupPosition(actions, id, mapping);
-    if (lineage) Object.assign(actions.at(-1), lineage);
+    Object.assign(actions.at(-1), {
+      reprojections: attempt.reprojections,
+      reprojectionOf: attempt.reprojectionOf,
+      projectionMs: attempt.reportProjectionMs,
+      coverElapsedMs: attempt.coverElapsedMs,
+      ...(attempt.skipOf === undefined ? {} : {
+        skipOf: attempt.skipOf,
+        abandonedDriftMs: attempt.abandonedDriftMs,
+      }),
+      ...(lineage?.reparkOf === undefined ? {} : {
+        reparkOf: lineage.reparkOf,
+        reparks: lineage.reparks,
+        abandonedLatenessMs: lineage.abandonedLatenessMs,
+        firstStartAtSharedMs: lineage.firstStartAtSharedMs,
+      }),
+    });
     return result(actions, S);
   }
 
@@ -209,9 +260,19 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0, 
           reparks: attempt.reparks + 1,
           abandonedLatenessMs: nowSharedMs - attempt.S,
           firstStartAtSharedMs: attempt.firstStartAtSharedMs,
+          reprojections: attempt.reprojections,
+          reprojectionOf: attempt.reprojectionOf,
+          nextProjectionMs: attempt.projectionMs,
+          reportProjectionMs: attempt.reportProjectionMs,
+          coverElapsedMs: attempt.coverElapsedMs,
+          skipOf: attempt.skipOf,
+          abandonedDriftMs: attempt.abandonedDriftMs,
         };
         const replaced = newPlayingAttempt(state, attempt.target, nowSharedMs, lineage);
-        if (replaced.actions.length > 0) reparks += 1;
+        if (replaced.actions.length > 0) {
+          reparks += 1;
+          return { ...replaced, reparks };
+        }
         return replaced;
       }
       attempt.playDispatched = true;
@@ -225,13 +286,28 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0, 
         ...attempt.mapping,
         reparks: attempt.reparks,
         firstStartAtSharedMs: attempt.firstStartAtSharedMs,
+        reprojections: attempt.reprojections,
+        reprojectionOf: attempt.reprojectionOf,
+        projectionMs: attempt.reportProjectionMs,
+        coverElapsedMs: attempt.coverElapsedMs,
+        ...(attempt.skipOf === undefined ? {} : {
+          skipOf: attempt.skipOf,
+          abandonedDriftMs: attempt.abandonedDriftMs,
+        }),
       }], null);
     }
     return result([], null);
   }
 
-  function poll({ nowSharedMs, resolved: nextResolved = false, state = null, linkOpen: nextLinkOpen = true } = {}) {
+  function poll({
+    nowSharedMs,
+    resolved: nextResolved = false,
+    state = null,
+    linkOpen: nextLinkOpen = true,
+    finished: nextFinished = null,
+  } = {}) {
     linkOpen = nextLinkOpen === true;
+    finished = nextFinished;
     resolved = nextResolved === true && state !== null;
     lastState = state;
 
@@ -273,8 +349,10 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0, 
     }
     if (attempt && !sameTarget(attempt.target, target)) invalidateAttempt();
     if (presented && !sameTarget(presented, target)) presented = null;
+    if (pendingSkip?.target && !sameTarget(pendingSkip.target, target)) pendingSkip = null;
 
     if (!target.playing) {
+      pendingSkip = null;
       if (retryAfterError) retryAfterError = false;
       if (attempt && sameTarget(attempt.target, target)) {
         if (attempt.deferred && nowSharedMs >= target.effectiveMs) return parkPaused(target);
@@ -288,10 +366,34 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0, 
       retargets += 1;
       invalidateAttempt();
     }
-    if (!attempt) return newPlayingAttempt(state, target, nowSharedMs);
+    if (!attempt) {
+      const lineage = pendingSkip;
+      pendingSkip = null;
+      return newPlayingAttempt(state, target, nowSharedMs, lineage);
+    }
     if (!attempt.target.playing) {
       invalidateAttempt();
       return newPlayingAttempt(state, target, nowSharedMs);
+    }
+    if (attempt.S === null) {
+      if (!covered(attempt.mapping.positionMs)) return result([], null);
+      const remaining = attempt.P - nowSharedMs;
+      if (remaining >= prepareLeadMs) {
+        attempt.S = attempt.P;
+        if (attempt.firstStartAtSharedMs === null) attempt.firstStartAtSharedMs = attempt.S;
+        return result([], attempt.S);
+      }
+      const coverElapsedMs = nowSharedMs - attempt.preparedAtSharedMs;
+      const nextProjectionMs = Math.min(projectionMaxMs, Math.max(projectionMs, 2 * coverElapsedMs));
+      return newPlayingAttempt(state, target, nowSharedMs, {
+        reparks: attempt.reparks,
+        firstStartAtSharedMs: attempt.firstStartAtSharedMs,
+        reprojections: attempt.reprojections + 1,
+        reprojectionOf: attempt.id,
+        nextProjectionMs,
+        reportProjectionMs: attempt.projectionMs,
+        coverElapsedMs,
+      });
     }
     if (nowSharedMs < attempt.S) return result([], attempt.S);
     return duePlaying(state, nowSharedMs);
@@ -327,10 +429,23 @@ export function createPlaybackStart({ prepareLeadMs, presentationAdvanceMs = 0, 
     }
   }
 
+  function skip({ abandonedDriftMs = null } = {}) {
+    if (presented?.playing !== true || !resolved) return false;
+    pendingSkip = {
+      target: attempt?.target ?? null,
+      skipOf: attempt?.id ?? null,
+      abandonedDriftMs: Number.isFinite(abandonedDriftMs) ? abandonedDriftMs : null,
+    };
+    presented = null;
+    attempt = null;
+    skips += 1;
+    return true;
+  }
+
   function click() {
     if (!resolved || !lastState?.current?.playing || !refused) return;
     retryRequested = true;
   }
 
-  return { poll, ready, playResolved, playRejected, click, state: snapshot };
+  return { poll, ready, playResolved, playRejected, skip, click, state: snapshot };
 }

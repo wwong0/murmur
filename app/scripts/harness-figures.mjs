@@ -14,6 +14,7 @@ import { driftSeriesCsv, driftSvg } from './figures/drift-plot.mjs';
 import { armFor } from './harness/arms.mjs';
 import { parseRate } from '../harness/apply-qdisc.mjs';
 import { computeEdgeFigures, readEdgeEvidence } from './figures/edge-publication.mjs';
+import { behindReading } from './figures/behind.mjs';
 
 function readJson(filePath, fallback = undefined) {
   try {
@@ -243,6 +244,19 @@ export function recomputeRunDirectory(runDir, options = {}) {
       requalification.maxRateCompletion = maxRateCompletion(evidence);
     }
     report.requalification = requalification;
+    if (figureKinds.includes('behind')) {
+      const targetTag = retained.input.condition?.behind?.clientTag ?? 'c03';
+      const target = clients[targetTag] ?? {};
+      const others = Object.fromEntries(Object.entries(clients).filter(([tag]) => tag !== targetTag));
+      report.behind = behindReading({
+        condition: retained.input.condition,
+        disturbance,
+        polls: target.polls,
+        records: target.records,
+        starts: target.starts,
+        others,
+      });
+    }
   }
   return report;
 }

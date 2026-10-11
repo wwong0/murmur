@@ -27,6 +27,7 @@ import { createDriftController } from './lib/drift-controller.mjs';
 import { initializePlaybackTreatment } from './lib/playback-treatment.mjs';
 import { createFrameSampler } from './lib/frame-sampler.mjs';
 import { createPlaybackStart } from './lib/playback-start.mjs';
+import { createFarSkip } from './lib/far-skip.mjs';
 import { createFrameObserver, createStartTelemetry } from './lib/start-telemetry.mjs';
 import { createDiagnosticsOverlay } from './lib/diagnostics-overlay.mjs';
 import {
@@ -35,7 +36,8 @@ import {
   createPlaybackAcquisition,
 } from './lib/playback-acquisition.mjs';
 import {
-  LATE_START_REPARK_MS, MAX_FUTURE_MS, MAX_LATE_REPARKS, PREPARE_LEAD_MS, PRESENTATION_ADVANCE_MS, TRANSITION_LEAD_MS,
+  LATE_START_REPARK_MS, MAX_FUTURE_MS, MAX_LATE_REPARKS, PREPARE_LEAD_MS, PRESENTATION_ADVANCE_MS, START_COVER_MARGIN_MS,
+  SKIP_DWELL_MS, SKIP_REPEAT_INTERVAL_MS, START_PROJECTION_MAX_MS, START_PROJECTION_MS, TRANSITION_LEAD_MS,
 } from './lib/playback-leads.mjs';
 import { runTickSteps } from './lib/tick-steps.mjs';
 import { readHostAsks, setUrgentContext, setUrgentOrder, urgentContext, urgentDelay } from './lib/urgent-source.mjs';
@@ -464,6 +466,7 @@ const player = createPlayer({ video, clientTag: tabId });
 player.onError((detail) => {
   addNotice(`player error: ${detail.type ?? 'unknown'} ${detail.details ?? ''}`, { warn: true });
 });
+player.onFinished(() => runTickSteps([['finished-fragment', () => schedulePollStart(0)]], reportStep));
 
 // THE PITCH TREATMENT, BEFORE THE SAMPLER, THE CONTROLLER AND ANY OPEN: the
 // adopted floor is only licensed by a pre-playback `preservesPitch = false`
@@ -719,9 +722,15 @@ const start = createPlaybackStart({
   presentationAdvanceMs: PRESENTATION_ADVANCE_MS,
   reparkAfterMs: LATE_START_REPARK_MS,
   maxReparks: MAX_LATE_REPARKS,
+  coverMarginMs: START_COVER_MARGIN_MS,
+  projectionMs: START_PROJECTION_MS,
+  projectionMaxMs: START_PROJECTION_MAX_MS,
 });
+const farSkip = createFarSkip({ dwellMs: SKIP_DWELL_MS, repeatIntervalMs: SKIP_REPEAT_INTERVAL_MS });
 const STARTS_KEPT = 32;
 const starts = [];
+let lastSkipAtSharedMs = null;
+let lastSkipAbandonedMs = null;
 let startTimer = null;
 // Readiness per executor-spec.md C1-7: an event after this attempt's load or
 // park, and for a park only from its `seeked` on; the tick re-checks readyState.
@@ -834,6 +843,12 @@ function recordAction(action, fields, dispatch) {
       reparks: action.reparks ?? null,
       abandonedLatenessMs: action.abandonedLatenessMs ?? null,
       firstStartAtSharedMs: action.firstStartAtSharedMs ?? null,
+      reprojections: action.reprojections ?? null,
+      reprojectionOf: action.reprojectionOf ?? null,
+      projectionMs: action.projectionMs ?? null,
+      coverElapsedMs: action.coverElapsedMs ?? null,
+      skipOf: action.skipOf ?? null,
+      abandonedDriftMs: action.abandonedDriftMs ?? null,
       ...fields,
       elementPausedBefore,
       elementCurrentTimeMs,
@@ -863,6 +878,13 @@ function play(action) {
     epochMs: seamEpochMs,
     reparks: action.reparks,
     firstStartAtSharedMs: action.firstStartAtSharedMs,
+    reprojections: action.reprojections,
+    projectionMs: action.projectionMs,
+    coverElapsedMs: action.coverElapsedMs,
+    ...(Object.hasOwn(action, 'skipOf') ? {
+      skipOf: action.skipOf,
+      abandonedDriftMs: action.abandonedDriftMs,
+    } : {}),
   });
   if (starts.length > STARTS_KEPT) starts.shift();
   sampler.start();
@@ -954,6 +976,7 @@ function pollStart() {
     resolved: acquisition.snapshot.resolved,
     state,
     linkOpen: link ? link.snapshot().state === 'open' : true,
+    finished: player.finishedSegments(),
   });
   telemetry.record('poll', {
     nowSharedMs,
@@ -973,6 +996,22 @@ function pollStart() {
   } else {
     schedulePollStart(result.nextAtSharedMs - (clockSync.sharedNow() ?? result.nextAtSharedMs));
   }
+}
+
+function evaluateFarSkip() {
+  const controllerState = controllerView();
+  const playback = start.state();
+  const decision = farSkip.evaluate({
+    nowMs: pageNow(),
+    named: controllerState.mode === 'beyond-rate-authority',
+    estimateMs: controllerState.estimateMs,
+    eligible: playback.resolved === true && playback.playing === true,
+  });
+  if (!decision.skip || !start.skip({ abandonedDriftMs: decision.abandonedDriftMs })) return;
+  lastSkipAtSharedMs = clockSync.sharedNow();
+  lastSkipAbandonedMs = decision.abandonedDriftMs;
+  addNotice(`far skip: ${decision.abandonedDriftMs}ms drift`);
+  pollStart();
 }
 
 document.addEventListener('click', () => {
@@ -1014,6 +1053,7 @@ function tickPlayback() {
     ['ahead-report', sendAheadReport],
     ['hold-resume', driveHoldResume],
     ['controller', () => treatment.pollController(() => controller.poll())],
+    ['far-skip', evaluateFarSkip],
     ['overlay', paintOverlay],
     ['controls', renderControls],
   ], reportStep);
@@ -1078,6 +1118,9 @@ window.__app = {
   },
   playback: () => ({
     ...start.state(),
+    skips: start.state().skips ?? 0,
+    lastSkipAtSharedMs,
+    lastSkipAbandonedMs,
     callbacks: sampler.callbacks,
     sampling: sampler.running,
     seams: controller.seams,

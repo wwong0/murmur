@@ -402,11 +402,14 @@ export function decideFinalization({ evaluation, recomputed, figureKinds, failur
   const hasKinds = Array.isArray(figureKinds);
   const byteAllowed = !hasKinds || figureKinds.includes('byte');
   const driftAllowed = hasKinds && figureKinds.includes('drift');
+  const behindAllowed = hasKinds && figureKinds.includes('behind');
   const publishedByte = isPublishedFigure(recomputed?.publishedByte);
   const publishedDrift = isPublishedFigure(recomputed?.publishedDrift);
+  const behindFigure = Array.isArray(recomputed?.behind) ? recomputed.behind : null;
   const byteEligible = evaluation?.figures?.byte
     ?? (!evaluation?.refused && !evaluation?.runRefused);
-  const aborted = (reason) => ({ status: 'aborted', outcome: 'failed', exitCode: 1, writeByte: false, writeDrift: false, reason });
+  const aborted = (reason) => ({ status: 'aborted', outcome: 'failed', exitCode: 1, writeByte: false, writeDrift: false,
+    ...(behindAllowed ? { writeBehind: false } : {}), reason });
   if (failure || recomputeError || retainedOverflow) return aborted('instrument-failure');
   // A run refusal outranks a cleanup failure; a cleanup failure outranks a pass.
   if (!evaluation?.runRefused && cleanupFailure) return aborted('cleanup-failure');
@@ -415,13 +418,14 @@ export function decideFinalization({ evaluation, recomputed, figureKinds, failur
     // Refusal scopes, not the run's status, decide what is withheld: a byte-only
     // run refusal leaves drift eligible (6a design.md D5; d1-findings.md F2).
     writeDrift: driftAllowed && evaluation?.figures?.drift === true && publishedDrift,
+    ...(behindAllowed ? { writeBehind: behindFigure !== null } : {}),
   };
   if (evaluation?.runRefused) return { status: 'refused', outcome: 'refused', exitCode: 1, ...writes, reason: 'run-refusal' };
   return { status: 'complete', outcome: 'pass', exitCode: 0, ...writes, reason: evaluation?.refused ? 'publication-refusal' : 'published' };
 }
 
 function clearPublishedOutputs(runDir) {
-  for (const name of ['published-figures.json', 'bytes-by-client.csv', 'utilisation.csv', 'published-drift.json', 'drift-series.csv', 'drift.svg']) {
+  for (const name of ['published-figures.json', 'bytes-by-client.csv', 'utilisation.csv', 'published-drift.json', 'drift-series.csv', 'drift.svg', 'published-behind.json']) {
     fs.rmSync(path.join(runDir, name), { force: true });
   }
 }
@@ -448,6 +452,10 @@ export function settleFinalization({ decision, manifestFile, runDir, recomputed,
         ['drift.svg', recomputed.driftSvg],
       ]);
     }
+    if (decision.writeBehind) {
+      if (!Array.isArray(recomputed?.behind)) throw new Error('behind output is not an array of rows');
+      outputs.push(['published-behind.json', `${JSON.stringify(recomputed.behind, null, 2)}\n`]);
+    }
     for (const [name, contents] of outputs) {
       const tempPath = path.join(runDir, `.${name}.${crypto.randomUUID()}.tmp`);
       temporary.push(tempPath);
@@ -457,6 +465,7 @@ export function settleFinalization({ decision, manifestFile, runDir, recomputed,
     const figures = {};
     if (decision.writeByte) figures.byte = recomputed.publishedByte;
     if (decision.writeDrift) figures.drift = recomputed.publishedDrift;
+    if (decision.writeBehind) figures.behind = recomputed.behind;
     manifestFile.merge({
       status: decision.status,
       outcome: decision.outcome,

@@ -221,6 +221,9 @@ export const IDLE_START_STATE = Object.freeze({
   lastPlayError: null,
   attemptId: null,
   startAtSharedMs: null,
+  projectedAtSharedMs: null,
+  reprojections: 0,
+  skips: 0,
 });
 
 /**
@@ -249,7 +252,12 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     clientHandlers: new Map(),
     playing: false,
     pendingActions: [],
+    acceptSkip: false,
+    skips: 0,
+    skipPositionMs: 1234,
     pollThrows: false,
+    finished: null,
+    finishedHandlers: [],
     startState: { ...IDLE_START_STATE },
     onPark: onPark && (() => onPark(control)),
     onLoad: onLoad && (() => onLoad(control)),
@@ -322,6 +330,9 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     /** A room-client event (`joined`, …) as the fake client's subscribers receive it. */
     emit(type, value) {
       for (const fn of harness.clientEvents.get(type) ?? []) fn(value);
+    },
+    emitFinished() {
+      for (const fn of [...harness.finishedHandlers]) fn();
     },
     /** A room-scoped envelope delivered to the fake client's `on(type)` subscribers. */
     deliver(env) {

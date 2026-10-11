@@ -438,13 +438,12 @@ function advancedMs(seam, probe) {
   return Number.isFinite(startedAt) ? probe.time * 1000 - startedAt : NaN;
 }
 
-/** The page's start status and its records after the latest start, in one evaluation. */
+/** The page's start status and its retained records, in one evaluation. */
 const START_RECORDS = `(() => {
   const app = window.__app;
   if (!app) return null;
   const playback = app.playback();
-  const start = playback.starts[playback.starts.length - 1];
-  return { playback, records: start ? app.drift(start.afterSeq).records : [] };
+  return { playback, records: app.drift(0).records };
 })()`;
 
 /**
@@ -473,7 +472,7 @@ function evaluateRetainedResidual({ label, fileStem, ready, frameIntervalMs }) {
   const recordsPath = path.join(RUN_DIR, `${fileStem}.records.ndjson`);
   const records = Array.isArray(ready.records) ? ready.records : [];
   fs.writeFileSync(recordsPath, records.map((record) => `${JSON.stringify(record)}\n`).join(''));
-  return evaluateResidual({ label, fileStem, seam: ready, records, retainedRecords: () => readNdjson(recordsPath), frameIntervalMs });
+  return evaluateAllResiduals({ label, fileStem, seam: ready, records, retainedRecords: () => readNdjson(recordsPath), frameIntervalMs });
 }
 
 /** Steady-command stretches at the saturated rate in a window's retained captures, as T10 fits them. */
@@ -493,6 +492,14 @@ function latestStart(seam) {
 function nextSeamAfterSeq(seam, start) {
   const later = (seam?.playback?.seams ?? []).map((entry) => entry?.afterSeq).filter((afterSeq) => Number.isSafeInteger(afterSeq) && afterSeq > start?.afterSeq);
   return later.length > 0 ? Math.min(...later) : Infinity;
+}
+
+/** The next scheduled start bounds this start's residual population. */
+function nextStartAfterSeq(seam, start, startIndex) {
+  const next = Array.isArray(seam?.playback?.starts) && Number.isInteger(startIndex)
+    ? seam.playback.starts[startIndex + 1]
+    : null;
+  return Number.isSafeInteger(next?.afterSeq) ? next.afterSeq : nextSeamAfterSeq(seam, start);
 }
 
 const failures = [];
@@ -526,17 +533,17 @@ function rowNotExercised(label, qualifier) {
  * records, retained to `<label>.starts.json`, then re-derived from the retained
  * NDJSON (D11). `retainedRecords` is read only after the first figure exists.
  */
-function evaluateResidual({ label, fileStem = label, seam, records, retainedRecords, frameIntervalMs }) {
-  const start = latestStart(seam);
-  const nextAfterSeq = nextSeamAfterSeq(seam, start);
-  const inputs = { start, nextAfterSeq, frameIntervalMs, population: RESIDUAL_POPULATION };
+function evaluateResidual({ label, fileStem = label, seam, records, retainedRecords, frameIntervalMs, start, startIndex = null }) {
+  const selectedStart = start ?? latestStart(seam);
+  const nextAfterSeq = nextStartAfterSeq(seam, selectedStart, startIndex);
+  const inputs = { start: selectedStart, nextAfterSeq, frameIntervalMs, population: RESIDUAL_POPULATION };
   const residual = startResidual({ records, ...inputs });
-  fs.writeFileSync(path.join(RUN_DIR, `${fileStem}.starts.json`), `${JSON.stringify({ start, nextAfterSeq: Number.isFinite(nextAfterSeq) ? nextAfterSeq : null, residual, frameIntervalMs: Number.isFinite(frameIntervalMs) ? frameIntervalMs : null }, null, 2)}\n`);
+  fs.writeFileSync(path.join(RUN_DIR, `${fileStem}.starts.json`), `${JSON.stringify({ start: selectedStart, nextAfterSeq: Number.isFinite(nextAfterSeq) ? nextAfterSeq : null, residual, frameIntervalMs: Number.isFinite(frameIntervalMs) ? frameIntervalMs : null }, null, 2)}\n`);
   const intervalText = Number.isFinite(frameIntervalMs) ? frameIntervalMs.toFixed(3) : 'null';
   expect(
     `RES ${label} scheduled-start residual within one frame interval (${intervalText}ms)`,
     residual.status === 'met',
-    `status ${residual.status} · S ${start?.startAtSharedMs ?? 'null'} · playAtSharedMs ${start?.playAtSharedMs ?? 'null'} · latenessMs ${start?.latenessMs ?? 'null'} · advanceMs ${start?.advanceMs ?? 'null'} · scheduledPositionMs ${start?.scheduledPositionMs ?? 'null'} · positionMs ${start?.positionMs ?? 'null'} · medianMs ${residual.medianMs ?? 'null'} · count ${residual.count} · seq ${residual.firstSeq ?? 'null'}..${residual.lastSeq ?? 'null'} after ${start?.afterSeq ?? 'null'} · next seam ${nextAfterSeq} · starts ${seam?.playback?.starts?.length ?? 'null'} · retargets ${seam?.playback?.retargets ?? 'null'}`,
+    `status ${residual.status} · S ${selectedStart?.startAtSharedMs ?? 'null'} · playAtSharedMs ${selectedStart?.playAtSharedMs ?? 'null'} · latenessMs ${selectedStart?.latenessMs ?? 'null'} · advanceMs ${selectedStart?.advanceMs ?? 'null'} · scheduledPositionMs ${selectedStart?.scheduledPositionMs ?? 'null'} · positionMs ${selectedStart?.positionMs ?? 'null'} · medianMs ${residual.medianMs ?? 'null'} · count ${residual.count} · seq ${residual.firstSeq ?? 'null'}..${residual.lastSeq ?? 'null'} after ${selectedStart?.afterSeq ?? 'null'} · next start ${nextAfterSeq} · starts ${seam?.playback?.starts?.length ?? 'null'} · retargets ${seam?.playback?.retargets ?? 'null'}`,
   );
   const rederived = startResidual({ records: retainedRecords(), ...inputs });
   expect(`RES ${label} re-derives from retained records`, JSON.stringify(rederived) === JSON.stringify(residual), `retained ${JSON.stringify(rederived)}; printed ${JSON.stringify(residual)}`);
@@ -544,13 +551,29 @@ function evaluateResidual({ label, fileStem = label, seam, records, retainedReco
   // advance `S - scheduledPositionMs` and `S - positionMs` differ by the
   // advance, so a seam derived from the physical park is caught here — and
   // nowhere else, because the controller drops its window by `afterSeq`.
-  const epoch = seamEpochAgreement({ start, records: retainedRecords() });
+  const epoch = seamEpochAgreement({ start: selectedStart, records: retainedRecords() });
   expect(
     `EPOCH ${label} seam epoch equals the room mapping epoch`,
     epoch.status === 'agrees',
-    `status ${epoch.status} · seam epochMs ${epoch.epochMs ?? 'null'} · S - scheduledPositionMs ${epoch.fromRoomMs ?? 'null'} · first record epochMs ${epoch.recordEpochMs ?? 'null'} · delta ${epoch.deltaMs ?? 'null'} · advanceMs ${start?.advanceMs ?? 'null'}`,
+    `status ${epoch.status} · seam epochMs ${epoch.epochMs ?? 'null'} · S - scheduledPositionMs ${epoch.fromRoomMs ?? 'null'} · first record epochMs ${epoch.recordEpochMs ?? 'null'} · delta ${epoch.deltaMs ?? 'null'} · advanceMs ${selectedStart?.advanceMs ?? 'null'}`,
   );
   return residual;
+}
+
+/** Judge every retained scheduled start, keeping one RES line and artifact per start. */
+function evaluateAllResiduals({ label, fileStem, seam, records, retainedRecords, frameIntervalMs }) {
+  const starts = Array.isArray(seam?.playback?.starts) ? seam.playback.starts : [];
+  if (!starts.length) return evaluateResidual({ label, fileStem, seam, records, retainedRecords, frameIntervalMs });
+  return starts.map((start, index) => evaluateResidual({
+    label: `${label} start ${index + 1}`,
+    fileStem: `${fileStem}-start-${index + 1}`,
+    seam,
+    records,
+    retainedRecords,
+    frameIntervalMs,
+    start,
+    startIndex: index,
+  }));
 }
 
 /**
@@ -965,7 +988,7 @@ try {
   for (const [label, tab, recorder] of [['A', a, recorderA], ['B', b, recorderB]]) {
     const seam = await tab.evaluate(SEAM);
     await pumpAll(recorders);
-    evaluateResidual({ label, seam, records: seam.records, retainedRecords: () => readNdjson(recorder.recordsPath), frameIntervalMs });
+    evaluateAllResiduals({ label, fileStem: label, seam, records: seam.records, retainedRecords: () => readNdjson(recorder.recordsPath), frameIntervalMs });
   }
 
   console.log('\n--- T6: measuring a converged span ---');
