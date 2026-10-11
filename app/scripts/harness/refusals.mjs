@@ -122,7 +122,8 @@ function excusedByRosterEvent(condition, event, reasons) {
   const excused = [];
   for (let index = reasons.length - 1; index >= 0; index -= 1) {
     const entry = reasons[index];
-    if (entry.tag === tag && (departs || (kind === 'join' && entry.reason === 'client-cadence-unavailable'))) {
+    const named = entry.tag === tag || (typeof entry.field === 'string' && entry.field.endsWith(`[${tag}]`));
+    if (named && (departs || (kind === 'join' && entry.reason === 'client-cadence-unavailable'))) {
       excused.unshift(...reasons.splice(index, 1));
     }
   }

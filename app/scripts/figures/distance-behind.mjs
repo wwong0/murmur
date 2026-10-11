@@ -108,7 +108,7 @@ export function distanceBehindRows({ condition = {}, clients = {}, viewerPolls =
   const rows = tags.map((tag) => {
     const polls = viewerPolls[tag];
     const base = { row: 'G1', client: tag, distanceBehindMs: null, maxMs,
-      pollPositionMs: null, pollAtMs: null, pollApproximate: true };
+      pollDistanceBehindMs: null, pollAtMs: null, pollApproximate: true };
     if (!Array.isArray(polls) || !polls.length) return { ...base, status: 'evidence-failure', reason: 'viewer-poll-stream-missing' };
     if (!Array.isArray(hostPoll) || !hostPoll.length) return { ...base, status: 'evidence-failure', reason: 'host-poll-stream-missing' };
     if (!finite(timebase?.offsetMs)) return { ...base, status: 'evidence-failure', reason: 'timebase-offset-missing' };
@@ -121,12 +121,14 @@ export function distanceBehindRows({ condition = {}, clients = {}, viewerPolls =
     const status = reading.status === 'available'
       ? (finite(maxMs) && finite(distance) && Math.abs(distance) <= maxMs ? 'met' : 'missed')
       : reading.status;
-    const poll = latest?.poll;
+    const page = pagePolls[tag];
+    // The viewer's own controller estimate at its last poll: a figure for a viewer
+    // presenting too few frames to be read, and no more than approximate.
+    const estimateMs = latestPagePoll(page, atMs)?.controller?.estimateMs;
     const result = { ...base, ...reading, status,
-      pollPositionMs: finite(poll?.state?.positionMs) ? poll.state.positionMs : null,
+      pollDistanceBehindMs: finite(estimateMs) ? -estimateMs : null,
       pollAtMs: finite(lastPollAtMs) ? lastPollAtMs : null };
 
-    const page = pagePolls[tag];
     if (!Array.isArray(page) || !page.length) {
       return { ...result, status: 'evidence-failure', reason: 'page-poll-stream-missing',
         skipsAtDrop: null, skipsAtInstant: null, skipRise: null };

@@ -370,12 +370,15 @@ function peerIdMembership(input) {
     new Set(Array.isArray(input.clients?.[tag]?.peerTotalsA?.peerIds)
       ? input.clients[tag].peerTotalsA.peerIds.filter((id) => typeof id === 'string') : [])]));
   const allIds = new Set(tags.flatMap((tag) => [...idsByTag[tag]]));
+  // A member a roster event removed was a member when the bytes moved.
+  const departed = new Set(input.departedPeerIds ?? []);
   const failures = [];
   let exercised = false;
   for (const tag of tags) {
     for (const attempt of recordsOf(input.clients?.[tag]).filter((record) => record?.kind === 'attempt' && record.source === 'p2p')) {
       exercised = true;
-      const matchesOther = tags.some((other) => other !== tag && idsByTag[other].has(attempt.peerId));
+      const matchesOther = departed.has(attempt.peerId)
+        || tags.some((other) => other !== tag && idsByTag[other].has(attempt.peerId));
       if (!matchesOther) failures.push({ tag, peerId: attempt.peerId ?? null, known: allIds.has(attempt.peerId) });
     }
   }

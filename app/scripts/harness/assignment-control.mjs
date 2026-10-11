@@ -54,7 +54,7 @@ export async function recordControls({ condition, sessions, record = { declared:
  * and at the end boundary; a run that kept none is refused whole, since nothing
  * then says which control its pages ran.
  */
-export function controlRefusals(condition = {}, readings = []) {
+export function controlRefusals(condition = {}, readings = [], { rosterPage = null } = {}) {
   const declared = declares(condition) ? condition.assignmentControl : CONTROL_PRODUCT;
   if (!Array.isArray(readings) || readings.length === 0) return [{ reason: 'assignment-control-unread', declared }];
   const refusals = [];
@@ -73,6 +73,8 @@ export function controlRefusals(condition = {}, readings = []) {
     for (const page of pages) {
       const before = first.byPage[page] ? assertControlReading(page, first.byPage[page]) : null;
       const after = reading.byPage[page] ? assertControlReading(page, reading.byPage[page]) : null;
+      // The page a roster event added or removed is in one reading only (10b design.md D7).
+      if (page === rosterPage && (before === null || after === null)) continue;
       if (JSON.stringify(before) !== JSON.stringify(after)) {
         refusals.push({ reason: 'assignment-control-changed', page, before, after });
       }

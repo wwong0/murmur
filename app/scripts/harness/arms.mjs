@@ -474,7 +474,9 @@ const HOST_ARM = Object.freeze({
     }
     // Absent only on evidence constructed or retained before 9b; a live run carries it.
     if (input.assignmentControl) {
-      for (const { reason, ...detail } of controlRefusals(condition, input.assignmentControl.readings)) {
+      const rosterPage = ['join', 'leave-clean', 'leave-silent', 'leave-first'].includes(condition.rosterEvent?.kind)
+        ? input.rosterEvent?.client ?? null : null;
+      for (const { reason, ...detail } of controlRefusals(condition, input.assignmentControl.readings, { rosterPage })) {
         addReason(reason, REFUSAL_SCOPE.control, detail);
       }
     }

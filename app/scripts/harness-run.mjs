@@ -330,8 +330,9 @@ async function prepareHostClient(session, url, deadline, options = {}) {
   await deadline.waitFor(`host ${session.tag}`, () => session.tab.evaluate('Boolean(window.__app && __app.hostCounters())'), Boolean, 30_000, 100);
 }
 
-function startLoop(task, everyMs, onError) {
+export function startLoop(task, everyMs, onError) {
   let stopped = false;
+  let wake = () => {};
   const promise = (async () => {
     while (!stopped) {
       const began = Date.now();
@@ -341,10 +342,11 @@ function startLoop(task, everyMs, onError) {
         onError(error);
         break;
       }
-      if (!stopped) await sleep(Math.max(1, everyMs - (Date.now() - began)));
+      // A stopped loop does not sleep its interval out: a leaver's is waited for before its tab closes.
+      if (!stopped) await Promise.race([sleep(Math.max(1, everyMs - (Date.now() - began))), new Promise((resolve) => { wake = resolve; })]);
     }
   })();
-  return { stop: () => { stopped = true; }, promise };
+  return { stop: () => { stopped = true; wake(); }, promise };
 }
 
 async function fetchSnapshot(originUrl) {
@@ -640,6 +642,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     boundaryOptions.viewerLinkReader = () => topology.readViewerLinkCounters?.() ?? null;
     boundaryOptions.topologyBoundaryReader = (kind, room) => topology.captureBoundary?.({
       kind, room, condition, runDir: prepared.runDir, manifest: manifestFile.get(),
+      ...(condition.rosterEvent ? { viewers: activeSessions().filter((session) => session.role === 'viewer').map((session) => session.tag) } : {}),
     });
     let pendingQualification = null;
     let lastJoinAtMs = null;
@@ -769,12 +772,14 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       rosterEvent = await issueRosterEvent({ condition, topology, sessions, targetSession: target, room,
         client: targetTag, runDir: prepared.runDir,
         activateJoin: targetTag === heldTag ? activateHeldJoiner : undefined,
+        // Waited for: a call in flight when the browser exits never settles, and teardown awaits every loop.
         stopSession: ['leave-clean', 'leave-first'].includes(kind)
           ? (session) => stopSessionLoops(session)
           : undefined,
         disposeSession: () => target.dispose?.(),
       });
-      if (kind !== 'drop-socket') target.active = false;
+      // A joiner is in the room from here on, and in both boundaries.
+      if (kind !== 'drop-socket' && kind !== 'join') target.active = false;
       return rosterEvent;
     };
     if (condition.rosterEvent && condition.rosterEvent.kind !== 'leave-first') await issueEvent();

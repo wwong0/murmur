@@ -72,6 +72,14 @@ export default async function assignmentControlSuite() {
       .find((entry) => entry.reason === 'assignment-control-changed');
     assertEqual(`${changed.page}:${changed.before.control}>${changed.after.control}`, 'c09:8b>product', 'two readings that differ name the page and both values');
     assertEqual(controlRefusals(DECLARING, [])[0].reason, 'assignment-control-unread', 'a run that kept no reading is refused');
+    // 10b: a joiner is absent from the first reading and a leaver from the last, and only they may be.
+    const joined = readings(EIGHT_B);
+    delete joined[0].byPage.c05;
+    assertEqual(named(controlRefusals(DECLARING, joined)), 'assignment-control-changed:c05', 'a page in one reading only is a change');
+    assertEqual(controlRefusals(DECLARING, joined, { rosterPage: 'c05' }).length, 0, 'unless it is the page the roster event added');
+    assertEqual(named(controlRefusals(DECLARING, joined, { rosterPage: 'c04' })), 'assignment-control-changed:c05', 'and no other page is excused by it');
+    const switched = controlRefusals(DECLARING, readings(EIGHT_B, { reading: 1, page: 'c05', value: PRODUCT }), { rosterPage: 'c05' });
+    assertEqual(named(switched), 'assignment-control-changed:c05 assignment-control-mismatch:c05', 'the event\'s page read twice and differing is still a change');
     // Prevention claim: a headline run that used the switch cannot be accepted.
     // Opportunity: a headline condition with page c07 reading 8b, supplied.
     // Action boundary: controlRefusals. Mutation, with assignment-control.mjs copied

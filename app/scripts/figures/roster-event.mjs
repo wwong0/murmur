@@ -16,7 +16,7 @@ import { startResiduals } from './start-requalification.mjs';
  * peer-bytes attempts use kind, path, peerId, bytes, endMs and segments use
  * path, mediaStartMs, completedAtMs. Page polls use atMs, clock.offsetMs and
  * playback; asks use index, reason, rank and atMs; starts use afterSeq,
- * reprojections, coverElapsedMs and reparks.
+ * reprojections, coverElapsedMs, reparks and positionMs.
  */
 
 const finite = (value) => Number.isFinite(value);
@@ -189,8 +189,25 @@ function runwayRow(name, tags, polls, eventTime, durationMs, barMs, timebase) {
   return row(name, status, { ...figures, lowestRunwayMs: Math.min(...Object.values(runwayMsByClient)) });
 }
 
-function startFigure(starts, records, first, content) {
-  const empty = { reprojections: null, coverElapsedMs: null, reparks: null, residualMs: null };
+const isSegmentPath = (path) => typeof path === 'string' && /(?:^|\/)seg-\d+\./.test(path);
+
+/**
+ * From the joiner's first segment request to its first request for the segment holding
+ * its start position. Both instants are the page's, so the difference needs no clock join.
+ */
+function landingAskDelay(start, attempts, segments) {
+  const positionMs = start?.positionMs;
+  const asked = (attempts ?? []).filter((attempt) => attempt?.kind === 'attempt' && isSegmentPath(attempt.path)
+    && finite(attempt.startMs));
+  const holding = (segments ?? []).find((segment) => finite(segment?.mediaStartMs) && finite(segment?.mediaEndMs)
+    && segment.mediaStartMs <= positionMs && positionMs < segment.mediaEndMs);
+  const landing = asked.filter((attempt) => attempt.path === holding?.path);
+  if (!finite(positionMs) || !landing.length) return null;
+  return Math.min(...landing.map((attempt) => attempt.startMs)) - Math.min(...asked.map((attempt) => attempt.startMs));
+}
+
+function startFigure(starts, records, first, content, attempts, segments) {
+  const empty = { reprojections: null, coverElapsedMs: null, reparks: null, residualMs: null, landingAskDelayMs: null };
   if (!Array.isArray(starts) || !first || !integer(first.seq)) return empty;
   let selected = -1;
   for (let index = 0; index < starts.length; index += 1) {
@@ -207,6 +224,7 @@ function startFigure(starts, records, first, content) {
     coverElapsedMs: start.coverElapsedMs ?? null,
     reparks: start.reparks ?? null,
     residualMs: residual?.signedMedianMs ?? null,
+    landingAskDelayMs: landingAskDelay(start, attempts, segments),
   };
 }
 
@@ -220,8 +238,7 @@ function fillRow(condition, attempts, eventTime, timebase) {
   const endMs = eventTime + overMs;
   const entries = [];
   for (const attempt of attempts) {
-    if (attempt?.kind !== 'attempt' || typeof attempt?.path !== 'string'
-      || !/(?:^|\/)seg-\d+\./.test(attempt.path)) continue;
+    if (attempt?.kind !== 'attempt' || !isSegmentPath(attempt?.path)) continue;
     if (!finite(attempt.endMs) || !finite(attempt.bytes) || attempt.bytes < 0) continue;
     const endSharedMs = sharedWallMs(timebase, attempt.endMs);
     if (finite(endSharedMs) && endSharedMs >= eventTime && endSharedMs <= endMs) entries.push(attempt);
@@ -426,7 +443,8 @@ export function rosterEventReading({ condition = {}, event, presence, drift = {}
     const maxMs = condition.churn?.firstFrameMaxMs;
     result.push(first ? row('J1', finite(maxMs) && first.displaySharedMs - eventTime <= maxMs ? 'met' : 'missed', {
       firstFrameSharedMs: first.displaySharedMs, firstFrameDelayMs: first.displaySharedMs - eventTime, maxMs,
-      start: startFigure(stream(starts, target), targetRecords, first, content),
+      start: startFigure(stream(starts, target), targetRecords, first, content,
+        stream(attempts, target), stream(segments, target)),
     }) : row('J1', 'missed', { firstFrameSharedMs: null, firstFrameDelayMs: null, maxMs, start: null }));
 
     if (!first) result.push(row('J2', 'not-exercised', { reason: 'first-frame-not-observed' }));
@@ -462,6 +480,8 @@ export function rosterEventReading({ condition = {}, event, presence, drift = {}
     result.push(fillRow(condition, stream(attempts, target), eventTime, timebase));
     result.push(runwayRow('J4', othersFor(condition, target), polls, eventTime,
       condition.churn?.stall?.afterMs, condition.churn?.runwayMinMs, timebase));
+    // D7's stall is every arm's: the viewers already in the room, either side of the join.
+    result.push(stallRow(condition, kind, eventTime, drift, stream(polls, 'host') ?? [], target));
     return result;
   }
   if (['leave-clean', 'leave-silent', 'leave-first', 'drop-socket'].includes(kind)) {

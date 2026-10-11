@@ -113,6 +113,34 @@ export default async function harnessRosterEventSuite() {
     assertEqual(rowOf(readJoin({ drift: { ...joinInput().drift, c05: [] } }), 'J1').status, 'missed', 'no frame is missed');
   });
 
+  await check('10b D1 B-1: a join reads the stall of the viewers already in the room, both windows', async () => {
+    const read = (gapAt) => rowOf(readJoin({ polls: { ...joinInput().polls, host: hostPolls() },
+      drift: Object.fromEntries(TAGS.map((tag) => [tag, tag === 'c05' ? denseFrames(E + 1_000, E + 60_000)
+        : denseFrames(E - 60_000, E + 60_000, tag === 'c02' ? gapAt : null)])) }), 'K1');
+    // Frames 50 ms apart from 60 s before the join: record 1 201 is displayed at it.
+    assertEqual(read(null).status, 'met', 'no gap either side is met');
+    const after = read(1_300);
+    assertEqual(after.status, 'missed', 'a 400 ms gap after the join is a stall');
+    assertEqual(after.intervals.c02.after.stalls.length, 1, 'the stall is the other viewer\'s');
+    assert(!('c05' in after.intervals), 'the joiner is not read');
+    assertEqual(read(600).status, 'unreadable', 'a gap before the join reads nothing');
+    assertEqual(rowOf(readJoin(), 'K1').status, 'evidence-failure', 'no host polls is an evidence failure, not a pass');
+  });
+
+  await check('10b D1 B-2: J1 publishes the delay to the landing segment\'s first ask', async () => {
+    const ask = (index, startMs) => ({ kind: 'attempt', attemptId: index, path: `/media/seg-${String(index).padStart(5, '0')}.m4s`,
+      startMs, endMs: E + 1_000 + index, bytes: 100, peerId: 'c01-peer' });
+    const segments = [1, 2, 3].map((index) => ({ kind: 'segment', path: `/media/seg-${String(index).padStart(5, '0')}.m4s`,
+      mediaStartMs: index * 4_000, mediaEndMs: (index + 1) * 4_000 }));
+    const start = (positionMs) => rowOf(readJoin({ segments: { c05: segments },
+      attempts: { c05: [{ ...ask(0, 1), path: '/media/index.m3u8' }, ask(3, 500), ask(2, 2_900), ask(2, 3_400), ask(1, 700)] },
+      starts: { c05: [{ afterSeq: 0, reprojections: 0, coverElapsedMs: 1_000, reparks: 0, positionMs }] } }), 'J1').start;
+    assertEqual(start(9_000).landingAskDelayMs, 2_400, 'the first of two asks for the holding segment, from the first segment ask');
+    assertEqual(start(12_000).landingAskDelayMs, 0, 'a position on a boundary is the later segment\'s, asked first');
+    assertEqual(start(40_000).landingAskDelayMs, null, 'a position in no finished segment has no figure');
+    assertEqual(rowOf(readJoin(), 'J1').start.landingAskDelayMs, null, 'a start with no position has no figure');
+  });
+
   await check('10b H7: fill uses peerId bytes, segment paths and shared-converted page ends', async () => {
     const result = (entries) => rowOf(readJoin({ attempts: { c05: entries } }), 'J3');
     const peer = Array.from({ length: 22 }, (_, index) => ({ kind: 'attempt', attemptId: index,

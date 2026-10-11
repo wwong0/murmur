@@ -67,10 +67,11 @@ function matching(records, state, expectedEvent, minimumSeq = -1) {
 
 function eventFrame(state, presence, eventName) {
   const all = Object.values(presence).flat();
-  const candidates = matching(all, state, eventName);
-  if (eventName === 'leave') return candidates.at(-1) ?? null;
+  const candidates = matching(all, state, eventName).sort((left, right) => left.seq - right.seq);
+  // The member the event acted on: a tab that rejoined leaves again at teardown, as another client.
+  if (eventName === 'leave') return candidates.find((record) => !state.clientId || record.clientId === state.clientId) ?? null;
   if (state.kind === 'drop-socket' && state.presence?.seq !== undefined) {
-    return candidates.filter((record) => record.seq > state.presence.seq).at(-1) ?? null;
+    return candidates.find((record) => record.seq > state.presence.seq) ?? null;
   }
   return candidates.at(-1) ?? null;
 }

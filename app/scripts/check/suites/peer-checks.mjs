@@ -1,6 +1,7 @@
 import { assert, assertEqual, check } from '../harness.mjs';
 import { computePeerChecks } from '../../figures/peer-checks.mjs';
 import { computePeerFigures } from '../../figures/peer-figures.mjs';
+import { remainingRoom } from '../../figures/harness-figures.mjs';
 
 const bars = {
   responseCutShortMaxBytes: 1_129_000, conservationChannelBytes: 131_071,
@@ -101,6 +102,28 @@ export default async function peerChecksSuite() {
     // Equal fields: both segment lengths, kept ids, byte totals, and every peer id except the mutated one.
     assertEqual(sum.clients.B.peerRecords[0].path, sumTwin.clients.B.peerRecords[0].path, 'sum twin keeps path');
     assertEqual(membership.clients.B.peerRecords[0].attemptId, 2, 'membership mutation keeps attempt id');
+  });
+
+  await check('10b peer checks: a leave is checked among the members that remain, its peer id still a member', async () => {
+    const left = (kind) => {
+      const input = base({ declaredClientTags: ['A', 'B', 'C'], condition: { bars, rosterEvent: { kind } },
+        rosterEvent: { kind, client: 'C' }, context: { clients: { C: { peerId: 'C' } } } });
+      input.clients.C = { peerRecords: [], requests: [] };
+      input.clients.A.peerRecords.push({ kind: 'attempt', attemptId: 9, path: '/media/seg-00009.m4s', source: 'p2p', peerId: 'C', startMs: 1, endMs: 2, bytes: 0 });
+      return input;
+    };
+    const by = (result, name) => result.find((entry) => entry.check === name);
+    const room = remainingRoom(left('leave-clean'));
+    assertEqual(JSON.stringify(room.declaredClientTags), JSON.stringify(['A', 'B']), 'the departed member is not in the room read');
+    assertEqual(JSON.stringify(room.departedPeerIds), JSON.stringify(['C']), 'its peer id is carried');
+    const remaining = computePeerChecks(room, bars);
+    assertEqual(by(remaining, 'conservation').exercised, true, 'conservation is exercised among the two that remain');
+    assertEqual(by(remaining, 'peer-id-membership').passed, true, 'an attempt on the departed member is a member\'s');
+    const stranger = computePeerChecks({ ...room, departedPeerIds: [] }, bars);
+    assertEqual(by(stranger, 'peer-id-membership').passed, false, 'the same attempt with no departed id is a stranger\'s');
+    const dropped = remainingRoom(left('drop-socket'));
+    assertEqual(JSON.stringify(dropped.declaredClientTags), JSON.stringify(['A', 'B', 'C']), 'a member that only lost its socket stays in the room read');
+    assertEqual(by(computePeerChecks(dropped, bars), 'conservation').exercised, false, 'and its missing totals are not excused');
   });
 
   await check('peer checks: conservation catches the lower bound and bounds tolerance', async () => {

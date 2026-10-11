@@ -383,7 +383,7 @@ export default async function harnessRefusalsSuite() {
       rosterEvent: { kind, client: 'c02', tabId: 'c02', presence: { event: 'leave', seq: 4 } },
       presence: { c01: [{ event: 'leave', seq: 4, tabId: 'c02' }], c02: [] } });
     const left = evaluateRefusals(input('leave-clean'));
-    assertEqual(left.reasons.filter((entry) => entry.tag === 'c02').length, 0, 'no reason names the leaver');
+    assertEqual(left.reasons.filter((entry) => entry.tag === 'c02' || String(entry.field ?? '').endsWith('[c02]')).length, 0, 'no reason names the leaver');
     assert(left.excused.some((entry) => entry.reason === 'client-holds-no-drift-records' && entry.tag === 'c02'), 'its absence is kept, named');
     const dropped = evaluateRefusals(input('drop-socket'));
     assert(dropped.reasons.some((entry) => entry.reason === 'client-holds-no-drift-records' && entry.tag === 'c02'),

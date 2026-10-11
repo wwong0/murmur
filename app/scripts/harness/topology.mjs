@@ -506,7 +506,7 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, e
       return { clients };
     },
 
-    async captureBoundary({ kind, condition, runDir, room }) {
+    async captureBoundary({ kind, condition, runDir, room, viewers = null }) {
       if (condition.delivery !== 'host') return null;
       const raw = await readTopologyAsync({ containers: state.containers, exec: execAsync });
       const subnet = state.subnets.get(MEDIA_NETWORK);
@@ -514,7 +514,8 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, e
       for (const name of ['origin', 'server']) {
         raw.mediaAddresses[name] = (await resolveInterfaceAsync(state.containers[name], subnet, execAsync)).address;
       }
-      const readback = topologyReadback({ raw, declaredViewers: armFor(condition).members(condition).tags });
+      // `viewers`: the ones in the room at this boundary, where a roster event changed them.
+      const readback = topologyReadback({ raw, declaredViewers: viewers ?? armFor(condition).members(condition).tags });
       const media = await readMediaCountersAsync({ container: state.containers.origin, exec: execAsync });
       const boundary = { raw, readback, media };
       state.boundaries[kind] = { ...boundary, room };

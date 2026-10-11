@@ -36,13 +36,17 @@ export function computeHarnessFigureKinds(input = {}) {
       starts: Object.fromEntries(Object.entries(clients).map(([tag, client]) => [tag, client?.starts])) });
   }
   if (kinds.includes('distance-behind')) {
+    // No recovered instant: a viewer with no drift stream is why, and is named.
+    const streamless = Object.entries(input.clients ?? {}).filter(([, client]) => !Array.isArray(client?.records))
+      .map(([tag]) => tag);
     result.distanceBehind = finite(input.distanceBehindAtMs)
       ? distanceBehindRows({ condition: input.condition, clients: input.clients, viewerPolls: input.viewerPolls,
         pagePolls: Object.fromEntries(Object.entries(input.clients ?? {})
           .map(([tag, client]) => [tag, client?.polls])), hostPoll: input.hostPoll,
         capacitySchedule: input.capacitySchedule, timebase: input.timebase, atMs: input.distanceBehindAtMs })
-      : { status: input.distanceBehindUnavailableReason === 'timebase-offset-missing' ? 'evidence-failure' : 'not-exercised',
-        rows: [], reason: input.distanceBehindUnavailableReason ?? 'recovery-unavailable' };
+      : streamless.length ? { status: 'evidence-failure', rows: [], reason: 'drift-stream-missing', clients: streamless }
+        : { status: input.distanceBehindUnavailableReason === 'timebase-offset-missing' ? 'evidence-failure' : 'not-exercised',
+          rows: [], reason: input.distanceBehindUnavailableReason ?? 'recovery-unavailable' };
   }
   return result;
 }
@@ -506,14 +510,31 @@ function peerAuxiliaryFigures(input) {
     .filter((field) => legacy[field] !== undefined).map((field) => [field, legacy[field]]));
 }
 
+const LEAVES = ['leave-clean', 'leave-silent', 'leave-first'];
+
+/**
+ * The room a leave left behind. The member it removed is in neither boundary, so the
+ * peer checks are made among the others, with its peer id still a member's (10b design.md D7).
+ */
+export function remainingRoom(input = {}) {
+  const departed = LEAVES.includes(input.condition?.rosterEvent?.kind) ? input.rosterEvent?.client : null;
+  if (typeof departed !== 'string') return input;
+  const tags = tagsFrom(input, input.clients ?? {}).filter((tag) => tag !== departed);
+  const { [departed]: gone, ...clients } = input.clients ?? {};
+  const peerId = input.context?.clients?.[departed]?.peerId;
+  return { ...input, declaredClientTags: tags, clientTags: tags, clients,
+    departedPeerIds: typeof peerId === 'string' ? [peerId] : [] };
+}
+
 function computePeerRunFigures(input) {
   const pairing = pairResponseEvidence(input);
   const auxiliary = peerAuxiliaryFigures(input);
-  const figures = computePeerFigures({ ...input,
+  const room = remainingRoom(input);
+  const figures = computePeerFigures({ ...room,
     uplinkUtilisationMean: auxiliary.uplinkUtilisationMean,
     realtimeFactorByClient: auxiliary.realtimeFactorByClient,
   }, pairing);
-  const checks = computePeerChecks(input, input.condition?.bars ?? {}, pairing);
+  const checks = computePeerChecks(room, input.condition?.bars ?? {}, pairing);
   const toleranceReasons = checks.flatMap((check) => check.toleranceRefusals ?? [])
     .map(() => 'peer-conservation-tolerance-unbounded');
   const spacing = peerSpacing({ clients: input.clients, tags: tagsFrom(input, input.clients ?? {}),

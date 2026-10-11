@@ -1,5 +1,6 @@
 import { assertEqual, assertNear, check } from '../harness.mjs';
 import { distanceBehind, distanceBehindRows } from '../../figures/distance-behind.mjs';
+import { computeHarnessFigureKinds } from '../../figures/harness-figures.mjs';
 
 const timebase = { offsetMs: 5_000, wallOffsetMs: -3_000 };
 const condition = { reading: { criteria: { distanceBehind: { maxMs: 600, windowMs: 2_000, minRecords: 20 } } } };
@@ -11,8 +12,8 @@ const viewerPoll = (atSharedMs, positionMs = 12_345) => ({
   harnessAfterMs: atSharedMs - 5_000 + 1,
   state: { positionMs },
 });
-const pagePoll = (atSharedMs, skips) => ({ atMs: atSharedMs - 10, clock: { offsetMs: 10 },
-  playback: { opens: 1, begun: 1, retargets: 0, reparks: 0, skips } });
+const pagePoll = (atSharedMs, skips, estimateMs = null) => ({ atMs: atSharedMs - 10, clock: { offsetMs: 10 },
+  controller: { estimateMs }, playback: { opens: 1, begun: 1, retargets: 0, reparks: 0, skips } });
 const hostPoll = Array.from({ length: 7 }, (_, index) => ({ sharedMs: index * 500 }));
 const rowFor = (driftMs, count = 20, overrides = {}) => distanceBehindRows({ condition,
   clients: { c01: { records: records(driftMs, count) } }, viewerPolls: { c01: [viewerPoll(2_900)] },
@@ -30,10 +31,25 @@ export default async function harnessDistanceBehindSuite() {
   });
 
   await check('10b H12: fewer than 20 records is missed and keeps the approximate poll figure', async () => {
-    const row = rowFor(-100, 19, { viewerPolls: { c01: [viewerPoll(2_900, 42_000)] } });
+    // The state's anchor position is not the viewer's: 99 000 here must not be published.
+    const row = rowFor(-100, 19, { viewerPolls: { c01: [viewerPoll(2_900, 99_000)] },
+      pagePolls: { c01: [pagePoll(2_000, 2, -41_000), pagePoll(2_900, 3, -42_000), pagePoll(3_000, 3, -7)] } });
     assertEqual(row.status, 'missed', '19 records do not establish a presentation');
     assertEqual(row.reason, 'not-presenting', 'the refusal names the absent presentation');
-    assertEqual(row.pollPositionMs, 42_000, 'the approximate poll position is published beside it');
+    assertEqual(row.pollDistanceBehindMs, 42_000, 'the last poll at or before the instant gives the approximate distance');
+    assertEqual(row.pollApproximate, true, 'and it is labelled approximate');
+    assertEqual(rowFor(-100, 19).pollDistanceBehindMs, null, 'a poll with no estimate publishes none');
+  });
+
+  await check('10b: with no recovered instant, a viewer without a drift stream is an evidence failure', async () => {
+    const reading = (clients) => computeHarnessFigureKinds({ condition: { ...condition, figureKinds: ['distance-behind'] },
+      clients, distanceBehindUnavailableReason: 'recovery-unavailable' }).distanceBehind;
+    const cut = reading({ c01: { records: records(-100) }, c02: {} });
+    assertEqual(cut.status, 'evidence-failure', 'a cut stream is not a room that was not exercised');
+    assertEqual(cut.reason, 'drift-stream-missing', 'the missing stream is the reason');
+    assertEqual(JSON.stringify(cut.clients), JSON.stringify(['c02']), 'and its viewer is named');
+    const whole = reading({ c01: { records: records(-100) }, c02: { records: records(-100) } });
+    assertEqual(whole.status, 'not-exercised', 'every stream present and no recovery is not exercised');
   });
 
   await check('10b H12: a 1400ms shared host gap across the instant has no distance value', async () => {
