@@ -44,6 +44,7 @@ import {
   makeError,
   makeEchoReply,
 } from '../public/lib/envelope.mjs';
+import { DEFAULT_TARGET_SEGMENT_SECONDS, targetMillis } from '../public/lib/remux-settings.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -211,7 +212,7 @@ function msUntilNameReleased(member, livenessMs) {
  * short liveness interval and a temporary media root, in-process, without
  * spawning anything.
  *
- * @param {{port?: number, host?: string, mediaDir?: string, livenessMs?: number, quiet?: boolean, delivery?: 'host'|'http', iceServers?: object[], trackerUrl?: string|null}} [opts]
+ * @param {{port?: number, host?: string, mediaDir?: string, livenessMs?: number, quiet?: boolean, delivery?: 'host'|'http', iceServers?: object[], trackerUrl?: string|null, mediaSource?: 'dir'|'file', targetSegmentSeconds?: number}} [opts]
  */
 export function startRoomServer(opts = {}) {
   const host = opts.host ?? DEFAULT_HOST;
@@ -221,8 +222,23 @@ export function startRoomServer(opts = {}) {
   const livenessMs = opts.livenessMs ?? DEFAULT_LIVENESS_MS;
   const quiet = opts.quiet ?? false;
   const delivery = opts.delivery ?? 'host';
+  const mediaSource = opts.mediaSource === undefined ? 'dir' : opts.mediaSource;
+  const targetSegmentSeconds = opts.targetSegmentSeconds === undefined
+    ? DEFAULT_TARGET_SEGMENT_SECONDS
+    : opts.targetSegmentSeconds;
   if (delivery !== 'host' && delivery !== 'http') {
     throw new TypeError(`delivery must be "host" or "http", got ${JSON.stringify(delivery)}`);
+  }
+  if (mediaSource !== 'dir' && mediaSource !== 'file') {
+    throw new TypeError(`APP_MEDIA_SOURCE must be "dir" or "file", got ${JSON.stringify(mediaSource)}`);
+  }
+  if (mediaSource === 'file' && delivery === 'http') {
+    throw new TypeError('APP_MEDIA_SOURCE=file requires APP_DELIVERY=host; file delivery cannot use http');
+  }
+  try {
+    targetMillis(targetSegmentSeconds);
+  } catch (error) {
+    throw new TypeError(`APP_SEGMENT_TARGET_S is invalid: ${error.message}`);
   }
   const trackerUrl = normalizeTrackerUrl(opts.trackerUrl);
   if (trackerUrl !== null && delivery === 'http') {
@@ -386,6 +402,32 @@ export function startRoomServer(opts = {}) {
     stream.pipe(res);
   }
 
+  function sendMediaUnavailable(req, res, clientTag) {
+    const body = 'not found';
+    const socket = res.socket;
+    const position = responsePosition(socket);
+    const originResponseId = position.socketId === null
+      ? null
+      : `${position.socketId}:${position.responseIndex}`;
+    res.writeHead(404, {
+      'Content-Type': 'text/plain',
+      'Content-Length': Buffer.byteLength(body),
+    });
+    res.flushHeaders();
+    completeResponse(res, {
+      clientTag,
+      urlPath: req.url,
+      kind: 'overhead',
+      expectedBytes: Buffer.byteLength(body),
+      socket,
+      socketId: position.socketId,
+      responseIndex: position.responseIndex,
+      originResponseId,
+      socketBytesAtStart: socket ? socket.bytesWritten : 0,
+    });
+    res.end(body);
+  }
+
   /**
    * Resolve a URL path under `root`, refusing anything that escapes it.
    *
@@ -440,11 +482,15 @@ export function startRoomServer(opts = {}) {
 
     if (req.method === 'GET' && pathname === '/app-settings') {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-      res.end(JSON.stringify({ delivery, iceServers, trackerUrl }));
+      res.end(JSON.stringify({ delivery, iceServers, trackerUrl, mediaSource, targetSegmentSeconds }));
       return;
     }
 
     if (pathname.startsWith('/media/')) {
+      if (mediaSource === 'file') {
+        sendMediaUnavailable(req, res, clientTag);
+        return;
+      }
       const abs = resolveWithin(mediaDir, pathname.slice('/media'.length));
       if (!abs) {
         res.writeHead(403, { 'Content-Type': 'text/plain' });
@@ -851,7 +897,8 @@ export function startRoomServer(opts = {}) {
     httpServer.listen(port, host, () => {
       const actual = httpServer.address().port;
       log(`listening on http://${host}:${actual} (ws at /ws)`);
-      log(`media root: ${mediaDir}`);
+      if (mediaSource === 'file') log('media source: file (server holds no media)');
+      else log(`media root: ${mediaDir}`);
       log(`liveness: ping every ${livenessMs}ms, terminate after 2 unanswered`);
       resolve(actual);
     });
@@ -872,6 +919,8 @@ export function optionsFromEnv(env = process.env) {
     mediaDir: env.APP_MEDIA_DIR,
     livenessMs: env.APP_LIVENESS_INTERVAL_MS ? Number(env.APP_LIVENESS_INTERVAL_MS) : undefined,
     delivery: env.APP_DELIVERY,
+    mediaSource: env.APP_MEDIA_SOURCE,
+    targetSegmentSeconds: env.APP_SEGMENT_TARGET_S === undefined ? undefined : Number(env.APP_SEGMENT_TARGET_S),
     iceServers,
     trackerUrl: normalizeTrackerUrl(env.APP_TRACKER_URL),
   };

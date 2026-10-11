@@ -28,6 +28,9 @@ desktop.ini
 # fMP4 segments of synthetic testsrc2).
 step0/content/
 
+# The owner's personal media, read by change 11's keyframe report. Never committed.
+test_videos/
+
 # Scratch from the spike rig's runs.
 spike-host-origin/.tmp/
 

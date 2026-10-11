@@ -83,6 +83,7 @@ import timeEchoSuite from './check/suites/time-echo.mjs';
 import robustnessSuite from './check/suites/robustness.mjs';
 import livenessSuite from './check/suites/liveness.mjs';
 import settingsSuite from './check/suites/settings.mjs';
+import mediaSourceSettingSuite from './check/suites/media-source-setting.mjs';
 import roomClientSuite from './check/suites/room-client.mjs';
 import clockSuite from './check/suites/clock.mjs';
 import clockSyncSuite from './check/suites/clock-sync.mjs';
@@ -184,6 +185,12 @@ import playbackTreatmentEntrySuite from './check/suites/playback-treatment-entry
 import roomControlsEntrySuite from './check/suites/room-controls-entry.mjs';
 import hostEntrySuite from './check/suites/host-entry.mjs';
 import runnerCoreSuite from './check/suites/runner-core.mjs';
+import remuxCutPlanSuite from './check/suites/remux-cut-plan.mjs';
+import remuxIndexSuite from './check/suites/remux-index.mjs';
+import remuxWriterSuite from './check/suites/remux-writer.mjs';
+import remuxPublishSuite from './check/suites/remux-publish.mjs';
+import fileIdentitySuite from './check/suites/file-identity.mjs';
+import remuxRunnerSuite from './check/suites/remux-runner.mjs';
 
 console.log(describeFixtures());
 
@@ -246,6 +253,7 @@ for (const suite of [
   robustnessSuite,
   livenessSuite,
   settingsSuite,
+  mediaSourceSettingSuite,
   roomClientSuite,
   clockSuite,
   clockSyncSuite,
@@ -347,6 +355,12 @@ for (const suite of [
   roomControlsEntrySuite,
   hostEntrySuite,
   runnerCoreSuite,
+  remuxCutPlanSuite,
+  remuxIndexSuite,
+  remuxWriterSuite,
+  remuxPublishSuite,
+  fileIdentitySuite,
+  remuxRunnerSuite,
 ]) {
   await suite();
 }

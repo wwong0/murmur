@@ -19,6 +19,7 @@
   "dependencies": {
     "bittorrent-tracker": "11.2.3",
     "hls.js": "^1.7.0",
+    "mp4box": "2.4.1",
     "p2p-media-loader-core": "3.0.1",
     "p2p-media-loader-hlsjs": "3.0.1",
     "ws": "^8.21.3"
