@@ -1,4 +1,4 @@
-import { POLL_FRESH_MS } from './poll-coverage.mjs';
+import { harnessSharedMs, latestPagePoll, pagePollSharedMs, POLL_FRESH_MS } from './poll-coverage.mjs';
 
 const finite = (value) => Number.isFinite(value);
 
@@ -58,34 +58,10 @@ export function distanceBehind({ records, atMs, windowMs, minRecords, lastPollAt
     records: samples.length, window: { startMs, endMs: atMs } };
 }
 
-function viewerPollSharedMs(poll, timebase) {
-  if (!finite(timebase?.offsetMs) || !finite(poll?.harnessBeforeMs) || !finite(poll?.harnessAfterMs)) return null;
-  return (poll.harnessBeforeMs + poll.harnessAfterMs) / 2 + timebase.offsetMs;
-}
-
-function pagePollSharedMs(poll) {
-  if (!finite(poll?.atMs) || !finite(poll?.clock?.offsetMs)) return null;
-  return poll.atMs + poll.clock.offsetMs;
-}
-
 function latestViewerPoll(polls, atMs, timebase) {
-  return (polls ?? []).map((poll) => ({ poll, atMs: viewerPollSharedMs(poll, timebase) }))
+  return (polls ?? []).map((poll) => ({ poll, atMs: harnessSharedMs(timebase, poll?.harnessBeforeMs, poll?.harnessAfterMs) }))
     .filter((entry) => finite(entry.atMs) && entry.atMs <= atMs)
     .sort((left, right) => left.atMs - right.atMs).at(-1) ?? null;
-}
-
-function latestPagePoll(polls, atMs) {
-  return (polls ?? []).map((poll) => ({ poll, atMs: pagePollSharedMs(poll) }))
-    .filter((entry) => finite(entry.atMs) && entry.atMs <= atMs)
-    .sort((left, right) => left.atMs - right.atMs).at(-1)?.poll ?? null;
-}
-
-function counterReading(poll) {
-  const playback = poll?.playback;
-  if (!playback || typeof playback !== 'object') return null;
-  const fields = ['opens', 'begun', 'retargets', 'reparks', 'skips'];
-  if (fields.some((field) => !Number.isSafeInteger(playback[field]))) return null;
-  return Object.fromEntries(fields.map((field) => [field, playback[field]]));
 }
 
 function skipReading(polls, atMs) {

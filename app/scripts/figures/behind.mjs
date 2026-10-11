@@ -112,19 +112,17 @@ export function resyncAfter({ firstFrameSharedMs, pairs, windowMs, medianMaxMs, 
     || !(finite(holdMs) && holdMs >= 0)) return null;
   const normalized = pairs.map(pairRecords);
   if (normalized.some((pair) => !pair.length)) return null;
-  const candidates = [...new Set(normalized.flatMap((pair) => pair
-    .map(sampleTime).filter((time) => finite(time) && time >= firstFrameSharedMs)))].sort((a, b) => a - b);
-  const allTimes = [...new Set(normalized.flatMap((pair) => pair
+  const times = [...new Set(normalized.flatMap((pair) => pair
     .map(sampleTime).filter((time) => finite(time) && time >= firstFrameSharedMs)))].sort((a, b) => a - b);
   const settledAt = (startMs) => {
     const endMs = startMs + holdMs;
-    const checks = [startMs, ...allTimes.filter((time) => time > startMs && time <= endMs)];
+    const checks = [startMs, ...times.filter((time) => time > startMs && time <= endMs)];
     return checks.every((time) => normalized.every((pair) => {
       const reading = windowMedian(pair, time, windowMs);
       return reading.count > 0 && reading.value <= medianMaxMs;
     }));
   };
-  const candidate = candidates.find((time) => settledAt(time));
+  const candidate = times.find((time) => settledAt(time));
   return candidate === undefined ? null : candidate - firstFrameSharedMs;
 }
 

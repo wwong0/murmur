@@ -21,7 +21,6 @@ const object = (value) => Boolean(value) && typeof value === 'object' && !Array.
 const keysOf = (value) => (object(value) ? Object.keys(value).sort().join(',') : '');
 const realSleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
-
 /** The shape 8a's `capacityStep` must have: the origin's tbf on the media network, three parsed parameters. */
 export function stepShapeValid(step) {
   const params = step?.params;
@@ -58,11 +57,6 @@ async function applyStep(declared, stepQdisc, now) {
   return { declared, readBack: result?.readings ?? {}, appliedAtMs, readBackAtMs: now(), inForce: result?.matches === true };
 }
 
-/**
- * `state` is `{ readyAtMs, tags }`; `viewerPolls` the live arrays the poll loops
- * append to. A step read back at another rate ends the schedule there, and the
- * run is refused by it.
- */
 function firstFetcherEdge({ state, viewerPolls, atMs, schedule } = {}) {
   const tags = state.tags ?? [];
   const viewerIds = typeof state.viewerIds === 'function' ? state.viewerIds() : state.viewerIds;
@@ -89,6 +83,11 @@ function firstFetcherEdge({ state, viewerPolls, atMs, schedule } = {}) {
   return candidates.sort((left, right) => left.viewer.localeCompare(right.viewer))[0] ?? null;
 }
 
+/**
+ * `state` is `{ readyAtMs, tags }`; `viewerPolls` the live arrays the poll loops
+ * append to. A step read back at another rate ends the schedule there, and the
+ * run is refused by it.
+ */
 export async function runSchedule({ condition, state, viewerPolls, stepQdisc, now = Date.now, sleep = realSleep,
   onEdge = null }) {
   const schedule = condition.capacitySchedule;

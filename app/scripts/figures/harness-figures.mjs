@@ -8,6 +8,7 @@ import { peerSpacing } from './peer-spacing.mjs';
 import { computeNoP2pSteady } from './nop2p-steady.mjs';
 import { distanceBehindRows } from './distance-behind.mjs';
 import { rosterEventReading } from './roster-event.mjs';
+import { removesMember } from '../harness/roster-kinds.mjs';
 
 export const PEER_FRACTION_ABS_MAX = 0.02;
 
@@ -23,26 +24,23 @@ function peerRecordsByKind(clients, kind) {
 /** Dispatch the two churn readers after the retained streams have been loaded. */
 export function computeHarnessFigureKinds(input = {}) {
   const kinds = input.condition?.figureKinds ?? [];
+  const clients = input.clients ?? {};
+  const byClient = (field) => Object.fromEntries(Object.entries(clients).map(([tag, client]) => [tag, client?.[field]]));
   const result = {};
   if (kinds.includes('roster-event')) {
-    const clients = input.clients ?? {};
     result.rosterEvent = rosterEventReading({ condition: input.condition, event: input.rosterEvent,
-      presence: input.presence, drift: Object.fromEntries(Object.entries(clients)
-        .map(([tag, client]) => [tag, client?.records])),
+      presence: input.presence, drift: byClient('records'),
       polls: { ...input.viewerPolls, host: input.hostPoll }, attempts: peerRecordsByKind(clients, 'attempt'),
       segments: peerRecordsByKind(clients, 'segment'), asks: input.asks, timebase: input.timebase,
-      content: input.content, pagePolls: Object.fromEntries(Object.entries(clients)
-        .map(([tag, client]) => [tag, client?.polls])),
-      starts: Object.fromEntries(Object.entries(clients).map(([tag, client]) => [tag, client?.starts])) });
+      content: input.content, pagePolls: byClient('polls'), starts: byClient('starts') });
   }
   if (kinds.includes('distance-behind')) {
     // No recovered instant: a viewer with no drift stream is why, and is named.
-    const streamless = Object.entries(input.clients ?? {}).filter(([, client]) => !Array.isArray(client?.records))
+    const streamless = Object.entries(clients).filter(([, client]) => !Array.isArray(client?.records))
       .map(([tag]) => tag);
     result.distanceBehind = finite(input.distanceBehindAtMs)
       ? distanceBehindRows({ condition: input.condition, clients: input.clients, viewerPolls: input.viewerPolls,
-        pagePolls: Object.fromEntries(Object.entries(input.clients ?? {})
-          .map(([tag, client]) => [tag, client?.polls])), hostPoll: input.hostPoll,
+        pagePolls: byClient('polls'), hostPoll: input.hostPoll,
         capacitySchedule: input.capacitySchedule, timebase: input.timebase, atMs: input.distanceBehindAtMs })
       : streamless.length ? { status: 'evidence-failure', rows: [], reason: 'drift-stream-missing', clients: streamless }
         : { status: input.distanceBehindUnavailableReason === 'timebase-offset-missing' ? 'evidence-failure' : 'not-exercised',
@@ -510,14 +508,12 @@ function peerAuxiliaryFigures(input) {
     .filter((field) => legacy[field] !== undefined).map((field) => [field, legacy[field]]));
 }
 
-const LEAVES = ['leave-clean', 'leave-silent', 'leave-first'];
-
 /**
  * The room a leave left behind. The member it removed is in neither boundary, so the
  * peer checks are made among the others, with its peer id still a member's (10b design.md D7).
  */
 export function remainingRoom(input = {}) {
-  const departed = LEAVES.includes(input.condition?.rosterEvent?.kind) ? input.rosterEvent?.client : null;
+  const departed = removesMember(input.condition?.rosterEvent?.kind) ? input.rosterEvent?.client : null;
   if (typeof departed !== 'string') return input;
   const tags = tagsFrom(input, input.clients ?? {}).filter((tag) => tag !== departed);
   const { [departed]: gone, ...clients } = input.clients ?? {};

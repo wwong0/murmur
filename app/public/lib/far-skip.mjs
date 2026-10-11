@@ -15,11 +15,7 @@ export function createFarSkip({ dwellMs, repeatIntervalMs } = {}) {
   }
 
   function evaluate({ nowMs, named = false, estimateMs = null, eligible = false } = {}) {
-    if (!Number.isFinite(nowMs)) {
-      namedSince = null;
-      return { skip: false, abandonedDriftMs: null };
-    }
-    if (named !== true || eligible !== true) {
+    if (!Number.isFinite(nowMs) || named !== true || eligible !== true) {
       namedSince = null;
       return { skip: false, abandonedDriftMs: null };
     }

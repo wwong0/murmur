@@ -4,6 +4,7 @@ import { evaluateByteControl } from './byte-control.mjs';
 import { armFor, REFUSAL_SCOPE } from './arms.mjs';
 import { appliedSeekEvidence, appliedWithoutRestart } from '../figures/seek-evidence.mjs';
 import { scheduleRefusals } from './capacity-schedule.mjs';
+import { removesMember } from './roster-kinds.mjs';
 
 export const REFUSAL_REASONS = Object.freeze([
   'client-never-began-playback',
@@ -103,12 +104,11 @@ function rosterEventRefusal(input, addReason) {
   const presence = input.presence ?? {};
   const expected = event.kind === 'join' ? 'join' : 'leave';
   const seq = event.presence?.seq;
-  const observed = Number.isSafeInteger(seq) && others.every((tag) => (presence[tag] ?? []).some((record) =>
+  const missingTags = others.filter((tag) => !(presence[tag] ?? []).some((record) =>
     record?.seq === seq && record?.event === expected && record?.tabId === event.tabId));
-  if (!observed) addReason('roster-event-not-observed', REFUSAL_SCOPE.churn, {
-    figure: 'roster-event', missingTags: others.filter((tag) => !(presence[tag] ?? []).some((record) =>
-      record?.seq === seq && record?.event === expected && record?.tabId === event.tabId)),
-  });
+  if (!Number.isSafeInteger(seq) || missingTags.length) {
+    addReason('roster-event-not-observed', REFUSAL_SCOPE.churn, { figure: 'roster-event', missingTags });
+  }
 }
 
 // 10b design.md D7: the member a leave removed ends its streams at the event by design,
@@ -118,7 +118,7 @@ function excusedByRosterEvent(condition, event, reasons) {
   const kind = condition.rosterEvent?.kind;
   const tag = event?.client;
   if (typeof tag !== 'string') return [];
-  const departs = kind === 'leave-clean' || kind === 'leave-silent' || kind === 'leave-first';
+  const departs = removesMember(kind);
   const excused = [];
   for (let index = reasons.length - 1; index >= 0; index -= 1) {
     const entry = reasons[index];

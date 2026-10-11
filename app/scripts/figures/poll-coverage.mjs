@@ -17,6 +17,34 @@ export function pollAt(polls, atMs, readAt = instantOf, freshMs = POLL_FRESH_MS)
   return atMs - latest.atMs <= freshMs ? latest.poll : null;
 }
 
+/** A harness bracket's midpoint on the shared clock, or `null` without the join's offset. */
+export function harnessSharedMs(timebase, beforeMs, afterMs) {
+  if (!finite(timebase?.offsetMs) || !finite(beforeMs) || !finite(afterMs)) return null;
+  return (beforeMs + afterMs) / 2 + timebase.offsetMs;
+}
+
+/** A page poll's own instant on the shared clock, by the page's clock offset. */
+export function pagePollSharedMs(poll) {
+  return finite(poll?.atMs) && finite(poll?.clock?.offsetMs) ? poll.atMs + poll.clock.offsetMs : null;
+}
+
+/** The latest page poll at or before the shared instant `atMs`, however old. */
+export function latestPagePoll(polls, atMs) {
+  return (polls ?? []).map((poll) => ({ poll, atMs: pagePollSharedMs(poll) }))
+    .filter((entry) => finite(entry.atMs) && entry.atMs <= atMs)
+    .sort((left, right) => left.atMs - right.atMs).at(-1)?.poll ?? null;
+}
+
+export const PLAYBACK_COUNTERS = Object.freeze(['opens', 'begun', 'retargets', 'reparks', 'skips']);
+
+/** A page poll's playback counters, or `null` when any one is not a count. */
+export function counterReading(poll) {
+  const playback = poll?.playback;
+  if (!playback || typeof playback !== 'object'
+    || PLAYBACK_COUNTERS.some((field) => !Number.isSafeInteger(playback[field]))) return null;
+  return Object.fromEntries(PLAYBACK_COUNTERS.map((field) => [field, playback[field]]));
+}
+
 /** The largest stretch of `window` with no poll in it, its two edges included. */
 export function coverageGap(polls, window) {
   const values = (polls ?? []).map(instantOf)

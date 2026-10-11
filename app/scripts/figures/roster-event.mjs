@@ -1,5 +1,5 @@
 import { resyncAfter } from './behind.mjs';
-import { POLL_FRESH_MS, runwayMs, runwaySource } from './poll-coverage.mjs';
+import { counterReading, harnessSharedMs, latestPagePoll, POLL_FRESH_MS, runwayMs, runwaySource } from './poll-coverage.mjs';
 import { frameStalls } from './frame-stalls.mjs';
 import { viewerOrder, edgeRank } from '../../public/lib/edge-assignment.mjs';
 import { startResiduals } from './start-requalification.mjs';
@@ -37,35 +37,13 @@ function othersFor(condition, target) {
   return tagsFor(condition).filter((tag) => tag !== target);
 }
 
-function sharedHarnessMs(timebase, beforeMs, afterMs) {
-  if (!finite(timebase?.offsetMs) || !finite(beforeMs) || !finite(afterMs)) return null;
-  return (beforeMs + afterMs) / 2 + timebase.offsetMs;
-}
-
 function sharedWallMs(timebase, wallMs) {
   if (!finite(timebase?.offsetMs) || !finite(timebase?.wallOffsetMs) || !finite(wallMs)) return null;
   return wallMs - timebase.wallOffsetMs + timebase.offsetMs;
 }
 
 function pollSharedMs(poll, timebase) {
-  return sharedHarnessMs(timebase, poll?.harnessBeforeMs, poll?.harnessAfterMs);
-}
-
-function pagePollSharedMs(poll) {
-  return finite(poll?.atMs) && finite(poll?.clock?.offsetMs) ? poll.atMs + poll.clock.offsetMs : null;
-}
-
-function latestPagePoll(polls, atMs) {
-  return (polls ?? []).map((poll) => ({ poll, atMs: pagePollSharedMs(poll) }))
-    .filter((entry) => finite(entry.atMs) && entry.atMs <= atMs)
-    .sort((left, right) => left.atMs - right.atMs).at(-1)?.poll ?? null;
-}
-
-function counterReading(poll) {
-  const playback = poll?.playback;
-  const fields = ['opens', 'begun', 'retargets', 'reparks', 'skips'];
-  if (!playback || typeof playback !== 'object' || fields.some((field) => !integer(playback[field]))) return null;
-  return Object.fromEntries(fields.map((field) => [field, playback[field]]));
+  return harnessSharedMs(timebase, poll?.harnessBeforeMs, poll?.harnessAfterMs);
 }
 
 function stream(input, tag) {
@@ -98,9 +76,9 @@ function eventState(condition, event, presence) {
         && record?.event === eventPresence.event && record?.tabId === event.tabId)) missing.push(tag);
     }
   }
-  if (event?.observed !== true || missing.length) return { notObserved: true, missing, eventFrame: eventPresence ? eventFrameFor(
-    presence, others, event, eventPresence.seq, eventPresence.event)?.frame ?? null : null };
-  const eventFrame = eventFrameFor(presence, others, event, eventPresence.seq, eventPresence.event)?.frame ?? null;
+  const frame = () => eventFrameFor(presence, others, event, eventPresence.seq, eventPresence.event)?.frame ?? null;
+  if (event?.observed !== true || missing.length) return { notObserved: true, missing, eventFrame: eventPresence ? frame() : null };
+  const eventFrame = frame();
   if (!eventFrame) return { missing: others, eventFrame: null };
   if (!finite(eventPresence.recvSharedMs)) return { timeFailure: 'event-time-missing', eventFrame };
   return { eventFrame, eventTime: eventPresence.recvSharedMs, missing: [] };
@@ -244,14 +222,14 @@ function fillRow(condition, attempts, eventTime, timebase) {
     if (finite(endSharedMs) && endSharedMs >= eventTime && endSharedMs <= endMs) entries.push(attempt);
   }
   if (!entries.length) return row('J3', 'evidence-failure', { reason: 'attempt-stream-empty' });
-  const peerBytes = entries.filter((entry) => typeof entry.peerId === 'string' && entry.peerId.length > 0)
-    .reduce((sum, entry) => sum + entry.bytes, 0);
-  const hostBytes = entries.filter((entry) => !(typeof entry.peerId === 'string' && entry.peerId.length > 0))
-    .reduce((sum, entry) => sum + entry.bytes, 0);
+  const fromPeer = (entry) => typeof entry.peerId === 'string' && entry.peerId.length > 0;
+  const bytesOf = (list) => list.reduce((sum, entry) => sum + entry.bytes, 0);
+  const fromHost = entries.filter((entry) => !fromPeer(entry));
+  const peerBytes = bytesOf(entries.filter(fromPeer));
+  const hostBytes = bytesOf(fromHost);
   const totalBytes = peerBytes + hostBytes;
   const peerFraction = totalBytes > 0 ? peerBytes / totalBytes : null;
-  const hostBodies = entries.filter((entry) => !(typeof entry.peerId === 'string' && entry.peerId.length > 0)
-    && entry.bytes > 0).length;
+  const hostBodies = fromHost.filter((entry) => entry.bytes > 0).length;
   const status = finite(peerFraction) && peerFraction >= criteria.peerFractionMin && hostBodies <= criteria.hostBodiesMax
     ? 'met' : 'missed';
   return row('J3', status, { peerBytes, hostBytes, peerFraction, hostBodies, overMs,
@@ -487,7 +465,7 @@ export function rosterEventReading({ condition = {}, event, presence, drift = {}
   if (['leave-clean', 'leave-silent', 'leave-first', 'drop-socket'].includes(kind)) {
     // A silent leave is issued up to the liveness interval before the room sees it: its
     // windows turn on the issue and its after-window runs on past the presence frame.
-    const issuedTime = kind === 'leave-silent' ? sharedHarnessMs(timebase, event.issuedAtHarnessMs, event.issuedAtHarnessMs) : eventTime;
+    const issuedTime = kind === 'leave-silent' ? harnessSharedMs(timebase, event.issuedAtHarnessMs, event.issuedAtHarnessMs) : eventTime;
     if (!finite(issuedTime) || issuedTime > eventTime) return [row('event', 'evidence-failure', { reason: 'event-issue-time-invalid' })];
     result.push(stallRow(condition, kind, eventTime, drift, stream(polls, 'host') ?? [], target, issuedTime));
     if (kind === 'drop-socket') result.unshift(socketRow(condition, event, presence, polls, pagePolls, timebase));

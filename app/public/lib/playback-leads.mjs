@@ -22,13 +22,13 @@ export const PRESENTATION_ADVANCE_MS = 1000 / 24;
 export const LATE_START_REPARK_MS = CLOSE_BUDGET_MS * MAX_RATE_DEVIATION;
 /** Re-parks one scheduled start may take before it plays late (7b2 design.md D3). */
 export const MAX_LATE_REPARKS = 2;
-/** D2 design.md: held media margin for a scheduled start. */
+/** 10a design.md D2: held media margin for a scheduled start. */
 export const START_COVER_MARGIN_MS = 3000;
-/** D2 design.md: initial shared-time projection for a scheduled start. */
+/** 10a design.md D2: initial shared-time projection for a scheduled start. */
 export const START_PROJECTION_MS = 3000;
-/** D2 design.md: maximum re-projection after missed coverage. */
+/** 10a design.md D2: maximum re-projection after missed coverage. */
 export const START_PROJECTION_MAX_MS = 30000;
-/** D4 design.md: a far skip names its difference for two estimate windows. */
+/** 10a design.md D4: a far skip names its difference for two estimate windows. */
 export const SKIP_DWELL_MS = 2 * ESTIMATE_WINDOW_MS;
-/** D4 design.md: a repeated far skip waits out the close budget. */
+/** 10a design.md D4: a repeated far skip waits out the close budget. */
 export const SKIP_REPEAT_INTERVAL_MS = CLOSE_BUDGET_MS;

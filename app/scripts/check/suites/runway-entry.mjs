@@ -52,7 +52,7 @@ export default async function runwayEntrySuite() {
     // Prevention proof under CONSTRAINTS.md → Verification: the opportunity is a
     // viewer behind the room and not held, read after its timeupdate. Mutation:
     // publish `positionMs` as `ownPositionMs` in updateHeldAhead → the not-held
-    // assertions are red (130000, not 100000). Recorded in design.md D6.
+    // assertions are red (130000, not 100000). Recorded in 10b design.md D6.
   });
 
   await check('runway: the edge index is the engine\'s index past the contiguous run', async () => {

@@ -29,6 +29,7 @@ import { assignmentControlReason, recordControls } from './harness/assignment-co
 import { capacityScheduleReason, recordSchedule, scheduleLengthMs } from './harness/capacity-schedule.mjs';
 import { createAskEvidence, recordHostStats } from './harness/ask-evidence.mjs';
 import { finalizeRosterEvent, isHeldJoin, issueRosterEvent, rosterEventTarget } from './harness/roster-event.mjs';
+import { removesMember } from './harness/roster-kinds.mjs';
 import { viewerOrder } from '../public/lib/edge-assignment.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -692,9 +693,9 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       session.measureLoops = [];
       if (!keepControl) session.controlLoop = null;
     };
+    const clientUrlFor = (session) => `${clientOriginUrl}/room.html?room=${encodeURIComponent(room)}&role=${session.role}&tab=${session.tag}`;
     const activateHeldJoiner = async (session) => {
-      const clientUrl = `${clientOriginUrl}/room.html?room=${encodeURIComponent(room)}&role=${session.role}&tab=${session.tag}`;
-      await prepareClient(session, clientUrl, deadline, arm.clientReadyTimeoutMs(condition), arm.prepareClientOptions({
+      await prepareClient(session, clientUrlFor(session), deadline, arm.clientReadyTimeoutMs(condition), arm.prepareClientOptions({
         condition, manifestFile, runDir: prepared.runDir,
       }));
       session.active = true;
@@ -704,7 +705,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       return { navigated: true, pageReadyMs: session.pageReadyMs };
     };
     for (const [index, session] of sessions.entries()) {
-      const clientUrl = `${clientOriginUrl}/room.html?room=${encodeURIComponent(room)}&role=${session.role}&tab=${session.tag}`;
+      const clientUrl = clientUrlFor(session);
       const acquired = await clientFactory({ tag: session.tag, role: session.role, room, url: clientUrl, condition, runDir: prepared.runDir });
       Object.assign(session, acquired);
       if (session.tag === heldTag) continue;
@@ -719,12 +720,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
         runDir: prepared.runDir,
       }));
       session.active = true;
-      if (controlEvidence) {
-        const viewerPoll = startLoop(async () => { await controlEvidence.pollViewer(session); await askEvidence.drain(session); },
-          250, (error) => { if (!session.expectedEvent) failure ??= error; });
-        session.controlLoop = viewerPoll;
-        loops.push(viewerPoll);
-      }
+      startControlLoop(session);
       if (index === 0 && !arm.qualifyAfterJoins) await qualifyFirst();
       // Not awaited: the joins go on while the first viewer's fetch is in flight.
       if (index === 0 && arm.qualifyAfterJoins) {
@@ -779,7 +775,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
         disposeSession: () => target.dispose?.(),
       });
       // A joiner is in the room from here on, and in both boundaries.
-      if (kind !== 'drop-socket' && kind !== 'join') target.active = false;
+      if (removesMember(kind)) target.active = false;
       return rosterEvent;
     };
     if (condition.rosterEvent && condition.rosterEvent.kind !== 'leave-first') await issueEvent();

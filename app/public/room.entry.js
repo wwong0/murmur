@@ -1133,7 +1133,6 @@ window.__app = {
   },
   playback: () => ({
     ...start.state(),
-    skips: start.state().skips ?? 0,
     lastSkipAtSharedMs,
     lastSkipAbandonedMs,
     callbacks: sampler.callbacks,

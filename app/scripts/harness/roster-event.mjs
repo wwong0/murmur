@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { asyncExec } from '../../harness/apply-qdisc.mjs';
+import { clientTags } from './arms.mjs';
 
 export function rosterEventTarget(condition = {}, kind = condition.rosterEvent?.kind) {
   if (kind === 'join') return condition.rosterEvent?.client ?? 'c05';
@@ -12,12 +13,8 @@ export function isHeldJoin(condition = {}) {
   return condition.rosterEvent?.kind === 'join' && typeof condition.rosterEvent.client === 'string';
 }
 
-function tagsFor(condition) {
-  return Array.from({ length: Number(condition?.clients) || 0 }, (_, index) => `c${String(index + 1).padStart(2, '0')}`);
-}
-
 function othersFor(condition, tag) {
-  return tagsFor(condition).filter((candidate) => candidate !== tag);
+  return clientTags(condition).filter((candidate) => candidate !== tag);
 }
 
 function recordsOf(session) {

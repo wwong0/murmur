@@ -158,6 +158,15 @@ export function createPlaybackStart({
     }
   }
 
+  /** What a playing attempt's actions report of its projection, and of the skip it follows. */
+  const projectionReport = (from) => ({
+    reprojections: from.reprojections,
+    reprojectionOf: from.reprojectionOf,
+    projectionMs: from.reportProjectionMs,
+    coverElapsedMs: from.coverElapsedMs,
+    ...(from.skipOf === undefined ? {} : { skipOf: from.skipOf, abandonedDriftMs: from.abandonedDriftMs }),
+  });
+
   function newPlayingAttempt(state, target, nowSharedMs, lineage = null) {
     const id = nextAttemptId++;
     const S0 = Math.max(target.effectiveMs, nowSharedMs + prepareLeadMs);
@@ -198,14 +207,7 @@ export function createPlaybackStart({
     pauseAction(actions, id);
     setupPosition(actions, id, mapping);
     Object.assign(actions.at(-1), {
-      reprojections: attempt.reprojections,
-      reprojectionOf: attempt.reprojectionOf,
-      projectionMs: attempt.reportProjectionMs,
-      coverElapsedMs: attempt.coverElapsedMs,
-      ...(attempt.skipOf === undefined ? {} : {
-        skipOf: attempt.skipOf,
-        abandonedDriftMs: attempt.abandonedDriftMs,
-      }),
+      ...projectionReport(attempt),
       ...(lineage?.reparkOf === undefined ? {} : {
         reparkOf: lineage.reparkOf,
         reparks: lineage.reparks,
@@ -286,14 +288,7 @@ export function createPlaybackStart({
         ...attempt.mapping,
         reparks: attempt.reparks,
         firstStartAtSharedMs: attempt.firstStartAtSharedMs,
-        reprojections: attempt.reprojections,
-        reprojectionOf: attempt.reprojectionOf,
-        projectionMs: attempt.reportProjectionMs,
-        coverElapsedMs: attempt.coverElapsedMs,
-        ...(attempt.skipOf === undefined ? {} : {
-          skipOf: attempt.skipOf,
-          abandonedDriftMs: attempt.abandonedDriftMs,
-        }),
+        ...projectionReport(attempt),
       }], null);
     }
     return result([], null);

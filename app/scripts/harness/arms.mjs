@@ -10,6 +10,7 @@ import { ENGINE_WINDOW_DEFAULTS, PRODUCT_ENGINE_WINDOWS } from '../../public/lib
 import { HEADROOM_DEFAULT } from '../../public/lib/send-pace.mjs';
 import { evidenceRefusals } from './control-evidence.mjs';
 import { controlInjection, controlRefusals } from './assignment-control.mjs';
+import { changesMembership } from './roster-kinds.mjs';
 
 export const REFUSAL_SCOPE = Object.freeze({
   neverPlayed: Object.freeze(['byte', 'drift']),
@@ -474,8 +475,7 @@ const HOST_ARM = Object.freeze({
     }
     // Absent only on evidence constructed or retained before 9b; a live run carries it.
     if (input.assignmentControl) {
-      const rosterPage = ['join', 'leave-clean', 'leave-silent', 'leave-first'].includes(condition.rosterEvent?.kind)
-        ? input.rosterEvent?.client ?? null : null;
+      const rosterPage = changesMembership(condition.rosterEvent?.kind) ? input.rosterEvent?.client ?? null : null;
       for (const { reason, ...detail } of controlRefusals(condition, input.assignmentControl.readings, { rosterPage })) {
         addReason(reason, REFUSAL_SCOPE.control, detail);
       }
