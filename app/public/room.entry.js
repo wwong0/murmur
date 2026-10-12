@@ -45,6 +45,10 @@ import { viewerOrder } from './lib/edge-assignment.mjs';
 import { ownPositionMs, requestClass } from './lib/urgent-request.mjs';
 import { createWireMeter } from './lib/wire-meter.mjs';
 import { controlInForce } from './lib/edge-control.mjs';
+import { createOpfsBackend, createWebLocks } from './lib/prepared-store-opfs.mjs';
+import { createPreparedStore } from './lib/prepared-store.mjs';
+import { createPrepareClient } from './lib/prepare-client.mjs';
+import { createHostFileSource } from './lib/host-file-source.mjs';
 
 const BUILD_ID = __BUILD_ID__;
 
@@ -138,6 +142,8 @@ const clockLine = document.getElementById('clock-line');
 const driftLine = document.getElementById('drift-line');
 const bytesLine = document.getElementById('bytes-line');
 const controllerLine = document.getElementById('controller-line');
+const hostFileInput = document.getElementById('host-file');
+const hostFileStatus = document.getElementById('host-file-status');
 const rosterEl = document.getElementById('roster');
 const noticesEl = document.getElementById('notices');
 const playButton = document.getElementById('play');
@@ -234,6 +240,7 @@ function rtcConfig() {
 }
 
 async function readHostSource(path) {
+  if (hostFile) return hostFile.read(path);
   if (!nativeFetch) throw new Error('native fetch is unavailable');
   const response = await nativeFetch(new URL(path, location.href), { headers: { 'x-app-tab': tabId }, cache: 'no-store' });
   return { status: response.status, bytes: new Uint8Array(await response.arrayBuffer()) };
@@ -340,6 +347,15 @@ function installViewerLink() {
   window.XMLHttpRequest = link.createShimXhr({ RealXHR: window.XMLHttpRequest, baseUrl: location.href });
 }
 
+// D6: the host's own player reads the store. Imported here, as the host transport is.
+async function installHostFileLink() {
+  const { createPreparedMediaLink } = await import('./lib/prepared-media-link.mjs');
+  const { createShimFetch, createShimXhr } = await import('./lib/host-link-shim.mjs');
+  const link = createPreparedMediaLink({ read: (path) => hostFile.read(path) });
+  window.fetch = createShimFetch({ link, realFetch: nativeFetch, baseUrl: location.href });
+  window.XMLHttpRequest = createShimXhr({ link, RealXHR: window.XMLHttpRequest, baseUrl: location.href });
+}
+
 // ---------------------------------------------------------------------------
 // Room client
 // ---------------------------------------------------------------------------
@@ -365,6 +381,21 @@ const nativeFetch = typeof window.fetch === 'function' ? window.fetch.bind(windo
 let createHostLink = null;
 let createHostOrigin = null;
 let hostSideInstalled = false;
+let hostFile = null;
+let mediaSource = null;
+let targetSegmentSeconds = null;
+let hostFileConnected = false;
+const PREPARED_KEY_NAME = 'watchalong.prepared-key';
+
+// D5: under `file` this is the host's only route into the room.
+function paintHostFile(snapshot) {
+  const detail = snapshot.refusal?.message ?? snapshot.failure;
+  hostFileStatus.textContent = detail ? `${snapshot.state}: ${detail}` : snapshot.state;
+  hostFileInput.hidden = snapshot.state === 'ready';
+  if (snapshot.state !== 'ready' || hostFileConnected) return;
+  hostFileConnected = true;
+  client.connect();
+}
 
 async function loadHostTransport() {
   if (createHostLink && createHostOrigin) return;
@@ -1153,6 +1184,11 @@ window.__app = {
     };
   },
   timeline: () => acquisition.snapshot,
+  hostFile: () => hostFile ? hostFile.snapshot() : {
+    mediaSource, targetSegmentSeconds, state: 'off', origin: null, key: null, manifest: null,
+    refusal: null, failure: null, storage: null, swept: null, workerCalls: { inspect: 0, prepare: 0 },
+    workerBuildId: null, cleanup: 'next-host-page-start',
+  },
 };
 
 async function startApp() {
@@ -1162,10 +1198,12 @@ async function startApp() {
     const settingsResponse = await window.fetch('/app-settings', { cache: 'no-store' });
     if (!settingsResponse.ok) throw new Error(`HTTP ${settingsResponse.status}`);
     const settings = await settingsResponse.json();
-    if (!settings || (settings.delivery !== 'host' && settings.delivery !== 'http') || !Array.isArray(settings.iceServers) || (settings.trackerUrl !== null && typeof settings.trackerUrl !== 'string')) {
+    if (!settings || (settings.delivery !== 'host' && settings.delivery !== 'http') || !Array.isArray(settings.iceServers) || (settings.trackerUrl !== null && typeof settings.trackerUrl !== 'string') || (settings.mediaSource !== 'dir' && settings.mediaSource !== 'file') || !Number.isFinite(settings.targetSegmentSeconds) || settings.targetSegmentSeconds <= 0) {
       throw new TypeError('invalid application settings');
     }
     delivery = settings.delivery;
+    mediaSource = settings.mediaSource;
+    targetSegmentSeconds = settings.targetSegmentSeconds;
     iceServers = settings.iceServers;
     trackerUrl = settings.trackerUrl;
     peerExchange = delivery !== 'host'
@@ -1174,11 +1212,40 @@ async function startApp() {
         ? 'host'
         : typeof trackerUrl === 'string' ? 'on' : 'off';
     roomHasPeerExchange = delivery === 'host' && typeof trackerUrl === 'string';
-    if (delivery === 'host') {
+    if (mediaSource === 'file' && role === 'host') {
+      const missing = !globalThis.navigator?.storage?.getDirectory ? 'navigator.storage.getDirectory'
+        : !globalThis.navigator?.locks ? 'navigator.locks' : typeof Worker !== 'function' ? 'Worker' : null;
+      if (missing) {
+        const failed = { ...window.__app.hostFile(), state: 'failed', failure: missing };
+        hostFile = { snapshot: () => ({ ...failed, workerCalls: { ...failed.workerCalls } }), read: async () => ({ status: 404, bytes: new Uint8Array() }) };
+        hostFileStatus.textContent = `failed: ${missing}`;
+        return;
+      }
+      const locks = createWebLocks(navigator.locks);
+      const store = createPreparedStore({ backend: createOpfsBackend(() => navigator.storage.getDirectory()), locks });
+      const memory = {
+        get: () => sessionStorage.getItem(PREPARED_KEY_NAME),
+        set: (value) => sessionStorage.setItem(PREPARED_KEY_NAME, value),
+        clear: () => sessionStorage.removeItem(PREPARED_KEY_NAME),
+      };
+      hostFile = createHostFileSource({
+        store, locks, memory,
+        client: createPrepareClient({ worker: new Worker('/prepare.worker.bundle.js') }),
+        isTypeSupported: (mime) => MediaSource.isTypeSupported(mime),
+        estimate: () => navigator.storage.estimate(),
+        targetSeconds: targetSegmentSeconds,
+        onChange: paintHostFile,
+      });
+      await installHostFileLink();
+      hostFileInput.hidden = false;
+      // D7: the page hands the File over and never reads its name.
+      hostFileInput.addEventListener('change', () => { if (hostFileInput.files?.[0]) void hostFile.choose(hostFileInput.files[0]); });
+      await hostFile.start();
+    } else if (delivery === 'host') {
       await loadHostTransport();
       if (role === 'viewer') installViewerLink();
     }
-    client.connect();
+    if (!hostFile) client.connect();
   } catch (error) {
     setStatus(`settings unavailable: ${error?.message ?? error}`, { final: true });
     addNotice(`settings unavailable: ${error?.message ?? error}`, { warn: true });

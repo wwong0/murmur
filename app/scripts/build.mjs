@@ -26,6 +26,8 @@ const PUBLIC_DIR = path.join(APP_DIR, 'public');
 
 export const ENTRY_POINT = path.join(PUBLIC_DIR, 'room.entry.js');
 export const OUT_FILE = path.join(PUBLIC_DIR, 'room.bundle.js');
+export const WORKER_ENTRY_POINT = path.join(PUBLIC_DIR, 'prepare.worker.js');
+export const WORKER_OUT_FILE = path.join(PUBLIC_DIR, 'prepare.worker.bundle.js');
 
 /** A short random suffix so two builds in the same millisecond still get distinct ids. */
 function randomSuffix() {
@@ -58,6 +60,20 @@ export function buildOptions(buildId) {
   };
 }
 
+export function workerBuildOptions(buildId) {
+  return {
+    entryPoints: [WORKER_ENTRY_POINT],
+    outfile: WORKER_OUT_FILE,
+    format: 'iife',
+    bundle: true,
+    sourcemap: true,
+    target: 'es2022',
+    define: {
+      __BUILD_ID__: JSON.stringify(buildId),
+    },
+  };
+}
+
 /** True if an esbuild error set is entirely "entry point not found" (i.e. room.entry.js doesn't exist yet). */
 function isMissingEntryError(err) {
   const errors = err?.errors;
@@ -86,6 +102,10 @@ async function main() {
 
   console.log(`[build] build id: ${buildId}`);
   console.log(`[build] wrote ${path.relative(APP_DIR, OUT_FILE)}${bytes !== undefined ? ` (${bytes} bytes)` : ''}`);
+  const worker = await esbuild.build({ ...workerBuildOptions(buildId), metafile: true });
+  const workerKey = Object.keys(worker.metafile?.outputs ?? {}).find((key) => key.endsWith('prepare.worker.bundle.js'));
+  const workerBytes = workerKey ? worker.metafile.outputs[workerKey].bytes : undefined;
+  console.log(`[build] wrote ${path.relative(APP_DIR, WORKER_OUT_FILE)}${workerBytes !== undefined ? ` (${workerBytes} bytes)` : ''}`);
 }
 
 // Only run when invoked directly (`node scripts/build.mjs`), not when

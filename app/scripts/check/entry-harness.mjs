@@ -205,6 +205,9 @@ function fakeElement(id, bubble = () => {}) {
       for (const fn of listeners.get('click') ?? []) fn(event);
       bubble('click', event);
     },
+    dispatch(type, event = {}) {
+      for (const fn of listeners.get(type) ?? []) fn({ type, target: this, ...event });
+    },
   };
 }
 

@@ -191,6 +191,11 @@ import remuxWriterSuite from './check/suites/remux-writer.mjs';
 import remuxPublishSuite from './check/suites/remux-publish.mjs';
 import fileIdentitySuite from './check/suites/file-identity.mjs';
 import remuxRunnerSuite from './check/suites/remux-runner.mjs';
+import preparedStoreSuite from './check/suites/prepared-store.mjs';
+import prepareRunnerSuite from './check/suites/prepare-runner.mjs';
+import hostFileSourceSuite from './check/suites/host-file-source.mjs';
+import hostFileEntrySuite from './check/suites/host-file-entry.mjs';
+import hostFileStepsSuite from './check/suites/host-file-steps.mjs';
 
 console.log(describeFixtures());
 
@@ -361,6 +366,11 @@ for (const suite of [
   remuxPublishSuite,
   fileIdentitySuite,
   remuxRunnerSuite,
+  preparedStoreSuite,
+  prepareRunnerSuite,
+  hostFileSourceSuite,
+  hostFileEntrySuite,
+  hostFileStepsSuite,
 ]) {
   await suite();
 }

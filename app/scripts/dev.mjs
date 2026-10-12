@@ -25,7 +25,7 @@
 import * as esbuild from 'esbuild';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildOptions, makeBuildId } from './build.mjs';
+import { buildOptions, makeBuildId, workerBuildOptions } from './build.mjs';
 import { requireTrackerStarted, startTracker, trackerFailure } from './runner/tracker.mjs';
 import { optionsFromEnv, startRoomServer } from '../server/room-server.mjs';
 import { startSocketControl } from '../harness/socket-control.mjs';
@@ -36,7 +36,7 @@ const APP_DIR = path.resolve(__dirname, '..');
 const TRACKER_PORT = 8101;
 const APP_TRACKER_URL = `ws://127.0.0.1:${TRACKER_PORT}`;
 
-let buildContext = null;
+let buildContexts = [];
 let roomServer = null;
 let tracker = null;
 let socketControl = null;
@@ -48,15 +48,18 @@ async function shutdown(exitCode) {
   process.exitCode = exitCode;
   if (socketControl) await socketControl.close();
   if (roomServer) await roomServer.close();
-  if (buildContext) await buildContext.dispose();
+  await Promise.all(buildContexts.map((context) => context.dispose()));
   if (tracker && tracker.exitCode === null) tracker.kill();
 }
 
 async function main() {
   const buildId = makeBuildId();
-  buildContext = await esbuild.context(buildOptions(buildId));
-  await buildContext.watch();
-  console.log('[dev] esbuild watch mode active — edits under public/ rebuild room.bundle.js automatically, no manual rebuild needed.');
+  buildContexts = await Promise.all([
+    esbuild.context(buildOptions(buildId)),
+    esbuild.context(workerBuildOptions(buildId)),
+  ]);
+  await Promise.all(buildContexts.map((context) => context.watch()));
+  console.log('[dev] esbuild watch mode active — edits under public/ rebuild both bundles automatically, no manual rebuild needed.');
   console.log(`[dev] build id: ${buildId}`);
 
   const trackerState = startTracker({
