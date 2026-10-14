@@ -17,6 +17,7 @@ function evidence(overrides = {}) {
     declaredClientTags: ['c01'],
     clients: overrides.clients ?? { c01: { finalPlayback: { begun: 1 }, records: [], polls: [], driftLogMissed: 0, maxDriftDrainGapMs: 0 } },
     originStart: { unattributedMediaBytesDelivered: 0 }, originEnd: { unattributedMediaBytesDelivered: 0 },
+    segmentSeconds: 4,
     seek: { host: same, viewers: { c01: { reading: same, restart: { restarted: true } } }, ...overrides.seek },
     peerRecords: overrides.peerRecords ?? { c01: records('/media/seg-10.m4s') },
   };
@@ -36,7 +37,7 @@ export default async function seekEvidenceSuite() {
   });
 
   await check('seek evidence: only an earlier segment passes the landing check', async () => {
-    const clean = appliedSeekEvidence({ host: same, viewers: { c01: { reading: same } }, peerRecords: { c01: records('/media/seg-9.m4s') }, declaredClientTags: ['c01'] });
+    const clean = appliedSeekEvidence({ host: same, viewers: { c01: { reading: same } }, peerRecords: { c01: records('/media/seg-9.m4s') }, declaredClientTags: ['c01'], segmentSeconds: 4 });
     assertEqual(clean.landedOnHeldMedia.length, 0, 'kL minus one is outside the landing range');
     const result = reasons(evidence({ peerRecords: { c01: records('/media/seg-9.m4s') } }));
     assert(!result.some((entry) => entry.reason === 'seek-landed-on-held-media'), 'the earlier-only case passes');

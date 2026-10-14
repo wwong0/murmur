@@ -39,6 +39,19 @@ function counterFrom(value) {
   return value === undefined || value === null ? undefined : (value.counters ?? value);
 }
 
+const STEP0_CONTENT_MANIFEST = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
+  '../../step0/content/content-manifest.json');
+
+function readContentManifest(manifest, runDir) {
+  const retained = readJson(path.join(runDir, 'content-manifest.json'));
+  if (retained) return retained;
+  if (manifest.content?.manifestPath) {
+    const declared = readJson(manifest.content.manifestPath);
+    if (declared) return declared;
+  }
+  return manifest.content?.identity === 'step0-content-media-v1' ? readJson(STEP0_CONTENT_MANIFEST) : null;
+}
+
 // The re-read's rule override (design.md D1): a copy of the manifest condition,
 // never the manifest. Absent rules the condition is the registered one.
 export function conditionWithRules(condition, rules) {
@@ -118,6 +131,7 @@ export function readRunDirectory(runDir, options = {}) {
   const originStart = counterFrom(readJson(path.join(runDir, 'origin-counters-start.json')));
   const originEnd = counterFrom(readJson(path.join(runDir, 'origin-counters-end.json')));
   const originSettled = counterFrom(readJson(path.join(runDir, 'origin-counters-settled.json')));
+  const contentManifest = readContentManifest(manifest, runDir);
   const window = manifest.window;
   const context = manifest.context ?? manifest;
   const tags = manifest.declaredClientTags ?? manifest.clientTags ?? manifest.condition?.clientTags
@@ -144,8 +158,9 @@ export function readRunDirectory(runDir, options = {}) {
     originSettled,
     clients: clientStreams(runDir, manifest),
     declaredClientTags: manifest.declaredClientTags ?? manifest.clientTags,
-    content: arm.recomputeContent(manifest),
-    segmentSeconds: arm.recomputeSegmentSeconds(manifest),
+    content: arm.recomputeContent(manifest, runDir),
+    contentManifest,
+    segmentSeconds: arm.recomputeSegmentSeconds(manifest, runDir),
     multiplierDenominator: manifest.multiplierDenominator ?? 'distinct-completed',
     seek: manifest.seek ?? null,
     capacityStep: manifest.capacityStep ?? null,

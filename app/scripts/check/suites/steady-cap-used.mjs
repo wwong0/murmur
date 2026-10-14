@@ -75,7 +75,7 @@ function recoveryFixture() {
       { atMs: 120_000, txBytes: 126_000_000 }, { atMs: 180_000, txBytes: 189_000_000 },
     ],
     capacityBitsPerSecond: 10_000_000,
-    content: { segmentSizes: [] },
+    content: { segmentSizes: [] }, segmentSeconds: 1,
   };
 }
 

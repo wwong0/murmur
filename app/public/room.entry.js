@@ -1023,6 +1023,7 @@ function pollStart() {
     state,
     linkOpen: link ? link.snapshot().state === 'open' : true,
     finished: player.finishedSegments(),
+    last: player.lastSegment(),
   });
   telemetry.record('poll', {
     nowSharedMs,

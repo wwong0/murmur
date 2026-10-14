@@ -96,7 +96,7 @@ function viewerFigure(input, tag, window, allowMissing) {
   const end = playedOrNull(client, tag, window.endMs, allowMissing);
   const played = start === null || end === null ? null : { start, end };
   const segmentSizes = input.content?.segmentSizes ?? input.segmentSizes;
-  const playedBytes = played && bytesForStretch(played.start, played.end, segmentSizes, input.segmentSeconds ?? 4);
+  const playedBytes = played && bytesForStretch(played.start, played.end, segmentSizes, input.segmentSeconds);
   const completed = completedBytes(segments, tag);
   return {
     window,

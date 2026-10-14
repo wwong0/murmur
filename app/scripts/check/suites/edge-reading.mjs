@@ -184,7 +184,7 @@ export default async function edgeReadingSuite() {
       steadyRealtimeMin: 0.98, steadyCapUsedMax: 0.90 } }, declaredClientTags: [], clients: {}, viewerPolls: {}, headroom: { fraction: 0.5 },
     hostPace: { intervals, fraction: 0.5 }, hostPaceFinal: { estimate: { bytesPerSecond: 2_000_000 } }, wallOffsetMs: 100,
     linkSamples: [{ atMs: 0, txBytes: 0 }, { atMs: 60_000, txBytes: 63_000_000 }, { atMs: 120_000, txBytes: 126_000_000 }, { atMs: 180_000, txBytes: 189_000_000 }],
-    capacityBitsPerSecond: 10_000_000, content: { segmentSizes: [] } };
+    capacityBitsPerSecond: 10_000_000, content: { segmentSizes: [] }, segmentSeconds: 4 };
     const { spans } = recoverySpans({ input, transition: 0, recordingEnd: 180_000, spanMs: 60_000, hostPace: input.hostPace, wallOffsetMs: 100 });
     assertEqual(`${spans[0].legs.capUsed.reason}/${spans[0].incomplete}`, 'pace-not-in-force/true', 'the start span reads pace-not-in-force, incomplete');
     assertEqual(`${spans[1].pass}/${spans[2].pass}`, 'true/true', 'the next two pass');

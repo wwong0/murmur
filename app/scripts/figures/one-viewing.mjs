@@ -70,10 +70,10 @@ export function playedMediaAt(client, tag, instant) {
 }
 
 /** Bytes of variable-sized segments intersecting the half-open media stretch. */
-export function bytesForStretch(startMs, endMs, segmentSizes, segmentSeconds = 4) {
+export function bytesForStretch(startMs, endMs, segmentSizes, segmentSeconds) {
   if (!finite(startMs) || !finite(endMs) || endMs < startMs) throw new Error('media stretch is invalid');
   if (!Array.isArray(segmentSizes) || !segmentSizes.length) throw new Error('segment sizes are unavailable');
-  if (!finite(segmentSeconds) || segmentSeconds <= 0) throw new Error('segment seconds are invalid');
+  if (!finite(segmentSeconds) || segmentSeconds <= 0) throw new Error('segment-seconds-unavailable');
   const segmentMs = segmentSeconds * 1000;
   const durationMs = segmentSizes.length * segmentMs;
   if (startMs < 0 || endMs > durationMs) throw new Error('media stretch is outside content');
@@ -89,7 +89,7 @@ export function bytesForStretch(startMs, endMs, segmentSizes, segmentSeconds = 4
 }
 
 /** Compute room stretch, viewer stretches, spread and one-viewing bytes. */
-export function computeOneViewing({ clients = {}, tags = Object.keys(clients), window, offsets = {}, segmentSizes, segmentSeconds = 4 } = {}) {
+export function computeOneViewing({ clients = {}, tags = Object.keys(clients), window, offsets = {}, segmentSizes, segmentSeconds } = {}) {
   if (!finite(window?.startMs) || !finite(window?.endMs) || window.endMs < window.startMs) {
     throw new Error('measure window is invalid');
   }

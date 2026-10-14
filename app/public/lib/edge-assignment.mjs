@@ -20,6 +20,15 @@ export function edgeRank({ viewerIds = [], selfId, segmentIndex } = {}) {
 }
 
 export const SPREAD_START_ANYWAY_MS = 1_500;
+export const SPREAD_ANCHOR_SEGMENT_MS = 4_000;
+
+export function spreadStartAnywayMs(segmentDurationMs) {
+  if (!Number.isFinite(segmentDurationMs) || segmentDurationMs <= 0) return SPREAD_START_ANYWAY_MS;
+  return Math.round(Math.min(
+    SPREAD_START_ANYWAY_MS,
+    SPREAD_START_ANYWAY_MS * segmentDurationMs / SPREAD_ANCHOR_SEGMENT_MS,
+  ));
+}
 
 export function spreadChoice({
   selfPeerId,
@@ -27,6 +36,7 @@ export function spreadChoice({
   segmentIndex,
   nowMs,
   holdersRoseMs,
+  segmentDurationMs,
 } = {}) {
   const connected = Array.isArray(peers) ? peers : [];
   const holders = sortIds(connected.filter((peer) => peer?.loaded === true).map((peer) => peer.id));
@@ -41,7 +51,8 @@ export function spreadChoice({
   const rotated = [...waiters.slice(rotation), ...waiters.slice(0, rotation)];
   const place = rotated.indexOf(selfPeerId);
   const elapsed = nowMs - holdersRoseMs;
-  if (place < holders.length || elapsed >= SPREAD_START_ANYWAY_MS) {
+  const startAnywayMs = spreadStartAnywayMs(segmentDurationMs);
+  if (place < holders.length || elapsed >= startAnywayMs) {
     for (let offset = 0; offset < holders.length; offset += 1) {
       const holderId = holders[(place + offset) % holders.length];
       const holder = connected.find((peer) => peer?.id === holderId);
@@ -49,5 +60,5 @@ export function spreadChoice({
     }
     return { none: true };
   }
-  return { waitUntilMs: holdersRoseMs + SPREAD_START_ANYWAY_MS };
+  return { waitUntilMs: holdersRoseMs + startAnywayMs };
 }

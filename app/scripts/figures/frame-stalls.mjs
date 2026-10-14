@@ -62,10 +62,12 @@ export function frameStalls({ records, playing, fromMs, toMs, gapMs } = {}) {
     if (!integer(record?.seq)) return failure('drift-sequence-missing');
   }
 
+  // Continuity is read in record order: a clock re-anchor can step shared time back.
+  const bySeq = relevant.slice().sort((left, right) => left.seq - right.seq);
   let uncalledFrames = 0;
-  for (let index = 1; index < relevant.length; index += 1) {
-    const previous = relevant[index - 1];
-    const current = relevant[index];
+  for (let index = 1; index < bySeq.length; index += 1) {
+    const previous = bySeq[index - 1];
+    const current = bySeq[index];
     const presentedDelta = current.presentedFrames - previous.presentedFrames;
     if (presentedDelta < 1) {
       return failure('presented-frame-counter-invalid', { atMs: current.displaySharedMs });

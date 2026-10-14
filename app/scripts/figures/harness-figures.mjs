@@ -8,6 +8,7 @@ import { peerSpacing } from './peer-spacing.mjs';
 import { computeNoP2pSteady } from './nop2p-steady.mjs';
 import { distanceBehindRows } from './distance-behind.mjs';
 import { rosterEventReading } from './roster-event.mjs';
+import { aheadForGood, doubleStalls } from './ahead-for-good.mjs';
 import { removesMember } from '../harness/roster-kinds.mjs';
 
 export const PEER_FRACTION_ABS_MAX = 0.02;
@@ -32,7 +33,19 @@ export function computeHarnessFigureKinds(input = {}) {
       presence: input.presence, drift: byClient('records'),
       polls: { ...input.viewerPolls, host: input.hostPoll }, attempts: peerRecordsByKind(clients, 'attempt'),
       segments: peerRecordsByKind(clients, 'segment'), asks: input.asks, timebase: input.timebase,
-      content: input.content, pagePolls: byClient('polls'), starts: byClient('starts') });
+      content: input.content, pagePolls: byClient('polls'), starts: byClient('starts'), window: input.window,
+      seek: input.seek, capacitySchedule: input.capacitySchedule });
+  }
+  if (kinds.includes('ahead-for-good')) {
+    const tags = input.declaredClientTags ?? Object.keys(clients);
+    const ahead = aheadForGood({ condition: input.condition, tags, window: input.window, event: null,
+      seek: input.seek, capacitySchedule: input.capacitySchedule, drift: byClient('records'),
+      polls: { ...input.viewerPolls, host: input.hostPoll }, pagePolls: byClient('polls'), timebase: input.timebase });
+    result.aheadForGood = ahead;
+    result.doubleStalls = { row: 'double-stalls', status: 'published', byClient: doubleStalls({
+      drift: byClient('records'), polls: { ...input.viewerPolls, host: input.hostPoll }, tags,
+      fromMs: ahead.readySharedMs ?? -Infinity, toMs: ahead.endSharedMs ?? Infinity,
+      aheadForGoodAtSharedMs: ahead.aheadForGoodAtSharedMs }) };
   }
   if (kinds.includes('distance-behind')) {
     // No recovered instant: a viewer with no drift stream is why, and is named.

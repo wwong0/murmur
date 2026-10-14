@@ -39,6 +39,7 @@ export function createPlayer({ video }) {
   return {
     onError() {},
     finishedSegments() { return harness().finished; },
+    lastSegment() { return harness().last ?? null; },
     onFinished(fn) {
       harness().finishedHandlers.push(fn);
       return () => {

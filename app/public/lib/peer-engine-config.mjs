@@ -1,5 +1,11 @@
 import { validateEngineWindows, PRODUCT_ENGINE_WINDOWS } from './engine-windows.mjs';
 
+export const HOST_LOAD_NO_BYTES_TIMEOUT_MS = 15_000;
+export const PRODUCT_STREAM_CONFIG = Object.freeze({
+  ...PRODUCT_ENGINE_WINDOWS,
+  httpNotReceivingBytesTimeoutMs: HOST_LOAD_NO_BYTES_TIMEOUT_MS,
+});
+
 function requireString(value, name) {
   if (typeof value !== 'string') throw new TypeError(`peerEngineConfig: ${name} must be a string`);
   return value;
@@ -20,6 +26,7 @@ export function peerEngineConfig({ roomId, trackerUrl, iceServers, windows = nul
     announceTrackers: Object.freeze([trackerUrl]),
     rtcConfig: Object.freeze({ iceServers }),
     ...(windows ?? PRODUCT_ENGINE_WINDOWS),
+    httpNotReceivingBytesTimeoutMs: HOST_LOAD_NO_BYTES_TIMEOUT_MS,
   });
   return Object.freeze({ core });
 }

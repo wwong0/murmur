@@ -18,8 +18,13 @@ const playing = (atSharedMs = 0, mediaMs = 0) => ({
   controlMode: 'open',
 });
 const segments = (mediaEndMs) => [{ mediaStartMs: 0, mediaEndMs }];
+const titleSegments = [
+  { index: 0, mediaStartMs: 0, mediaEndMs: 4_000 },
+  { index: 1, mediaStartMs: 4_000, mediaEndMs: 8_000 },
+  { index: 2, mediaStartMs: 8_000, mediaEndMs: 11_016 },
+];
 
-function rig({ margin = 0, projection = 350, projectionMax = projection, prepareLead = 350, reparkAfterMs = Infinity, maxReparks = 0, state = playing() } = {}) {
+function rig({ margin = 0, projection = 350, projectionMax = projection, prepareLead = 350, reparkAfterMs = Infinity, maxReparks = 0, state = playing(), last = null } = {}) {
   const start = createPlaybackStart({
     prepareLeadMs: prepareLead,
     coverMarginMs: margin,
@@ -29,7 +34,7 @@ function rig({ margin = 0, projection = 350, projectionMax = projection, prepare
     maxReparks,
   });
   const element = { paused: true, writes: [], plays: [] };
-  const context = { nowSharedMs: 0, resolved: true, state, linkOpen: true, finished: null };
+  const context = { nowSharedMs: 0, resolved: true, state, linkOpen: true, finished: null, last };
   function apply(actions) {
     for (const action of actions) {
       if (action.kind === 'pause') element.paused = true;
@@ -59,6 +64,62 @@ async function coverAt(elapsedMs, options = {}) {
 }
 
 export default async function playbackStartCoverSuite() {
+  const last = titleSegments.at(-1);
+  const tailRig = (mediaMs) => rig({ margin: 3_000, projection: 3_000, projectionMax: 30_000, state: playing(0, mediaMs), last });
+
+  // Prevention proof: dropping the edgeIndexAfter clause from covered() turns
+  // `a play 2 s before the end starts` red.
+  await check('playback-start-cover: a play 2 s before the end starts', async () => {
+    const allFinished = tailRig(9_016);
+    const prepared = allFinished.poll({ nowSharedMs: 0, finished: titleSegments });
+    allFinished.start.ready(prepared.attemptId, 0);
+    const due = allFinished.poll({ nowSharedMs: prepared.nextAtSharedMs, finished: titleSegments });
+    assertEqual(due.actions[0]?.kind, 'play', 'a play 2 s before the end starts');
+    assertEqual(due.startAtSharedMs, prepared.nextAtSharedMs, 'the play is issued at the chosen S');
+  });
+
+  // Prevention proof: comparing against last.index instead of last.index + 1
+  // turns `a finished run that stops before the last segment does not cover` red.
+  await check('playback-start-cover: the tail is not covered until it is finished', async () => {
+    const unfinished = tailRig(9_016);
+    const waiting = unfinished.poll({ nowSharedMs: 0, finished: titleSegments.slice(0, 2) });
+    assertEqual(waiting.startAtSharedMs, null, 'the tail is not covered until it is finished');
+    const shortRun = tailRig(7_016).poll({ nowSharedMs: 0, finished: titleSegments.slice(0, 2) });
+    assertEqual(shortRun.startAtSharedMs, null, 'a finished run that stops before the last segment does not cover');
+  });
+
+  await check('playback-start-cover: a position short of the margin is not covered, as before', async () => {
+    const marginResult = tailRig(1_016).poll({ nowSharedMs: 0, finished: [titleSegments[0]] });
+    assertEqual(marginResult.startAtSharedMs, null, 'a position short of the margin is not covered');
+  });
+
+  // Prevention proof: removing the projection's bound turns `the projection
+  // does not pass the end` red.
+  await check('playback-start-cover: the projection does not pass the end', async () => {
+    const projected = tailRig(9_016).poll({ nowSharedMs: 0, finished: titleSegments.slice(0, 2) });
+    assert(projected.actions[0].positionMs < last.mediaEndMs, 'the projection does not pass the end');
+    const later = tailRig(9_016);
+    later.poll({ nowSharedMs: 0, finished: titleSegments.slice(0, 2) });
+    assert(Number.isFinite(later.poll({ nowSharedMs: 0, finished: titleSegments }).startAtSharedMs), 'the tail finished later chooses S');
+  });
+
+  await check('playback-start-cover: last null preserves the existing rule', async () => {
+    const first = rig({ margin: 3_000, projection: 3_000, projectionMax: 30_000, state: playing(0, 9_016) });
+    const second = rig({ margin: 3_000, projection: 3_000, projectionMax: 30_000, state: playing(0, 9_016) });
+    const left = first.poll({ nowSharedMs: 0, finished: titleSegments });
+    const right = second.poll({ nowSharedMs: 0, finished: titleSegments });
+    assertEqual(json(left.actions), json(right.actions), 'last null keeps the existing actions');
+    assertEqual(left.nextAtSharedMs, right.nextAtSharedMs, 'last null keeps the existing deadline');
+  });
+
+  await check('playback-start-cover: a position already past the end is unchanged', async () => {
+    const options = { margin: 3_000, projection: 3_000, projectionMax: 30_000, state: playing(0, 12_000) };
+    const withLast = rig({ ...options, last: titleSegments.at(-1) }).poll({ nowSharedMs: 0, finished: titleSegments });
+    const without = rig(options).poll({ nowSharedMs: 0, finished: titleSegments });
+    assertEqual(withLast.startAtSharedMs, null, 'a position past the end is not covered');
+    assertEqual(json(withLast.actions), json(without.actions), 'a position past the end projects as before');
+  });
+
   await check('playback-start-cover C1: coverage after the candidate still starts at P', async () => {
     const r = rig({ margin: 1000, projection: 1500, projectionMax: 30000 });
     const first = r.poll({ nowSharedMs: 0, finished: [] });

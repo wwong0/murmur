@@ -138,7 +138,8 @@ export function roomPosition({ clients = {}, tags = Object.keys(clients), hostPo
 }
 
 /** Segments finished in the window, as media time, over the stretch played. Published beside the byte ratio, never tested. */
-export function mediaTimeRatio(figures = {}, tags = [], segmentSeconds = 4) {
+export function mediaTimeRatio(figures = {}, tags = [], segmentSeconds) {
+  if (!finite(segmentSeconds) || segmentSeconds <= 0) throw new Error('segment-seconds-unavailable');
   return Object.fromEntries(tags.map((tag) => {
     const played = figures.playedMediaMsByClient?.[tag];
     const stretchMs = played ? played.end - played.start : null;

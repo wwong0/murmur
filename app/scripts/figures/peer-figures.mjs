@@ -91,7 +91,8 @@ function completedBytes(segments) {
 
 function downloadRatios(input, tags, cohorts, oneViewing) {
   const segmentSizes = input.content?.segmentSizes ?? input.segmentSizes;
-  const segmentSeconds = input.segmentSeconds ?? 4;
+  const segmentSeconds = input.segmentSeconds;
+  if (!finite(segmentSeconds) || segmentSeconds <= 0) throw new Error('segment-seconds-unavailable');
   const durationMs = (segmentSizes?.length ?? 0) * segmentSeconds * 1000;
   const byClient = {};
   for (const tag of tags) {
@@ -205,7 +206,7 @@ function oneViewingDetails(input, tags, multiplierDenominator) {
       window: input.window,
       offsets: offsetsFor(input, tags),
       segmentSizes: input.content?.segmentSizes ?? input.segmentSizes,
-      segmentSeconds: input.segmentSeconds ?? 4,
+      segmentSeconds: input.segmentSeconds,
     });
   } catch (error) {
     if (!BOUNDARY_RECORD_MISSING.test(error.message)) throw error;
@@ -322,7 +323,7 @@ export function computePeerFigures(input = {}, pairing = pairResponseEvidence(in
   const hasDrift = tags.every((tag) => Array.isArray(input.clients?.[tag]?.records)
     && input.clients[tag].records.length > 0);
   if (hasDrift) {
-    const { positionsByClient, ...held } = computeHeldAhead({ input, tags, window }) ?? {};
+    const { positionsByClient, ...held } = computeHeldAhead({ input, tags, window, segmentSeconds: input.segmentSeconds }) ?? {};
     Object.assign(result, held);
     if (trap) result.diagnostics = { spanCourse: computeSpanCourse(input) };
   }

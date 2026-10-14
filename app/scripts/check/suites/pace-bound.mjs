@@ -135,7 +135,8 @@ export default async function paceBoundSuite() {
     try {
       for (const dir of dirs) {
         fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({
-          condition: { delivery: 'host', peerExchange: true, clients: 1, bars: BARS }, declaredClientTags: ['c01'] }));
+          condition: { delivery: 'host', peerExchange: true, clients: 1, bars: BARS },
+          content: { identity: 'step0-content-media-v1' }, declaredClientTags: ['c01'] }));
       }
       fs.writeFileSync(path.join(dirs[0], 'host-headroom.json'), JSON.stringify({ fraction: 0.85, supplied: false }));
       const [present, absent] = dirs.map((dir) => readRunDirectory(dir).input);

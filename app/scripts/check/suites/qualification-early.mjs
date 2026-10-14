@@ -52,7 +52,7 @@ async function thrownBy(run) {
 export default async function qualificationEarlySuite() {
   await check('qualification early: begin returns before the fetch resolves, and finish reads the four-way agreement', async () => {
     const fake = world({ resolveAfterMs: 1_000 });
-    const handle = await beginLinkQualification(fake.viewerTab, { now: fake.now, pause: fake.pause });
+    const handle = await beginLinkQualification(fake.viewerTab, { segmentSeconds: 4, now: fake.now, pause: fake.pause });
     assertEqual(fake.now(), 0, 'begin took no time on the fake clock');
     assertEqual(fake.done(), false, 'the fetch has not resolved when begin returns');
     assertEqual(handle.fetchIssuedAtMs, 0, 'the fetch was issued at 0 ms');
@@ -68,10 +68,10 @@ export default async function qualificationEarlySuite() {
     // The pair differs only in when the fetch resolves: 179 900 ms and never.
     const inside = world({ resolveAfterMs: 179_900 });
     const insideRecord = await finishLinkQualification(
-      await beginLinkQualification(inside.viewerTab, { now: inside.now, pause: inside.pause }), inside.hostTab, inside.options);
+      await beginLinkQualification(inside.viewerTab, { segmentSeconds: 4, now: inside.now, pause: inside.pause }), inside.hostTab, inside.options);
     assertEqual(insideRecord.status, 'passed', 'a body complete at 179 900 ms qualifies');
     const starved = world({ resolveAfterMs: null });
-    const handle = await beginLinkQualification(starved.viewerTab, { now: starved.now, pause: starved.pause });
+    const handle = await beginLinkQualification(starved.viewerTab, { segmentSeconds: 4, now: starved.now, pause: starved.pause });
     const error = await thrownBy(() => finishLinkQualification(handle, starved.hostTab, starved.options));
     assertEqual(error?.code, QUALIFICATION_FETCH_TIMEOUT, 'a starved fetch throws qualification-fetch-timeout');
     assertEqual(error.elapsedMs, 180_000, 'with the elapsed time');

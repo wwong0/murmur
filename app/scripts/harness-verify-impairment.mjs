@@ -249,7 +249,7 @@ async function armMeasurements(name, context) {
     return {
       goodput: measureGoodput(client),
       codec: await verifyCodecAndDecode(tab),
-      cdpQualification: await qualifyCdpBytes(tab, { originContainer: origin }),
+      cdpQualification: await qualifyCdpBytes(tab, { originContainer: origin, segmentSeconds: 4 }),
     };
   }
   if (name === 'cap100') {

@@ -83,7 +83,7 @@ function fixture(overrides = {}) {
   return {
     window: WINDOW,
     declaredClientTags: ['A'],
-    content: { identity: 'constructed-content', frameRate: 24 },
+    content: { identity: 'step0-content-media-v1', frameRate: 24 },
     condition: { name: 'constructed', capacityMbps: 10, capacityBitsPerSecond: 10_000_000 },
     capacityBitsPerSecond: 10_000_000,
     originStart: counters({ byClient: { A: { mediaBytesDelivered: 0, abortedMediaBytesDelivered: 0, segmentBytesDelivered: 0, initBytesDelivered: 0 } } }),
@@ -110,7 +110,7 @@ function publicationContext() {
     declaredClientTags: ['A'],
     condition: { name: 'constructed', capacityMbps: 10 },
     window: WINDOW,
-    content: { identity: 'constructed-content', frameRate: 24 },
+    content: { identity: 'step0-content-media-v1', frameRate: 24 },
     originWasteFraction: 0,
     realtimeFactorByClient: { A: 0.74 },
     stallCountByClient: { A: 265 },

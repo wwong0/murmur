@@ -53,6 +53,7 @@ export const REFUSAL_REASONS = Object.freeze([
   'capacity-step-not-in-force',
   'capacity-schedule-not-in-force',
   'seek-not-applied',
+  'seek-target-missed',
   'seek-landed-on-held-media',
   'roster-event-not-issued',
   'roster-event-not-observed',
@@ -114,16 +115,45 @@ function rosterEventRefusal(input, addReason) {
 // 10b design.md D7: the member a leave removed ends its streams at the event by design,
 // and a joiner was not in the room when the cadence was established. Their reasons are
 // kept, named, beside the ones the run is judged on.
-function excusedByRosterEvent(condition, event, reasons) {
+const ROSTER_EVENT_EXCUSABLE_REASONS = new Set([
+  'client-never-began-playback',
+  'record-coverage-unavailable',
+  'dropped-frame-evidence-unavailable',
+  'viewer-interface-evidence-unavailable',
+  'engine-windows-unavailable',
+]);
+
+function rosterExcusableReason(reason, tag) {
+  return ROSTER_EVENT_EXCUSABLE_REASONS.has(reason)
+    || reason === `required-context-absent:stallCountByClient[${tag}]`
+    || reason === `required-context-absent:keptHostBytesByClient[${tag}]`;
+}
+
+export function excusedByRosterEvent(condition, event, reasons, clients) {
   const kind = condition.rosterEvent?.kind;
   const tag = event?.client;
   if (typeof tag !== 'string') return [];
-  const departs = removesMember(kind);
+  if (kind === 'join') {
+    const excused = [];
+    for (let index = reasons.length - 1; index >= 0; index -= 1) {
+      const entry = reasons[index];
+      const named = entry.tag === tag || (typeof entry.field === 'string' && entry.field.endsWith(`[${tag}]`));
+      if (named && entry.reason === 'client-cadence-unavailable') excused.unshift(...reasons.splice(index, 1));
+    }
+    return excused;
+  }
+  if (!removesMember(kind)) return [];
+  // Shared clock only: the drift records are shared, the issue instant is the harness's.
+  const issueMs = event?.presence?.recvSharedMs;
+  const hasPresentedBeforeIssue = (clients?.[tag]?.records ?? []).some((record) =>
+    finite(record?.displaySharedMs) && finite(issueMs) && record.displaySharedMs <= issueMs
+      && finite(record.presentedFrames) && record.presentedFrames > 0);
+  if (!hasPresentedBeforeIssue) return [];
   const excused = [];
   for (let index = reasons.length - 1; index >= 0; index -= 1) {
     const entry = reasons[index];
     const named = entry.tag === tag || (typeof entry.field === 'string' && entry.field.endsWith(`[${tag}]`));
-    if (named && (departs || (kind === 'join' && entry.reason === 'client-cadence-unavailable'))) {
+    if (named && rosterExcusableReason(entry.reason, tag)) {
       excused.unshift(...reasons.splice(index, 1));
     }
   }
@@ -328,12 +358,20 @@ export function evaluateRefusals(input = {}) {
         addReason(reasons, 'seek-not-applied', REFUSAL_SCOPE.seek, { tag, lastReading });
       }
     } else {
+      if (Number.isSafeInteger(input.seek.declaredPositionMs)
+        && (!finite(input.seek.landedPositionMs)
+          || Math.abs(input.seek.landedPositionMs - input.seek.declaredPositionMs) > 2)) {
+        addReason(reasons, 'seek-target-missed', REFUSAL_SCOPE.seek, {
+          declaredPositionMs: input.seek.declaredPositionMs,
+          landedPositionMs: input.seek.landedPositionMs ?? null,
+        });
+      }
       const landing = input.seek.landedOnHeldMedia ? input.seek : appliedSeekEvidence({
         host: input.seek.host,
         viewers: input.seek.viewers,
         peerRecords: input.peerRecords,
         declaredClientTags: tags,
-        segmentSeconds: input.seek.segmentSeconds ?? 4,
+        segmentSeconds: input.segmentSeconds,
         highDemandTimeWindowMs: input.seek.highDemandTimeWindowMs ?? Number(condition.engineWindows?.highDemandTimeWindow ?? 15) * 1000,
       });
       for (const entry of landing.notApplied ?? []) {
@@ -350,7 +388,7 @@ export function evaluateRefusals(input = {}) {
 
   const arm = armFor(condition);
   arm.refusals(input, (reason, scope, detail) => addReason(reasons, reason, scope, detail));
-  const excused = excusedByRosterEvent(condition, input.rosterEvent, reasons);
+  const excused = excusedByRosterEvent(condition, input.rosterEvent, reasons, clients);
 
   const uniqueReasonSet = [...new Set(reasons.map((entry) => entry.reason))];
   const duplicateReasons = reasons.map((entry) => entry.reason).filter((reason, index, all) => all.indexOf(reason) !== index);

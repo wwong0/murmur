@@ -7,6 +7,7 @@ export const PEER_WAIT_HELD_LIMIT_MS = 6_000;
 export const PEER_WAIT_MARGIN_MS = 1_500;
 export const URGENT_DELAY_MAX_MS = 500;
 export const EDGE_STEP_MS = 250;
+export const EDGE_HELD_STEP_MS = 750;
 export const EDGE_RECHECK_MS = 500;
 export const SLOW_RATE_BYTES_PER_S = 160_000;
 export const SLOW_WINDOW_MS = 2_000;
@@ -51,14 +52,25 @@ function validateHostAsk(record) {
   const startMs = hostAskField(record, 'startMs');
   const reason = hostAskField(record, 'reason');
   const rank = hostAskField(record, 'rank');
+  const decidedAtMs = hostAskField(record, 'decidedAtMs');
   const atMs = hostAskField(record, 'atMs');
   if (!Number.isSafeInteger(index)) throw new TypeError('host ask index must be an integer');
   if (typeof path !== 'string') throw new TypeError('host ask path must be a string');
   if (!Number.isFinite(startMs) || startMs < 0) throw new TypeError('host ask startMs must be finite and non-negative');
   if (!HOST_ASK_REASONS.has(reason)) throw new TypeError('host ask reason is invalid');
   if (!Number.isSafeInteger(rank) || rank < 0) throw new TypeError('host ask rank must be a non-negative integer');
+  if (!Number.isFinite(decidedAtMs) || decidedAtMs < 0 || decidedAtMs > atMs) throw new TypeError('host ask decidedAtMs must be finite, non-negative and no later than atMs');
   if (!Number.isFinite(atMs) || atMs < 0) throw new TypeError('host ask atMs must be finite and non-negative');
-  return { index, path, startMs, reason, rank, atMs };
+  return { index, path, startMs, reason, rank, decidedAtMs, atMs };
+}
+
+export function hostAskDecidedAtMs({ timeOriginMs, decisionMs, passMs, atMs } = {}) {
+  finiteNonNegative(timeOriginMs, 'timeOriginMs');
+  finiteNonNegative(passMs, 'passMs');
+  finiteNonNegative(atMs, 'atMs');
+  if (decisionMs === undefined || decisionMs === passMs) return atMs;
+  finiteNonNegative(decisionMs, 'decisionMs');
+  return timeOriginMs + decisionMs;
 }
 
 export function noteHostAsk(record) {
@@ -271,7 +283,8 @@ export function edgeSource({
   if (rank === 0) return { source: 'http', reason: 'first' };
   // design.md D4: a viewer that parks ahead of a held state's instant counts from
   // that instant, when the viewers still playing first need the segment.
-  const at = Math.max(finiteNonNegative(episode?.quietSinceMs, 'quietSinceMs'), notBeforeMs) + rank * EDGE_STEP_MS;
+  const at = Math.max(finiteNonNegative(episode?.quietSinceMs, 'quietSinceMs'), notBeforeMs)
+    + rank * (held ? EDGE_HELD_STEP_MS : EDGE_STEP_MS);
   return nowMs < at
     ? { source: 'wait', untilMs: at }
     : { source: 'http', reason: 'fallback-no-announcement' };

@@ -22,7 +22,7 @@ export default async function heldAheadSuite() {
     const clients = Object.fromEntries([
       ['c01', 100_000], ['c02', 101_500], ['c03', 103_000],
     ].map(([tag, mediaMs]) => [tag, drift([{ displaySharedMs: 0, mediaMs }, { displaySharedMs: 1_000, mediaMs }])]));
-    const result = computeHeldAhead({ tags: ['c01', 'c02', 'c03'], window: { startMs: 0, endMs: 1_000 }, clients,
+    const result = computeHeldAhead({ tags: ['c01', 'c02', 'c03'], window: { startMs: 0, endMs: 1_000 }, segmentSeconds: 4, clients,
       input: { clients: Object.fromEntries(Object.entries(clients).map(([tag, client]) => [tag, { ...client, peerRecords: [] }])), declaredClientTags: ['c01', 'c02', 'c03'], window: { startMs: 0, endMs: 1_000 } } });
     assertNear(result.positionSpreadMsMedian, 3_000, 0, 'spread is max minus min');
     assertEqual(result.positionSpreadSecondsUsed, 1, 'one complete second contributes');

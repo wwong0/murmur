@@ -23,6 +23,9 @@ import { hostSourceOnLoopback, topologyReadback } from './topology-readback.mjs'
 
 const HARNESS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'harness');
 const COMPOSE_FILE = path.join(HARNESS_DIR, 'compose.yaml');
+const APP_DIR = path.resolve(HARNESS_DIR, '..');
+const LEGACY_CONTENT_IDENTITY = 'step0-content-media-v1';
+const LEGACY_CONTENT = Object.freeze({ segmentSeconds: 4, segmentCount: 1_800, totalBytes: 2_365_859_777 });
 
 export const PROJECT = 'wa6a';
 export const MEDIA_NETWORK = 'wa-media';
@@ -254,6 +257,37 @@ export function readContentFrameRate(container, exec = defaultExec) {
   return { frameRate, source: 'ffprobe(init.mp4 + seg-00000.m4s)', ratio };
 }
 
+export function validateContentManifest(content = {}, manifest = {}) {
+  if (content.hostDir !== undefined && typeof content.identity !== 'string') throw new Error('content-invalid');
+  // step0's manifest carries no identity field, so the legacy identity is matched by its numbers.
+  if (content.identity === LEGACY_CONTENT_IDENTITY && !Object.prototype.hasOwnProperty.call(content, 'targetSeconds')) {
+    if (manifest.segmentSeconds !== LEGACY_CONTENT.segmentSeconds
+      || manifest.segmentCount !== LEGACY_CONTENT.segmentCount
+      || manifest.totalBytes !== LEGACY_CONTENT.totalBytes) {
+      throw new Error('content-legacy-mismatch');
+    }
+    return manifest;
+  }
+  if (content.identity !== manifest.identity) throw new Error('content-identity-mismatch');
+  if (Object.prototype.hasOwnProperty.call(content, 'targetSeconds')
+    && content.targetSeconds !== manifest.targetSeconds) throw new Error('content-target-mismatch');
+  if (!Number.isFinite(manifest.segmentSeconds) || manifest.segmentSeconds <= 0) {
+    throw new Error('content-segment-seconds-unavailable');
+  }
+  return manifest;
+}
+
+export function readMountedContentManifest({ container, runDir, content = {}, exec = defaultExec } = {}) {
+  const raw = dockerExec(container, ['cat', '/media/content-manifest.json'], exec);
+  let manifest;
+  try { manifest = JSON.parse(raw); } catch (error) {
+    throw new Error(`content-manifest-invalid:${error.message}`);
+  }
+  validateContentManifest(content, manifest);
+  fs.writeFileSync(path.join(runDir, 'content-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  return manifest;
+}
+
 function containerRunDir(runDir) {
   return `/results/${path.basename(runDir)}`;
 }
@@ -372,13 +406,18 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, e
 
     async prepare({ condition, runDir }) {
       const arm = armFor(condition);
+      if (condition.content?.hostDir !== undefined && typeof condition.content?.identity !== 'string') {
+        throw new Error('content-invalid');
+      }
       state.urls = urlsForDelivery(condition.delivery);
       state.runDir = runDir;
       const services = serviceNames(condition.clients, { delivery: condition.delivery });
       const previousDelivery = process.env.WA_DELIVERY;
       const previousTrackerPort = process.env.WA_TRACKER_PORT;
       const previousOriginRole = process.env.WA_ORIGIN_ROLE;
+      const previousMediaDir = process.env.WA_MEDIA_DIR;
       process.env.WA_DELIVERY = condition.delivery;
+      if (condition.content?.hostDir !== undefined) process.env.WA_MEDIA_DIR = path.resolve(APP_DIR, condition.content.hostDir);
       if (arm.trackerPort !== null) process.env.WA_TRACKER_PORT = arm.trackerPort;
       else delete process.env.WA_TRACKER_PORT;
       if (condition.delivery === 'host') process.env.WA_ORIGIN_ROLE = 'host-page';
@@ -392,12 +431,16 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, e
         else process.env.WA_TRACKER_PORT = previousTrackerPort;
         if (previousOriginRole === undefined) delete process.env.WA_ORIGIN_ROLE;
         else process.env.WA_ORIGIN_ROLE = previousOriginRole;
+        if (previousMediaDir === undefined) delete process.env.WA_MEDIA_DIR;
+        else process.env.WA_MEDIA_DIR = previousMediaDir;
       }
       state.containers = composeContainers(project, exec);
       const missing = services.filter((name) => !state.containers[name]);
       if (missing.length) throw new Error(`compose did not start: ${missing.join(', ')}`);
       if (condition.delivery === 'host' && !state.containers.server) throw new Error('host delivery requires server container');
       await waitForOrigin(state.urls.countersUrl);
+      const contentManifest = readMountedContentManifest({ container: state.containers.origin, runDir,
+        content: condition.content, exec });
       await requireDelivery(state.urls.countersUrl, condition.delivery, {
         trackerUrl: arm.trackerPort === null ? null : `ws://${condition.delivery === 'host' ? 'server-media' : 'origin-media'}:${arm.trackerPort}`,
       });
@@ -430,7 +473,8 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, e
       state.sampler = startSampler({ container: state.containers.origin, ifName: state.origin.ifName, runDir, intervalMs: samplerIntervalMs, exec });
       state.backgroundLoad = startBackgroundLoad({ container: state.containers.origin, mbps: condition.backgroundLoadMbps, protocol: condition.backgroundLoadProtocol ?? 'tcp', runDir, exec });
 
-      const content = { ...condition.content, ...readContentFrameRate(state.containers.origin, exec) };
+      const content = { ...condition.content, segmentSeconds: contentManifest.segmentSeconds,
+        identity: contentManifest.identity ?? condition.content?.identity, ...readContentFrameRate(state.containers.origin, exec) };
       return {
         containers: state.containers,
         countersUrl: state.urls.countersUrl,

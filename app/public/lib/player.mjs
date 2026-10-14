@@ -41,6 +41,7 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientT
   /** @type {Set<Function>} */
   const finishedHandlers = new Set();
   const finished = new Map();
+  let last = null;
   let hls = null;
 
   function emitError(detail) {
@@ -63,6 +64,7 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientT
   function load({ startPositionMs = null, p2p = null } = {}) {
     const startPosition = Number.isFinite(startPositionMs) ? startPositionMs / 1000 : -1;
     finished.clear();
+    last = null;
     if (hls) {
       hls.destroy();
       hls = null;
@@ -88,7 +90,7 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientT
         const frag = data?.frag;
         if (frag?.type !== 'main' || !Number.isFinite(frag.sn)
           || !Number.isFinite(frag.start) || !Number.isFinite(frag.end)) return;
-        finished.set(frag.sn, { mediaStartMs: frag.start * 1000, mediaEndMs: frag.end * 1000 });
+        finished.set(frag.sn, { index: frag.sn, mediaStartMs: frag.start * 1000, mediaEndMs: frag.end * 1000 });
         for (const fn of finishedHandlers) {
           try {
             fn();
@@ -96,6 +98,15 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientT
             // A broken subscriber must not take the player down with it.
           }
         }
+      });
+      instance.on(Hls.Events.LEVEL_LOADED, (_event, data) => {
+        if (hls !== instance) return;
+        const details = data?.details;
+        const fragments = details?.fragments;
+        if (details?.live !== false || !Array.isArray(fragments) || fragments.length === 0) return;
+        const frag = fragments.at(-1);
+        if (!Number.isFinite(frag?.sn) || !Number.isFinite(frag?.start) || !Number.isFinite(frag?.end)) return;
+        last = { index: frag.sn, mediaStartMs: frag.start * 1000, mediaEndMs: frag.end * 1000 };
       });
       instance.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) {
@@ -133,6 +144,7 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientT
       hls.destroy();
       hls = null;
     }
+    last = null;
   }
 
   /** Park is the only position write, and scheduled start calls it paused. */
@@ -149,6 +161,9 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientT
     finishedSegments() {
       if (!Hls.isSupported()) return null;
       return [...finished.values()].map((segment) => ({ ...segment }));
+    },
+    lastSegment() {
+      return last ? { ...last } : null;
     },
     onFinished(fn) {
       finishedHandlers.add(fn);

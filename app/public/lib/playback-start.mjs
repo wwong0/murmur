@@ -4,7 +4,7 @@
 // instant and the returned actions; this module owns no timer, DOM or clock.
 
 import { epochMsAt, mediaMsAt } from './playback-state.mjs';
-import { heldAheadMs } from './held-ahead.mjs';
+import { edgeIndexAfter, heldAheadMs } from './held-ahead.mjs';
 
 /** The advance's accepted range (executor-spec.md §2.5 C1 amendment). */
 const ADVANCE_RANGE_MS = Object.freeze([0, 250]);
@@ -88,12 +88,16 @@ export function createPlaybackStart({
   let lastPlayError = null;
   let linkOpen = true;
   let finished = null;
+  let last = null;
   let pendingSkip = null;
 
   function covered(positionMs) {
-    return coverMarginMs === 0 || finished === null
-      || (Number.isFinite(positionMs) && Array.isArray(finished) && finished.length > 0
-        && heldAheadMs({ positionMs, segments: finished }) >= coverMarginMs);
+    if (coverMarginMs === 0 || finished === null) return true;
+    const marginCovered = Number.isFinite(positionMs) && Array.isArray(finished) && finished.length > 0
+      && heldAheadMs({ positionMs, segments: finished }) >= coverMarginMs;
+    const tailCovered = last !== null && Array.isArray(finished)
+      && edgeIndexAfter({ positionMs, segments: finished }) === last.index + 1;
+    return marginCovered || tailCovered;
   }
 
   function snapshot() {
@@ -171,7 +175,11 @@ export function createPlaybackStart({
     const id = nextAttemptId++;
     const S0 = Math.max(target.effectiveMs, nowSharedMs + prepareLeadMs);
     const chosen = covered(mediaMsAt(state, S0 + presentationAdvanceMs));
-    const P = chosen ? S0 : Math.max(target.effectiveMs, nowSharedMs + (lineage?.nextProjectionMs ?? projectionMs));
+    let P = chosen ? S0 : Math.max(target.effectiveMs, nowSharedMs + (lineage?.nextProjectionMs ?? projectionMs));
+    if (!chosen && last !== null && mediaMsAt(state, S0 + presentationAdvanceMs) < last.mediaEndMs
+      && mediaMsAt(state, P + presentationAdvanceMs) >= last.mediaEndMs) {
+      P = Math.max(S0, epochMsAt(state, P + presentationAdvanceMs) + last.mediaStartMs - presentationAdvanceMs);
+    }
     const S = chosen ? S0 : null;
     const mapping = {
       positionMs: mediaMsAt(state, P + presentationAdvanceMs),
@@ -300,9 +308,11 @@ export function createPlaybackStart({
     state = null,
     linkOpen: nextLinkOpen = true,
     finished: nextFinished = null,
+    last: nextLast = null,
   } = {}) {
     linkOpen = nextLinkOpen === true;
     finished = nextFinished;
+    last = nextLast;
     resolved = nextResolved === true && state !== null;
     lastState = state;
 

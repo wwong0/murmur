@@ -1,4 +1,3 @@
-const DEFAULT_SEGMENT_SECONDS = 4;
 const DEFAULT_HIGH_DEMAND_MS = 15_000;
 
 export function segmentIndex(path) {
@@ -49,10 +48,10 @@ function highestSegment(records) {
   return entries.reduce((highest, entry) => entry.index > highest.index ? entry : highest).index;
 }
 
-export function appliedSeekEvidence({ host, viewers = {}, peerRecords = {}, declaredClientTags = Object.keys(viewers), segmentSeconds = DEFAULT_SEGMENT_SECONDS, highDemandTimeWindowMs = DEFAULT_HIGH_DEMAND_MS } = {}) {
+export function appliedSeekEvidence({ host, viewers = {}, peerRecords = {}, declaredClientTags = Object.keys(viewers), segmentSeconds, highDemandTimeWindowMs = DEFAULT_HIGH_DEMAND_MS } = {}) {
   const hostReading = appliedReading(host);
   if (!hostReading) throw new Error('seek host applied reading is unavailable');
-  if (!Number.isFinite(segmentSeconds) || segmentSeconds <= 0) throw new Error('seek segment seconds are invalid');
+  if (!Number.isFinite(segmentSeconds) || segmentSeconds <= 0) throw new Error('segment-seconds-unavailable');
   if (!Number.isFinite(highDemandTimeWindowMs) || highDemandTimeWindowMs <= 0) throw new Error('seek high-demand window is invalid');
   const segmentMs = segmentSeconds * 1000;
   const landingSegment = Math.floor(hostReading.positionMs / segmentMs);

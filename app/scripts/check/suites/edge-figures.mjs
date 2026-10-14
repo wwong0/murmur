@@ -116,7 +116,7 @@ export default async function edgeFiguresSuite() {
     assertNear(mediaTimeRatio(figures, ['c01'], 4).c01, 0.98, 0.0001, '176 000 ms of media over 179 592 ms played');
     assertEqual(mediaTimeRatio({ completedSegmentsByClient: { c01: 44 }, playedMediaMsByClient: { c01: null } }, ['c01'], 4).c01, null, 'no played stretch: no value');
     // The pair differs only in whether the condition is registered under 9b.
-    const span = (reading) => recoverySpans({ input: { condition: { bars: {}, reading }, declaredClientTags: ['c01'],
+    const span = (reading) => recoverySpans({ input: { condition: { bars: {}, reading }, segmentSeconds: 4, declaredClientTags: ['c01'],
       clients: { c01: { records: [], polls: [] } }, hostPoll: [], viewerPolls: { c01: [{ harnessAfterMs: 59_900, heldAhead: { heldAheadMs: 21_000 }, state: HELD }] },
       linkSamples: [], hostPace: null, capacityBitsPerSecond: 10_000_000 }, transition: 0, recordingEnd: 60_000 }).spans[0];
     const edge = span({ kind: 'control', hostPollCoverage: true });

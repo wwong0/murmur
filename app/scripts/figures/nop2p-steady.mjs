@@ -34,7 +34,7 @@ export function computeNoP2pSteady({ input = {}, figures = {}, tags = [], offset
     window: input.window,
     offsets,
     segmentSizes: input.content?.segmentSizes ?? input.segmentSizes,
-    segmentSeconds: input.segmentSeconds ?? 4,
+    segmentSeconds: input.segmentSeconds,
   });
   const cohorts = Object.fromEntries(tags.map((tag) => [tag, receiptSegments(input.clients?.[tag], input.window)]));
   const steady = steadyState({ input, tags, figures, cohorts, oneViewing });

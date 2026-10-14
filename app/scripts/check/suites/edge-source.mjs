@@ -1,6 +1,7 @@
 import { assert, assertEqual, check } from '../harness.mjs';
 import {
   EDGE_RECHECK_MS,
+  EDGE_HELD_STEP_MS,
   EDGE_STEP_MS,
   PEER_WAIT_HELD_LIMIT_MS,
   PEER_WAIT_LIMIT_MS,
@@ -103,12 +104,38 @@ export default async function edgeSourceSuite() {
 
   await check('edge-source: an unannounced first fetcher is replaced at 250 ms', async () => {
     const episode = next(null, { nowMs: 0 });
+    const before = edgeSource({ nowMs: 249, rank: 1, viewers: 5, holders: 0, loaders: 0, episode });
     const firstReplacement = edgeSource({ nowMs: 250, rank: 1, viewers: 5, holders: 0, loaders: 0, episode });
     const later = [2, 3, 4].map((rank) => edgeSource({
       nowMs: 1_300, rank, viewers: 5, holders: 1, loaders: 0, episode,
     }));
+    assertEqual(before.source, 'wait', 'rank 1 waits at 249 ms');
     assertEqual(firstReplacement.reason, 'fallback-no-announcement', 'rank 1 asks at 250 ms');
     assertEqual(later.every((decision) => decision.source === 'p2p'), true, 'later ranks use the holder');
+  });
+
+  await check('edge-source: held viewers take 750 ms turns without an announcement', async () => {
+    const heldInstant = 10_000;
+    const episode = next(null, { nowMs: heldInstant - 400 });
+    const args = { viewers: 5, held: true, holders: 0, loaders: 0, episode, notBeforeMs: heldInstant };
+    const rankOneBefore = edgeSource({ ...args, rank: 1, nowMs: heldInstant + 749 });
+    const rankOne = edgeSource({ ...args, rank: 1, nowMs: heldInstant + 750 });
+    const rankTwoBefore = edgeSource({ ...args, rank: 2, nowMs: heldInstant + 1_499 });
+    const rankTwo = edgeSource({ ...args, rank: 2, nowMs: heldInstant + 1_500 });
+    const rankThreeBefore = edgeSource({ ...args, rank: 3, nowMs: heldInstant + 2_249 });
+    const rankThree = edgeSource({ ...args, rank: 3, nowMs: heldInstant + 2_250 });
+    assertEqual(rankOneBefore.untilMs, heldInstant + EDGE_HELD_STEP_MS, 'held rank 1 waits until H plus 750 ms');
+    assertEqual(rankOne.reason, 'fallback-no-announcement', 'held rank 1 asks at H plus 750 ms');
+    assertEqual(rankTwoBefore.untilMs, heldInstant + 1_500, 'held rank 2 waits until H plus 1 500 ms');
+    assertEqual(rankTwo.reason, 'fallback-no-announcement', 'held rank 2 asks at H plus 1 500 ms');
+    assertEqual(rankThreeBefore.untilMs, heldInstant + 2_250, 'held rank 3 waits until H plus 2 250 ms');
+    assertEqual(rankThree.reason, 'fallback-no-announcement', 'held rank 3 asks at H plus 2 250 ms');
+    // Prevention proof: opportunity is the held rank-1 fallback at H+600;
+    // action boundary is `edgeSource`. Mutation: use EDGE_STEP_MS for held
+    // rooms. Named red: `held rank 1 waits until H plus 750 ms`.
+    assertEqual(edgeSource({ ...args, rank: 1, nowMs: heldInstant + 600 }).source, 'wait', 'held rank 1 does not ask at H plus 600 ms');
+    const announced = next(episode, { nowMs: heldInstant + 600, loaders: 1 });
+    assertEqual(edgeSource({ ...args, rank: 1, nowMs: heldInstant + 600, loaders: 1, episode: announced }).source, 'wait', 'held announcement at H plus 600 ms is not a host answer');
   });
 
   // Mutation proof, 2026-10-04: counting from quietSinceMs alone made this case red

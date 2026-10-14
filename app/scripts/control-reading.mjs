@@ -87,15 +87,36 @@ export function trapClassForRun(entry, condition, trapReading) {
   }
 }
 
-// A register reads the arms of its own change: 9b's are the ones declaring the
-// host's poll coverage, so 8b2's reading does not gain an empty arm per 9b condition.
-function armsOf(conditions, change) {
-  return [...conditionEntries(conditions).values()].filter((condition) => condition?.reading?.kind === 'control'
-    && edgeReading(condition.reading) === (change === EDGE_CHANGE));
+function conditionNameOf(entry) {
+  return entry?.manifest?.regime?.name ?? entry?.condition ?? entry?.manifest?.condition?.name ?? null;
 }
 
-export function sweepPositions(runs, conditions, change = null) {
-  const entries = armsOf(conditions, change).filter((condition) => {
+// A register's edge arms come from the retained regime, not from its label. A
+// register may pin the names explicitly; every pinned name must have a run.
+function edgeArmNames(conditions, register, entries) {
+  const byName = conditionEntries(conditions);
+  const names = Array.isArray(register?.arms)
+    ? [...register.arms]
+    : [...byName.values()].filter((condition) => condition?.reading?.kind === 'control'
+      && edgeReading(condition.reading)
+      && (entries ?? []).some((entry) => conditionNameOf(entry) === condition.name)).map((condition) => condition.name);
+  for (const name of names) {
+    if (!(entries ?? []).some((entry) => conditionNameOf(entry) === name)) throw new Error(`arm-not-in-register:${name}`);
+  }
+  return names;
+}
+
+function armsOf(conditions, names) {
+  const byName = conditionEntries(conditions);
+  return names.map((name) => byName.get(name)).filter((condition) => condition?.reading?.kind === 'control');
+}
+
+export function sweepPositions(runs, conditions, change = null, registeredArmNames = null) {
+  const armEntries = registeredArmNames
+    ? armsOf(conditions, registeredArmNames)
+    : [...conditionEntries(conditions).values()].filter((condition) => condition?.reading?.kind === 'control'
+      && edgeReading(condition.reading) === (change === EDGE_CHANGE));
+  const entries = armEntries.filter((condition) => {
     const declared = Object.prototype.hasOwnProperty.call(condition, 'headroomFraction');
     // The product's own position is the seek arm's, not its control arm's.
     return condition.reading.sweep === true || (condition.seek && !declared && !condition.assignmentControl);
@@ -149,9 +170,9 @@ function outputRun(entry, conditions, trapReading) {
   return output;
 }
 
-function controlArms(entries, conditions, change) {
+function controlArms(entries, conditions, armNames) {
   const result = {};
-  for (const condition of armsOf(conditions, change)) {
+  for (const condition of armsOf(conditions, armNames)) {
     const name = condition.name;
     const classified = classifyControlReading({ runs: entries, reading: condition.reading, armNames: [name] });
     result[name] = classified.arms[name];
@@ -174,12 +195,14 @@ export function buildControlReadingReport({ registerPath, conditionsPath = CONDI
       throw new Error(`trap-reading-result-missing:${key}`);
     }
   }
-  const change = readJson(registerPath).change ?? '8b2';
-  const edge = change === EDGE_CHANGE;
+  const register = readJson(registerPath);
+  const change = register.change ?? '8b2';
   const entries = recomputed ?? registryEntries(registerPath).map(recomputeControlRun);
+  const armNames = edgeArmNames(conditions, register, entries);
+  const edge = armNames.length > 0;
   const runs = entries.map((entry) => outputRun(entry, conditions, trapCondition.reading));
-  const arms = controlArms(entries, conditions, change);
-  const controlRuns = Object.fromEntries((edge ? Object.keys(arms) : ['control-five', 'control-ten']).map((condition) => [condition,
+  const arms = controlArms(entries, conditions, armNames);
+  const controlRuns = Object.fromEntries((edge ? armNames : ['control-five', 'control-ten']).map((condition) => [condition,
     entries.find((entry) => accepted(entry) && entry.condition === condition) ?? null]));
   return {
     change,
@@ -191,7 +214,7 @@ export function buildControlReadingReport({ registerPath, conditionsPath = CONDI
     baseline: baselineTable({ runs: entries, controlRuns }),
     trapReading: { file: TRAP_RESULT, arm: 'trap-seek', reading: trapArm.reading,
       readingKey: trapArm.readingKey, class: trapArm.class },
-    sweep: { positions: sweepPositions(runs, conditions, change) },
+    sweep: { positions: sweepPositions(runs, conditions, change, armNames) },
     ...(edge ? { gain: gain({ arms }) } : {}),
   };
 }

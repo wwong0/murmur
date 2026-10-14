@@ -4,6 +4,13 @@ import { createRequestRecorder } from './cdp-records.mjs';
 
 const finite = (value) => Number.isFinite(value);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+export const QUALIFICATION_MEDIA_POSITION_MS = 6_000_000;
+
+export function segmentAtMediaPosition(mediaMs, segmentSeconds) {
+  if (!finite(segmentSeconds) || segmentSeconds <= 0) throw new Error('segment-seconds-unavailable');
+  if (!finite(mediaMs) || mediaMs < 0) throw new Error('qualification-media-position-invalid');
+  return `seg-${String(Math.floor(mediaMs / (segmentSeconds * 1000))).padStart(5, '0')}.m4s`;
+}
 
 export const CDP_QUALIFICATION_REASON = 'cdp-byte-mapping-unqualified';
 export const LINK_RECEIPT_QUALIFICATION_REASON = 'link-receipt-mapping-unqualified';
@@ -15,7 +22,8 @@ export const LINK_RECEIPT_QUALIFICATION_REASON = 'link-receipt-mapping-unqualifi
  * rather than beside the impairment verifier because the run driver needs it
  * too, and the verifier already imports from the driver.
  */
-export async function qualifyCdpBytes(tab, { originContainer, origin = CLIENT_ORIGIN_URL, segment = 'seg-01500.m4s', exec = defaultExec } = {}) {
+export async function qualifyCdpBytes(tab, { originContainer, origin = CLIENT_ORIGIN_URL, segmentSeconds, mediaPositionMs = QUALIFICATION_MEDIA_POSITION_MS, exec = defaultExec } = {}) {
+  const segment = segmentAtMediaPosition(mediaPositionMs, segmentSeconds);
   const statSizeBytes = Number(dockerExec(originContainer, ['stat', '-c', '%s', `/media/${segment}`], exec).trim());
   const recorder = createRequestRecorder(tab);
   try {
@@ -111,7 +119,8 @@ function issueFetchExpression(segment) {
  * returns without awaiting its body (9b design.md D1, J6): at that point the host
  * has no estimate and no pace to starve it behind.
  */
-export async function beginLinkQualification(viewerTab, { segment = 'seg-01500.m4s', now = Date.now, pause = sleep } = {}) {
+export async function beginLinkQualification(viewerTab, { segmentSeconds, mediaPositionMs = QUALIFICATION_MEDIA_POSITION_MS, now = Date.now, pause = sleep } = {}) {
+  const segment = segmentAtMediaPosition(mediaPositionMs, segmentSeconds);
   const beginAtMs = now();
   await waitForOpen(viewerTab, { now, pause });
   const beforeMs = now();

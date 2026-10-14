@@ -49,11 +49,12 @@ function round100(value) {
 }
 
 export function computeHeldAhead({ input = {}, clients = input.clients ?? {}, tags = tagsOf(input),
-  window = input.window, segmentSeconds = input.segmentSeconds ?? 4 } = {}) {
+  window = input.window, segmentSeconds = input.segmentSeconds } = {}) {
   const startMs = Number(window?.startMs);
   const endMs = Number(window?.endMs);
   const segmentMs = Number(segmentSeconds) * 1000;
-  if (!finite(startMs) || !finite(endMs) || !(endMs > startMs) || !(segmentMs > 0)) return null;
+  if (!finite(segmentSeconds) || segmentSeconds <= 0) throw new Error('segment-seconds-unavailable');
+  if (!finite(startMs) || !finite(endMs) || !(endMs > startMs)) return null;
   const seconds = Math.max(0, Math.floor((endMs - startMs) / 1000));
   if (!seconds) return null;
   const seek = seekInstants(input);

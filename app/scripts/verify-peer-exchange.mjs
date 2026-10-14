@@ -13,6 +13,7 @@ import { startTracker as spawnTracker } from './runner/tracker.mjs';
 import { requireDelivery } from './delivery-pin.mjs';
 import { PEER_EXCHANGE_BARS, evaluatePeerExchange } from './figures/peer-exchange-bars.mjs';
 import { PEER_PAGE_READING } from './peer-exchange-probe.mjs';
+import { PRODUCT_STREAM_CONFIG } from '../public/lib/peer-engine-config.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -217,7 +218,7 @@ async function captureReadings(plans) {
 
 function coreDefaults() {
   return {
-    defaultStreamConfig: Core.DEFAULT_STREAM_CONFIG,
+    defaultStreamConfig: { ...Core.DEFAULT_STREAM_CONFIG, ...PRODUCT_STREAM_CONFIG },
     defaultCommonConfig: Core.DEFAULT_COMMON_CORE_CONFIG,
     trackerUrl: TRACKER_URL,
     iceServers: [],

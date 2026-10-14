@@ -6,8 +6,8 @@ function seekValues(input) {
   const instants = seekInstants(input);
   if (!instants) throw new Error('trap seek evidence is unavailable');
   const { version, landingMs, effectiveSharedMs } = instants;
-  const segmentSeconds = Number(input.segmentSeconds ?? instants.segmentSeconds ?? 4);
-  if (!(segmentSeconds > 0) || !finite(segmentSeconds)) throw new Error('trap segment seconds are invalid');
+  const segmentSeconds = Number(input.segmentSeconds);
+  if (!(segmentSeconds > 0) || !finite(segmentSeconds)) throw new Error('segment-seconds-unavailable');
   return {
     version,
     landingMs,

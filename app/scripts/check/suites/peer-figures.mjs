@@ -52,6 +52,7 @@ function fixture(overrides = {}) {
   return {
     window: WINDOW,
     declaredClientTags: ['A', 'B'],
+    segmentSeconds: 4,
     content: { segmentSizes: SIZES },
     cdpQualification: { receipt: { requestId: 'qualification' } },
     originStart: { mediaBytesDelivered: 0, responseRecords: [] },

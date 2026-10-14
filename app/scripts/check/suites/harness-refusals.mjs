@@ -378,15 +378,17 @@ export default async function harnessRefusalsSuite() {
 
   await check('10b refusal: the member a leave removed is excused by name, and only under a leave', async () => {
     const base = evidence();
-    const input = (kind) => ({ ...base, condition: { ...base.condition, clients: 2, figureKinds: ['roster-event'], rosterEvent: { kind, client: 'c02' } },
-      declaredClientTags: ['c01', 'c02'], clients: { c01: base.clients.c01, c02: {} },
-      rosterEvent: { kind, client: 'c02', tabId: 'c02', presence: { event: 'leave', seq: 4 } },
+    const { publicationContext: _publicationContext, cadence: _cadence, ...bare } = base;
+    const input = (kind) => ({ ...bare, condition: { ...base.condition, publishes: false, clients: 2, figureKinds: ['roster-event'], rosterEvent: { kind, client: 'c02' } },
+      declaredClientTags: ['c01', 'c02'], clients: { c01: base.clients.c01, c02: { finalPlayback: { begun: 0 },
+        records: base.clients.c01.records, polls: base.clients.c01.polls, driftLogMissed: 0, maxDriftDrainGapMs: 0 } },
+      rosterEvent: { kind, client: 'c02', tabId: 'c02', presence: { event: 'leave', seq: 4, recvSharedMs: 180_000 } },
       presence: { c01: [{ event: 'leave', seq: 4, tabId: 'c02' }], c02: [] } });
     const left = evaluateRefusals(input('leave-clean'));
     assertEqual(left.reasons.filter((entry) => entry.tag === 'c02' || String(entry.field ?? '').endsWith('[c02]')).length, 0, 'no reason names the leaver');
-    assert(left.excused.some((entry) => entry.reason === 'client-holds-no-drift-records' && entry.tag === 'c02'), 'its absence is kept, named');
+    assert(left.excused.some((entry) => entry.reason === 'client-never-began-playback' && entry.tag === 'c02'), 'the named seven are excused only after prior frames');
     const dropped = evaluateRefusals(input('drop-socket'));
-    assert(dropped.reasons.some((entry) => entry.reason === 'client-holds-no-drift-records' && entry.tag === 'c02'),
+    assert(dropped.reasons.some((entry) => entry.reason === 'client-never-began-playback' && entry.tag === 'c02'),
       'a member that only lost its socket is still judged');
     assertEqual(dropped.excused.length, 0, 'and nothing is excused');
   });

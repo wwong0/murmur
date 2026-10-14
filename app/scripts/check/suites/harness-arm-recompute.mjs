@@ -10,7 +10,7 @@ const contentManifest = JSON.parse(fs.readFileSync(contentManifestPath, 'utf8'))
 const manifest = {
   byteAccountingMethod: 'constructed-accounting',
   cdpQualification: { receipt: { requestId: 'constructed' } },
-  content: { identity: 'constructed-content', frameRate: 24, manifestPath: contentManifestPath },
+  content: { identity: 'step0-content-media-v1', frameRate: 24 },
   topology: { probePaths: { c01: { peerLinksShaped: false } } },
 };
 

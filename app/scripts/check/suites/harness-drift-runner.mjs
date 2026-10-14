@@ -61,7 +61,7 @@ function manifestFor(tags, figureKinds) {
       bars: { recordCoverageMin: 0, droppedFrameFractionMax: 1, driftLogMissedMax: 0 },
     },
     window: { startMs: 0, endMs: 1000, excludedPrefixMs: 0, measureWindowMs: 1000 },
-    content: { identity: 'constructed', frameRate: 1 },
+    content: { identity: 'step0-content-media-v1', frameRate: 1 },
     cadence: Object.fromEntries(tags.map((tag) => [tag, { presentIntervalMs: 16.667, classification: 'synthetic-fixed' }])),
     clients: Object.fromEntries(tags.map((tag) => [tag, {
       tag,

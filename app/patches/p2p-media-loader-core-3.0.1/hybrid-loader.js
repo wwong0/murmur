@@ -16,7 +16,7 @@ import * as LoggerUtils from "./utils/logger.js";
 import * as StreamUtils from "./utils/stream.js";
 import * as Utils from "./utils/utils.js";
 import debug from "debug";
-import { EDGE_RECHECK_MS, SLOW_WINDOW_MS, drawUrgentDelay, edgeSource, nextEdgeEpisode, transferIsSlow, hostSlotVictim, urgentBudgetMs, urgentContext, urgentSource, noteHostAsk as recordHostAsk } from "./urgent-source.mjs"; // wa-patch: use the product's urgent-load decisions and ask record
+import { EDGE_RECHECK_MS, SLOW_WINDOW_MS, drawUrgentDelay, edgeSource, nextEdgeEpisode, transferIsSlow, hostSlotVictim, urgentBudgetMs, urgentContext, urgentSource, hostAskDecidedAtMs, noteHostAsk as recordHostAsk } from "./urgent-source.mjs"; // wa-patch: use the product's urgent-load decisions and ask record
 import { controlInForce } from "../../public/lib/edge-control.mjs"; // wa-patch: read the selected queue control
 import { edgeRank, spreadChoice, SPREAD_START_ANYWAY_MS } from "../../public/lib/edge-assignment.mjs"; // wa-patch: call the pure assignment helpers
 import { edgeRequestStep } from "../../public/lib/edge-request.mjs"; // wa-patch: carry out one selected edge request step
@@ -384,6 +384,9 @@ export class HybridLoader {
                     const loading = (request === null || request === void 0 ? void 0 : request.status) === "loading"; // wa-patch: inspect the product transfer state
                     const loadingFromP2P = loading && request.downloadSource === "p2p"; // wa-patch: retain only peer transfers
                     if (loading && !loadingFromP2P) continue; // wa-patch: leave HTTP transfers to the stock loop
+                    const wait = this.urgentWaits.get(segment.runtimeId); // wa-patch: retain the product host-decision instant
+                    if (urgent.source === "http") wait.hostDecisionMs ??= now; // wa-patch: start an unbroken host-decision run once, never during a host load
+                    else if (wait) delete wait.hostDecisionMs; // wa-patch: end the run when another source wins
                     const immediate = loadingFromP2P && urgent.source === "move"; // wa-patch: move only a slow peer transfer
                     const needsSpread = immediate || (!loadingFromP2P && urgent.source === "p2p"); // wa-patch: spread only a new or moving peer request
                     const choice = needsSpread ? this.edgeSpreadChoice(segment, urgent, now, immediate) : undefined; // wa-patch: gather the pure spread choice
@@ -416,7 +419,7 @@ export class HybridLoader {
                         peer.downloadSegment(this.requests.getOrCreateRequest(segment)); // wa-patch: start on the spread holder
                     } else if (step.do === "host") { // wa-patch: carry out a selected host load
                         if (step.cancel) request.cancel(); // wa-patch: preserve bytes before the host re-issue
-                        this.noteHostAsk(segment, step); // wa-patch: record the selected host ask
+                        this.noteHostAsk(segment, step, now); // wa-patch: record the selected host ask and its decision pass
                         this.loadThroughHttp(segment); // wa-patch: start the selected host load
                     } // wa-patch: finish the selected edge action
                     continue; // wa-patch: close the product high-demand branch
@@ -515,7 +518,7 @@ export class HybridLoader {
         return { ...decision, rank, peers, sender, episode: wait.episode }; // wa-patch: return the answer and adapter state
     } // wa-patch: finish the product-control decision adapter
     edgeSpreadChoice(segment, decision, nowMs, immediate) { // wa-patch: adapt the pure spread choice to engine peers
-        return spreadChoice({ selfPeerId: this.peerId, peers: decision.peers.filter((peer) => peer.id !== decision.sender), segmentIndex: segment.externalId, nowMs: immediate ? SPREAD_START_ANYWAY_MS : nowMs, holdersRoseMs: immediate ? 0 : decision.episode.holdersRoseMs }); // wa-patch: choose without putting the host in the peer pool
+        return spreadChoice({ selfPeerId: this.peerId, peers: decision.peers.filter((peer) => peer.id !== decision.sender), segmentIndex: segment.externalId, segmentDurationMs: (segment.endTime - segment.startTime) * 1000, nowMs: immediate ? SPREAD_START_ANYWAY_MS : nowMs, holdersRoseMs: immediate ? 0 : decision.episode.holdersRoseMs }); // wa-patch: choose without putting the host in the peer pool
     } // wa-patch: finish the spread adapter
     edgeFreeHostSlot(queue, segment) { // wa-patch: cancel a later host load only where the room loses no host copy
         const later = queue.slice(queue.findIndex((item) => item.segment === segment) + 1); // wa-patch: the stock scan stops at this segment
@@ -539,7 +542,7 @@ export class HybridLoader {
         wait.samples = []; // wa-patch: clear the old rate window
         wait.p2pStartMs = nowMs; // wa-patch: age the new peer transfer from its move
     } // wa-patch: finish the transfer reset
-    noteHostAsk(segment, decision) { // wa-patch: publish one adapter host-ask record
+    noteHostAsk(segment, decision, passMs) { // wa-patch: publish one adapter host-ask record
         const ctx = urgentContext(); // wa-patch: calculate the rank in the current room
         let path = null; // wa-patch: invalid URLs are refused by the ring
         try { // wa-patch: parse the segment URL at the adapter boundary
@@ -548,7 +551,11 @@ export class HybridLoader {
         catch (_error) { // wa-patch: pass null so the ring reports malformed input
             path = null; // wa-patch: preserve the ring's TypeError boundary
         } // wa-patch: finish malformed URL handling
-        recordHostAsk({ index: segment.externalId, path, startMs: segment.startTime * 1000, reason: this.edgeControl === "8b" ? "control-8b" : decision.reason, rank: decision.rank ?? edgeRank({ viewerIds: ctx.viewerIds, selfId: ctx.selfId, segmentIndex: segment.externalId }), atMs: performance.timeOrigin + performance.now() }); // wa-patch: record the exact page-time host boundary
+        const atMs = performance.timeOrigin + performance.now(); // wa-patch: record the exact page-time host boundary
+        const wait = this.urgentWaits.get(segment.runtimeId); // wa-patch: read the episode's decision instant
+        const decidedAtMs = hostAskDecidedAtMs({ timeOriginMs: performance.timeOrigin, decisionMs: wait?.hostDecisionMs, passMs, atMs }); // wa-patch: preserve time spent waiting for the host slot
+        recordHostAsk({ index: segment.externalId, path, startMs: segment.startTime * 1000, reason: this.edgeControl === "8b" ? "control-8b" : decision.reason, rank: decision.rank ?? edgeRank({ viewerIds: ctx.viewerIds, selfId: ctx.selfId, segmentIndex: segment.externalId }), decidedAtMs, atMs }); // wa-patch: publish one shaped host ask
+        if (wait) delete wait.hostDecisionMs; // wa-patch: finish this host-decision run after publication
     } // wa-patch: finish the host-ask adapter
     armUrgentWait(segment, decision, nowMs) { // wa-patch: arm the rule's single wake timer
         const wait = this.urgentWaits.get(segment.runtimeId); // wa-patch: the decision created the episode

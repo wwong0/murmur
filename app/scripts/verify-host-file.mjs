@@ -25,7 +25,7 @@ import {
   boundariesFromPlaylist,
   chooseSegments,
   exitCode,
-  s0, s1, s2, s3, s4, s5, s6, s7a, s7b, s7c, s7d, s7e, s8, s9, s10, s11, s12, s13,
+  s0, s1, s2, s3, s4, s5, s6, s7a, s7f, s7b, s7c, s7d, s7e, s8, s9, s10, s11, s12, s13,
 } from './host-file-steps.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -492,6 +492,30 @@ async function runPass(options) {
       const after = await shown(mark, target - 1.5 * frame, target + 1.5 * frame);
       const seg = (index) => `/media/seg-${String(index).padStart(5, '0')}.m4s`;
       return s7a({ position: fromSeconds, target, frame, afterWallTime: mark, frames: framesAfter(viewer, mark), longFile: choice.longFile, segment: choice.j, targetPath: seg(choice.j), previousPath: seg(choice.j - 1), requestsBefore, requestsAfter: linkOf(after)?.requestsByPath, element: after.element ?? null });
+    });
+    await step('S7f', "seek to a segment's first presented frame", async () => {
+      if (!passed(r2) || !choice) return s7f({ precondition: false });
+      if (!choice.longFile) return s7f({ precondition: false, reason: 'short file' });
+      const index = boundaries.findIndex((boundary, i) => i < count - 1 && boundary >= boundaries[choice.j - 1] + 150);
+      if (index === -1) throw new Error("no segment 150 s past S7a's");
+      await setPlaying(false);
+      const zero = (await seekTo(0)).mark;
+      await shown(zero, 0, 1);
+      const delta = framesAfter(viewer, zero)[0]?.mediaTime ?? null;
+      const segment = index + 1;
+      const target = boundaries[index] + delta;
+      // Without the settle, prefetch from the seek to 0 counts as an earlier segment the seek requested.
+      const requestKey = async () => JSON.stringify(linkOf(await read(viewer))?.requestsByPath ?? null);
+      for (let previous = await requestKey(), i = 0; i < 15; i += 1) {
+        await sleep(1_000);
+        const current = await requestKey();
+        if (current === previous) break;
+        previous = current;
+      }
+      const requestsBefore = linkOf(await read(viewer))?.requestsByPath;
+      const { mark } = await seekTo(target);
+      const after = await shown(mark, target - 1.5 * frame, target + 1.5 * frame);
+      return s7f({ delta, target, segment, frame, mediaTime: framesAfter(viewer, mark)[0]?.mediaTime ?? null, requestsBefore, requestsAfter: linkOf(after)?.requestsByPath, element: after.element ?? null });
     });
     await step('S7e', "seek to a segment's first presented frame", async () => {
       if (!passed(r2) || !choice) return s7e({ precondition: false });

@@ -1,6 +1,6 @@
 import { assert, assertEqual, check } from '../harness.mjs';
 import fs from 'node:fs';
-import { hostSlotVictim, noteHostAsk, readHostAsks } from '../../../public/lib/urgent-source.mjs';
+import { hostAskDecidedAtMs, hostSlotVictim, noteHostAsk, readHostAsks } from '../../../public/lib/urgent-source.mjs';
 import { PATCHED_HYBRID_LOADER } from '../../engine-patch.mjs';
 
 const common = Object.freeze({
@@ -8,6 +8,7 @@ const common = Object.freeze({
   path: '/media/17.ts',
   startMs: 68_000,
   rank: 2,
+  decidedAtMs: 1_700_000_000_000,
   atMs: 1_700_000_000_000,
 });
 
@@ -26,7 +27,7 @@ export default async function edgeAsksSuite() {
     noteHostAsk({ ...common, reason: 'first' });
     const after = readHostAsks(before.latestSeq);
     assertEqual(after.records.length, 1, 'one record round-trips');
-    assertEqual(JSON.stringify(after.records[0]), JSON.stringify({ seq: before.latestSeq + 1, index: common.index, path: common.path, startMs: common.startMs, reason: 'first', rank: common.rank, atMs: common.atMs }), 'every record field round-trips');
+    assertEqual(JSON.stringify(after.records[0]), JSON.stringify({ seq: before.latestSeq + 1, index: common.index, path: common.path, startMs: common.startMs, reason: 'first', rank: common.rank, decidedAtMs: common.decidedAtMs, atMs: common.atMs }), 'every record field round-trips');
     const filtered = readHostAsks(after.records[0].seq);
     assertEqual(filtered.records.length, 0, 'afterSeq excludes the matching record');
     after.records[0].path = '/mutated';
@@ -57,6 +58,34 @@ export default async function edgeAsksSuite() {
     // and `unknown reason is refused`. Restore with git checkout -- and rerun green.
     assert(missing instanceof TypeError, 'missing reason is refused');
     assert(invalid instanceof TypeError, 'unknown reason is refused');
+    assert(thrown(() => noteHostAsk({ ...common, decidedAtMs: undefined })) instanceof TypeError, 'missing decided instant is refused');
+    assert(thrown(() => noteHostAsk({ ...common, decidedAtMs: common.atMs + 1 })) instanceof TypeError, 'a decision after the ask is refused');
+  });
+
+  await check('edge-asks: a waited decision keeps its earlier instant', async () => {
+    const atMs = 1_700_000_002_800;
+    assertEqual(hostAskDecidedAtMs({ timeOriginMs: 1_700_000_000_000, decisionMs: 2_000, passMs: 2_800, atMs }), 1_700_000_002_000, 'an ask that waited keeps its 800 ms earlier decision');
+    assertEqual(hostAskDecidedAtMs({ timeOriginMs: 1_700_000_000_000, decisionMs: 2_800, passMs: 2_800, atMs }), atMs, 'a same-pass decision uses its start instant');
+    assertEqual(hostAskDecidedAtMs({ timeOriginMs: 1_700_000_000_000, passMs: 2_800, atMs }), atMs, 'a control ask without an episode uses its start instant');
+    // Prevention proof: opportunity is an ask after an 800 ms wait; action
+    // boundary is `hostAskDecidedAtMs`. Mutation: always return atMs. Named red:
+    // `an ask that waited keeps its 800 ms earlier decision`.
+  });
+
+  await check('edge-asks: the product branch takes a decision instant only outside a host load', async () => {
+    const loader = fs.readFileSync(PATCHED_HYBRID_LOADER, 'utf8');
+    const from = loader.indexOf('if (this.edgeControl !== "8b") { // wa-patch: product control assigns high-demand peers');
+    const branch = loader.slice(from, loader.indexOf('// wa-patch: finish product-control assignment', from));
+    const skip = branch.indexOf('if (loading && !loadingFromP2P) continue;');
+    const set = branch.indexOf('wait.hostDecisionMs ??= now;');
+    assert(from > 0 && skip > 0, 'the product branch and its host-load skip are found');
+    assert(set > skip, 'the decision instant is set after a loading host request is skipped');
+    assert(branch.includes('delete wait.hostDecisionMs;'), 'another source ends the decision run');
+    assert(branch.includes('this.noteHostAsk(segment, step, now);'), 'the ask carries its decision pass');
+    assert(/noteHostAsk\(segment, decision, passMs\)[\s\S]*?delete wait\.hostDecisionMs;/.test(loader), 'publishing an ask ends the decision run');
+    // Prevention proof: opportunity is a pass while a host load is in flight;
+    // mutation: set the instant before the skip. Named red: `the decision
+    // instant is set after a loading host request is skipped`.
   });
 
   await check('edge-asks: fallback reasons distinguish the three fallback paths', async () => {
@@ -64,7 +93,7 @@ export default async function edgeAsksSuite() {
     const reasons = ['fallback-no-announcement', 'fallback-no-holder', 'fallback-slow-holder'];
     for (const reason of reasons) noteHostAsk({ ...common, reason });
     const records = readHostAsks(before.latestSeq).records;
-    const shared = ['index', 'path', 'startMs', 'rank', 'atMs'];
+    const shared = ['index', 'path', 'startMs', 'rank', 'decidedAtMs', 'atMs'];
     const projected = records.map((record) => Object.fromEntries(shared.map((key) => [key, record[key]])));
     assertEqual(records.map((record) => record.reason).join(','), reasons.join(','), 'fallback reasons are published');
     assertEqual(new Set(projected.map((record) => JSON.stringify(record))).size, 1, 'fallback records agree in every other field');

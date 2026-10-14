@@ -219,13 +219,16 @@ export default async function engineWindowsSuite() {
       'baseline-join', 'baseline-leave-clean', 'baseline-leave-silent', 'join', 'leave-clean', 'leave-silent', 'leave-first',
       'drop-socket', 'drop-recover', 'shakedown/churn-join', 'shakedown/churn-leave-clean', 'shakedown/churn-leave-silent',
       'shakedown/churn-drop-socket', 'shakedown/churn-leave-first'];
+    // 11a-2's copy 9b's edge conditions and run the product's windows as they do.
+    const registeredBy11a2 = (name) => (name.startsWith('11a2-') || name.startsWith('shakedown/11a2-'))
+      && name !== '11a2-scattered-4s';
     const supplied = [];
     const walk = (group, label) => {
       for (const [name, condition] of Object.entries(group)) {
         if (name === 'schemaVersion' || !condition || typeof condition !== 'object') continue;
         if (condition.peerExchange === true) {
           const declares = Object.prototype.hasOwnProperty.call(condition, 'engineWindows');
-          if (productInputs.includes(`${label}${name}`)) { if (declares) supplied.push(`${label}${name}`); }
+          if (productInputs.includes(`${label}${name}`) || registeredBy11a2(`${label}${name}`)) { if (declares) supplied.push(`${label}${name}`); }
           else if (!declares) undeclared.push(`${label}${name}`);
         } else if (condition.delivery === undefined && !('peerExchange' in condition)
           && Object.values(condition).every((value) => value && typeof value === 'object')) {

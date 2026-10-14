@@ -126,8 +126,10 @@ export default async function harnessConditionsSuite() {
     const registeredBy10b = ['baseline-join', 'baseline-leave-clean', 'baseline-leave-silent', 'join', 'leave-clean', 'leave-silent', 'leave-first',
       'drop-socket', 'drop-recover', 'shakedown/churn-join', 'shakedown/churn-leave-clean', 'shakedown/churn-leave-silent',
       'shakedown/churn-drop-socket', 'shakedown/churn-leave-first'];
+    // 11a-2's, by prefix as 9b's; registered after its image build (its tasks.md Decisions).
+    const registeredBy11a2 = (name) => name.startsWith('11a2-') || name.startsWith('shakedown/11a2-');
     const added = [...currentEntries.keys()].filter((name) => !baseEntries.has(name) && !registeredBy8b2.includes(name) && !registeredBy9b(name)
-      && !registeredBy10b.includes(name));
+      && !registeredBy10b.includes(name) && !registeredBy11a2(name));
     assertEqual(JSON.stringify(added.sort()), JSON.stringify(['baseline-nop2p-steady', 'behind-inside', 'behind-past', 'capacity-ten', 'hostorigin-nop2p', 'hostorigin-uncapped', 'p2p-naive', 'p2p-scattered', 'regimes-default-shaped', 'regimes-limited-shaped', 'regimes-starved', 'shakedown/behind-qual', 'shakedown/cap20', 'shakedown/hostorigin-qual', 'shakedown/p2p-qual', 'shakedown/regimes-qual', 'shakedown/trap-qual', 'trap-seek', 'trap-seek-short']), 'only declared change conditions are new');
   });
 

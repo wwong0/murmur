@@ -11,6 +11,7 @@ import { HEADROOM_DEFAULT } from '../../public/lib/send-pace.mjs';
 import { evidenceRefusals } from './control-evidence.mjs';
 import { controlInjection, controlRefusals } from './assignment-control.mjs';
 import { changesMembership } from './roster-kinds.mjs';
+import { buildIdentityFromRun, buildRefusals, recordPageBuildIds } from './build-identity.mjs';
 
 export const REFUSAL_SCOPE = Object.freeze({
   neverPlayed: Object.freeze(['byte', 'drift']),
@@ -84,86 +85,23 @@ function readJson(file) {
 
 const STEP0_CONTENT_MANIFEST = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
   '../../../step0/content/content-manifest.json');
-const BUNDLE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../public/room.bundle.js');
 
-export function readBundleBuildId(file = BUNDLE_PATH) {
-  try {
-    const source = fs.readFileSync(file, 'utf8');
-    return source.match(/\bBUILD_ID\s*=\s*["']([^"']+)["']/)?.[1] ?? null;
-  } catch {
-    return null;
-  }
+function contentManifestOf(manifest, runDir) {
+  const retained = runDir ? path.join(runDir, 'content-manifest.json') : null;
+  if (retained && fs.existsSync(retained)) return readJson(retained);
+  if (manifest.content?.manifestPath) return readJson(manifest.content.manifestPath);
+  if (manifest.content?.identity === 'step0-content-media-v1') return readJson(STEP0_CONTENT_MANIFEST);
+  throw new Error('content manifest unavailable');
 }
 
-async function readPageBuildId(session) {
-  try {
-    const value = await session.tab.evaluate('window.__app && typeof window.__app.buildId === "string" ? window.__app.buildId : null');
-    return typeof value === 'string' ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-async function recordPageBuildIds(kind, { sessions = [], hostSession = null, runDir }) {
-  const host = hostSession ?? sessions.find((session) => session.role === 'host') ?? null;
-  const viewers = sessions.filter((session) => session.role === 'viewer');
-  const hostBuildId = host ? await readPageBuildId(host) : null;
-  const viewerBuildIds = Object.fromEntries(await Promise.all(viewers.map(async (session) => {
-    const buildId = await readPageBuildId(session);
-    session.pageBuildId = buildId;
-    return [session.tag, buildId];
-  })));
-  if (host) host.pageBuildId = hostBuildId;
-  // Read at the boundary: a later recompute must not judge the run by a later build.
-  const identity = { host: hostBuildId, viewers: viewerBuildIds, disk: readBundleBuildId() };
-  writeJson(path.join(runDir, `build-ids-${kind}.json`), identity);
-  return identity;
-}
-
-function buildIdentityFromRun(runDir) {
-  const identity = readJson(path.join(runDir, 'build-ids-end.json'))
-    ?? readJson(path.join(runDir, 'build-ids-start.json'));
-  return identity ?? null;
-}
-
-export function buildRefusalDetails(identity) {
-  if (!identity) return [];
-  const details = [];
-  const hostBuildId = identity.host ?? null;
-  const diskBuildId = identity.disk ?? null;
-  for (const [tag, viewerBuildId] of Object.entries(identity.viewers ?? {})) {
-    if (hostBuildId === null || viewerBuildId === null || hostBuildId !== viewerBuildId) {
-      details.push({ pair: 'host-viewer', viewer: tag, hostBuildId, viewerBuildId });
-    }
-    if (viewerBuildId === null || diskBuildId === null || viewerBuildId !== diskBuildId) {
-      details.push({ pair: 'viewer-disk', viewer: tag, viewerBuildId, diskBuildId });
-    }
-  }
-  if (hostBuildId === null || diskBuildId === null || hostBuildId !== diskBuildId) {
-    details.push({ pair: 'host-disk', hostBuildId, diskBuildId });
-  }
-  return details;
-}
-
-function buildRefusals(input, addReason) {
-  if (!input.buildIdentity) return;
-  for (const detail of buildRefusalDetails(input.buildIdentity)) {
-    addReason('build-mismatch', REFUSAL_SCOPE.build, detail);
-  }
-}
-
-function contentManifestOf(manifest) {
-  return readJson(manifest.content?.manifestPath ?? STEP0_CONTENT_MANIFEST);
-}
-
-function recomputePeerContent(manifest) {
-  const contentManifest = contentManifestOf(manifest);
+function recomputePeerContent(manifest, runDir) {
+  const contentManifest = contentManifestOf(manifest, runDir);
   if (!Array.isArray(contentManifest?.segmentSizes)) throw new Error('content segmentSizes are unavailable');
   return { ...manifest.content, segmentSizes: contentManifest.segmentSizes };
 }
 
-function recomputePeerSegmentSeconds(manifest) {
-  const contentManifest = contentManifestOf(manifest);
+function recomputePeerSegmentSeconds(manifest, runDir) {
+  const contentManifest = contentManifestOf(manifest, runDir);
   if (!finite(contentManifest?.segmentSeconds) || contentManifest.segmentSeconds <= 0) {
     throw new Error('content segment seconds are unavailable');
   }
@@ -242,7 +180,7 @@ function baseArm({ hostTag, runDirPrefix, readyTimeoutMs }) {
     runDirPrefix,
     byteAccountingMethod: 'client-receipt-cohort-v1',
     recomputeContent: (manifest) => manifest.content,
-    recomputeSegmentSeconds: (manifest) => manifest.content?.segmentSeconds,
+    recomputeSegmentSeconds: (manifest, runDir) => recomputePeerSegmentSeconds(manifest, runDir),
     recomputeAccountingMethod: (manifest) => manifest.byteAccountingMethod,
     recomputeInputExtras: () => ({}),
     driftCriterionWhenUndeclared: null,
@@ -286,10 +224,10 @@ function baseArm({ hostTag, runDirPrefix, readyTimeoutMs }) {
 
 const HTTP_ARM = Object.freeze({
   ...baseArm({ hostTag: null, runDirPrefix: '6a', readyTimeoutMs: 30_000 }),
-  async qualify(sessions, { originContainer, qualifyCdpBytes }) {
+  async qualify(sessions, { originContainer, qualifyCdpBytes, segmentSeconds }) {
     const tab = sessions[0]?.tab;
     return qualifyWith(!originContainer ? 'origin-container' : !tab ? 'first-client-tab' : null,
-      () => qualifyCdpBytes(tab, { originContainer }));
+      () => qualifyCdpBytes(tab, { originContainer, segmentSeconds }));
   },
   refusals(input, addReason) {
     buildRefusals(input, addReason);
@@ -303,9 +241,8 @@ const HOST_ARM = Object.freeze({
   ...baseArm({ hostTag: 'c00', runDirPrefix: '9b', readyTimeoutMs: 120_000 }),
   qualifyAfterJoins: true,
   // D5's one viewing sizes the played stretch from the content, as the peer arm does.
-  recomputeContent: (manifest) => (oneViewing(manifest) ? recomputePeerContent(manifest) : manifest.content),
-  recomputeSegmentSeconds: (manifest) => (oneViewing(manifest)
-    ? recomputePeerSegmentSeconds(manifest) : manifest.content?.segmentSeconds),
+  recomputeContent: (manifest, runDir) => (oneViewing(manifest) ? recomputePeerContent(manifest, runDir) : manifest.content),
+  recomputeSegmentSeconds: (manifest, runDir) => recomputePeerSegmentSeconds(manifest, runDir),
   async openWindow({ sessions, condition, deadline, establishCadence, manifestFile, placeWindow }) {
     const cadence = await establishCadence(sessions, { condition, deadline });
     manifestFile.merge({
@@ -420,15 +357,15 @@ const HOST_ARM = Object.freeze({
     return session;
   },
   // Issued at the first viewer's join and collected after the last (9b design.md D1).
-  beginQualification(sessions, { beginLinkQualification }) {
+  beginQualification(sessions, { beginLinkQualification, segmentSeconds }) {
     const viewerTab = sessions[0]?.tab;
-    return viewerTab ? beginLinkQualification(viewerTab) : null;
+    return viewerTab ? beginLinkQualification(viewerTab, { segmentSeconds }) : null;
   },
-  async qualify(sessions, { originSession, originContainer, finishLinkQualification, pending }) {
+  async qualify(sessions, { originSession, originContainer, finishLinkQualification, pending, segmentSeconds }) {
     const viewerTab = sessions[0]?.tab;
     const hostTab = originSession?.tab;
     return qualifyWith(!originContainer ? 'origin-container' : !viewerTab || !hostTab ? 'host-or-viewer-tab' : null,
-      async () => finishLinkQualification(await pending, hostTab, { originContainer }));
+      async () => finishLinkQualification(await pending, hostTab, { originContainer, segmentSeconds }));
   },
   async drain(session, ndjson, atMs, drainClient) {
     const result = await drainClient(session, ndjson, atMs);

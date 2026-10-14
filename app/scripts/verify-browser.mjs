@@ -88,7 +88,7 @@ import { inSyncWithoutCorrection } from './settle-wait.mjs';
 import { TRANSITION_LEAD_MS } from '../public/lib/playback-leads.mjs';
 import { edgeRank } from '../public/lib/edge-assignment.mjs';
 import { WAITING_PAUSED } from '../public/lib/playback-start.mjs';
-import { PRODUCT_ENGINE_WINDOWS } from '../public/lib/engine-windows.mjs';
+import { PRODUCT_STREAM_CONFIG } from '../public/lib/peer-engine-config.mjs';
 import { seamEpochAgreement, startResidual } from './start-residual.mjs';
 import { evaluatePeerExchange } from './figures/peer-exchange-bars.mjs';
 import { PEER_PAGE_READING } from './peer-exchange-probe.mjs';
@@ -1180,10 +1180,9 @@ try {
   const peerBars = evaluatePeerExchange({
     ...peerReading,
     defaults: {
-      // B2 used to re-derive the library defaults. T1 makes the product's
-      // 15/60/60 windows the no-harness input, so this browser bar reads back
-      // that product set while retaining the rest of the library config.
-      defaultStreamConfig: { ...Core.DEFAULT_STREAM_CONFIG, ...PRODUCT_ENGINE_WINDOWS },
+      // B2 reads the product stream config, including its host-load timeout,
+      // over the core defaults used by the browser aid.
+      defaultStreamConfig: { ...Core.DEFAULT_STREAM_CONFIG, ...PRODUCT_STREAM_CONFIG },
       defaultCommonConfig: Core.DEFAULT_COMMON_CORE_CONFIG,
       trackerUrl: peerSettings.trackerUrl,
       iceServers: peerSettings.iceServers,

@@ -86,7 +86,7 @@ export default async function scheduleRecoverySuite() {
   await check('schedule recovery: a start hold\'s spans stop at the drop', async () => {
     const poll = (at, held) => ({ harnessBeforeMs: at - 10, harnessAfterMs: at, pageWallMs: at + 1_000, sharedMs: at, clock: { halfWidthMs: 2 },
       state: { held, lineage: 'l', version: held ? 1 : 2, atSharedMs: held ? 0 : 2_000 } });
-    const base = { condition: { peerExchange: true, bars: {} }, declaredClientTags: ['c01'], clients: { c01: { records: [], polls: [] } },
+    const base = { condition: { peerExchange: true, bars: {} }, segmentSeconds: 4, declaredClientTags: ['c01'], clients: { c01: { records: [], polls: [] } },
       hostPoll: [poll(0, true), poll(2_000, false), poll(700_000, false)], viewerPolls: { c01: [] },
       clockJoin: { c01: { joined: [{ cdpMs: 1, recvSharedMs: 1_000 }] } },
       resumes: { records: [{ seq: 1, identity: { lineage: 'l', version: 1 }, cause: 'ready', issuedAtSharedMs: 1_500, holdMs: 500 }] } };

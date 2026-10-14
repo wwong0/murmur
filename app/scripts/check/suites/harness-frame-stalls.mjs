@@ -41,4 +41,15 @@ export default async function harnessFrameStallsSuite() {
     assertEqual(lost.reason, 'drift-record-lost', 'the missing record is named');
     assertEqual(lost.stalls, undefined, 'a refusal is not an array carrying stall properties');
   });
+
+  await check('11a-2: a shared-clock backstep with contiguous records is not a loss, and a real gap still is', async () => {
+    const backstep = frameStalls({ records: frames([0, 40, 80, 30, 70, 110]), playing: [],
+      fromMs: 0, toMs: 110, gapMs: 250 });
+    assertEqual(backstep.status, 'ok', 'a 50ms re-anchor backstep keeps the stream readable');
+    assertEqual(backstep.uncalledFrames, 0, 'no frame is counted uncalled');
+    assertEqual(backstep.stalls.length, 0, 'no stall is read');
+    const lost = frameStalls({ records: frames([0, 40, 80, 30, 70], { presented: [1, 2, 3, 5, 6], seq: [1, 2, 3, 5, 6] }),
+      playing: [], fromMs: 0, toMs: 80, gapMs: 250 });
+    assertEqual(lost.reason, 'drift-record-lost', 'a missing record across a backstep is still named');
+  });
 }

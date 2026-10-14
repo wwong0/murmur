@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { assert, assertEqual, check } from '../harness.mjs';
 import { buildImages } from '../../harness/images.mjs';
-import { buildRefusalDetails, readBundleBuildId } from '../../harness/arms.mjs';
+import { buildRefusalDetails, readBundleBuildId } from '../../harness/build-identity.mjs';
 
 // Layer chains: the client image is three layers, an origin adds one to its parent's.
 const CLIENT = ['l1', 'l2', 'l3'];

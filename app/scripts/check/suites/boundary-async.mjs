@@ -170,7 +170,7 @@ export default async function boundaryAsyncSuite() {
   await check('boundary async: a host poll gap of 3 900 ms inside a span reads it incomplete where declared', async () => {
     // The pair differs only in the host's polls between 10 000 and 13 900 ms.
     const span = (hostPoll, reading) => recoverySpans({ input: { condition: { bars: {}, reading },
-      declaredClientTags: ['c01'], clients: { c01: { records: [], polls: [] } }, hostPoll,
+      declaredClientTags: ['c01'], clients: { c01: { records: [], polls: [] } }, segmentSeconds: 4, hostPoll,
       viewerPolls: { c01: every250(0, 60_000) }, linkSamples: [], hostPace: null, capacityBitsPerSecond: 10_000_000 },
     transition: 0, recordingEnd: 60_000 }).spans[0];
     const whole = every250(0, 60_000);

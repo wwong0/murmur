@@ -10,6 +10,7 @@ import { evidenceRefusals, recordingTailMs as evidenceRecordingTailMs } from '..
 import { bracketHalfWidths, coverageGap, heldAheadAt, pollGaps } from './poll-coverage.mjs';
 import { mediaTimeRatio } from './edge-figures.mjs';
 import { edgeReading } from './edge-reading.mjs';
+import { landingReading, waitParts } from './landing.mjs';
 
 const finite = (value) => Number.isFinite(value);
 const ordered = (values) => values.filter(finite).sort((a, b) => a - b);
@@ -173,6 +174,7 @@ export function holds({ hostPoll = [], resumes = [], joins = {}, declaredViewers
 }
 
 export function widenedBars(bars, spanMs, edgeSegments, segmentSeconds) {
+  if (!finite(segmentSeconds) || segmentSeconds <= 0) throw new Error('segment-seconds-unavailable');
   const edge = 2 * edgeSegments * segmentSeconds * 1000 / spanMs;
   // An undeclared bar is no value, as steadyState reads it: never a widened NaN.
   const widen = (bar, by) => (finite(bar) ? bar + by : null);
@@ -275,8 +277,9 @@ function capUsedFigure(input, window, wallOffsetMs) {
 }
 
 export function recoverySpans({ input = {}, transition, spanMs = 60_000, recordingEnd, bars = input.condition?.bars,
-  edgeSegments = 1, segmentSeconds = input.segmentSeconds ?? 4, viewerPolls = input.viewerPolls,
+  edgeSegments = 1, segmentSeconds = input.segmentSeconds, viewerPolls = input.viewerPolls,
   hostPace = input.hostPace, wallOffsetMs = input.wallOffsetMs, capacityBitsPerSecond = input.capacityBitsPerSecond } = {}) {
+  if (!finite(segmentSeconds) || segmentSeconds <= 0) throw new Error('segment-seconds-unavailable');
   if (!finite(transition) || !finite(recordingEnd) || !(spanMs > 0)) return { spans: [], trailingMs: 0 };
   const tags = input.declaredClientTags ?? Object.keys(input.clients ?? {});
   const spans = [];
@@ -367,6 +370,7 @@ export function computeControlFigures(input = {}, { manifest = input.manifest } 
   const holdInput = { ...input, manifest };
   const holdResult = holds({ hostPoll: input.hostPoll, resumes: input.resumes?.records ?? input.resumes ?? [],
     joins: input.clockJoin, declaredViewers, seek: input.seek, recordingEndShared, input: holdInput, window: input.window });
+  const waitPartResult = waitParts({ holds: holdResult, viewerPolls: input.viewerPolls, declaredViewers, timebase: join });
   const estimate = estimateFigure({ hostPace: input.hostPace, hostPaceFinal: input.hostPaceFinal,
     capacityBeforeReadings: input.capacityBeforeReadings, window: input.window, wallOffsetMs: join?.wallOffsetMs });
   const seekHold = holdResult.seek;
@@ -378,6 +382,10 @@ export function computeControlFigures(input = {}, { manifest = input.manifest } 
       bracketHalfWidthMedianMs: join.bracketHalfWidthMedianMs ?? null, bracketHalfWidthMaxMs: join.bracketHalfWidthMaxMs ?? null },
     pollGaps: pollGaps({ hostPoll: input.hostPoll, viewerPolls: input.viewerPolls }),
     holds: holdResult,
+    waitParts: waitPartResult,
+    landing: landingReading({ holds: holdResult, seek: input.seek, content: input.contentManifest ?? input.content,
+      hostResponses: input.originEnd?.responseRecords ?? [], clients: input.clients, asks: input.asks,
+      timebase: join, segmentSizes: input.contentManifest?.segmentSizes ?? input.content?.segmentSizes }),
     recordingEndHarnessMs,
     recordingEndSharedMs: recordingEndShared,
     recordingTailMs: input.seek ? evidenceRecordingTailMs({ join, seek: input.seek, windowEndMs: input.window?.endMs }) : 0,

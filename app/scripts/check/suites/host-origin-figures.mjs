@@ -74,7 +74,7 @@ function writeRun(runDir, evidence) {
     condition: { name: 'host-figures', delivery: 'host', capacityMbps: 10, capacityBitsPerSecond: 10_000_000 },
     window: WINDOW,
     declaredClientTags: TAGS,
-    content: { identity: 'constructed-host-content', frameRate: 24 },
+    content: { identity: 'step0-content-media-v1', frameRate: 24 },
     clients: Object.fromEntries(TAGS.map((tag) => [tag, { requestTimebase: 'measure-window' }])),
   };
   writeJson(path.join(runDir, 'manifest.json'), manifest);

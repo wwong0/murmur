@@ -65,7 +65,7 @@ function spanFigure(input, window) {
     && window.endMs > Number(input.seek?.effectiveSharedMs ?? input.seek?.host?.atSharedMs);
   const cohort = trapCohorts(input, { window, filterAfterEffective });
   const peer = peerFractionForCohorts(input, cohort.cohorts);
-  const held = computeHeldAhead({ input, window });
+  const held = computeHeldAhead({ input, window, segmentSeconds: input.segmentSeconds });
   return {
     window,
     lengthMs: window.endMs - window.startMs,

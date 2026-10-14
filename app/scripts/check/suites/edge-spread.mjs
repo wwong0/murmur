@@ -1,7 +1,9 @@
 import { assert, assertEqual, check } from '../harness.mjs';
 import {
   SPREAD_START_ANYWAY_MS,
+  SPREAD_ANCHOR_SEGMENT_MS,
   spreadChoice,
+  spreadStartAnywayMs,
 } from '../../../public/lib/edge-assignment.mjs';
 import {
   SLOW_MIN_AGE_MS,
@@ -19,11 +21,12 @@ function peersFor(selfPeerId, loaded, busy = []) {
     .map((id) => ({ id, loaded: loaded.has(id), busy: busy.includes(id) }));
 }
 
-function choiceFor(selfPeerId, loaded, { nowMs = 0, holdersRoseMs = 0, segmentIndex = 0, busy = [] } = {}) {
+function choiceFor(selfPeerId, loaded, { nowMs = 0, holdersRoseMs = 0, segmentIndex = 0, segmentDurationMs, busy = [] } = {}) {
   return spreadChoice({
     selfPeerId,
     peers: peersFor(selfPeerId, loaded, busy),
     segmentIndex,
+    segmentDurationMs,
     nowMs,
     holdersRoseMs,
   });
@@ -65,6 +68,23 @@ const healthySamples = Array.from({ length: 6 }, (_unused, index) => ({
 }));
 
 export default async function edgeSpreadSuite() {
+  await check('edge-spread: start-anyway scales with segment duration', async () => {
+    assertEqual(spreadStartAnywayMs(1_000), 375, 'one second waits 375 ms');
+    assertEqual(spreadStartAnywayMs(2_000), 750, 'two seconds waits 750 ms');
+    assertEqual(spreadStartAnywayMs(3_000), 1_125, 'three seconds waits 1 125 ms');
+    assertEqual(spreadStartAnywayMs(SPREAD_ANCHOR_SEGMENT_MS), SPREAD_START_ANYWAY_MS, 'four seconds uses the full wait');
+    assertEqual(spreadStartAnywayMs(7_000), SPREAD_START_ANYWAY_MS, 'longer segments stay at the cap');
+    assertEqual(spreadStartAnywayMs(0), SPREAD_START_ANYWAY_MS, 'zero duration uses the default');
+    assertEqual(spreadStartAnywayMs(Number.NaN), SPREAD_START_ANYWAY_MS, 'non-finite duration uses the default');
+    const short = choiceFor('d', new Set(['H']), { nowMs: 374, holdersRoseMs: 0, segmentDurationMs: 1_000 });
+    const due = choiceFor('d', new Set(['H']), { nowMs: 375, holdersRoseMs: 0, segmentDurationMs: 1_000 });
+    assert('holderId' in due, 'one second starts at 375 ms');
+    assertEqual(short.waitUntilMs, 375, 'one second waits until 375 ms');
+    // Prevention proof: opportunity is a one-second segment's waiter at 375 ms;
+    // action boundary is `spreadChoice`. Mutation: compare elapsed with the
+    // constant. Named red: `one second starts at 375 ms`.
+  });
+
   await check('edge-spread: a second holder serves a waiter', async () => {
     const result = relaySimulation();
     const hostServedCount = result.servedBy.filter((holderId) => holderId === 'H').length;

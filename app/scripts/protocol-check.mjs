@@ -51,6 +51,7 @@ import harnessBehindPastSuite from './check/suites/harness-behind-past.mjs';
 import harnessFrameStallsSuite from './check/suites/harness-frame-stalls.mjs';
 import harnessDistanceBehindSuite from './check/suites/harness-distance-behind.mjs';
 import harnessRosterEventSuite from './check/suites/harness-roster-event.mjs';
+import segmentWaitSuite from './check/suites/segment-wait.mjs';
 import harnessSocketControlSuite from './check/suites/harness-socket-control.mjs';
 import harnessPeerConditionsSuite from './check/suites/harness-peer-conditions.mjs';
 import harnessPeerTopologySuite from './check/suites/harness-peer-topology.mjs';
@@ -99,6 +100,7 @@ import fetchShimBarsSuite from './check/suites/fetch-shim-bars.mjs';
 import peerBytesSuite from './check/suites/peer-bytes.mjs';
 import bytesReadoutSuite from './check/suites/bytes-readout.mjs';
 import peerEngineConfigSuite from './check/suites/peer-engine-config.mjs';
+import hostLoadTimeoutSuite from './check/suites/host-load-timeout.mjs';
 import engineWindowsSuite from './check/suites/engine-windows.mjs';
 import urgentSourceSuite from './check/suites/urgent-source.mjs';
 import edgeAssignmentSuite from './check/suites/edge-assignment.mjs';
@@ -134,8 +136,11 @@ import steadyCapUsedSuite from './check/suites/steady-cap-used.mjs';
 import controlEvidenceSuite from './check/suites/control-evidence.mjs';
 import controlFiguresSuite from './check/suites/control-figures.mjs';
 import controlReadingSuite from './check/suites/control-reading.mjs';
+import controlReadingScriptSuite from './check/suites/control-reading-script.mjs';
 import buildMatchSuite from './check/suites/build-match.mjs';
 import controlReadingRepairsSuite from './check/suites/control-reading-repairs.mjs';
+import harnessContentSuite from './check/suites/harness-content.mjs';
+import segmentSecondsSuite from './check/suites/segment-seconds.mjs';
 import controlRereadSuite from './check/suites/control-reread.mjs';
 import headroomSuite from './check/suites/headroom.mjs';
 import seekEntrySuite from './check/suites/seek-entry.mjs';
@@ -226,6 +231,7 @@ for (const suite of [
   harnessFrameStallsSuite,
   harnessDistanceBehindSuite,
   harnessRosterEventSuite,
+  segmentWaitSuite,
   harnessSocketControlSuite,
   harnessPeerConditionsSuite,
   harnessPeerTopologySuite,
@@ -274,6 +280,7 @@ for (const suite of [
   peerBytesSuite,
   bytesReadoutSuite,
   peerEngineConfigSuite,
+  hostLoadTimeoutSuite,
   engineWindowsSuite,
   urgentSourceSuite,
   edgeAssignmentSuite,
@@ -309,8 +316,11 @@ for (const suite of [
   controlEvidenceSuite,
   controlFiguresSuite,
   controlReadingSuite,
+  controlReadingScriptSuite,
   buildMatchSuite,
   controlReadingRepairsSuite,
+  harnessContentSuite,
+  segmentSecondsSuite,
   controlRereadSuite,
   headroomSuite,
   seekEntrySuite,

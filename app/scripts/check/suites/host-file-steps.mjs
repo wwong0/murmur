@@ -3,7 +3,7 @@ import {
   boundariesFromPlaylist,
   chooseSegments,
   exitCode,
-  s0, s1, s2, s3, s4, s5, s6, s7a, s7b, s7c, s7d, s7e, s8, s9, s10, s11, s12, s13,
+  s0, s1, s2, s3, s4, s5, s6, s7a, s7f, s7b, s7c, s7d, s7e, s8, s9, s10, s11, s12, s13,
   showsFrameAt,
   stallTest,
 } from '../../host-file-steps.mjs';
@@ -118,6 +118,18 @@ export default async function hostFileStepsSuite() {
   await check('host-file-steps: S7a short-file request clause is declared not exercised', async () => {
     assertEqual(s7a({ ...s7aGood, longFile: false }).status, 'pass', 'short seek still passes its frame clause');
   });
+
+  const s7fGood = {
+    delta: 0.148042, target: 150.148042, segment: 151, frame: 0.04, mediaTime: 150.148042,
+    requestsBefore: { '/media/seg-00151.m4s': 0, '/media/seg-00150.m4s': 0 },
+    requestsAfter: { '/media/seg-00151.m4s': 1, '/media/seg-00150.m4s': 0 },
+  };
+  await verdictCases('S7f', s7f, s7fGood, [
+    ['before', { ...clone(s7fGood), requestsBefore: { ...s7fGood.requestsBefore, '/media/seg-00151.m4s': 1 } }],
+    ['target', { ...clone(s7fGood), requestsAfter: { ...s7fGood.requestsAfter, '/media/seg-00151.m4s': 0 } }],
+    ['earlier', { ...clone(s7fGood), requestsAfter: { ...s7fGood.requestsAfter, '/media/seg-00150.m4s': 1 } }],
+    ['frame', { ...clone(s7fGood), mediaTime: s7fGood.target + s7fGood.frame }],
+  ]);
 
   const s7bGood = { target: 5, frame: 0.04, afterWallTime: 10, frames: [frame(4.94, 11)] };
   await verdictCases('S7b', s7b, s7bGood, [['frame', { ...clone(s7bGood), frames: [frame(4, 11)] }]]);

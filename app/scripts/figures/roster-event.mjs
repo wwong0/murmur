@@ -3,6 +3,7 @@ import { counterReading, harnessSharedMs, latestPagePoll, POLL_FRESH_MS, runwayM
 import { frameStalls } from './frame-stalls.mjs';
 import { viewerOrder, edgeRank } from '../../public/lib/edge-assignment.mjs';
 import { startResiduals } from './start-requalification.mjs';
+import { aheadForGood, doubleStalls } from './ahead-for-good.mjs';
 
 /*
  * Presence streams are arrays of { cdpMs, seq, recvSharedMs, event, tabId,
@@ -123,7 +124,7 @@ function coverageGap(times, fromMs, toMs) {
   return largest;
 }
 
-function runwayRow(name, tags, polls, eventTime, durationMs, barMs, timebase) {
+export function runwayRow(name, tags, polls, eventTime, durationMs, barMs, timebase) {
   const endMs = eventTime + durationMs;
   const runwayMsByClient = {};
   const gaps = {};
@@ -281,6 +282,30 @@ function stallRow(condition, kind, eventTime, drift, hostPoll, target, issuedTim
     ...(beforeStall ? { reason: 'before-window-not-clean' } : {}) });
 }
 
+function k0Row(tags, polls, issuedTime, condition, timebase) {
+  const raw = runwayRow('K0', tags, polls, issuedTime, condition.churn?.stall?.beforeMs,
+    condition.churn?.runwayMinMs, timebase);
+  return raw.status === 'missed' ? { ...raw, status: 'unreadable', reason: 'runway-below-bar' } : raw;
+}
+
+function median(values) {
+  const sorted = values.filter(finite).sort((left, right) => left - right);
+  if (!sorted.length) return null;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function wideBand(drift, tags, eventTime, windowMs = 60_000) {
+  const pairs = [];
+  for (let left = 0; left < tags.length; left += 1) {
+    for (let right = left + 1; right < tags.length; right += 1) {
+      pairs.push(...pairSamples(stream(drift, tags[left]) ?? [], stream(drift, tags[right]) ?? [],
+        eventTime - windowMs, windowMs).map((sample) => Math.abs(sample.driftMs)));
+    }
+  }
+  return median(pairs);
+}
+
 function segmentIndex(path) {
   if (typeof path !== 'string') return null;
   const match = path.match(/(?:^|\/)seg-(\d+)\./);
@@ -400,9 +425,26 @@ function socketRow(condition, event, presence, polls, pagePolls, timebase) {
   });
 }
 
+/** Three-way leave-arm rule; comparand stall evidence is retained beside it. */
+export function leaveArmReading({ runs = [], comparands = [] } = {}) {
+  const exercised = [];
+  for (const run of runs.slice(0, 5)) {
+    const rows = Array.isArray(run) ? run : run?.rows ?? run?.reading ?? [];
+    const k1 = rows.find((entry) => entry.row === 'K1');
+    const k3 = rows.find((entry) => entry.row === 'K3');
+    if (k3?.status === 'not-exercised') continue;
+    exercised.push({ k1: k1?.status ?? 'unreadable', k3: k3?.status ?? 'unreadable' });
+  }
+  const failed = exercised.some((entry) => entry.k1 === 'missed' || entry.k3 === 'missed');
+  const status = failed ? 'fail' : exercised.length >= 3 ? 'pass' : 'not-established';
+  return { status, exercised, exercisedCount: exercised.length,
+    comparandStalls: comparands.map((comparand) => ({ directory: comparand.directory ?? null,
+      stalls: comparand.stalls ?? comparand.reading?.stallsByClient ?? null })) };
+}
+
 /** Read the J/K/S matrix from the event and retained streams. */
 export function rosterEventReading({ condition = {}, event, presence, drift = {}, polls = {}, pagePolls = {},
-  attempts, segments, asks = {}, starts = {}, timebase, content } = {}) {
+  attempts, segments, asks = {}, starts = {}, timebase, content, window, seek, capacitySchedule } = {}) {
   if (event?.__evidenceFailure) return [row('event', 'evidence-failure', { reason: event.__evidenceFailure })];
   if (!event) return [row('event', 'unreadable', { reason: 'roster-event-not-issued' })];
   const state = eventState(condition, event, presence);
@@ -442,6 +484,11 @@ export function rosterEventReading({ condition = {}, event, presence, drift = {}
       }
       if (!finite(horizonMs)) result.push(row('J2', 'evidence-failure', { reason: 'horizon-missing' }));
       else if (missing.length) result.push(row('J2', 'evidence-failure', { reason: `drift-stream-insufficient:${missing.join(',')}` }));
+      else if (finite(wideBand(drift, othersFor(condition, target), eventTime))
+        && wideBand(drift, othersFor(condition, target), eventTime) > 40) {
+        result.push(row('J2', 'unreadable', { reason: 'drift-band-before-event', medianPairwiseDriftMs:
+          wideBand(drift, othersFor(condition, target), eventTime), barMs: 40 }));
+      }
       else {
         const pairs = otherRecords.map((records) => pairSamples(targetRecords, records, first.displaySharedMs, horizonMs));
         const resyncMs = resyncAfter({ firstFrameSharedMs: first.displaySharedMs, pairs,
@@ -458,8 +505,14 @@ export function rosterEventReading({ condition = {}, event, presence, drift = {}
     result.push(fillRow(condition, stream(attempts, target), eventTime, timebase));
     result.push(runwayRow('J4', othersFor(condition, target), polls, eventTime,
       condition.churn?.stall?.afterMs, condition.churn?.runwayMinMs, timebase));
+    result.unshift(k0Row(othersFor(condition, target), polls, eventTime - (condition.churn?.stall?.beforeMs ?? NaN), condition, timebase));
     // D7's stall is every arm's: the viewers already in the room, either side of the join.
     result.push(stallRow(condition, kind, eventTime, drift, stream(polls, 'host') ?? [], target));
+    const ahead = aheadForGood({ condition, tags: tagsFor(condition), window, event, seek, capacitySchedule, drift, polls, pagePolls, timebase });
+    result.push(ahead);
+    result.push({ row: 'double-stalls', status: 'published', byClient: doubleStalls({ drift,
+      polls, tags: othersFor(condition, target), fromMs: ahead.readySharedMs ?? -Infinity,
+      toMs: ahead.endSharedMs ?? Infinity, aheadForGoodAtSharedMs: ahead.aheadForGoodAtSharedMs }) });
     return result;
   }
   if (['leave-clean', 'leave-silent', 'leave-first', 'drop-socket'].includes(kind)) {
@@ -467,6 +520,7 @@ export function rosterEventReading({ condition = {}, event, presence, drift = {}
     // windows turn on the issue and its after-window runs on past the presence frame.
     const issuedTime = kind === 'leave-silent' ? harnessSharedMs(timebase, event.issuedAtHarnessMs, event.issuedAtHarnessMs) : eventTime;
     if (!finite(issuedTime) || issuedTime > eventTime) return [row('event', 'evidence-failure', { reason: 'event-issue-time-invalid' })];
+    if (kind === 'leave-silent') result.push(k0Row(othersFor(condition, target), polls, issuedTime, condition, timebase));
     result.push(stallRow(condition, kind, eventTime, drift, stream(polls, 'host') ?? [], target, issuedTime));
     if (kind === 'drop-socket') result.unshift(socketRow(condition, event, presence, polls, pagePolls, timebase));
     else {
@@ -474,6 +528,11 @@ export function rosterEventReading({ condition = {}, event, presence, drift = {}
         eventTime - issuedTime + condition.churn?.stall?.afterMs, kind === 'leave-first' ? null : condition.churn?.runwayMinMs, timebase));
       result.push(reassignmentRow(condition, event, eventTime, state.eventFrame, segments, asks, polls, target, timebase));
     }
+    const ahead = aheadForGood({ condition, tags: othersFor(condition, target), window, event, seek, capacitySchedule, drift, polls, pagePolls, timebase });
+    result.push(ahead);
+    result.push({ row: 'double-stalls', status: 'published', byClient: doubleStalls({ drift,
+      polls, tags: othersFor(condition, target), fromMs: ahead.readySharedMs ?? -Infinity,
+      toMs: ahead.endSharedMs ?? Infinity, aheadForGoodAtSharedMs: ahead.aheadForGoodAtSharedMs }) });
     return result;
   }
   return [row('event', 'evidence-failure', { reason: `roster-event-kind-unsupported:${kind}` })];

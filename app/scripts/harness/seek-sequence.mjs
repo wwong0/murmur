@@ -3,8 +3,15 @@
 // each of its three stages. Nothing here writes; the runner owns the manifest.
 
 import { appliedSeekEvidence } from '../figures/seek-evidence.mjs';
+import { TRANSITION_LEAD_MS } from '../../public/lib/playback-leads.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Build the one-tab expression used for an absolute media-position seek. */
+export function absoluteSeekExpression(positionMs) {
+  if (!Number.isSafeInteger(positionMs) || positionMs <= 0) throw new Error('absolute-seek-position-invalid');
+  return `(() => { const state = __app.playbackState(); const now = performance.timeOrigin + performance.now() + __app.clock().offsetMs; const at = state.playing ? state.positionMs + (now + ${TRANSITION_LEAD_MS} - state.atSharedMs) : state.positionMs; return __app.harnessSeek(${JSON.stringify(positionMs)} - at); })()`;
+}
 
 export async function stepThenSeek({ condition, topology, preSeekState = null, readHostState,
   stepQdisc, seek, drainAll = async () => {}, now = Date.now } = {}) {
@@ -30,7 +37,9 @@ export async function stepThenSeek({ condition, topology, preSeekState = null, r
   const before = preSeekState ?? await readHostState?.();
   if (!before) throw new Error('host playback state is unavailable before seek');
   await drainAll();
-  const result = await seek(seekDeclaration.deltaMs);
+  const seekArgument = Number.isInteger(seekDeclaration.positionMs)
+    ? { positionMs: seekDeclaration.positionMs } : seekDeclaration.deltaMs;
+  const result = await seek(seekArgument);
   // Harness clock, as readBackAtMs is; the page's instant is another machine's clock.
   const seekIssuedAtMs = now();
   await drainAll();
@@ -128,6 +137,7 @@ function landingFor(seekEvidence, sessions, { segmentSeconds, highDemandTimeWind
 export function issuedSeekEvidence(issued, applied, sessions) {
   return {
     ...issued,
+    declaredPositionMs: Number.isInteger(issued.declared?.positionMs) ? issued.declared.positionMs : null,
     issuedAtMs: issued.seekIssuedAtMs,
     host: applied.host,
     hostAtMs: applied.hostAtMs,
@@ -147,6 +157,7 @@ export function landedSeekEvidence(seekEvidence, sessions, windows) {
     ...seekEvidence,
     ...(seekEvidence.host ? landingFor(seekEvidence, sessions, windows) : {}),
     landingMs: seekEvidence.host?.positionMs ?? null,
+    landedPositionMs: seekEvidence.host?.positionMs ?? null,
     effectiveSharedMs: seekEvidence.host?.atSharedMs ?? null,
   };
 }

@@ -4,7 +4,7 @@ import { ENGINE_WINDOW_DEFAULTS, PRODUCT_ENGINE_WINDOWS } from '../../../public/
 
 // Core keys are exact: since T1 (design.md D1) the core always carries the three
 // window keys, from the product's set when none is supplied.
-const CORE_KEYS = ['swarmId', 'announceTrackers', 'rtcConfig', 'highDemandTimeWindow', 'httpDownloadTimeWindow', 'p2pDownloadTimeWindow'];
+const CORE_KEYS = ['swarmId', 'announceTrackers', 'rtcConfig', 'highDemandTimeWindow', 'httpDownloadTimeWindow', 'p2pDownloadTimeWindow', 'httpNotReceivingBytesTimeoutMs'];
 
 function windowsOf(core) {
   return {
@@ -36,6 +36,7 @@ export default async function peerEngineConfigSuite() {
     const result = peerEngineConfig({ roomId: 'room-1', trackerUrl: 'ws://tracker.test:1', iceServers: [] });
     assertEqual(JSON.stringify(windowsOf(result.core)), JSON.stringify(PRODUCT_ENGINE_WINDOWS),
       'core windows default to 15/60/60, the product set');
+    assertEqual(result.core.httpNotReceivingBytesTimeoutMs, 15_000, 'core default host timeout is 15 000 ms');
     // Mutation probe (item 2's `...(windows ?? {})` restored): staged, then applied to
     // public/lib/peer-engine-config.mjs. `npm run check` turned this exact assertion
     // red (the core carried no window keys at all, so `windowsOf` read three
@@ -48,6 +49,7 @@ export default async function peerEngineConfigSuite() {
     });
     assertEqual(JSON.stringify(windowsOf(result.core)), JSON.stringify(ENGINE_WINDOW_DEFAULTS),
       'the library set (15/3000/6000), supplied explicitly, reads back exactly — not the product default');
+    assertEqual(result.core.httpNotReceivingBytesTimeoutMs, 15_000, 'supplied windows keep the product host timeout');
   });
 
   await check('peer-engine-config: rejects invalid room, tracker and ICE values', async () => {

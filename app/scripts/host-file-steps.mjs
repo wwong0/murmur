@@ -277,6 +277,27 @@ export function s7a(reading) {
   return verdict(reasons.length ? 'fail' : 'pass', reading, reasons.length ? reasons : [reading.longFile ? 'seek loaded only the chosen segment' : 'short-file seek request clause declared not exercised']);
 }
 
+export function s7f(reading) {
+  const early = precondition(reading);
+  if (early) return early;
+  if (!finite(reading.delta) || !finite(reading.target) || !Number.isSafeInteger(reading.segment) || reading.segment < 1
+    || !finitePositive(reading.frame) || !finite(reading.mediaTime)
+    || !object(reading.requestsBefore) || !object(reading.requestsAfter)) return missing(reading);
+  const segmentPath = `/media/seg-${String(reading.segment).padStart(5, '0')}.m4s`;
+  const reasons = [];
+  if ((reading.requestsBefore[segmentPath] ?? 0) !== 0) reasons.push('target segment was requested before the seek');
+  if ((reading.requestsAfter[segmentPath] ?? 0) < 1) reasons.push('target segment was not requested by the seek');
+  for (const [path, after] of Object.entries(reading.requestsAfter)) {
+    const match = /^\/media\/seg-(\d+)\.m4s$/.exec(path);
+    if (match && Number(match[1]) < reading.segment && after > (reading.requestsBefore[path] ?? 0)) {
+      reasons.push('an earlier segment was requested more often after the seek');
+      break;
+    }
+  }
+  if (Math.abs(reading.mediaTime - reading.target) > reading.frame / 2) reasons.push('the frame shown is not the target: one reorder delay per title does not hold here');
+  return verdict(reasons.length ? 'fail' : 'pass', reading, reasons.length ? reasons : ['the seek loaded the target segment and showed its first presented frame']);
+}
+
 export function s7b(reading) {
   const early = precondition(reading);
   if (early) return early;
