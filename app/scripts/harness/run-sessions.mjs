@@ -83,6 +83,11 @@ export async function setupSessions({ sessions, heldTag, room, clientOriginUrl, 
   return { activateHeldJoiner };
 }
 
+/** The schedule edge's issue: a condition with no rosterEvent records its edge and issues nothing. */
+export function edgeRosterEvent(options, issue = issueRosterEvent) {
+  return options.condition?.rosterEvent ? async (edge) => issue({ ...options, client: edge.leaver }) : null;
+}
+
 export async function issueRosterEvent({ client = null, condition, topology, sessions, room, runDir, heldTag,
   activateHeldJoiner, stopSessionLoops, state }) {
   const kind = condition.rosterEvent?.kind;

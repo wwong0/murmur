@@ -42,8 +42,8 @@ export default async function hostFileStepsSuite() {
   });
 
   const s0Good = {
-    target: 4, pageBuildId: 'room-build', workerBuildId: 'room-build',
-    settings: { mediaSource: 'file', delivery: 'host', targetSegmentSeconds: 4 },
+    target: 2, pageBuildId: 'room-build', workerBuildId: 'room-build',
+    settings: { mediaSource: 'file', delivery: 'host', targetSegmentSeconds: 2 },
     roomBundle: { servedSha256: 'a', diskSha256: 'a', pageIdInServed: true },
     workerBundle: { servedSha256: 'b', diskSha256: 'b' },
   };

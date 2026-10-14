@@ -30,7 +30,7 @@ import { capacityScheduleReason, recordSchedule, scheduleLengthMs } from './harn
 import { createAskEvidence, recordHostStats } from './harness/ask-evidence.mjs';
 import { finalizeRosterEvent, isHeldJoin, rosterEventTarget } from './harness/roster-event.mjs';
 import { viewerOrder } from '../public/lib/edge-assignment.mjs';
-import { issueRosterEvent, setupSessions, startMeasureLoops, stopSessionLoops } from './harness/run-sessions.mjs';
+import { edgeRosterEvent, issueRosterEvent, setupSessions, startMeasureLoops, stopSessionLoops } from './harness/run-sessions.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -735,7 +735,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     // The deep phase runs with the poll and drain loops already going (9b design.md D5).
     const scheduled = () => recordSchedule({ condition, window: manifestFile.get().window, tags,
       viewerPolls: controlEvidence.viewerPolls, stepQdisc: (capacityStep) => topology.stepQdisc({ capacityStep }),
-      viewerIds, clientIds, onEdge: async (edge) => issueRosterEvent({ ...issueEventOptions, client: edge.leaver }),
+      viewerIds, clientIds, onEdge: edgeRosterEvent(issueEventOptions),
       manifestFile, runDir: prepared.runDir });
     if (condition.capacitySchedule && !condition.seek) recordingEndTargetMs = await scheduled();
     const startBoundary = await captureBoundary('start', activeSessions(), originUrl, manifestFile.get(), manifestFile, ndjson, fetchSnapshot, boundaryOptions);

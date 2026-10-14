@@ -7,6 +7,7 @@ import {
 } from '../../harness/capacity-schedule.mjs';
 import { conditionValidationReason } from '../../harness-run.mjs';
 import { capacityBitsForManifest } from '../../harness-figures.mjs';
+import { edgeRosterEvent } from '../../harness/run-sessions.mjs';
 import { heldAheadAt } from '../../figures/poll-coverage.mjs';
 
 const step = (rate) => ({ container: 'origin', network: 'wa-media', discipline: 'tbf', params: { rate, burst: '32kbit', latency: '400ms' } });
@@ -151,5 +152,34 @@ export default async function capacityScheduleSuite() {
       stepQdisc: async () => ({ readings: {}, matches: true }), now: () => ceiling,
       sleep: async (ms) => { ceiling += ms; } });
     assertEqual(noEvent.exercised, false, 'the ceiling without an event is not exercised');
+  });
+
+  // 11a-2's drop comparand: the edge of a condition with no rosterEvent issues nothing.
+  // Mutation: edgeRosterEvent always returns the issuing closure; red on the null.
+  await check('capacity schedule: the edge issues a roster event only when the condition declares one', async () => {
+    const calls = [];
+    const issue = async (options) => { calls.push(options); };
+    const declared = { condition: { rosterEvent: { kind: 'leave-first', at: 'capacity-schedule-edge' } }, room: 'r' };
+    const onEdge = edgeRosterEvent(declared, issue);
+    await onEdge({ leaver: 'c03', viewer: 'c02', index: 7 });
+    assertEqual(calls.length, 1, 'a declared event is issued once');
+    assertEqual(JSON.stringify(calls[0]), JSON.stringify({ ...declared, client: 'c03' }), 'with the options and the leaver, as before');
+    assertEqual(edgeRosterEvent({ condition: { capacitySchedule: {} } }, issue), null, 'no rosterEvent, no issue');
+    const events = [];
+    let clock = 0;
+    const polls = { c01: [], c02: [] };
+    const schedule = { dropAfterReadyMs: 1, drop: step('2mbit'), rise: step('10mbit'),
+      edgeHeldAheadMsBelow: 15_000, ceilingMs: 750, recordAfterRiseMs: 1, riseOn: 'first-fetcher-edge' };
+    const result = await runSchedule({ condition: { delivery: 'host', excludedPrefixMs: 1, capacitySchedule: schedule },
+      state: { readyAtMs: 0, tags: ['c01', 'c02'], viewerIds: ['id-a', 'id-b'], clientIds: { c01: 'id-a', c02: 'id-b' } },
+      viewerPolls: polls, stepQdisc: async () => ({ readings: {}, matches: true }), now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+        polls.c01.push({ harnessAfterMs: clock, heldAhead: { ownHeldAheadMs: 10_000, edgeIndex: 0 } });
+        if (clock > 300) polls.c02.push({ harnessAfterMs: clock, heldAhead: { ownHeldAheadMs: 10_000, edgeIndex: 0 } });
+      },
+      onEdge: edgeRosterEvent({ condition: {} }, async (options) => { events.push(options); }) });
+    assertEqual(result.edge?.reached, true, 'the comparand still records its edge');
+    assertEqual(events.length, 0, 'and issues nothing');
   });
 }

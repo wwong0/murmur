@@ -15,6 +15,7 @@ import { armFor } from './harness/arms.mjs';
 import { parseRate } from '../harness/apply-qdisc.mjs';
 import { computeEdgeFigures, readEdgeEvidence } from './figures/edge-publication.mjs';
 import { behindReading } from './figures/behind.mjs';
+import { seekWithPolledHold } from './figures/seek-hold.mjs';
 
 function readJson(filePath, fallback = undefined) {
   try {
@@ -162,7 +163,7 @@ export function readRunDirectory(runDir, options = {}) {
     contentManifest,
     segmentSeconds: arm.recomputeSegmentSeconds(manifest, runDir),
     multiplierDenominator: manifest.multiplierDenominator ?? 'distinct-completed',
-    seek: manifest.seek ?? null,
+    seek: seekWithPolledHold(manifest.seek ?? null, { hostPoll, viewerPolls }),
     capacityStep: manifest.capacityStep ?? null,
     capacitySchedule: manifest.capacitySchedule ?? null,
     condition,

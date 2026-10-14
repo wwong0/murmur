@@ -1,4 +1,4 @@
-export const DEFAULT_TARGET_SEGMENT_SECONDS = 4;
+export const DEFAULT_TARGET_SEGMENT_SECONDS = 2;
 export const REMUX_FORMAT_VERSION = 1;
 
 export function targetMillis(seconds) {

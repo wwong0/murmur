@@ -146,6 +146,7 @@ import headroomSuite from './check/suites/headroom.mjs';
 import seekEntrySuite from './check/suites/seek-entry.mjs';
 import capacityStepSuite from './check/suites/capacity-step.mjs';
 import seekEvidenceSuite from './check/suites/seek-evidence.mjs';
+import seekHoldSuite from './check/suites/seek-hold.mjs';
 import trapFiguresSuite from './check/suites/trap-figures.mjs';
 import trapReadingSuite from './check/suites/trap-reading.mjs';
 import starvedRecomputeSuite from './check/suites/starved-recompute.mjs';
@@ -326,6 +327,7 @@ for (const suite of [
   seekEntrySuite,
   capacityStepSuite,
   seekEvidenceSuite,
+  seekHoldSuite,
   trapFiguresSuite,
   trapReadingSuite,
   starvedRecomputeSuite,

@@ -60,7 +60,7 @@ export default async function mediaSourceSettingSuite() {
       const settings = await (await fetch(`${origin}/app-settings`)).json();
       assertEqual(response.status, 200, 'directory media status');
       assertEqual(bytes.toString('hex'), expected.toString('hex'), 'directory media bytes');
-      assertEqual(JSON.stringify(settings), JSON.stringify({ delivery: 'host', iceServers: [], trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 4 }), 'directory settings');
+      assertEqual(JSON.stringify(settings), JSON.stringify({ delivery: 'host', iceServers: [], trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 2 }), 'directory settings');
       await sleep(10);
       assert(server.counters.snapshot().playlistBytesDelivered > 0, 'directory playlist is counted as media');
     });
@@ -100,9 +100,9 @@ export default async function mediaSourceSettingSuite() {
   });
 
   await check('media-source-setting: validation and environment options are exact', async () => {
-    const configured = optionsFromEnv({ APP_MEDIA_SOURCE: 'file', APP_SEGMENT_TARGET_S: '2' });
+    const configured = optionsFromEnv({ APP_MEDIA_SOURCE: 'file', APP_SEGMENT_TARGET_S: '4' });
     assertEqual(configured.mediaSource, 'file', 'environment source is preserved');
-    assertEqual(configured.targetSegmentSeconds, 2, 'environment target is numeric');
+    assertEqual(configured.targetSegmentSeconds, 4, 'environment target is numeric');
     const unset = optionsFromEnv({});
     assertEqual(unset.mediaSource, undefined, 'unset source stays undefined');
     assertEqual(unset.targetSegmentSeconds, undefined, 'unset target stays undefined');
@@ -125,9 +125,9 @@ export default async function mediaSourceSettingSuite() {
   });
 
   await check('media-source-setting: target segment seconds accepts only exact valid values', async () => {
-    await withServer({ targetSegmentSeconds: 2 }, async (_server, origin) => {
+    await withServer({ targetSegmentSeconds: 4 }, async (_server, origin) => {
       const settings = await (await fetch(`${origin}/app-settings`)).json();
-      assertEqual(settings.targetSegmentSeconds, 2, 'configured target is served');
+      assertEqual(settings.targetSegmentSeconds, 4, 'configured target is served');
     });
     const invalid = [0, 4.0001, '4'];
     const errors = invalid.map((targetSegmentSeconds) => {

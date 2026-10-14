@@ -78,6 +78,27 @@ function addReason(reasons, reason, scope, detail = {}) {
   reasons.push({ reason, scope: [...scope], ...detail });
 }
 
+export function summarizeRefusalReasons(reasons = []) {
+  const entries = Array.isArray(reasons) ? reasons : [];
+  const uniqueReasonSet = [...new Set(entries.map((entry) => entry.reason))];
+  const duplicateReasons = entries.map((entry) => entry.reason)
+    .filter((reason, index, all) => all.indexOf(reason) !== index);
+  const suppressed = { byte: false, drift: false };
+  for (const entry of entries) for (const figure of entry.scope ?? []) suppressed[figure] = true;
+  return {
+    refused: entries.length > 0,
+    runRefused: entries.some((entry) => !entry.reason.startsWith('required-context-absent:')
+      && !PUBLICATION_ONLY_REASONS.has(entry.reason)
+      && ((entry.scope ?? []).includes('byte') || (entry.scope ?? []).includes('drift')
+        || entry.reason === 'run-directory-exists')),
+    publicationRefused: entries.some((entry) => entry.reason.startsWith('required-context-absent:')
+      || PUBLICATION_ONLY_REASONS.has(entry.reason)),
+    reasonSet: uniqueReasonSet,
+    duplicateReasons: [...new Set(duplicateReasons)],
+    figures: { byte: !suppressed.byte, drift: !suppressed.drift },
+  };
+}
+
 function counterDelta(after, before, field) {
   const right = Number(after?.[field] ?? 0);
   const left = Number(before?.[field] ?? 0);
@@ -390,27 +411,21 @@ export function evaluateRefusals(input = {}) {
   arm.refusals(input, (reason, scope, detail) => addReason(reasons, reason, scope, detail));
   const excused = excusedByRosterEvent(condition, input.rosterEvent, reasons, clients);
 
-  const uniqueReasonSet = [...new Set(reasons.map((entry) => entry.reason))];
-  const duplicateReasons = reasons.map((entry) => entry.reason).filter((reason, index, all) => all.indexOf(reason) !== index);
-  const suppressed = { byte: false, drift: false };
-  for (const entry of reasons) for (const figure of entry.scope) suppressed[figure] = true;
+  const summary = summarizeRefusalReasons(reasons);
 
   return {
-    refused: reasons.length > 0,
-    runRefused: reasons.some((entry) => !entry.reason.startsWith('required-context-absent:')
-      && !PUBLICATION_ONLY_REASONS.has(entry.reason)
-      && (entry.scope.includes('byte') || entry.scope.includes('drift') || entry.reason === 'run-directory-exists')),
-    publicationRefused: reasons.some((entry) => entry.reason.startsWith('required-context-absent:')
-      || PUBLICATION_ONLY_REASONS.has(entry.reason)),
+    refused: summary.refused,
+    runRefused: summary.runRefused,
+    publicationRefused: summary.publicationRefused,
     reasons,
     excused,
-    reasonSet: uniqueReasonSet,
-    duplicateReasons: [...new Set(duplicateReasons)],
+    reasonSet: summary.reasonSet,
+    duplicateReasons: summary.duplicateReasons,
     coverage,
     dropped,
     published: { realtimeFactorByClient },
     unattributedDelta: unattributed,
-    figures: { byte: !suppressed.byte, drift: !suppressed.drift },
+    figures: summary.figures,
   };
 }
 

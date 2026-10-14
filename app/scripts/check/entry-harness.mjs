@@ -274,7 +274,7 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     crypto: globalThis.crypto,
     // The page's settings read; `settings: null` leaves the page without fetch.
     fetch: settings && (async (resource) => (String(resource) === '/app-settings'
-      ? { ok: true, status: 200, json: async () => ({ trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 4, ...settings }) }
+      ? { ok: true, status: 200, json: async () => ({ trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 2, ...settings }) }
       : { ok: false, status: 404, json: async () => null, arrayBuffer: async () => new ArrayBuffer(0) })),
     location: { search, protocol: 'http:', host: '127.0.0.1:8100' },
     history,

@@ -160,6 +160,7 @@ function outputRun(entry, conditions, trapReading) {
     accepted: accepted(entry),
     ...(entry.goodput ? { goodput: entry.goodput } : {}),
     ...(entry.recomputeError ? { recomputeError: entry.recomputeError } : {}),
+    ...(entry.postResultRepair ? { postResultRepair: entry.postResultRepair } : {}),
     ...(entry.report ? {
       figures: entry.report.figures ?? null,
       publishedByte: entry.report.publishedByte ?? null,
@@ -180,7 +181,7 @@ function controlArms(entries, conditions, armNames) {
   return result;
 }
 
-export function buildControlReadingReport({ registerPath, conditionsPath = CONDITIONS_PATH, entries: recomputed } = {}) {
+export function buildControlReadingReport({ registerPath, conditionsPath = CONDITIONS_PATH, entries: recomputed, reread = null } = {}) {
   if (!registerPath) throw new Error('registry path is required');
   const conditions = readJson(conditionsPath);
   const trapCondition = conditionByName(conditions, 'trap-seek');
@@ -197,7 +198,21 @@ export function buildControlReadingReport({ registerPath, conditionsPath = CONDI
   }
   const register = readJson(registerPath);
   const change = register.change ?? '8b2';
-  const entries = recomputed ?? registryEntries(registerPath).map(recomputeControlRun);
+  const repairs = new Map((reread?.runs ?? [])
+    .filter((entry) => entry?.status === 'repaired' && typeof entry.directory === 'string')
+    .map((entry) => [entry.directory, entry]));
+  const applyRepair = (entry) => {
+    const repair = repairs.get(entry?.directory);
+    if (!repair) return entry;
+    const finalization = repair.repairedFinalization;
+    return { ...entry,
+      ...(finalization?.status === 'complete' ? { outcome: 'complete' } : {}),
+      ...(finalization?.writeByte === true ? { publishes: true } : {}),
+      finalization, postResultRepair: 'seek-hold' };
+  };
+  const entries = recomputed
+    ? recomputed.map(applyRepair)
+    : registryEntries(registerPath).map((entry) => applyRepair(recomputeControlRun(entry)));
   const armNames = edgeArmNames(conditions, register, entries);
   const edge = armNames.length > 0;
   const runs = entries.map((entry) => outputRun(entry, conditions, trapCondition.reading));
@@ -222,7 +237,9 @@ export function buildControlReadingReport({ registerPath, conditionsPath = CONDI
 export function main(argv = process.argv.slice(2)) {
   const register = argument('registry', argv);
   if (!register) throw new Error('usage: node scripts/control-reading.mjs --registry=<file> [--out=<file>]');
-  const report = buildControlReadingReport({ registerPath: appPath(register) });
+  const reread = argument('reread', argv);
+  const report = buildControlReadingReport({ registerPath: appPath(register),
+    ...(reread ? { reread: readJson(appPath(reread)) } : {}) });
   const outputPath = appPath(argument('out', argv) ?? `results/${report.change}-control-reading.json`);
   fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`);
   return report;
