@@ -1,5 +1,9 @@
 import { REMUX_FORMAT_VERSION, targetMillis } from './remux-settings.mjs';
 
+export function segmentName(index) {
+  return `seg-${String(index).padStart(5, '0')}.m4s`;
+}
+
 function seconds(segment, timescale) {
   return (segment.endTick - segment.startTick) / timescale;
 }
@@ -22,7 +26,7 @@ export function writePlaylist(segments, timescale) {
     '#EXTM3U', '#EXT-X-VERSION:7', `#EXT-X-TARGETDURATION:${target}`, '#EXT-X-MEDIA-SEQUENCE:0',
     '#EXT-X-PLAYLIST-TYPE:VOD', '#EXT-X-INDEPENDENT-SEGMENTS', '#EXT-X-MAP:URI="init.mp4"',
   ];
-  for (const [i, duration] of durations.entries()) lines.push(`#EXTINF:${duration.toFixed(6)},`, `seg-${String(i).padStart(5, '0')}.m4s`);
+  for (const [i, duration] of durations.entries()) lines.push(`#EXTINF:${duration.toFixed(6)},`, segmentName(i));
   lines.push('#EXT-X-ENDLIST');
   return `${lines.join('\n')}\n`;
 }

@@ -2,7 +2,7 @@ import { DEFAULT_TARGET_SEGMENT_SECONDS, targetMillis } from './remux-settings.m
 import { assignAudio, planCuts } from './remux-cut-plan.mjs';
 import { fileIdentity } from './file-identity.mjs';
 import { writeFragment, writeInitSegment } from './fmp4-writer.mjs';
-import { writeManifest, writePlaylist } from './remux-publish.mjs';
+import { segmentName, writeManifest, writePlaylist } from './remux-publish.mjs';
 import { readSourceIndex } from './remux-index.mjs';
 
 function outputDts(track, sample) {
@@ -80,7 +80,7 @@ export async function writePlanned({ index, segments, audioRanges, source, sink 
     const audio = index.audio && audioRanges?.[i] ? segmentPart(index.audio, audioRanges[i]) : null;
     await readSegmentBytes(source, audio ? [video, audio] : [video]);
     const bytes = writeFragment({ sequence: i + 1, video: fragmentTrack(video, true), audio: audio ? fragmentTrack(audio, false) : null });
-    await sink.write(`seg-${String(i).padStart(5, '0')}.m4s`, bytes);
+    await sink.write(segmentName(i), bytes);
     sizes.push(bytes.length);
   }
   return sizes;

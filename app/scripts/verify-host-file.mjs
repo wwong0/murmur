@@ -21,6 +21,7 @@ import { assertServedBundle, createManifestFile, createNdjson, prepareRunDirecto
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
 import { readSourceIndex } from '../public/lib/remux-index.mjs';
 import { storeKey } from '../public/lib/prepared-store.mjs';
+import { segmentName } from '../public/lib/remux-publish.mjs';
 import {
   boundariesFromPlaylist,
   chooseSegments,
@@ -490,7 +491,7 @@ async function runPass(options) {
       const requestsBefore = linkOf(await read(viewer))?.requestsByPath;
       const { mark, fromSeconds } = await seekTo(target);
       const after = await shown(mark, target - 1.5 * frame, target + 1.5 * frame);
-      const seg = (index) => `/media/seg-${String(index).padStart(5, '0')}.m4s`;
+      const seg = (index) => `/media/${segmentName(index)}`;
       return s7a({ position: fromSeconds, target, frame, afterWallTime: mark, frames: framesAfter(viewer, mark), longFile: choice.longFile, segment: choice.j, targetPath: seg(choice.j), previousPath: seg(choice.j - 1), requestsBefore, requestsAfter: linkOf(after)?.requestsByPath, element: after.element ?? null });
     });
     await step('S7f', "seek to a segment's first presented frame", async () => {
@@ -524,7 +525,7 @@ async function runPass(options) {
       if (index === -1 || !Number.isFinite(presentedOffset)) throw new Error('no far segment or no presented offset for the diagnostic seek');
       const segment = index + 1;
       const target = boundaries[index] + presentedOffset;
-      const seg = (n) => `/media/seg-${String(n).padStart(5, '0')}.m4s`;
+      const seg = (n) => `/media/${segmentName(n)}`;
       const requestsBefore = linkOf(await read(viewer))?.requestsByPath;
       const { mark } = await seekTo(target);
       const after = await shown(mark, target - 1.5 * frame, target + 1.5 * frame);

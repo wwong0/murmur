@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { readFragment, readInitSegment } from './fmp4-reader.mjs';
+import { descendants, readFragment, readInitSegment, scan } from './fmp4-reader.mjs';
 
 const fixtureDir = path.resolve(import.meta.dirname, 'remux-fixtures');
 const fixtureManifest = JSON.parse(fs.readFileSync(path.join(fixtureDir, 'fixtures.json'), 'utf8'));
@@ -59,33 +59,10 @@ export function refusalNames() {
   return fixtureManifest.refusals.map(({ name }) => name);
 }
 
-function boxType(bytes, offset) {
-  return String.fromCharCode(...bytes.subarray(offset + 4, offset + 8));
-}
-
-function scan(bytes, start = 0, end = bytes.length) {
-  const boxes = [];
-  for (let offset = start; offset < end;) {
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const sizeField = view.getUint32(offset);
-    const header = sizeField === 1 ? 16 : 8;
-    const size = sizeField === 1 ? Number(view.getBigUint64(offset + 8)) : sizeField || end - offset;
-    if (size < header || offset + size > end) throw new Error(`invalid box at ${offset}`);
-    boxes.push({ type: boxType(bytes, offset), start: offset, size, header, body: offset + header, end: offset + size });
-    offset += size;
-  }
-  return boxes;
-}
-
-function nested(bytes, root) {
-  const containers = new Set(['moov', 'trak', 'mdia', 'minf', 'dinf', 'dref', 'stbl', 'mvex', 'moof', 'traf', 'edts']);
-  return scan(bytes, root.body, root.end).flatMap((box) => [box, ...(containers.has(box.type) ? nested(bytes, box) : [])]);
-}
-
 function sourceStsd(bytes, type) {
   const moov = scan(bytes).find((box) => box.type === 'moov');
   for (const trak of scan(bytes, moov.body, moov.end).filter((box) => box.type === 'trak')) {
-    const all = nested(bytes, trak);
+    const all = descendants(bytes, trak);
     const hdlr = all.find((box) => box.type === 'hdlr');
     if (String.fromCharCode(...bytes.subarray(hdlr.body + 8, hdlr.body + 12)) !== (type === 'video' ? 'vide' : 'soun')) continue;
     const stsd = all.find((box) => box.type === 'stsd');
@@ -271,7 +248,7 @@ export function seedEditList(files) {
     const top = scan(bytes);
     const moov = top.find((box) => box.type === 'moov');
     const traks = scan(bytes, moov.body, moov.end).filter((box) => box.type === 'trak');
-    const video = traks.find((trak) => nested(bytes, trak).find((box) => box.type === 'hdlr' && String.fromCharCode(...bytes.subarray(box.body + 8, box.body + 12)) === 'vide'));
+    const video = traks.find((trak) => descendants(bytes, trak).find((box) => box.type === 'hdlr' && String.fromCharCode(...bytes.subarray(box.body + 8, box.body + 12)) === 'vide'));
     const children = scan(bytes, video.body, video.end);
     const edit = makeBox('edts', makeBox('elst', elst));
     const trakPayload = children.flatMap((box) => box.type === 'tkhd' ? [bytes.slice(box.start, box.end), edit] : [bytes.slice(box.start, box.end)]);

@@ -8,6 +8,22 @@ function manifestOf(result) {
   return JSON.parse(new TextDecoder().decode(result.bytes));
 }
 
+// The one shape __app.hostFile() reports, whether or not this page has a source.
+export function hostFileSnapshot({
+  mediaSource, targetSegmentSeconds, state = 'off', origin = null, key = null, manifest = null, refusal = null,
+  failure = null, storage = null, swept = null, workerCalls = { inspect: 0, prepare: 0 }, workerBuildId = null,
+}) {
+  return {
+    mediaSource, targetSegmentSeconds, state, origin, key, manifest,
+    refusal, failure, storage, swept, workerCalls,
+    workerBuildId, cleanup: 'next-host-page-start',
+  };
+}
+
+function storageOf(estimateValue) {
+  return { quota: estimateValue?.quota ?? null, usage: estimateValue?.usage ?? null };
+}
+
 export function createHostFileSource({ store, locks, memory, client, isTypeSupported, estimate, targetSeconds, onChange }) {
   let state = 'starting';
   let origin = null;
@@ -22,11 +38,10 @@ export function createHostFileSource({ store, locks, memory, client, isTypeSuppo
   const workerCalls = { inspect: 0, prepare: 0 };
 
   function snapshot() {
-    return {
+    return hostFileSnapshot({
       mediaSource: 'file', targetSegmentSeconds: targetSeconds, state, origin, key, manifest,
-      refusal, failure, storage, swept, workerCalls: { ...workerCalls },
-      workerBuildId: client.buildId(), cleanup: 'next-host-page-start',
-    };
+      refusal, failure, storage, swept, workerCalls: { ...workerCalls }, workerBuildId: client.buildId(),
+    });
   }
 
   function publish(next) {
@@ -47,6 +62,12 @@ export function createHostFileSource({ store, locks, memory, client, isTypeSuppo
     publish('failed');
   }
 
+  function refuse(next) {
+    release();
+    refusal = next;
+    publish('refused');
+  }
+
   async function start() {
     if (started) return;
     started = true;
@@ -54,8 +75,7 @@ export function createHostFileSource({ store, locks, memory, client, isTypeSuppo
       const remembered = memory.get();
       if (remembered) held = await locks.hold(lockName(remembered));
       swept = await store.sweep({ keep: held ? remembered : null });
-      const estimateValue = await estimate();
-      storage = { quota: estimateValue?.quota ?? null, usage: estimateValue?.usage ?? null };
+      storage = storageOf(await estimate());
       if (held && await store.isComplete(remembered)) {
         const result = await store.read(remembered, MANIFEST_NAME);
         key = remembered;
@@ -91,8 +111,7 @@ export function createHostFileSource({ store, locks, memory, client, isTypeSuppo
       workerCalls.inspect += 1;
       const inspected = await client.inspect(file);
       if (inspected.t === 'refused') {
-        refusal = { reason: inspected.reason, message: inspected.message };
-        publish('refused');
+        refuse({ reason: inspected.reason, message: inspected.message });
         return;
       }
       if (inspected.t !== 'inspected') throw new Error(inspected.message ?? 'worker inspection failed');
@@ -102,35 +121,31 @@ export function createHostFileSource({ store, locks, memory, client, isTypeSuppo
       ];
       const unsupported = tracks.find(([, codec, type]) => !isTypeSupported(`${type}; codecs="${codec}"`));
       if (unsupported) {
-        refusal = codecRefusal(unsupported[1]);
-        publish('refused');
+        refuse(codecRefusal(unsupported[1]));
         return;
       }
       const estimateValue = await estimate();
-      storage = { quota: estimateValue?.quota ?? null, usage: estimateValue?.usage ?? null };
+      storage = storageOf(estimateValue);
       const fit = storageFit({ sourceBytes: inspected.sourceBytes, estimate: estimateValue });
       if (!fit.fits) {
         const free = fit.freeBytes === null ? 'unknown' : fit.freeBytes;
-        refusal = {
+        refuse({
           reason: 'storage', neededBytes: fit.neededBytes, freeBytes: fit.freeBytes,
           message: `storage: need ${fit.neededBytes} bytes, free ${free}`,
-        };
-        publish('refused');
+        });
         return;
       }
       key = storeKey({ identity: inspected.identity, targetSeconds });
       held = await locks.hold(lockName(key));
       if (held === null) {
-        key = null;
-        throw new Error('another tab is serving this title');
+        fail('another tab is serving this title');
+        return;
       }
       publish('preparing');
       workerCalls.prepare += 1;
       const prepared = await client.prepare(file, key, targetSeconds);
       if (prepared.t === 'refused') {
-        refusal = { reason: prepared.reason, message: prepared.message };
-        release();
-        publish('refused');
+        refuse({ reason: prepared.reason, message: prepared.message });
         return;
       }
       if (prepared.t !== 'prepared') throw new Error(prepared.message ?? 'worker preparation failed');
@@ -140,8 +155,7 @@ export function createHostFileSource({ store, locks, memory, client, isTypeSuppo
       origin = 'prepared';
       publish('ready');
     } catch (error) {
-      if (error?.message === 'another tab is serving this title') fail(error.message);
-      else fail(errorMessage(error));
+      fail(errorMessage(error));
     }
   }
 

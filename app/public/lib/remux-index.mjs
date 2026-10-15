@@ -115,6 +115,14 @@ function trackFrom(infoTrack, sourceTrack, sourceSize, moovBytes, moovOffset, ed
   };
 }
 
+function structureIssue(track, sourceTrack, sourceSize) {
+  if (!sourceTrack.samples?.length) return 'has no samples';
+  if (sourceTrack.mdia?.minf?.stbl?.stsd?.entries?.length !== 1) return 'has multiple sample descriptions';
+  if (sourceTrack.samples.some((sample) => sample.offset + sample.size > sourceSize)) return 'has a sample outside the file';
+  if (track.type === 'video' && !sourceTrack.samples[0].is_sync) return 'does not start with a sync sample';
+  return null;
+}
+
 function findBox(box, name) {
   if (!box) return false;
   if (box.box_name === name) return true;
@@ -213,16 +221,9 @@ export async function readSourceIndex(source) {
   const editChecks = sourceTracks.map(({ info: track, source }) => ({ track, source, edit: editShape(source) }));
   const badEdit = editChecks.find((item) => item.edit.invalid);
   if (badEdit) refusal('edit-list', `edit-list: ${badEdit.edit.invalid}`);
-  const badStructure = editChecks.find(({ track, source: sourceTrack }) => {
-    if (!sourceTrack.samples?.length) return true;
-    if (sourceTrack.mdia?.minf?.stbl?.stsd?.entries?.length !== 1) return true;
-    if (sourceTrack.samples.some((sample) => sample.offset + sample.size > source.size)) return true;
-    return track.type === 'video' && !sourceTrack.samples[0].is_sync;
-  });
-  if (badStructure) {
-    const { track, source: sourceTrack } = badStructure;
-    const issue = !sourceTrack.samples?.length ? 'has no samples' : sourceTrack.mdia?.minf?.stbl?.stsd?.entries?.length !== 1 ? 'has multiple sample descriptions' : sourceTrack.samples.some((sample) => sample.offset + sample.size > source.size) ? 'has a sample outside the file' : 'does not start with a sync sample';
-    refusal('unsupported-structure', `unsupported structure: track ${track.id} ${issue}`);
+  for (const { track, source: sourceTrack } of editChecks) {
+    const issue = structureIssue(track, sourceTrack, source.size);
+    if (issue) refusal('unsupported-structure', `unsupported structure: track ${track.id} ${issue}`);
   }
   const byId = new Map(editChecks.map((item) => [item.track.id, item]));
   const video = trackFrom(videoInfo, byId.get(videoInfo.id).source, source.size, moovBytes, moovOffset, byId.get(videoInfo.id).edit);

@@ -30,7 +30,7 @@ import { capacityScheduleReason, recordSchedule, scheduleLengthMs } from './harn
 import { createAskEvidence, recordHostStats } from './harness/ask-evidence.mjs';
 import { finalizeRosterEvent, isHeldJoin, rosterEventTarget } from './harness/roster-event.mjs';
 import { viewerOrder } from '../public/lib/edge-assignment.mjs';
-import { edgeRosterEvent, issueRosterEvent, setupSessions, startMeasureLoops, stopSessionLoops } from './harness/run-sessions.mjs';
+import { createSessionLoops, edgeRosterEvent, issueRosterEvent, setupSessions, stopSessionLoops } from './harness/run-sessions.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -664,11 +664,14 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       manifestFile.write();
     };
     const startEcho = (session) => session.startEcho?.({ room: `${room}-probe`, out: `/results/${path.basename(prepared.runDir)}/client-${session.tag}.echo.ndjson`, intervalMs: ECHO_INTERVAL_MS, condition });
+    const sessionLoops = createSessionLoops({
+      startLoop, loops, state: sessionState, ndjson, arm, queuedDrain, controlEvidence, askEvidence,
+      pollIntervalMs: POLL_INTERVAL_MS, drainIntervalMs: DRAIN_INTERVAL_MS,
+    });
     const { activateHeldJoiner } = await setupSessions({
       sessions, heldTag, room, clientOriginUrl, deadline, clientFactory, condition, runDir: prepared.runDir,
       arm, manifestFile, prepareClient, startEcho, qualifyFirst, beginLinkQualification, activeSessions, failedCdpQualification,
-      state: sessionState, loops, controlEvidence, askEvidence, startLoop, ndjson, queuedDrain,
-      pollIntervalMs: POLL_INTERVAL_MS, drainIntervalMs: DRAIN_INTERVAL_MS,
+      state: sessionState, sessionLoops,
     });
     const readControl = async () => {
       if (!originSession) return;
@@ -687,10 +690,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     });
     manifestFile.write();
 
-    for (const session of activeSessions()) startMeasureLoops({
-      session, startLoop, loops, state: sessionState, ndjson, arm, queuedDrain,
-      pollIntervalMs: POLL_INTERVAL_MS, drainIntervalMs: DRAIN_INTERVAL_MS,
-    });
+    for (const session of activeSessions()) sessionLoops.startMeasureLoops(session);
     await waitUntil(deadline, manifestFile.get().window.startMs);
     const latestRoster = () => activeSessions().flatMap((session) => session.presenceRecorder?.snapshot?.() ?? [])
       .filter((record) => Array.isArray(record?.roster)).sort((left, right) => left.seq - right.seq).at(-1)?.roster ?? [];

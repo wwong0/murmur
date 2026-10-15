@@ -6,7 +6,7 @@ function viewOf(bytes) {
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 }
 
-function scan(bytes, start = 0, end = bytes.length) {
+export function scan(bytes, start = 0, end = bytes.length) {
   const boxes = [];
   let offset = start;
   for (; offset < end;) {
@@ -25,7 +25,7 @@ function scan(bytes, start = 0, end = bytes.length) {
 
 const CONTAINERS = new Set(['moov', 'trak', 'mdia', 'minf', 'dinf', 'dref', 'stbl', 'mvex', 'moof', 'traf', 'edts']);
 
-function descendants(bytes, root) {
+export function descendants(bytes, root) {
   const children = scan(bytes, root.body, root.end);
   return children.flatMap((child) => [child, ...(CONTAINERS.has(child.type) ? descendants(bytes, child) : [])]);
 }

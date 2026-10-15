@@ -2,6 +2,8 @@
 // clock only through the run's timebase, as roster-event.mjs → sharedWallMs does;
 // harness instants are never mixed into these differences.
 
+import { segmentName } from '../../public/lib/remux-publish.mjs';
+
 const finite = (value) => Number.isFinite(value);
 
 function pathOf(value) {
@@ -49,7 +51,7 @@ function holdValues(hold = {}) {
   };
 }
 
-/** The three wait parts and D9's threshold instants for each hold. */
+/** The three wait parts and 11a-2 D9's threshold instants for each hold. */
 export function waitParts({ holds = {}, viewerPolls = {}, declaredViewers = [], timebase } = {}) {
   const read = (hold) => {
     if (!hold) return null;
@@ -138,7 +140,7 @@ function responseReceipts(receiptsByClient, responseId) {
 export function landingHostCopies({ segments = [], transitionSharedMs, effectiveSharedMs, hostResponses = [],
   receiptsByClient = {}, timebase, segmentSizes = [] } = {}) {
   const rows = segments.map((index) => {
-    const path = `/media/seg-${String(index).padStart(5, '0')}.m4s`;
+    const path = `/media/${segmentName(index)}`;
     const expected = segmentSizes[index];
     let deliveredBytes = 0;
     let responseCount = 0;
@@ -189,14 +191,14 @@ function landingRow({ hold, positionMs, content = {}, deltaMs = null, asks, clie
   const traces = traceRows(geometry.segmentsNeeded, asks);
   const delays = Object.fromEntries(Object.entries(clients ?? {}).map(([tag, client]) => [tag,
     Object.fromEntries(geometry.segmentsNeeded.map((index) => [index, askDelay({ tag,
-      path: `/media/seg-${String(index).padStart(5, '0')}.m4s`, transitionSharedMs: hold?.transitionSharedMs,
+      path: `/media/${segmentName(index)}`, transitionSharedMs: hold?.transitionSharedMs,
       asks: asks?.[tag], requests: client?.requests, timebase })]))]));
   return { positionMs, segment: geometry.index, playlistOffsetMs: geometry.offsetMs,
     firstPresentedOffsetMs: finite(deltaMs) ? geometry.offsetMs - deltaMs : null,
     segmentsNeeded: geometry.segmentsNeeded, hostCopies: null, traces, askDelays: delays };
 }
 
-/** Publish the landing geometry, host copies, D6 trace and ask delay for a run. */
+/** Publish the landing geometry, host copies, 11a D6 trace and ask delay for a run. */
 export function landingReading({ holds = {}, seek = null, content = {}, hostResponses = [], clients = {}, asks = {},
   timebase, segmentSizes = content.segmentSizes ?? [] } = {}) {
   const build = (kind, hold, positionMs) => {

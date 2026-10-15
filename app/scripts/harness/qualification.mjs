@@ -1,6 +1,7 @@
 import { defaultExec, dockerExec } from '../../harness/apply-qdisc.mjs';
 import { CLIENT_ORIGIN_URL } from './topology.mjs';
 import { createRequestRecorder } from './cdp-records.mjs';
+import { segmentName } from '../../public/lib/remux-publish.mjs';
 
 const finite = (value) => Number.isFinite(value);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -9,7 +10,7 @@ export const QUALIFICATION_MEDIA_POSITION_MS = 6_000_000;
 export function segmentAtMediaPosition(mediaMs, segmentSeconds) {
   if (!finite(segmentSeconds) || segmentSeconds <= 0) throw new Error('segment-seconds-unavailable');
   if (!finite(mediaMs) || mediaMs < 0) throw new Error('qualification-media-position-invalid');
-  return `seg-${String(Math.floor(mediaMs / (segmentSeconds * 1000))).padStart(5, '0')}.m4s`;
+  return segmentName(Math.floor(mediaMs / (segmentSeconds * 1000)));
 }
 
 export const CDP_QUALIFICATION_REASON = 'cdp-byte-mapping-unqualified';

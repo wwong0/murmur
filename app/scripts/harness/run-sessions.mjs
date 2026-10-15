@@ -2,25 +2,30 @@ import { pollExpression } from './cdp-records.mjs';
 import { issueRosterEvent as issueRosterEventFromRunner, rosterEventTarget } from './roster-event.mjs';
 import { removesMember } from './roster-kinds.mjs';
 
-export function startControlLoop({ session, controlEvidence, askEvidence, startLoop, loops, state }) {
-  if (!controlEvidence || session.controlLoop) return;
-  const viewerPoll = startLoop(async () => { await controlEvidence.pollViewer(session); await askEvidence.drain(session); },
-    250, (error) => { if (!session.expectedEvent) state.failure ??= error; });
-  session.controlLoop = viewerPoll;
-  loops.push(viewerPoll);
-}
-
-export function startMeasureLoops({ session, startLoop, loops, state, ndjson, arm, queuedDrain, pollIntervalMs, drainIntervalMs }) {
-  if (session.measureLoops?.length) return;
-  const poll = startLoop(async () => {
-    const value = await session.tab.evaluate(pollExpression());
-    session.polls.push(value);
-    ndjson.append(`client-${session.tag}.poll.ndjson`, [value]);
-  }, pollIntervalMs, (error) => { if (!session.expectedEvent) state.failure ??= error; });
-  const drain = startLoop(() => queuedDrain(session, ndjson, arm, Date.now()), drainIntervalMs,
-    (error) => { if (!session.expectedEvent) state.failure ??= error; });
-  session.measureLoops = [poll, drain];
-  loops.push(poll, drain);
+// The loop dependencies are bound once per run; each call names only its session.
+export function createSessionLoops({ startLoop, loops, state, ndjson, arm, queuedDrain, controlEvidence, askEvidence,
+  pollIntervalMs, drainIntervalMs }) {
+  const failOnError = (session) => (error) => { if (!session.expectedEvent) state.failure ??= error; };
+  return {
+    startControlLoop(session) {
+      if (!controlEvidence || session.controlLoop) return;
+      const viewerPoll = startLoop(async () => { await controlEvidence.pollViewer(session); await askEvidence.drain(session); },
+        250, failOnError(session));
+      session.controlLoop = viewerPoll;
+      loops.push(viewerPoll);
+    },
+    startMeasureLoops(session) {
+      if (session.measureLoops?.length) return;
+      const poll = startLoop(async () => {
+        const value = await session.tab.evaluate(pollExpression());
+        session.polls.push(value);
+        ndjson.append(`client-${session.tag}.poll.ndjson`, [value]);
+      }, pollIntervalMs, failOnError(session));
+      const drain = startLoop(() => queuedDrain(session, ndjson, arm, Date.now()), drainIntervalMs, failOnError(session));
+      session.measureLoops = [poll, drain];
+      loops.push(poll, drain);
+    },
+  };
 }
 
 export async function stopSessionLoops(session, { keepControl = false } = {}) {
@@ -33,16 +38,16 @@ export async function stopSessionLoops(session, { keepControl = false } = {}) {
 }
 
 export async function setupSessions({ sessions, heldTag, room, clientOriginUrl, deadline, clientFactory, condition, runDir,
-  arm, manifestFile, prepareClient, startEcho, qualifyFirst, beginLinkQualification, activeSessions, failedCdpQualification, state, loops,
-  controlEvidence, askEvidence, startLoop, ndjson, queuedDrain, pollIntervalMs, drainIntervalMs }) {
+  arm, manifestFile, prepareClient, startEcho, qualifyFirst, beginLinkQualification, activeSessions, failedCdpQualification, state,
+  sessionLoops }) {
   const clientUrlFor = (session) => `${clientOriginUrl}/room.html?room=${encodeURIComponent(room)}&role=${session.role}&tab=${session.tag}`;
   const activateHeldJoiner = async (session) => {
     await prepareClient(session, clientUrlFor(session), deadline, arm.clientReadyTimeoutMs(condition), arm.prepareClientOptions({
       condition, manifestFile, runDir,
     }));
     session.active = true;
-    startControlLoop({ session, controlEvidence, askEvidence, startLoop, loops, state });
-    startMeasureLoops({ session, startLoop, loops, state, ndjson, arm, queuedDrain, pollIntervalMs, drainIntervalMs });
+    sessionLoops.startControlLoop(session);
+    sessionLoops.startMeasureLoops(session);
     await startEcho(session);
     return { navigated: true, pageReadyMs: session.pageReadyMs };
   };
@@ -62,7 +67,7 @@ export async function setupSessions({ sessions, heldTag, room, clientOriginUrl, 
       runDir,
     }));
     session.active = true;
-    startControlLoop({ session, controlEvidence, askEvidence, startLoop, loops, state });
+    sessionLoops.startControlLoop(session);
     if (index === 0 && !arm.qualifyAfterJoins) await qualifyFirst();
     // Not awaited: the joins go on while the first viewer's fetch is in flight.
     if (index === 0 && arm.qualifyAfterJoins) {

@@ -48,7 +48,7 @@ import { controlInForce } from './lib/edge-control.mjs';
 import { createOpfsBackend, createWebLocks } from './lib/prepared-store-opfs.mjs';
 import { createPreparedStore } from './lib/prepared-store.mjs';
 import { createPrepareClient } from './lib/prepare-client.mjs';
-import { createHostFileSource } from './lib/host-file-source.mjs';
+import { createHostFileSource, hostFileSnapshot } from './lib/host-file-source.mjs';
 
 const BUILD_ID = __BUILD_ID__;
 
@@ -347,7 +347,7 @@ function installViewerLink() {
   window.XMLHttpRequest = link.createShimXhr({ RealXHR: window.XMLHttpRequest, baseUrl: location.href });
 }
 
-// D6: the host's own player reads the store. Imported here, as the host transport is.
+// 11-2 D6: the host's own player reads the store. Imported here, as the host transport is.
 async function installHostFileLink() {
   const { createPreparedMediaLink } = await import('./lib/prepared-media-link.mjs');
   const { createShimFetch, createShimXhr } = await import('./lib/host-link-shim.mjs');
@@ -387,7 +387,7 @@ let targetSegmentSeconds = null;
 let hostFileConnected = false;
 const PREPARED_KEY_NAME = 'watchalong.prepared-key';
 
-// D5: under `file` this is the host's only route into the room.
+// 11-2 D5: under `file` this is the host's only route into the room.
 function paintHostFile(snapshot) {
   const detail = snapshot.refusal?.message ?? snapshot.failure;
   hostFileStatus.textContent = detail ? `${snapshot.state}: ${detail}` : snapshot.state;
@@ -1185,11 +1185,7 @@ window.__app = {
     };
   },
   timeline: () => acquisition.snapshot,
-  hostFile: () => hostFile ? hostFile.snapshot() : {
-    mediaSource, targetSegmentSeconds, state: 'off', origin: null, key: null, manifest: null,
-    refusal: null, failure: null, storage: null, swept: null, workerCalls: { inspect: 0, prepare: 0 },
-    workerBuildId: null, cleanup: 'next-host-page-start',
-  },
+  hostFile: () => hostFile ? hostFile.snapshot() : hostFileSnapshot({ mediaSource, targetSegmentSeconds }),
 };
 
 async function startApp() {
@@ -1217,8 +1213,10 @@ async function startApp() {
       const missing = !globalThis.navigator?.storage?.getDirectory ? 'navigator.storage.getDirectory'
         : !globalThis.navigator?.locks ? 'navigator.locks' : typeof Worker !== 'function' ? 'Worker' : null;
       if (missing) {
-        const failed = { ...window.__app.hostFile(), state: 'failed', failure: missing };
-        hostFile = { snapshot: () => ({ ...failed, workerCalls: { ...failed.workerCalls } }), read: async () => ({ status: 404, bytes: new Uint8Array() }) };
+        hostFile = {
+          snapshot: () => hostFileSnapshot({ mediaSource, targetSegmentSeconds, state: 'failed', failure: missing }),
+          read: async () => ({ status: 404, bytes: new Uint8Array() }),
+        };
         hostFileStatus.textContent = `failed: ${missing}`;
         return;
       }
@@ -1239,7 +1237,7 @@ async function startApp() {
       });
       await installHostFileLink();
       hostFileInput.hidden = false;
-      // D7: the page hands the File over and never reads its name.
+      // 11-2 D7: the page hands the File over and never reads its name.
       hostFileInput.addEventListener('change', () => { if (hostFileInput.files?.[0]) void hostFile.choose(hostFileInput.files[0]); });
       await hostFile.start();
     } else if (delivery === 'host') {

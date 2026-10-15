@@ -1,5 +1,7 @@
 // Pure readings and verdicts for the host-file browser pass.
 
+import { segmentName } from '../public/lib/remux-publish.mjs';
+
 const STATUSES = new Set(['pass', 'fail', 'not exercised', 'evidence missing']);
 
 function verdict(status, observed, reasons) {
@@ -283,7 +285,7 @@ export function s7f(reading) {
   if (!finite(reading.delta) || !finite(reading.target) || !Number.isSafeInteger(reading.segment) || reading.segment < 1
     || !finitePositive(reading.frame) || !finite(reading.mediaTime)
     || !object(reading.requestsBefore) || !object(reading.requestsAfter)) return missing(reading);
-  const segmentPath = `/media/seg-${String(reading.segment).padStart(5, '0')}.m4s`;
+  const segmentPath = `/media/${segmentName(reading.segment)}`;
   const reasons = [];
   if ((reading.requestsBefore[segmentPath] ?? 0) !== 0) reasons.push('target segment was requested before the seek');
   if ((reading.requestsAfter[segmentPath] ?? 0) < 1) reasons.push('target segment was not requested by the seek');
@@ -322,7 +324,7 @@ export function s7c(reading) {
 }
 
 /**
- * A diagnostic, added after S7c's result (tasks.md -> Decisions, 2026-10-12): the
+ * A diagnostic, added after S7c's result (change 11-2 tasks.md -> Decisions, 2026-10-12): the
  * same reading from a play that starts at least 4 s before the end. It says which
  * side an S7c failure lies on and earns the matrix nothing.
  */
@@ -341,7 +343,7 @@ export function s7d(reading) {
 }
 
 /**
- * A diagnostic, added after S7a's result (tasks.md -> Decisions, 2026-10-12): S7a's
+ * A diagnostic, added after S7a's result (change 11-2 tasks.md -> Decisions, 2026-10-12): S7a's
  * request clause, with the seek made to the segment's first PRESENTED frame, which
  * sits `offset` after the playlist's cumulative time. Earns the matrix nothing.
  */

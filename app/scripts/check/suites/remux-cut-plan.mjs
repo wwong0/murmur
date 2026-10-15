@@ -73,7 +73,7 @@ export default async function remuxCutPlanSuite() {
   });
 
   await check('remux-cut-plan: varying fixture is pinned to both targets', async () => {
-    // Keyframes come from ffprobe's table, not from the index: tasks.md 1.3 and 2.3.
+    // Keyframes come from ffprobe's table, not from the index: change 11 tasks.md 1.3 and 2.3.
     const video = loadFixture('varying.mp4').table.streams.video;
     const ticks = video.packets.filter((packet) => packet[3] === 1).map((packet) => packet[1]);
     const endTick = video.packets.at(-1)[1] + (video.packets.at(-1)[1] - video.packets.at(-2)[1]);

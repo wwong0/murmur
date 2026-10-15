@@ -288,6 +288,23 @@ export function readMountedContentManifest({ container, runDir, content = {}, ex
   return manifest;
 }
 
+// Sets each variable for the call, undefined meaning unset, and restores what was there.
+function withEnv(values, body) {
+  const previous = Object.fromEntries(Object.keys(values).map((name) => [name, process.env[name]]));
+  const assign = (entries) => {
+    for (const [name, value] of Object.entries(entries)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  };
+  assign(values);
+  try {
+    return body();
+  } finally {
+    assign(previous);
+  }
+}
+
 function containerRunDir(runDir) {
   return `/results/${path.basename(runDir)}`;
 }
@@ -412,28 +429,13 @@ export function createComposeTopology({ project = PROJECT, exec = defaultExec, e
       state.urls = urlsForDelivery(condition.delivery);
       state.runDir = runDir;
       const services = serviceNames(condition.clients, { delivery: condition.delivery });
-      const previousDelivery = process.env.WA_DELIVERY;
-      const previousTrackerPort = process.env.WA_TRACKER_PORT;
-      const previousOriginRole = process.env.WA_ORIGIN_ROLE;
-      const previousMediaDir = process.env.WA_MEDIA_DIR;
-      process.env.WA_DELIVERY = condition.delivery;
-      if (condition.content?.hostDir !== undefined) process.env.WA_MEDIA_DIR = path.resolve(APP_DIR, condition.content.hostDir);
-      if (arm.trackerPort !== null) process.env.WA_TRACKER_PORT = arm.trackerPort;
-      else delete process.env.WA_TRACKER_PORT;
-      if (condition.delivery === 'host') process.env.WA_ORIGIN_ROLE = 'host-page';
-      else delete process.env.WA_ORIGIN_ROLE;
-      try {
-        compose(['up', '-d', '--no-build', ...services], { project, exec });
-      } finally {
-        if (previousDelivery === undefined) delete process.env.WA_DELIVERY;
-        else process.env.WA_DELIVERY = previousDelivery;
-        if (previousTrackerPort === undefined) delete process.env.WA_TRACKER_PORT;
-        else process.env.WA_TRACKER_PORT = previousTrackerPort;
-        if (previousOriginRole === undefined) delete process.env.WA_ORIGIN_ROLE;
-        else process.env.WA_ORIGIN_ROLE = previousOriginRole;
-        if (previousMediaDir === undefined) delete process.env.WA_MEDIA_DIR;
-        else process.env.WA_MEDIA_DIR = previousMediaDir;
-      }
+      withEnv({
+        WA_DELIVERY: condition.delivery,
+        // Left as found when the condition names no directory.
+        ...(condition.content?.hostDir !== undefined ? { WA_MEDIA_DIR: path.resolve(APP_DIR, condition.content.hostDir) } : {}),
+        WA_TRACKER_PORT: arm.trackerPort === null ? undefined : arm.trackerPort,
+        WA_ORIGIN_ROLE: condition.delivery === 'host' ? 'host-page' : undefined,
+      }, () => compose(['up', '-d', '--no-build', ...services], { project, exec }));
       state.containers = composeContainers(project, exec);
       const missing = services.filter((name) => !state.containers[name]);
       if (missing.length) throw new Error(`compose did not start: ${missing.join(', ')}`);
