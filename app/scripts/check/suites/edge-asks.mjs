@@ -72,6 +72,15 @@ export default async function edgeAsksSuite() {
     // `an ask that waited keeps its 800 ms earlier decision`.
   });
 
+  await check('edge-asks: an 8b ask, with no pass instant, publishes its start instant', async () => {
+    const atMs = 1_700_000_002_800;
+    assertEqual(hostAskDecidedAtMs({ timeOriginMs: 1_700_000_000_000, atMs }), atMs, 'an archived 8b ask is not refused');
+    const loader = fs.readFileSync(PATCHED_HYBRID_LOADER, 'utf8');
+    assert(loader.includes('this.noteHostAsk(segment, urgent); // wa-patch: record the 8b urgent host load'), 'the 8b call site passes no pass instant');
+    // Joint D1 F1: the 8b call sites pass no passMs. Mutation: validate passMs
+    // before the decisionMs test. Named red: `an archived 8b ask is not refused`.
+  });
+
   await check('edge-asks: the product branch takes a decision instant only outside a host load', async () => {
     const loader = fs.readFileSync(PATCHED_HYBRID_LOADER, 'utf8');
     const from = loader.indexOf('if (this.edgeControl !== "8b") { // wa-patch: product control assigns high-demand peers');

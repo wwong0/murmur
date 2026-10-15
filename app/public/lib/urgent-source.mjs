@@ -66,9 +66,11 @@ function validateHostAsk(record) {
 
 export function hostAskDecidedAtMs({ timeOriginMs, decisionMs, passMs, atMs } = {}) {
   finiteNonNegative(timeOriginMs, 'timeOriginMs');
-  finiteNonNegative(passMs, 'passMs');
   finiteNonNegative(atMs, 'atMs');
-  if (decisionMs === undefined || decisionMs === passMs) return atMs;
+  // The archived 8b asks have no decision run and no pass instant (joint D1 F1).
+  if (decisionMs === undefined) return atMs;
+  finiteNonNegative(passMs, 'passMs');
+  if (decisionMs === passMs) return atMs;
   finiteNonNegative(decisionMs, 'decisionMs');
   return timeOriginMs + decisionMs;
 }
