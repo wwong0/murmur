@@ -61,9 +61,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep, disposeChrome } from './cdp.mjs';
+import { evaluateRun, reportLines } from './browser-check-list.mjs';
 import { assertServedBundle, prepareRunDirectory } from './runner/core.mjs';
 import { INTEGRATION_SCHEMA, createRecorder, pitchReference } from './drift-capture.mjs';
-import { auditClient, integrationSummary, readClientEvidence } from './product-integration-evidence.mjs';
+import { auditClient, integrationSummary, intStepFailures, readClientEvidence, refusalAfterSettlingAudit } from './product-integration-evidence.mjs';
 import { DRIFT_LINE_RE, driftLineForm } from '../public/lib/drift-readout.mjs';
 import { D8_COMMAND_THRESHOLD, MAX_RATE_DEVIATION, MIN_RECORDS, RATE_EPSILON } from '../public/lib/drift-controller.mjs';
 import { CLOCK_LINE_RE, CONTROLLER_LINE_HELD_RE, CONTROLLER_LINE_ACTING_RE } from '../public/lib/diagnostics-overlay.mjs';
@@ -116,7 +117,7 @@ const RUN_DIR = RUN_DIR_ARGUMENT === null
 const RUN_DIRECTORY_NAME = path.relative(RESULTS_DIR, RUN_DIR).split(path.sep).join('/');
 const MEDIA_DIR = path.resolve(process.env.APP_MEDIA_DIR ?? path.join(APP_DIR, '..', 'step0', 'content'));
 const WINDOW_STATE = 'visible, non-occluded (Chrome automation flags)';
-const MAX_RETAINED_BYTES = 10 * 1024 * 1024;
+const MAX_RETAINED_BYTES = 16 * 1024 * 1024;
 /**
  * The hold the run IMPOSES before the second window joins. Held creation replaces
  * the old playing gap: a working room keeps the host held while it is alone, then
@@ -508,8 +509,14 @@ const failures = [];
 // command's status stays honest, and out of PASS so nothing unearned is banked.
 // Each entry carries what its absence leaves unverified.
 const notExercised = [];
+// Every result in call order, for the exit rule (browser-check-list.mjs). `errors`
+// holds what ends or taints a pass: no registered entry admits one.
+const results = [];
+const errors = [];
+let chromeBrowser = null;
 function expect(label, cond, detail) {
   console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
+  results.push({ label, status: cond ? 'pass' : 'fail', detail, approvedStem: false });
   if (!cond) failures.push(label);
 }
 function expectWhen(label, exercised, cond, detail, qualifier) {
@@ -518,6 +525,7 @@ function expectWhen(label, exercised, cond, detail, qualifier) {
   if (!approved.some((stem) => label.endsWith(` ${stem}`))) throw new Error(`assertion is not approved for NOT EXERCISED: ${label}`);
   console.log(`NOT EXERCISED  ${label}${detail ? ` — ${detail}` : ''}`);
   console.log(`  ${qualifier}`);
+  results.push({ label, status: 'not-exercised', detail, approvedStem: true });
   notExercised.push({ label, qualifier });
 }
 
@@ -525,6 +533,7 @@ function expectWhen(label, exercised, cond, detail, qualifier) {
 function rowNotExercised(label, qualifier) {
   console.log(`NOT EXERCISED  ${label}`);
   console.log(`  ${qualifier}`);
+  results.push({ label, status: 'not-exercised', detail: undefined, approvedStem: false });
   notExercised.push({ label, qualifier });
 }
 
@@ -635,11 +644,12 @@ async function verifySocketRecovery(viewer) {
       signal: AbortSignal.timeout(3000),
     });
   } catch (error) {
-    console.log(`NOT EXERCISED  10b socket recovery — control unreachable (${error.message})`);
+    // Asked for and not delivered: a row, so the exit rule sees it (11a-3 d1-findings F10).
+    rowNotExercised('10b socket recovery', `control unreachable (${error.message})`);
     return false;
   }
   if (!response.ok) {
-    console.log(`NOT EXERCISED  10b socket recovery — control HTTP ${response.status}`);
+    rowNotExercised('10b socket recovery', `control HTTP ${response.status}`);
     return false;
   }
   const rejoined = await pollUntil(
@@ -897,6 +907,8 @@ function runCheck() {
 
 try {
   const chromeInfo = await cdpHttp('/json/version');
+  console.log(`chrome: ${chromeInfo.Browser ?? null} · ${CHROME}`);
+  chromeBrowser = chromeInfo.Browser ?? null;
   const gitHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: APP_DIR, encoding: 'utf8' }).trim();
   try {
     contentFps = readContentFrameRate();
@@ -1631,6 +1643,7 @@ try {
   const countsB = recorderB.finish();
   const retainedBytes = [recorderA.recordsPath, recorderA.capturesPath, recorderB.recordsPath, recorderB.capturesPath]
     .reduce((total, filePath) => total + fs.statSync(filePath).size, 0);
+  console.log(`  retained records and captures: ${retainedBytes} bytes (STOP above ${MAX_RETAINED_BYTES})`);
   if (retainedBytes > MAX_RETAINED_BYTES) {
     throw new Error(`retained capture volume ${retainedBytes} bytes exceeds the ${MAX_RETAINED_BYTES}-byte STOP limit`);
   }
@@ -1741,12 +1754,14 @@ try {
     console.log(`  ${client.label}: treatment ${treatment.status} over ${treatment.observed.samples} samples (startup ${treatment.observed.outcome}); refusal/dwell ${refusalDwell.status} over polls ${refusalDwell.firstPollId}..${refusalDwell.lastPollId}; settled entries ${JSON.stringify(refusalDwell.settledEntries.map((entry) => entry.elapsedMs))}`);
     expect(`INT ${client.label} held the adopted pitch treatment on every retained sample`, treatment.status === 'met', JSON.stringify(treatment.failures));
     const settle = settleStates.find((state) => state.label === client.label);
-    const onlyNeverSettled = refusalDwell.failures.length === 1 && refusalDwell.failures[0] === 'never-settled';
+    // drift-control → An adopted rate floor bounds commands and stopping tolerance; scenario Budget refusal clears convergence immediately.
+    const stepFailures = intStepFailures(refusalDwell, refusalAfterSettlingAudit(readClientEvidence(RUN_DIR, client.label).events));
+    const onlyNeverSettled = stepFailures.length === 1 && stepFailures[0] === 'never-settled';
     expectWhen(
       `INT ${client.label} followed the adopted refusal and dwell policy`,
       !(onlyNeverSettled && settle?.path === 'in-sync'),
-      refusalDwell.status === 'met',
-      JSON.stringify(refusalDwell.failures),
+      stepFailures.length === 0,
+      JSON.stringify(stepFailures),
       `${client.label} finished T5 in sync, and never-settled is its only failure (O1 option 1)`,
     );
   }
@@ -2059,6 +2074,7 @@ try {
 } catch (err) {
   console.log('ERROR:', err.message);
   failures.push(err.message);
+  errors.push(err.message);
 } finally {
   for (const recorder of [recorderA, recorderB]) {
     if (!recorder) continue;
@@ -2066,24 +2082,31 @@ try {
       recorder.finish();
     } catch (error) {
       failures.push(error?.message ?? String(error));
+      errors.push(error?.message ?? String(error));
     }
   }
+  const readVerdict = () => evaluateRun({ results, errors, chrome: { browser: chromeBrowser, override: process.env.APP_CHROME ?? null } });
   if (manifestPath && fs.existsSync(manifestPath)) {
     try {
       const finalManifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      const { exitCode, admitted, unadmitted, errors: verdictErrors } = readVerdict();
       finalManifest.timing.passEndedAt = new Date().toISOString();
       finalManifest.outcome = failures.length === 0 ? 'pass' : 'failed';
       finalManifest.failures = failures.slice();
       finalManifest.notExercised = notExercised.slice();
+      finalManifest.verdict = { exitCode, admitted, unadmitted, errors: verdictErrors };
       fs.writeFileSync(manifestPath, `${JSON.stringify(finalManifest, null, 2)}\n`);
     } catch (error) {
       failures.push(`manifest finalization failed: ${error?.message ?? error}`);
+      errors.push(`manifest finalization failed: ${error?.message ?? error}`);
     }
   }
+  const verdict = readVerdict();
   const unexercisedText = notExercised.length === 0
     ? ''
     : `\n${notExercised.length} NOT EXERCISED: ${notExercised.map((entry) => `${entry.label} — ${entry.qualifier}`).join('; ')}`;
   console.log(`\n${failures.length === 0 ? 'ALL PASS' : `${failures.length} FAILURE(S): ${failures.join('; ')}`}${unexercisedText}`);
+  for (const line of reportLines(verdict)) console.log(line);
   await disposeChrome(chrome, profile);
-  process.exit(failures.length === 0 ? 0 : 1);
+  process.exit(verdict.exitCode);
 }

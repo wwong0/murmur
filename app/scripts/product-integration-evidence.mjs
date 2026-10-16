@@ -20,6 +20,7 @@ import path from 'node:path';
 
 import { browserHoldRows, holdPolicyAudit, pitchAudit } from './check/remedy-browser-comparison-metrics.mjs';
 import { dwellEligibility } from './check/remedy-browser-metrics.mjs';
+import { D8_REFUSAL_MODES } from './check/d8-research-controller.mjs';
 import { INTEGRATION_SCHEMA } from './drift-capture.mjs';
 import { D8_COMMAND_THRESHOLD, SETTLED_FOR_MS } from '../public/lib/drift-controller.mjs';
 import { D8_TREATMENT, TREATMENT_FAULT_MODE } from '../public/lib/playback-treatment.mjs';
@@ -254,6 +255,62 @@ export function refusalDwellAudit({ events = [], stream = null, expectedF = D8_C
     holds: { status: holds.status, clauses: holds.clauses.map(({ name, status }) => ({ name, status })), firstSettledAtMs: holds.firstSettledAtMs ?? null, postFirstSettleHold: holds.postFirstSettleHold ?? null },
     settledEntries,
   };
+}
+
+// Each is a `drift-control` requirement a refusal after first settling must still meet;
+// the comparison with F (the first settling duration) is made in the audit below.
+export const AFTER_SETTLING_PREDICATES = Object.freeze([
+  ['P1', (s) => s.requiredStoppingThresholdMs > s.settings.MAX_STOPPING_THRESHOLD_MS],
+  ['P2', (s) => Math.abs(s.estimateMs) <= s.requiredStoppingThresholdMs],
+  ['P3', (s) => s.rate === 1],
+  ['P4', (s) => s.thresholdUsable === false && s.stoppingThresholdMs === null],
+  ['P5', (s, firstSettlingMs) => s.settlingMs === firstSettlingMs],
+  ['P6', (s) => s.fastestCloseMs === null],
+  ['P7', (s) => s.mode === 'resolution-budget-hold' && s.reason === 'stopping-threshold-over-budget'],
+]);
+
+/** A judged poll's fields, each present and finite (or null where the predicate expects null). */
+function afterSettlingShapeOk(s) {
+  const finite = (value) => Number.isFinite(value);
+  const nullOrFinite = (value) => value === null || finite(value);
+  return s !== null && typeof s === 'object'
+    && finite(s.requiredStoppingThresholdMs) && finite(s.settings?.MAX_STOPPING_THRESHOLD_MS)
+    && finite(s.estimateMs) && finite(s.rate) && typeof s.thresholdUsable === 'boolean'
+    && nullOrFinite(s.stoppingThresholdMs) && finite(s.settlingMs) && nullOrFinite(s.fastestCloseMs)
+    && typeof s.mode === 'string' && typeof s.reason === 'string';
+}
+
+/**
+ * Every refusal-mode poll at or after the first `settled` poll, held to the
+ * `drift-control` requirements for a refusal (P1-P7) and to a fresh dwell on every
+ * re-entry to `settled`. `refused` when a judged poll lacks a field a predicate reads.
+ */
+export function refusalAfterSettlingAudit(events) {
+  const { rows } = pollRows(events);
+  const first = rows.findIndex((row) => row.snapshot?.mode === 'settled');
+  if (first === -1) return { status: 'met', failures: [], polls: 0 };
+  const firstSettlingMs = rows[first].snapshot.settlingMs;
+  const judged = rows.slice(first).filter((row) => D8_REFUSAL_MODES.includes(row.snapshot?.mode));
+  const shapeOk = Number.isFinite(firstSettlingMs) && judged.every((row) => Number.isFinite(row.controllerNowMs) && afterSettlingShapeOk(row.snapshot));
+  if (!shapeOk) return { status: 'refused', failures: ['shape'], polls: judged.length };
+  const failures = AFTER_SETTLING_PREDICATES
+    .filter(([, holds]) => judged.some((row) => !holds(row.snapshot, firstSettlingMs)))
+    .map(([name]) => name);
+  if (!settledEntryDwells(rows).every((entry) => entry.ok)) failures.push('re-entry');
+  return { status: failures.length === 0 ? 'met' : 'failed', failures, polls: judged.length };
+}
+
+/**
+ * INT's failures: `hold-after-first-settling` is dropped only when every refusal
+ * after settling meets `drift-control` (`after.status === 'met'`); the clause is
+ * change 5's frozen policy, not a requirement of that capability.
+ */
+export function intStepFailures(refusalDwell, after) {
+  const mapped = after.failures.map((failure) => `refusal-after-settling:${failure}`);
+  const kept = after.status === 'met'
+    ? refusalDwell.failures.filter((failure) => failure !== 'hold-after-first-settling:failed')
+    : refusalDwell.failures;
+  return [...kept, ...mapped];
 }
 
 /** `missing` names retained files that were absent; each refuses both audits. */

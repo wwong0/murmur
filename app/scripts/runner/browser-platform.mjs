@@ -37,10 +37,10 @@ function removeProfile(profile) {
 export const windowsChrome = {
   name: 'windows',
 
-  locate: () => WINDOWS_CHROME,
+  locate: () => process.env.APP_CHROME ?? WINDOWS_CHROME,
 
   launch(args, options = {}) {
-    return spawn(WINDOWS_CHROME, args, options);
+    return spawn(this.locate(), args, options);
   },
 
   /**
