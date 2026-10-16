@@ -62,6 +62,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep, disposeChrome } from './cdp.mjs';
 import { evaluateRun, reportLines } from './browser-check-list.mjs';
+import { createResultLog } from './browser-result-log.mjs';
 import { assertServedBundle, prepareRunDirectory } from './runner/core.mjs';
 import { INTEGRATION_SCHEMA, createRecorder, pitchReference } from './drift-capture.mjs';
 import { auditClient, integrationSummary, intStepFailures, readClientEvidence, refusalAfterSettlingAudit } from './product-integration-evidence.mjs';
@@ -503,39 +504,11 @@ function nextStartAfterSeq(seam, start, startIndex) {
   return Number.isSafeInteger(next?.afterSeq) ? next.afterSeq : nextSeamAfterSeq(seam, start);
 }
 
-const failures = [];
-// A THIRD OUTCOME. An assertion whose precondition never occurred has not
-// passed and has not failed — it made no claim. Kept out of `failures` so the
-// command's status stays honest, and out of PASS so nothing unearned is banked.
-// Each entry carries what its absence leaves unverified.
-const notExercised = [];
-// Every result in call order, for the exit rule (browser-check-list.mjs). `errors`
-// holds what ends or taints a pass: no registered entry admits one.
-const results = [];
-const errors = [];
+// Every result and error of the pass; the summary, the manifest and the exit rule
+// (browser-check-list.mjs) all read this one record.
+const log = createResultLog({ approvedStems: [...SETTLE_WITHOUT_CORRECTION_ASSERTIONS, ...O1_WITHOUT_CORRECTION_ASSERTIONS] });
+const { expect, expectWhen, rowNotExercised } = log;
 let chromeBrowser = null;
-function expect(label, cond, detail) {
-  console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
-  results.push({ label, status: cond ? 'pass' : 'fail', detail, approvedStem: false });
-  if (!cond) failures.push(label);
-}
-function expectWhen(label, exercised, cond, detail, qualifier) {
-  if (exercised) return expect(label, cond, detail);
-  const approved = [...SETTLE_WITHOUT_CORRECTION_ASSERTIONS, ...O1_WITHOUT_CORRECTION_ASSERTIONS];
-  if (!approved.some((stem) => label.endsWith(` ${stem}`))) throw new Error(`assertion is not approved for NOT EXERCISED: ${label}`);
-  console.log(`NOT EXERCISED  ${label}${detail ? ` — ${detail}` : ''}`);
-  console.log(`  ${qualifier}`);
-  results.push({ label, status: 'not-exercised', detail, approvedStem: true });
-  notExercised.push({ label, qualifier });
-}
-
-/** An edge row (E5, E7) whose event did not occur in its window: no pass is banked. */
-function rowNotExercised(label, qualifier) {
-  console.log(`NOT EXERCISED  ${label}`);
-  console.log(`  ${qualifier}`);
-  results.push({ label, status: 'not-exercised', detail: undefined, approvedStem: false });
-  notExercised.push({ label, qualifier });
-}
 
 /**
  * The RES labels for one window's latest start: the residual from the page's
@@ -2073,39 +2046,33 @@ try {
 
 } catch (err) {
   console.log('ERROR:', err.message);
-  failures.push(err.message);
-  errors.push(err.message);
+  log.error(err.message);
 } finally {
   for (const recorder of [recorderA, recorderB]) {
     if (!recorder) continue;
     try {
       recorder.finish();
     } catch (error) {
-      failures.push(error?.message ?? String(error));
-      errors.push(error?.message ?? String(error));
+      log.error(error?.message ?? String(error));
     }
   }
-  const readVerdict = () => evaluateRun({ results, errors, chrome: { browser: chromeBrowser, override: process.env.APP_CHROME ?? null } });
+  const readVerdict = () => evaluateRun({ results: log.results, errors: log.errors, chrome: { browser: chromeBrowser, override: process.env.APP_CHROME ?? null } });
   if (manifestPath && fs.existsSync(manifestPath)) {
     try {
       const finalManifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
       const { exitCode, admitted, unadmitted, errors: verdictErrors } = readVerdict();
       finalManifest.timing.passEndedAt = new Date().toISOString();
-      finalManifest.outcome = failures.length === 0 ? 'pass' : 'failed';
-      finalManifest.failures = failures.slice();
-      finalManifest.notExercised = notExercised.slice();
+      finalManifest.outcome = log.failures().length === 0 ? 'pass' : 'failed';
+      finalManifest.failures = log.failures();
+      finalManifest.notExercised = log.notExercised();
       finalManifest.verdict = { exitCode, admitted, unadmitted, errors: verdictErrors };
       fs.writeFileSync(manifestPath, `${JSON.stringify(finalManifest, null, 2)}\n`);
     } catch (error) {
-      failures.push(`manifest finalization failed: ${error?.message ?? error}`);
-      errors.push(`manifest finalization failed: ${error?.message ?? error}`);
+      log.error(`manifest finalization failed: ${error?.message ?? error}`);
     }
   }
   const verdict = readVerdict();
-  const unexercisedText = notExercised.length === 0
-    ? ''
-    : `\n${notExercised.length} NOT EXERCISED: ${notExercised.map((entry) => `${entry.label} — ${entry.qualifier}`).join('; ')}`;
-  console.log(`\n${failures.length === 0 ? 'ALL PASS' : `${failures.length} FAILURE(S): ${failures.join('; ')}`}${unexercisedText}`);
+  console.log(log.summary());
   for (const line of reportLines(verdict)) console.log(line);
   await disposeChrome(chrome, profile);
   process.exit(verdict.exitCode);

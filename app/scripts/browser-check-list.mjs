@@ -4,7 +4,7 @@
 // Pure: results in, verdict out. No fs, no process, no clock — the runner supplies
 // the Chrome it ran. An unlisted failure, an unapproved NOT EXERCISED or any error
 // exits 1; a listed one prints as FAIL with its entry, never as PASS.
-// Why each entry is listed: openspec/changes/browser-check-repair (design.md D3).
+// Why each entry is listed: openspec/changes/archive/2026-10-16-browser-check-repair (design.md D3).
 
 const T5_END = (w) => `T5 ${w} is settled at the end of the wait`;
 const INT_POLICY = (w) => `INT ${w} followed the adopted refusal and dwell policy`;
@@ -59,12 +59,6 @@ export function t5Entries(admission) {
   return Object.freeze([Object.freeze(t5), ...int.map((entry) => Object.freeze(entry))]);
 }
 
-export const L1_L2_REFERENCE = Object.freeze({
-  unconditional: t5Entries('unconditional'),
-  version: t5Entries('version'),
-  flavour: t5Entries('flavour'),
-});
-
 const matches = (pattern, label) => (pattern instanceof RegExp ? pattern.test(label) : pattern === label);
 const listed = (entry, label) => entry.labels.some((pattern) => matches(pattern, label));
 
@@ -110,7 +104,7 @@ export function evaluateRun({ results, errors, chrome, list = REGISTERED_LIST })
 }
 
 /** The evidence a row prints, by entry id, across the list the verdict was read against. */
-export function reportLines(verdict, list = [...REGISTERED_LIST, ...L1_L2_REFERENCE.unconditional]) {
+export function reportLines(verdict, list = [...REGISTERED_LIST, ...t5Entries('unconditional')]) {
   const evidenceOf = (id) => list.find((e) => e.id === id)?.evidence ?? 'unregistered';
   const lines = verdict.admitted.map((row) => `${row.status === 'fail' ? 'FAIL' : 'NOT EXERCISED'}  ${row.label} — listed: ${row.entryId} (${evidenceOf(row.entryId)})`);
   if (verdict.unadmitted.length > 0) {

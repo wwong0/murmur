@@ -203,6 +203,7 @@ import hostFileSourceSuite from './check/suites/host-file-source.mjs';
 import hostFileEntrySuite from './check/suites/host-file-entry.mjs';
 import hostFileStepsSuite from './check/suites/host-file-steps.mjs';
 import browserCheckListSuite from './check/suites/browser-check-list.mjs';
+import browserResultLogSuite from './check/suites/browser-result-log.mjs';
 
 console.log(describeFixtures());
 
@@ -385,6 +386,7 @@ for (const suite of [
   hostFileEntrySuite,
   hostFileStepsSuite,
   browserCheckListSuite,
+  browserResultLogSuite,
 ]) {
   await suite();
 }
