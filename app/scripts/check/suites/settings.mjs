@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { check, assert, assertEqual } from '../harness.mjs';
 import { HTTP, mediaDir } from '../fixtures.mjs';
-import { startRoomServer } from '../../../server/room-server.mjs';
+import { optionsFromEnv, startRoomServer } from '../../../server/room-server.mjs';
 import { requireDelivery } from '../../delivery-pin.mjs';
 
 const APP_DIR = path.resolve(fileURLToPath(new URL('../../../', import.meta.url)));
@@ -23,15 +23,15 @@ async function settingsAt(origin) {
 
 export default async function settingsSuite() {
   await check('settings: the default server serves host delivery and no ICE servers', async () => {
-    assertEqual(JSON.stringify(await settingsAt(HTTP)), JSON.stringify({ delivery: 'host', iceServers: [], trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 2 }), 'default settings are exact');
+    assertEqual(JSON.stringify(await settingsAt(HTTP)), JSON.stringify({ delivery: 'host', iceServers: [], trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 2, autoStart: false }), 'default settings are exact');
   });
 
   await check('settings: configured delivery and ICE servers are served exactly', async () => {
     const iceServers = [{ urls: 'turn:turn.example.test:3478', username: 'u', credential: 'c' }];
-    const configured = startRoomServer({ port: 0, mediaDir, delivery: 'http', iceServers, livenessMs: 120, quiet: true });
+    const configured = startRoomServer({ ...optionsFromEnv({ APP_AUTO_START: '1' }), port: 0, mediaDir, delivery: 'http', iceServers, livenessMs: 120, quiet: true });
     try {
       const port = await configured.ready;
-      assertEqual(JSON.stringify(await settingsAt(`http://127.0.0.1:${port}`)), JSON.stringify({ delivery: 'http', iceServers, trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 2 }), 'configured settings round-trip');
+      assertEqual(JSON.stringify(await settingsAt(`http://127.0.0.1:${port}`)), JSON.stringify({ delivery: 'http', iceServers, trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 2, autoStart: true }), 'configured settings round-trip');
     } finally {
       await configured.close();
     }
@@ -43,7 +43,7 @@ export default async function settingsSuite() {
     const configured = startRoomServer({ port: 0, mediaDir, delivery: 'host', iceServers, trackerUrl, livenessMs: 120, quiet: true });
     try {
       const port = await configured.ready;
-      assertEqual(JSON.stringify(await settingsAt(`http://127.0.0.1:${port}`)), JSON.stringify({ delivery: 'host', iceServers, trackerUrl, mediaSource: 'dir', targetSegmentSeconds: 2 }), 'configured tracker round-trips');
+      assertEqual(JSON.stringify(await settingsAt(`http://127.0.0.1:${port}`)), JSON.stringify({ delivery: 'host', iceServers, trackerUrl, mediaSource: 'dir', targetSegmentSeconds: 2, autoStart: false }), 'configured tracker round-trips');
     } finally {
       await configured.close();
     }

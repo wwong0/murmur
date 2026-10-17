@@ -22,6 +22,7 @@ desktop.ini
 # Build output — esbuild regenerates these from `public/`. Tracking them means
 # every source edit shows twice in the diff, once as cause and once as effect.
 *.bundle.js
+*.bundle.css
 *.bundle.js.map
 
 # Generated media — `npm run content` in step0/ rebuilds it (~2.3 GB, 1800

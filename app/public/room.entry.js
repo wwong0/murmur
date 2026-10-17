@@ -22,6 +22,7 @@ import { HEADROOM_DEFAULT, validateHeadroomFraction } from './lib/send-pace.mjs'
 import { createClockSync, websocketProbe } from './lib/clock-sync.mjs';
 import { createRoomTimeline } from './lib/room-timeline.mjs';
 import { offsetView } from './lib/playback-state.mjs';
+import { createEndLatch, endInstant, isEnded } from './lib/title-end.mjs';
 import { createDriftLog } from './lib/frame-drift.mjs';
 import { createDriftController } from './lib/drift-controller.mjs';
 import { initializePlaybackTreatment } from './lib/playback-treatment.mjs';
@@ -49,6 +50,12 @@ import { createOpfsBackend, createWebLocks } from './lib/prepared-store-opfs.mjs
 import { createPreparedStore } from './lib/prepared-store.mjs';
 import { createPrepareClient } from './lib/prepare-client.mjs';
 import { createHostFileSource, hostFileSnapshot } from './lib/host-file-source.mjs';
+import { keyframeNotice, refusalHelp } from './lib/file-help.mjs';
+import { createPageView } from './lib/page-view.mjs';
+import { syncDot } from './lib/sync-dot.mjs';
+import { joinTarget, readRoute } from './lib/route.mjs';
+import { createHostAnswer } from './lib/host-answer.mjs';
+import { mountScreens } from './room/screens.jsx';
 
 const BUILD_ID = __BUILD_ID__;
 
@@ -99,14 +106,13 @@ function randomTabId() {
 }
 
 const params = new URLSearchParams(window.location.search);
-const suppliedRoom = params.get('room');
-const room = suppliedRoom ?? newReclaimSecret();
-const role = suppliedRoom ? (params.get('role') ?? 'viewer') : 'host';
-const tabId = suppliedRoom ? (params.get('tab') ?? randomTabId()) : randomTabId();
-
-if (!suppliedRoom) {
-  history.replaceState(null, '', `?room=${room}&role=host&tab=${tabId}`);
-}
+const initialRoute = readRoute(window.location.search);
+let route = initialRoute.room ? 'room' : 'front';
+let room = initialRoute.room;
+let role = initialRoute.role;
+let tabId = initialRoute.room ? (initialRoute.tab ?? randomTabId()) : null;
+let activeClient = null;
+let appStarted = false;
 
 // Start-timing instrumentation (executor-spec.md §11.2), off unless asked for.
 // `record` returns early when disabled, so every site below is unconditional
@@ -137,53 +143,62 @@ const url = `${wsScheme}//${window.location.host}/ws`;
 
 const video = document.getElementById('video');
 let elementPositionMs = null;
-const statusLine = document.getElementById('status-line');
-const clockLine = document.getElementById('clock-line');
-const driftLine = document.getElementById('drift-line');
-const bytesLine = document.getElementById('bytes-line');
-const controllerLine = document.getElementById('controller-line');
-const hostFileInput = document.getElementById('host-file');
-const hostFileStatus = document.getElementById('host-file-status');
-const rosterEl = document.getElementById('roster');
-const noticesEl = document.getElementById('notices');
-const playButton = document.getElementById('play');
-const pauseButton = document.getElementById('pause');
-const backButton = document.getElementById('back-10');
-const forwardButton = document.getElementById('forward-10');
-const modeButton = document.getElementById('control-mode');
-const muteButton = document.getElementById('mute');
-const invite = document.getElementById('invite');
 
-invite.textContent = 'invite link';
-invite.href = `${location.origin}${location.pathname}?room=${encodeURIComponent(room)}`;
+const INITIAL_VIEW = {
+  status: 'unknown',
+  ended: false,
+  hostFile: { status: 'off', inputHidden: true, help: null, notice: null },
+  overlay: { clock: '', drift: '', bytes: '', controller: '' },
+  overlayVisible: false,
+  bar: {
+    faded: false,
+    positionMs: 0,
+    durationMs: null,
+    time: '0:00 / 0:00',
+    syncDot: { state: 'idle', title: 'no figure' },
+  },
+  roster: [],
+  notices: [],
+  route,
+  joinError: '',
+  invite: { href: room ? `${location.origin}${location.pathname}?room=${encodeURIComponent(room)}` : '', text: 'invite link' },
+  controls: {
+    play: { text: 'play', disabled: false, hidden: false },
+    pause: { text: 'pause', disabled: false, hidden: false },
+    'back-10': { text: 'back 10s', disabled: false, hidden: false },
+    'forward-10': { text: 'forward 10s', disabled: false, hidden: false },
+    'control-mode': { text: 'mode: host', disabled: false, hidden: true },
+    mute: { text: 'unmute', disabled: false, hidden: false },
+  },
+};
+const view = createPageView(INITIAL_VIEW, {
+  onError: (error, key) => console.error('[app] view subscriber failed', key, error),
+});
+let noticeSeq = 0;
 
 function renderMute() {
-  muteButton.textContent = video.muted ? 'unmute' : 'mute';
+  const controls = view.get().controls;
+  view.set('controls', { ...controls, mute: { ...controls.mute, text: video.muted ? 'unmute' : 'mute' } });
 }
 
 function addNotice(text, { warn = false } = {}) {
-  const li = document.createElement('li');
-  li.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
-  if (warn) li.classList.add('gap');
-  noticesEl.appendChild(li);
-  noticesEl.scrollTop = noticesEl.scrollHeight;
+  view.set('notices', [...view.get().notices, {
+    seq: noticeSeq++,
+    text: `[${new Date().toLocaleTimeString()}] ${text}`,
+    warn,
+  }]);
 }
 
 function renderRoster(roster) {
-  rosterEl.innerHTML = '';
-  for (const member of roster ?? []) {
-    const li = document.createElement('li');
-    li.textContent = `${member.tabId} · ${member.role} · ${member.clientId}`;
-    rosterEl.appendChild(li);
-  }
+  view.set('roster', (roster ?? []).map((member) => `${member.tabId} · ${member.role} · ${member.clientId}`));
 }
 
 // What a person can DO about a refusal, where there is anything. Absence is the
 // ordinary case and must stay readable: a code missing from here reports itself
 // and the server's detail, never another code's remedy.
 const REFUSAL_REMEDIES = {
-  'tab-taken': `the tab name "${tabId}" is in use in room "${room}" — open this page with a different tab= value`,
-  'host-taken': `the room "${room}" already has a host — open this page with role=viewer`,
+  'tab-taken': () => `the tab name "${tabId}" is in use in room "${room}" — open this page with a different tab= value`,
+  'host-taken': () => `the room "${room}" already has a host — open this page with role=viewer`,
 };
 
 // Some statuses are the last word: superseded, or refused for good. Both are
@@ -194,7 +209,7 @@ let terminal = false;
 
 function setStatus(text, { final = false } = {}) {
   if (terminal) return;
-  statusLine.textContent = text;
+  view.set('status', text);
   terminal = final;
 }
 
@@ -213,25 +228,6 @@ function onEnvelope(type, label, handler) {
   });
 }
 
-function closeHostPeer(viewerId) {
-  const entry = hostPeers.get(viewerId);
-  if (!entry) return;
-  hostPeers.delete(viewerId);
-  try { entry.detach?.(); } catch (error) { addSubscriberFailure('host link detach', error); }
-  try { entry.pc.close(); } catch (error) { addSubscriberFailure('host link close', error); }
-}
-
-function closeHostPeers() {
-  for (const viewerId of [...hostPeers.keys()]) closeHostPeer(viewerId);
-}
-
-function closeDepartedHostPeers(roster) {
-  const present = new Set((roster ?? []).map((member) => member.clientId));
-  for (const viewerId of hostPeers.keys()) {
-    if (!present.has(viewerId)) closeHostPeer(viewerId);
-  }
-}
-
 function rtcConfig() {
   return {
     iceServers,
@@ -246,41 +242,6 @@ async function readHostSource(path) {
   return { status: response.status, bytes: new Uint8Array(await response.arrayBuffer()) };
 }
 
-async function answerHostOffer(env) {
-  if (delivery !== 'host' || client.role !== 'host') return;
-  const viewerId = env.from;
-  const payload = env.payload ?? {};
-  if (typeof viewerId !== 'string' || typeof payload.linkId !== 'string' || typeof payload.sdp !== 'string') {
-    throw new TypeError('host-link-offer is malformed');
-  }
-  closeHostPeer(viewerId);
-  const pc = new RTCPeerConnection(rtcConfig());
-  const viewerTag = client.roster.find((member) => member.clientId === viewerId)?.tabId ?? null;
-  const entry = { pc, linkId: payload.linkId, viewerTag, detach: null };
-  hostPeers.set(viewerId, entry);
-  pc.addEventListener('icecandidate', (event) => {
-    if (!event.candidate || hostPeers.get(viewerId) !== entry) return;
-    const candidate = typeof event.candidate.toJSON === 'function' ? event.candidate.toJSON() : event.candidate;
-    client.send({ type: 'host-link-ice', to: viewerId, payload: { linkId: entry.linkId, candidate } });
-  });
-  pc.addEventListener('datachannel', (event) => {
-    if (hostPeers.get(viewerId) !== entry || !hostOrigin) return;
-    entry.detach?.();
-    entry.detach = hostOrigin.attach(event.channel, { viewerTag: entry.viewerTag });
-  });
-  await pc.setRemoteDescription({ type: 'offer', sdp: payload.sdp });
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
-  client.send({ type: 'host-link-answer', to: viewerId, payload: { linkId: entry.linkId, sdp: answer.sdp ?? answer } });
-}
-
-async function routeHostIce(env) {
-  if (delivery !== 'host' || client.role !== 'host') return;
-  const entry = hostPeers.get(env.from);
-  if (!entry || env.payload?.linkId !== entry.linkId) return;
-  await entry.pc.addIceCandidate(env.payload.candidate);
-}
-
 async function installHostSide() {
   if (hostSideInstalled) return;
   await loadHostTransport();
@@ -293,10 +254,18 @@ async function installHostSide() {
     },
     pace: { fraction: headroomFraction.fraction },
     // T14 (design.md D2, reversed): the estimate reads the wire, not the channels' drain.
-    wire: createWireMeter({ peers: () => [...hostPeers.values()].map((entry) => entry.pc) }),
+    wire: createWireMeter({ peers: () => hostAnswer.peerConnections() }),
   });
-  onEnvelope('host-link-offer', 'host-link offer', answerHostOffer);
-  onEnvelope('host-link-ice', 'host-link ICE', routeHostIce);
+  hostAnswer = createHostAnswer({
+    client,
+    RTCPeerConnection,
+    rtcConfig,
+    origin: () => hostOrigin,
+    isActive: () => delivery === 'host' && client.role === 'host',
+    report: addSubscriberFailure,
+  });
+  onEnvelope('host-link-offer', 'host-link offer', hostAnswer.answerOffer);
+  onEnvelope('host-link-ice', 'host-link ICE', hostAnswer.routeIce);
   hostSideInstalled = true;
 }
 
@@ -360,10 +329,54 @@ async function installHostFileLink() {
 // Room client
 // ---------------------------------------------------------------------------
 
-const client = createRoomClient({ url, room, tabId, role });
+const eventSubscribers = new Map();
+const envelopeSubscribers = new Map();
+
+// D4: the front page has no room, so the client is made at Host or load; a
+// subscription made before it is replayed onto it, and its unsubscribe still detaches.
+function subscribe(map, method, type, listener) {
+  const entry = { listener, off: activeClient?.[method](type, listener) };
+  if (!map.has(type)) map.set(type, new Set());
+  map.get(type).add(entry);
+  return () => {
+    map.get(type)?.delete(entry);
+    entry.off?.();
+  };
+}
+
+function activateClient() {
+  if (activeClient) return;
+  activeClient = createRoomClient({ url, room, tabId, role: role ?? 'viewer' });
+  for (const [type, entries] of eventSubscribers) {
+    for (const entry of entries) entry.off = activeClient.onEvent(type, entry.listener);
+  }
+  for (const [type, entries] of envelopeSubscribers) {
+    for (const entry of entries) entry.off = activeClient.on(type, entry.listener);
+  }
+}
+
+const client = {
+  get clientId() { return activeClient?.clientId ?? null; },
+  get role() { return activeClient?.role ?? role; },
+  get roster() { return activeClient?.roster ?? []; },
+  onEvent(type, listener) { return subscribe(eventSubscribers, 'onEvent', type, listener); },
+  on(type, listener) { return subscribe(envelopeSubscribers, 'on', type, listener); },
+  send(envelope) {
+    return activeClient ? activeClient.send(envelope) : null;
+  },
+  request(options) {
+    return activeClient ? activeClient.request(options) : Promise.reject(new Error('room is not active'));
+  },
+  connect() { activeClient?.connect(); },
+};
+
+if (route === 'room') activateClient();
 let delivery = 'host';
 let iceServers = [];
 let trackerUrl = null;
+// D8: on the page no creation precedes /app-settings (both connects follow it), so
+// only entry suites that create first read this; true keeps their start as it was.
+let autoStart = true;
 let peerExchange = null;
 // T10 (design.md D7): every reader of "does this room have peer exchange" reads
 // this one value, derived once in startApp — not the delivery/trackerUrl pair
@@ -376,22 +389,34 @@ let peerBytesRead = () => ({ attribution: null, peerExchange: peerExchange ?? 'o
 let peerEngine = null;
 let link = null;
 let hostOrigin = null;
-const hostPeers = new Map();
+let hostAnswer = null;
 const nativeFetch = typeof window.fetch === 'function' ? window.fetch.bind(window) : null;
 let createHostLink = null;
 let createHostOrigin = null;
 let hostSideInstalled = false;
 let hostFile = null;
+let hostFileChooserOpen = false;
 let mediaSource = null;
 let targetSegmentSeconds = null;
 let hostFileConnected = false;
+// Design D10: the bar fades after this long without a pointer move over #player.
+const FADE_AFTER_MS = 3000;
+let lastPointerMoveAt = null;
 const PREPARED_KEY_NAME = 'watchalong.prepared-key';
+const endLatch = createEndLatch();
+let lastEndPauseInstant = null;
 
 // 11-2 D5: under `file` this is the host's only route into the room.
 function paintHostFile(snapshot) {
   const detail = snapshot.refusal?.message ?? snapshot.failure;
-  hostFileStatus.textContent = detail ? `${snapshot.state}: ${detail}` : snapshot.state;
-  hostFileInput.hidden = snapshot.state === 'ready';
+  const help = snapshot.refusal ? refusalHelp(snapshot.refusal) : null;
+  const notice = snapshot.state === 'ready' ? keyframeNotice(snapshot.manifest) : null;
+  view.set('hostFile', {
+    status: detail ? `${snapshot.state}: ${detail}` : snapshot.state,
+    inputHidden: snapshot.state === 'ready',
+    help,
+    notice,
+  });
   if (snapshot.state !== 'ready' || hostFileConnected) return;
   hostFileConnected = true;
   client.connect();
@@ -421,7 +446,7 @@ client.onEvent('joined', (joined) => {
   // The role reported is the one the server gave this membership, not the one
   // the query string asked for.
   if (delivery === 'host' && joined.role === 'host') {
-    closeHostPeers();
+    hostAnswer?.closeAll();
     if (nativeFetch) installHostSide().catch((error) => addSubscriberFailure('host transport', error));
   }
   addNotice(`joined as ${joined.clientId} (${joined.role})`);
@@ -454,7 +479,7 @@ client.onEvent('refused', ({ code, detail }) => {
   // grows later arrives on this event — a two-branch ternary told a
   // `version-mismatch` it was a host collision. A code with a way out gets the
   // way out; everything else says what happened and stops.
-  const remedy = REFUSAL_REMEDIES[code];
+  const remedy = REFUSAL_REMEDIES[code]?.();
   setStatus(`refused (${code}): ${remedy ?? detail ?? 'this page will not reconnect'}`, { final: true });
   addNotice(`refused (${code}): ${detail ?? remedy ?? ''}`, { warn: true });
 });
@@ -466,7 +491,7 @@ client.onEvent('gap', ({ expected, actual }) => {
 client.on('presence', (env) => {
   const body = readBody(env);
   // A member can relay an envelope typed `presence`; only the server's closes peers (7a d1-findings D1-1).
-  if (env.from === ADDR_SERVER && delivery === 'host' && client.role === 'host') closeDepartedHostPeers(body.roster);
+  if (env.from === ADDR_SERVER && delivery === 'host' && client.role === 'host') hostAnswer?.closeDeparted(body.roster);
   addNotice(`presence: ${body.event} — ${body.member?.tabId ?? body.member?.clientId}`);
   renderRoster(body.roster);
   runTickSteps([['urgent-context', updateUrgentContext]], reportStep);
@@ -523,10 +548,15 @@ const acquisition = createPlaybackAcquisition({
     requestTimeoutMs: ACQUISITION_REQUEST_TIMEOUT_MS,
     backoffMs: ACQUISITION_BACKOFF_MS,
     holds: () => roomHasPeerExchange,
+    autoStart: () => autoStart,
   },
   mintLineage: newReclaimSecret,
   onOutcome: ({ env, outcome }) => {
-    if (outcome !== 'applied' && env.from === client.clientId) {
+    const ownEndPauseRejection = outcome !== 'applied'
+      && env.from === client.clientId
+      && env.payload?.kind === 'pause'
+      && env.payload?.atSharedMs === lastEndPauseInstant;
+    if (outcome !== 'applied' && !ownEndPauseRejection && env.from === client.clientId) {
       addNotice(`your ${env.payload?.kind ?? 'operation'} was rejected: ${outcome}`, { warn: true });
     }
     renderControls();
@@ -678,16 +708,54 @@ function controlsReady(kind) {
 
 function renderControls() {
   const state = acquisition.state;
+  const durationMs = player.lastSegment()?.mediaEndMs ?? null;
+  const ended = isEnded(state, durationMs);
   const ready = (kind) => controlsReady(kind);
-  playButton.disabled = !(ready('play') && !state?.current.playing);
-  // T5 (design.md D3, "any member's own play or pause ends a hold"): a held
-  // state is paused, so pause is enabled to let a person end the hold.
-  pauseButton.disabled = !(ready('pause') && (state?.current.playing || state?.current.held));
-  backButton.disabled = !ready('seek');
-  forwardButton.disabled = !ready('seek');
-  modeButton.hidden = client.role !== 'host';
-  modeButton.disabled = !ready('control-mode');
-  modeButton.textContent = `mode: ${state?.controlMode === 'host' ? 'open' : 'host'}`;
+  const controls = {
+    play: {
+      text: ended ? 'Watch again' : 'play',
+      disabled: ended ? !ready('seek') : !(ready('play') && !state?.current.playing),
+      hidden: false,
+    },
+    // T5 (design.md D3, "any member's own play or pause ends a hold"): a held
+    // state is paused, so pause is enabled to let a person end the hold.
+    pause: { text: 'pause', disabled: !(ready('pause') && (state?.current.playing || state?.current.held)), hidden: false },
+    'back-10': { text: 'back 10s', disabled: !ready('seek'), hidden: false },
+    'forward-10': { text: 'forward 10s', disabled: !ready('seek'), hidden: false },
+    'control-mode': { text: `mode: ${state?.controlMode === 'host' ? 'open' : 'host'}`, disabled: !ready('control-mode'), hidden: client.role !== 'host' },
+    mute: { text: view.get().controls.mute.text, disabled: false, hidden: false },
+  };
+  view.set('ended', ended);
+  view.set('controls', controls);
+}
+
+function formatTime(mediaMs) {
+  if (!Number.isFinite(mediaMs) || mediaMs < 0) return '0:00';
+  const seconds = Math.floor(mediaMs / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function renderBar() {
+  const state = acquisition.state;
+  const durationMs = player.lastSegment()?.mediaEndMs ?? null;
+  const nowSharedMs = clockSync.sharedNow();
+  const mappedMs = Number.isFinite(nowSharedMs) ? timeline.mediaMsAt(nowSharedMs) : null;
+  const positionMs = Number.isFinite(mappedMs)
+    ? Math.max(0, Number.isFinite(durationMs) ? Math.min(durationMs, mappedMs) : mappedMs)
+    : 0;
+  const playing = start.state().playing === true;
+  const nowPageMs = pageNow();
+  if (lastPointerMoveAt === null) lastPointerMoveAt = nowPageMs;
+  const faded = playing && nowPageMs - lastPointerMoveAt >= FADE_AFTER_MS;
+  const ended = isEnded(state, durationMs);
+  const controllerState = controllerView();
+  view.set('bar', {
+    faded,
+    positionMs,
+    durationMs: Number.isFinite(durationMs) ? durationMs : null,
+    time: ended ? 'Ended' : `${formatTime(positionMs)} / ${formatTime(durationMs)}`,
+    syncDot: syncDot({ playing, mode: controllerState.mode, estimateMs: controllerState.estimateMs }),
+  });
 }
 
 function issue(kind, args) {
@@ -712,18 +780,77 @@ const harnessSeek = harnessSeekConfig.enabled
     }
   : null;
 
-playButton.addEventListener('click', () => issue('play'));
-pauseButton.addEventListener('click', () => issue('pause'));
-backButton.addEventListener('click', () => seekBy(-10_000));
-forwardButton.addEventListener('click', () => seekBy(10_000));
-modeButton.addEventListener('click', () => {
-  const state = acquisition.state;
-  if (state) issue('control-mode', { controlMode: state.controlMode === 'host' ? 'open' : 'host' });
-});
-muteButton.addEventListener('click', () => {
-  video.muted = !video.muted;
-  renderMute();
-});
+function hostRoom() {
+  if (route !== 'front') return;
+  room = newReclaimSecret();
+  role = 'host';
+  tabId = randomTabId();
+  route = 'room';
+  history.replaceState(null, '', `?room=${room}&role=host&tab=${tabId}`);
+  view.set('route', route);
+  view.set('invite', { href: `${location.origin}${location.pathname}?room=${encodeURIComponent(room)}`, text: 'invite link' });
+  activateClient();
+  startRoomApp();
+}
+
+function joinRoom(text) {
+  const target = joinTarget(text);
+  if (target === null) {
+    view.set('joinError', 'enter an invite link or a room name');
+    return;
+  }
+  location.assign(`/room.html?room=${encodeURIComponent(target)}`);
+}
+
+const actions = {
+  host: hostRoom,
+  join: joinRoom,
+  play: () => {
+    const state = acquisition.state;
+    const durationMs = player.lastSegment()?.mediaEndMs ?? null;
+    return isEnded(state, durationMs)
+      ? issue('seek', { positionMs: 0 })
+      : issue('play');
+  },
+  pause: () => issue('pause'),
+  back10: () => seekBy(-10_000),
+  forward10: () => seekBy(10_000),
+  controlMode: () => {
+    const state = acquisition.state;
+    if (state) issue('control-mode', { controlMode: state.controlMode === 'host' ? 'open' : 'host' });
+  },
+  mute: () => {
+    video.muted = !video.muted;
+    renderMute();
+  },
+  seek: (positionMs) => {
+    if (Number.isFinite(positionMs)) return issue('seek', { positionMs });
+    return false;
+  },
+  volume: (value) => {
+    const next = Number(value);
+    if (Number.isFinite(next)) video.volume = Math.max(0, Math.min(1, next));
+  },
+  fullscreen: () => {
+    const playerElement = document.getElementById('player');
+    return playerElement?.requestFullscreen?.();
+  },
+  stats: () => view.set('overlayVisible', !view.get().overlayVisible),
+  pointerMove: () => {
+    lastPointerMoveAt = pageNow();
+    const bar = view.get().bar;
+    if (bar.faded) view.set('bar', { ...bar, faded: false });
+  },
+  copyFile: () => {
+    const command = view.get().hostFile.help?.command;
+    if (command && typeof globalThis.navigator?.clipboard?.writeText === 'function') return globalThis.navigator.clipboard.writeText(command);
+    return undefined;
+  },
+  chooseHostFile: (file) => {
+    if (!hostFileChooserOpen) return;
+    if (file) void hostFile.choose(file);
+  },
+};
 renderMute();
 
 const driftLog = createDriftLog();
@@ -1083,10 +1210,12 @@ const overlay = createDiagnosticsOverlay({
 // samples, so a repaint tied to new samples alone freezes a growing number.
 function paintOverlay() {
   const lines = overlay.lines();
-  clockLine.textContent = lines.clock;
-  driftLine.textContent = lines.drift;
-  bytesLine.textContent = lines.bytes;
-  controllerLine.textContent = lines.controller;
+  view.set('overlay', {
+    clock: lines.clock,
+    drift: lines.drift,
+    bytes: lines.bytes,
+    controller: lines.controller,
+  });
 }
 
 // Each step in its own try (D10): the controller's stale rule is what returns
@@ -1095,6 +1224,15 @@ function tickPlayback() {
   runTickSteps([
     ['acquisition', () => acquisition.poll()],
     ['playback-start', pollStart],
+    ['title-end', () => {
+      const state = acquisition.state;
+      const durationMs = player.lastSegment()?.mediaEndMs ?? null;
+      const instant = endInstant(state, durationMs);
+      const nowSharedMs = clockSync.sharedNow();
+      if (instant === null || !Number.isFinite(nowSharedMs) || nowSharedMs < instant
+        || !endLatch.take(acquisition.snapshot.identity)) return;
+      if (issue('pause', { atSharedMs: instant })) lastEndPauseInstant = instant;
+    }],
     ['urgent-context', updateUrgentContext],
     ['held-ahead', updateHeldAhead],
     ['ahead-report', sendAheadReport],
@@ -1103,10 +1241,12 @@ function tickPlayback() {
     ['far-skip', evaluateFarSkip],
     ['overlay', paintOverlay],
     ['controls', renderControls],
+    ['bar', renderBar],
   ], reportStep);
 }
 
 renderControls();
+renderBar();
 tickPlayback();
 setInterval(tickPlayback, 250);
 
@@ -1123,8 +1263,8 @@ setInterval(tickPlayback, 250);
 
 window.__app = {
   buildId: BUILD_ID,
-  room,
-  tabId,
+  get room() { return room; },
+  get tabId() { return tabId; },
   control: () => ({ ...controlInForce() }),
   clock: () => clockSync.read(),
   positionOffset: () => ({ ...positionOffset }),
@@ -1195,7 +1335,7 @@ async function startApp() {
     const settingsResponse = await window.fetch('/app-settings', { cache: 'no-store' });
     if (!settingsResponse.ok) throw new Error(`HTTP ${settingsResponse.status}`);
     const settings = await settingsResponse.json();
-    if (!settings || (settings.delivery !== 'host' && settings.delivery !== 'http') || !Array.isArray(settings.iceServers) || (settings.trackerUrl !== null && typeof settings.trackerUrl !== 'string') || (settings.mediaSource !== 'dir' && settings.mediaSource !== 'file') || !Number.isFinite(settings.targetSegmentSeconds) || settings.targetSegmentSeconds <= 0) {
+    if (!settings || (settings.delivery !== 'host' && settings.delivery !== 'http') || !Array.isArray(settings.iceServers) || (settings.trackerUrl !== null && typeof settings.trackerUrl !== 'string') || (settings.mediaSource !== 'dir' && settings.mediaSource !== 'file') || !Number.isFinite(settings.targetSegmentSeconds) || settings.targetSegmentSeconds <= 0 || typeof settings.autoStart !== 'boolean') {
       throw new TypeError('invalid application settings');
     }
     delivery = settings.delivery;
@@ -1203,6 +1343,7 @@ async function startApp() {
     targetSegmentSeconds = settings.targetSegmentSeconds;
     iceServers = settings.iceServers;
     trackerUrl = settings.trackerUrl;
+    autoStart = settings.autoStart;
     peerExchange = delivery !== 'host'
       ? 'off'
       : client.role === 'host'
@@ -1217,7 +1358,7 @@ async function startApp() {
           snapshot: () => hostFileSnapshot({ mediaSource, targetSegmentSeconds, state: 'failed', failure: missing }),
           read: async () => ({ status: 404, bytes: new Uint8Array() }),
         };
-        hostFileStatus.textContent = `failed: ${missing}`;
+        view.set('hostFile', { status: `failed: ${missing}`, inputHidden: true });
         return;
       }
       const locks = createWebLocks(navigator.locks);
@@ -1236,9 +1377,9 @@ async function startApp() {
         onChange: paintHostFile,
       });
       await installHostFileLink();
-      hostFileInput.hidden = false;
+      view.set('hostFile', { ...view.get().hostFile, inputHidden: false });
       // 11-2 D7: the page hands the File over and never reads its name.
-      hostFileInput.addEventListener('change', () => { if (hostFileInput.files?.[0]) void hostFile.choose(hostFileInput.files[0]); });
+      hostFileChooserOpen = true;
       await hostFile.start();
     } else if (delivery === 'host') {
       await loadHostTransport();
@@ -1251,4 +1392,11 @@ async function startApp() {
   }
 }
 
-void startApp();
+function startRoomApp() {
+  if (route !== 'room' || appStarted) return;
+  appStarted = true;
+  void startApp();
+}
+
+mountScreens({ view, actions });
+startRoomApp();

@@ -1,6 +1,6 @@
 // scripts/check-structure.mjs
 //
-// Build-time structural linter. Enforces four rules that keep the app's
+// Build-time structural linter. Enforces five rules that keep the app's
 // architecture honest without a real parser — deliberately dumb regex/
 // substring scans over the source tree, so this file stays auditable no
 // matter how many changes land on top of it. Run via `npm run build` /
@@ -8,12 +8,13 @@
 // found (not just the first) if anything trips, exits 0 with a short
 // summary otherwise.
 //
-// The four rules (see PLAN.md / CLAUDE.md for the "why"):
+// The five rules (see PLAN.md / CLAUDE.md for the "why"):
 //   1. No non-empty inline <script> in app/public/**/*.html — pages are
 //      shells, all behaviour lives in bundled modules.
-//   2. No DOM access (document./location./bare window.) under
-//      app/public/lib/** — those modules take config as arguments so a
-//      later React rewrite can reuse them unedited.
+//   1b. Each page has one bundled script and at most one bundled stylesheet.
+//   2. DOM access (document./location./bare window.) only in
+//      public/room.entry.js and the component tree public/room/**; never in
+//      public/lib/**, whose modules take config as arguments (design.md D3).
 //   3. The string "payload" must never appear under app/server/** — the
 //      routing server is structurally forbidden from naming the
 //      message-content field, which is how it's kept from interpreting
@@ -109,6 +110,23 @@ function checkHtmlFile(file) {
     const firstLine = match[0].split('\n')[0];
     addViolation(file, lineNumber, firstLine, 'rule 1: non-empty inline <script> (pages must be shells; put behaviour in a bundled module)');
   }
+
+  const scripts = [...text.matchAll(/<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi)];
+  if (scripts.length !== 1) {
+    addViolation(file, 1, `<script src> count: ${scripts.length}`, 'rule 1b: each page must have exactly one script src ending in .bundle.js');
+  } else if (!scripts[0][1].endsWith('.bundle.js')) {
+    addViolation(file, 1, `<script src> count: ${scripts.length}`, 'rule 1b: the page script src must end in .bundle.js');
+  }
+
+  const stylesheets = [...text.matchAll(/<link\b[^>]*\brel\s*=\s*["']stylesheet["'][^>]*>/gi)];
+  if (stylesheets.length > 1) {
+    addViolation(file, 1, `<link rel="stylesheet"> count: ${stylesheets.length}`, 'rule 1b: each page may have at most one stylesheet link');
+  } else if (stylesheets.length === 1) {
+    const href = stylesheets[0][0].match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1] ?? '';
+    if (!href.endsWith('.bundle.css')) {
+      addViolation(file, 1, `<link rel="stylesheet"> count: ${stylesheets.length}`, 'rule 1b: the stylesheet href must end in .bundle.css');
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -123,11 +141,21 @@ const DOM_ACCESS_RE = /\bdocument\.|\blocation\.|(?<![\w.])window\./;
  * as a property path doesn't false-positive, though that's an edge case —
  * the rule is deliberately dumb per spec).
  */
-function checkLibFile(file) {
+const ENTRY_FILE = path.join(PUBLIC_DIR, 'room.entry.js');
+const ROOM_DIR = path.join(PUBLIC_DIR, 'room');
+
+function checkDomFile(file) {
   const text = fs.readFileSync(file, 'utf8');
   const lines = text.split('\n');
   lines.forEach((line, idx) => {
     if (DOM_ACCESS_RE.test(line)) {
+      const inLib = file.startsWith(`${LIB_DIR}${path.sep}`);
+      const allowed = file === ENTRY_FILE || file.startsWith(`${ROOM_DIR}${path.sep}`);
+      if (!inLib && !allowed) {
+        addViolation(file, idx + 1, line, 'rule 2: DOM access outside the entry and the component tree (public/room.entry.js, public/room/**)');
+        return;
+      }
+      if (!inLib) return;
       addViolation(file, idx + 1, line, 'rule 2: DOM access (document./location./window.) is forbidden under public/lib/** — modules must take config as arguments');
     }
   });
@@ -247,7 +275,7 @@ function reportRatios() {
   // On main, or with no source in the diff, measure everything rule 4 scans.
   // An empty report reads as "nothing is over the line" when it means "nothing
   // was looked at", which is the failure this whole mode exists to prevent.
-  const isSource = (f) => f.endsWith('.js') || f.endsWith('.mjs');
+  const isSource = (f) => f.endsWith('.js') || f.endsWith('.mjs') || f.endsWith('.jsx');
   let paths = files
     .filter(isSource)
     .filter((f) => !f.endsWith('.bundle.js'))
@@ -284,13 +312,13 @@ if (process.argv.includes('--ratios')) reportRatios();
 const htmlFiles = walk(PUBLIC_DIR, (f) => f.toLowerCase().endsWith('.html'));
 for (const file of htmlFiles) checkHtmlFile(file);
 
-const libFiles = walk(LIB_DIR, (f) => f.endsWith('.js') || f.endsWith('.mjs'));
-for (const file of libFiles) checkLibFile(file);
+const publicSourceFiles = walk(PUBLIC_DIR, (f) => f.endsWith('.js') || f.endsWith('.mjs') || f.endsWith('.jsx'));
+for (const file of publicSourceFiles) checkDomFile(file);
 
 const serverFiles = walk(SERVER_DIR, () => true);
 for (const file of serverFiles) checkServerFile(file);
 
-const isSource = (f) => f.endsWith('.js') || f.endsWith('.mjs');
+const isSource = (f) => f.endsWith('.js') || f.endsWith('.mjs') || f.endsWith('.jsx');
 const proseFiles = [
   ...walk(PUBLIC_DIR, isSource),
   ...walk(SERVER_DIR, isSource),
@@ -318,6 +346,6 @@ if (violations.length > 0) {
   process.exit(1);
 } else {
   const warned = warnings.length > 0 ? `, ${warnings.length} prose warning(s)` : '';
-  console.log(`[check-structure] OK: scanned ${htmlFiles.length} HTML file(s), ${libFiles.length} lib file(s), ${serverFiles.length} server file(s), ${proseFiles.length} source file(s) for prose ratio, no violations${warned}`);
+  console.log(`[check-structure] OK: scanned ${htmlFiles.length} HTML file(s), ${publicSourceFiles.length} public source file(s), ${serverFiles.length} server file(s), ${proseFiles.length} source file(s) for prose ratio, no violations${warned}`);
   process.exit(0);
 }

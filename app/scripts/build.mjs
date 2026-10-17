@@ -15,6 +15,8 @@
 // Node 24, ESM. esbuild is the only dependency used here.
 
 import * as esbuild from 'esbuild';
+import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { enginePatchPlugin } from './engine-patch.mjs';
@@ -53,8 +55,11 @@ export function buildOptions(buildId) {
     bundle: true,
     sourcemap: true,
     target: 'es2022',
+    jsx: 'automatic',
     define: {
       __BUILD_ID__: JSON.stringify(buildId),
+      // React's entry branches on it and throws in a browser without it (design.md D1).
+      'process.env.NODE_ENV': '"production"',
     },
     plugins: [enginePatchPlugin()],
   };
@@ -72,6 +77,19 @@ export function workerBuildOptions(buildId) {
       __BUILD_ID__: JSON.stringify(buildId),
     },
   };
+}
+
+/** Tailwind's CLI, resolved from its package rather than hard-coded, and its arguments. */
+export function tailwindCommand() {
+  const require = createRequire(import.meta.url);
+  const pkgPath = require.resolve('tailwindcss/package.json');
+  const cli = path.join(path.dirname(pkgPath), require(pkgPath).bin.tailwindcss);
+  return [cli, '-c', 'tailwind.config.cjs', '-i', 'styles/room.css', '-o', 'public/room.bundle.css'];
+}
+
+/** The one-shot stylesheet build; a non-zero CLI exit throws. */
+export function buildStylesheet() {
+  execFileSync(process.execPath, tailwindCommand(), { cwd: APP_DIR, stdio: 'inherit' });
 }
 
 /** True if an esbuild error set is entirely "entry point not found" (i.e. room.entry.js doesn't exist yet). */
@@ -106,6 +124,13 @@ async function main() {
   const workerKey = Object.keys(worker.metafile?.outputs ?? {}).find((key) => key.endsWith('prepare.worker.bundle.js'));
   const workerBytes = workerKey ? worker.metafile.outputs[workerKey].bytes : undefined;
   console.log(`[build] wrote ${path.relative(APP_DIR, WORKER_OUT_FILE)}${workerBytes !== undefined ? ` (${workerBytes} bytes)` : ''}`);
+  try {
+    buildStylesheet();
+  } catch (err) {
+    console.error(`[build] tailwind failed: ${err.message ?? err}`);
+    process.exit(1);
+  }
+  console.log('[build] wrote public/room.bundle.css');
 }
 
 // Only run when invoked directly (`node scripts/build.mjs`), not when

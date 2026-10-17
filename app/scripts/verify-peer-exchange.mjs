@@ -6,11 +6,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { attach, CHROME, disposeChrome, FLAGS, sleep } from './cdp.mjs';
+import { attach, cdpHttp, CHROME, disposeChrome, FLAGS, sleep } from './cdp.mjs';
 import { assertServedBundle, createManifestFile, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
 import { startTracker as spawnTracker } from './runner/tracker.mjs';
-import { requireDelivery } from './delivery-pin.mjs';
+import { requireAutoStart, requireDelivery } from './delivery-pin.mjs';
 import { PEER_EXCHANGE_BARS, evaluatePeerExchange } from './figures/peer-exchange-bars.mjs';
 import { PEER_PAGE_READING } from './peer-exchange-probe.mjs';
 import { PRODUCT_STREAM_CONFIG } from '../public/lib/peer-engine-config.mjs';
@@ -64,6 +64,7 @@ const tabs = [];
 const pages = [];
 let server = null;
 let tracker = null;
+let autoStartRefused = false;
 let evaluated = false;
 
 function recordFailure(error) {
@@ -120,6 +121,7 @@ async function startServer(origin) {
     ...process.env,
     APP_PORT: String(SERVER_PORT),
     APP_DELIVERY: 'host',
+    APP_AUTO_START: '1',
     APP_TRACKER_URL: TRACKER_URL,
     APP_ICE_SERVERS: '[]',
   };
@@ -142,6 +144,10 @@ async function startServer(origin) {
   throw new Error('room server did not become ready');
 }
 
+// The pass's Chrome, printed once before any row; set before the await so
+// two pages launched together print it once.
+let chromePrinted = false;
+
 async function launchPage(label, roomId, role) {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), `app-peer-exchange-${label.toLowerCase().replaceAll('/', '-')}-`));
   const cdpPort = await unusedPort();
@@ -149,6 +155,11 @@ async function launchPage(label, roomId, role) {
   children.push(child);
   try {
     const tab = await attach(cdpPort, 'about:blank', { label });
+    if (!chromePrinted) {
+      chromePrinted = true;
+      manifest.chrome = (await cdpHttp(cdpPort, '/json/version')).Browser ?? null;
+      console.log(`chrome: ${manifest.chrome} · ${CHROME}`);
+    }
     const url = `http://127.0.0.1:${SERVER_PORT}/room.html?room=${roomId}&role=${role}&tab=${label.replaceAll('/', '-')}`;
     await tab.send('Page.navigate', { url });
     const page = { label, role, roomId, child, profile, cdpPort, tab, url };
@@ -242,6 +253,8 @@ async function main() {
   await startTracker();
   await startServer(origin);
   const settings = await requireDelivery(origin, 'host');
+  try { await requireAutoStart(origin); } catch (error) { autoStartRefused = true; throw error; }
+  console.log('autoStart: on');
   if (settings.trackerUrl !== TRACKER_URL) throw new Error(`trackerUrl is ${settings.trackerUrl}, expected ${TRACKER_URL}`);
   manifest.settings = settings;
   const preTabsBundle = await assertServedBundle({ origin, bundlePath: BUNDLE_PATH, pageBuildId: null });
@@ -298,5 +311,5 @@ try {
   manifestFile.write();
   console.log(`\n${manifest.outcome === 'pass' ? 'ALL PASS' : `${failures.length || manifest.failures.length} FAILURE(S)`}`);
   console.log(`evidence: ${RUN_DIR}`);
-  process.exitCode = manifest.outcome === 'pass' ? 0 : 1;
+  process.exitCode = autoStartRefused ? 2 : manifest.outcome === 'pass' ? 0 : 1;
 }

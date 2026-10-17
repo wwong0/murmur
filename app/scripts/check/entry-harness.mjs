@@ -27,6 +27,7 @@ export const FAKED_SPECIFIERS = Object.freeze([
   './lib/clock-sync.mjs',
   './lib/player.mjs',
   './lib/playback-start.mjs',
+  './room/screens.jsx',
 ]);
 const SPIES = Object.freeze({
   './lib/drift-controller.mjs': path.join(HERE, 'entry-controller-spy.mjs'),
@@ -39,7 +40,7 @@ export function entryFakesPlugin({ spies, hits = [] }) {
   return {
     name: 'entry-harness-fakes',
     setup(build) {
-      build.onResolve({ filter: /^\.\/lib\// }, (args) => {
+      build.onResolve({ filter: /^\.\/(lib|room)\// }, (args) => {
         if (path.resolve(args.importer) !== entry) return null;
         if (FAKED_SPECIFIERS.includes(args.path)) {
           hits.push(args.path);
@@ -181,36 +182,6 @@ export function fakeVideo({ supported = true, initial = true, paused = true, rej
   return { video: element, control };
 }
 
-function fakeElement(id, bubble = () => {}) {
-  const listeners = new Map();
-  return {
-    id,
-    textContent: '',
-    innerHTML: '',
-    href: '',
-    disabled: false,
-    hidden: false,
-    scrollTop: 0,
-    scrollHeight: 0,
-    children: [],
-    classList: { add() {} },
-    appendChild(child) { this.children.push(child); },
-    addEventListener(type, fn) {
-      if (!listeners.has(type)) listeners.set(type, []);
-      listeners.get(type).push(fn);
-    },
-    click() {
-      if (this.disabled) return;
-      const event = { type: 'click', target: this };
-      for (const fn of listeners.get('click') ?? []) fn(event);
-      bubble('click', event);
-    },
-    dispatch(type, event = {}) {
-      for (const fn of listeners.get(type) ?? []) fn({ type, target: this, ...event });
-    },
-  };
-}
-
 /** The scheduled start's published status, as the fake returns it. */
 export const IDLE_START_STATE = Object.freeze({
   playing: false,
@@ -237,15 +208,24 @@ export const IDLE_START_STATE = Object.freeze({
 export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', onPark, onLoad, settings = { delivery: 'http', iceServers: [] }, role = 'viewer', globals = {} } = {}) {
   let pinnedNowMs = null;
   const events = [];
+  // Kept out of `events`, whose order several suites compare whole.
+  const fetches = [];
   const intervals = [];
-  const elements = new Map();
   const documentListeners = new Map();
+  const location = {
+    search,
+    protocol: 'http:',
+    host: '127.0.0.1:8100',
+    assignments: [],
+    assign(url) { this.assignments.push(url); },
+  };
   const history = { replacements: [], replaceState(state, title, url) {
     this.replacements.push({ state, title, url });
   } };
   const log = (kind, detail) => events.push({ kind, detail });
   const { video, control } = fakeVideo({ ...videoOptions, onEvent: log });
   const harness = {
+    screens: null,
     clock: { offsetMs: null, halfWidthMs: null, sampleCount: 0, counters: { reanchors: 0 } },
     sharedNowMs: null,
     clientId: null,
@@ -273,10 +253,10 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     URL,
     crypto: globalThis.crypto,
     // The page's settings read; `settings: null` leaves the page without fetch.
-    fetch: settings && (async (resource) => (String(resource) === '/app-settings'
-      ? { ok: true, status: 200, json: async () => ({ trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 2, ...settings }) }
+    fetch: settings && (async (resource) => (fetches.push(String(resource)), String(resource) === '/app-settings'
+      ? { ok: true, status: 200, json: async () => ({ trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 2, autoStart: true, ...settings }) }
       : { ok: false, status: 404, json: async () => null, arrayBuffer: async () => new ArrayBuffer(0) })),
-    location: { search, protocol: 'http:', host: '127.0.0.1:8100' },
+    location,
     history,
     // `now` walks with the event list so page stamps stay ordered and distinct.
     // A test that needs a fixed timebase pins it with `setNow`.
@@ -288,14 +268,9 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     document: {
       getElementById(id) {
         if (id === 'video') return video;
-        if (!elements.has(id)) {
-          elements.set(id, fakeElement(id, (type, event) => {
-            for (const fn of documentListeners.get(type) ?? []) fn(event);
-          }));
-        }
-        return elements.get(id);
+        throw new Error(`the engine read #${id}`);
       },
-      createElement: () => fakeElement('li'),
+      createElement: () => { throw new Error('the engine created an element'); },
       addEventListener(type, fn) {
         if (!documentListeners.has(type)) documentListeners.set(type, []);
         documentListeners.get(type).push(fn);
@@ -309,19 +284,41 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
   context.window = context;
   vm.createContext(context);
   vm.runInContext(code, context);
+  const requireScreens = () => {
+    if (!harness.screens) throw new Error('the screens never mounted');
+    return harness.screens;
+  };
   return {
     events,
     video,
     control,
     history,
+    location,
+    fetches,
     app: context.__app,
     remedy: () => context.__remedyBrowser ?? null,
-    notices: () => (elements.get('notices')?.children ?? []).map((li) => li.textContent),
-    controllerLine: () => elements.get('controller-line')?.textContent ?? null,
-    element: (id) => elements.get(id),
-    click(id) { elements.get(id)?.click(); },
+    view: () => requireScreens().view.get(),
+    screens: () => requireScreens(),
+    chooseHostFile(file) { requireScreens().actions.chooseHostFile(file); },
+    notices: () => requireScreens().view.get().notices.map((notice) => notice.text),
+    controllerLine: () => requireScreens().view.get().overlay.controller,
+    click(id) {
+      const actions = requireScreens().actions;
+      const action = {
+        play: 'play',
+        pause: 'pause',
+        'back-10': 'back10',
+        'forward-10': 'forward10',
+        'control-mode': 'controlMode',
+        mute: 'mute',
+      }[id];
+      if (!action || this.view().controls[id].disabled) return;
+      actions[action]();
+      for (const fn of documentListeners.get('click') ?? []) fn({ type: 'click', target: { id } });
+    },
     /** Pin `performance.now()`, for a test whose expected values are arithmetic on it. */
     setNow(ms) { pinnedNowMs = ms; },
+    settled() { return new Promise((resolve) => setImmediate(resolve)); },
     kinds: () => events.map((event) => event.kind),
     count: (kind) => events.filter((event) => event.kind === kind).length,
     /** One page tick, exactly the entry's own 250 ms interval body. */

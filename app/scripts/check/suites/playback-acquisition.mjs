@@ -24,6 +24,7 @@ const SETTINGS = Object.freeze({
   maxFutureMs: 1150,
   requestTimeoutMs: 200,
   backoffMs: 100,
+  autoStart: () => true,
 });
 
 const clock = { sharedNow: () => performance.timeOrigin + performance.now() };

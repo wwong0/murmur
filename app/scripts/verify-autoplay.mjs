@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { CHROME, FLAGS, attach, cdpHttp, sleep, disposeChrome } from './cdp.mjs';
 import { assertServedBundle, prepareRunDirectory } from './runner/core.mjs';
 import { WAITING_REFUSED } from '../public/lib/playback-start.mjs';
+import { requireAutoStart } from './delivery-pin.mjs';
 
 const PORT = 9225;
 const ORIGIN = 'http://127.0.0.1:8100';
@@ -64,11 +65,20 @@ const report = { startedAt: new Date().toISOString(), gitHead: null, flags, room
 let chrome = null;
 
 try {
+  await requireAutoStart(ORIGIN);
+  console.log('autoStart: on');
+} catch (error) {
+  console.error(error.message ?? String(error));
+  process.exit(2);
+}
+
+try {
   report.gitHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: APP_DIR, encoding: 'utf8' }).trim();
   expect('9.2 the launch drops exactly the autoplay-policy flag', flags.length === FLAGS.length - 1, JSON.stringify(flags));
 
   chrome = spawn(CHROME, [...flags, `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`, '--window-size=700,500', 'about:blank'], { stdio: 'ignore' });
-  await cdpHttp(PORT, '/json/version');
+  report.chrome = (await cdpHttp(PORT, '/json/version')).Browser ?? null;
+  console.log(`chrome: ${report.chrome} · ${CHROME}`);
   // Attach to the launch window first and navigate it, so the unmute below
   // races nothing but the page's own clock estimate and preparation lead.
   const tab = await attach(PORT, 'about:blank', { label: 'A' });

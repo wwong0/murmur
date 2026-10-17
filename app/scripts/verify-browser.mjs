@@ -95,6 +95,7 @@ import { seamEpochAgreement, startResidual } from './start-residual.mjs';
 import { evaluatePeerExchange } from './figures/peer-exchange-bars.mjs';
 import { PEER_PAGE_READING } from './peer-exchange-probe.mjs';
 import { Core } from '../node_modules/p2p-media-loader-core/lib/core.js';
+import { requireAutoStart } from './delivery-pin.mjs';
 
 const PASS_STARTED_AT = Date.now();
 const PORT = 9223;
@@ -235,6 +236,13 @@ const URL_B_MEASURED = `${URL_B}&treatmentEvidence=1`;
 
 // The first window IS page A. It opens blank so the harness seek flag is
 // installed before the product loads (T12), then navigates to A.
+try {
+  await requireAutoStart(ORIGIN);
+  console.log('autoStart: on');
+} catch (error) {
+  console.error(error.message ?? String(error));
+  process.exit(2);
+}
 const chrome = spawn(
   CHROME,
   [...FLAGS, `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`, '--window-size=700,500', '--window-position=0,0', 'about:blank'],
@@ -1999,6 +2007,9 @@ try {
 
   console.log('\n--- 9.1: a page with no room creates one, and invites ---');
   const n = await attach('N/creator', `${ORIGIN}/room.html`);
+  // D4: a room-less page makes no room until Host is pressed; the front page mounts after attach.
+  await pollUntil(() => n.evaluate(`document.querySelector('#host') !== null`), (present) => present === true, { everyMs: 250, deadlineAt: Date.now() + 15_000 });
+  await clickElement(n, '#host');
   const created = await pollUntil(() => pageOf(n), (page) => page.present && /[?&]room=/.test(page.search) && page.members.length > 0, { everyMs: 250, deadlineAt: Date.now() + 15_000 });
   const createdQuery = new URLSearchParams(created.value.search ?? '');
   const createdRoom = createdQuery.get('room');

@@ -23,9 +23,10 @@
 // Node 24, ESM.
 
 import * as esbuild from 'esbuild';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildOptions, makeBuildId, workerBuildOptions } from './build.mjs';
+import { buildOptions, buildStylesheet, makeBuildId, tailwindCommand, workerBuildOptions } from './build.mjs';
 import { requireTrackerStarted, startTracker, trackerFailure } from './runner/tracker.mjs';
 import { optionsFromEnv, startRoomServer } from '../server/room-server.mjs';
 import { startSocketControl } from '../harness/socket-control.mjs';
@@ -39,6 +40,7 @@ const APP_TRACKER_URL = `ws://127.0.0.1:${TRACKER_PORT}`;
 let buildContexts = [];
 let roomServer = null;
 let tracker = null;
+let cssWatcher = null;
 let socketControl = null;
 let shuttingDown = false;
 
@@ -50,6 +52,7 @@ async function shutdown(exitCode) {
   if (roomServer) await roomServer.close();
   await Promise.all(buildContexts.map((context) => context.dispose()));
   if (tracker && tracker.exitCode === null) tracker.kill();
+  if (cssWatcher && cssWatcher.exitCode === null) cssWatcher.kill();
 }
 
 async function main() {
@@ -61,6 +64,17 @@ async function main() {
   await Promise.all(buildContexts.map((context) => context.watch()));
   console.log('[dev] esbuild watch mode active — edits under public/ rebuild both bundles automatically, no manual rebuild needed.');
   console.log(`[dev] build id: ${buildId}`);
+
+  // The stylesheet is built once before serving, then watched. Tailwind v3's
+  // watcher exits when its stdin ends, so the pipe is held open.
+  buildStylesheet();
+  cssWatcher = spawn(process.execPath, [...tailwindCommand(), '--watch'], { cwd: APP_DIR, stdio: ['pipe', 'inherit', 'inherit'] });
+  cssWatcher.on('exit', async (code, signal) => {
+    if (shuttingDown) return;
+    console.error(`[dev] tailwind watcher exited (${code ?? signal})`);
+    await shutdown(1);
+    process.exit(1);
+  });
 
   const trackerState = startTracker({
     port: TRACKER_PORT,

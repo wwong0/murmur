@@ -41,6 +41,7 @@ export function createPlaybackAcquisition({
   // and at issue — not cached, since T10's single derivation may not have
   // settled the first time `poll()` runs.
   const holds = settings.holds ?? (() => false);
+  const autoStart = settings.autoStart ?? (() => false);
   if (![transitionLeadMs, maxFutureMs, requestTimeoutMs, backoffMs].every(validNumber)
     || transitionLeadMs < 0 || maxFutureMs < 0 || requestTimeoutMs < 0 || backoffMs < 0) {
     throw new TypeError('acquisition settings must be finite non-negative numbers');
@@ -169,9 +170,11 @@ export function createPlaybackAcquisition({
     } else {
       const now = clock.sharedNow();
       if (!validNumber(now)) return;
-      current = holds()
-        ? { playing: false, atSharedMs: now + transitionLeadMs, mediaMs: 0, held: true }
-        : { playing: true, atSharedMs: now + transitionLeadMs, mediaMs: 0 };
+      current = autoStart()
+        ? holds()
+          ? { playing: false, atSharedMs: now + transitionLeadMs, mediaMs: 0, held: true }
+          : { playing: true, atSharedMs: now + transitionLeadMs, mediaMs: 0 }
+        : { playing: false, atSharedMs: now + transitionLeadMs, mediaMs: 0 };
     }
     creationIssued = true;
     const payload = {
@@ -418,14 +421,18 @@ export function createPlaybackAcquisition({
     const basis = { lineage: holder.state.lineage, version: holder.state.version };
     let payload = { kind, basis };
     if (kind === 'play' || kind === 'pause') {
-      payload = { ...payload, atSharedMs: now + transitionLeadMs };
+      const atSharedMs = kind === 'pause' && validNumber(args.atSharedMs)
+        ? args.atSharedMs
+        : now + transitionLeadMs;
+      payload = { ...payload, atSharedMs };
     } else if (kind === 'seek') {
       payload = {
         ...payload,
         atSharedMs: now + transitionLeadMs,
         positionMs: args.positionMs,
-        // T5: a room with peer exchange holds at the landing of every seek.
-        ...(holds() ? { hold: true } : {}),
+        // D14: a playing or held room with peer exchange holds at the landing; a
+        // paused, unheld one must not, or a seek while paused would start it.
+        ...(holds() && (holder.state.current.playing || holder.state.current.held === true) ? { hold: true } : {}),
       };
     } else if (kind === 'control-mode') {
       payload = { ...payload, controlMode: args.controlMode };

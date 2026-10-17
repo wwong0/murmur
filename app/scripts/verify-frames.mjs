@@ -18,11 +18,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FLAGS, attach, cdpHttp, sleep } from './cdp.mjs';
 import { selectBrowserPlatform } from './runner/browser-platform.mjs';
+import { requireAutoStart } from './delivery-pin.mjs';
 
 // The platform adapter rather than cdp.mjs's Windows re-exports (D9): change 6a
 // runs this same file inside the client container, where the Windows path does
 // not exist and `taskkill` is not a command.
 const BROWSER = selectBrowserPlatform();
+const CHROME = BROWSER.locate();
 
 // The browsers in the container are not on the host's loopback. On the host this
 // default is the origin `npm start` serves; in the container it is the media
@@ -121,6 +123,8 @@ async function waitForPlaying(tab, timeoutMs) {
 }
 
 const failures = [];
+/** Each state's `/json/version` Browser string, keyed by state. */
+const chromeVersions = {};
 function expect(label, cond, detail) {
   console.log(`  ${cond ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
   if (!cond) failures.push(label);
@@ -142,7 +146,8 @@ async function runState({ name, room, port, extraFlags, minimizeAfterAttach }, f
     { stdio: 'ignore' }
   );
   try {
-    await cdpHttp(port, '/json/version');
+    chromeVersions[name] = (await cdpHttp(port, '/json/version')).Browser ?? null;
+    console.log(`  chrome: ${chromeVersions[name]} · ${CHROME}`);
     const tab = await attach(port, url);
 
     if (minimizeAfterAttach) {
@@ -237,6 +242,16 @@ const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPat
 const options = isMain ? parseArgs(process.argv.slice(2)) : null;
 let report = null;
 
+if (isMain) {
+  try {
+    await requireAutoStart(ORIGIN);
+    console.log('autoStart: on');
+  } catch (error) {
+    console.error(error.message ?? String(error));
+    process.exit(2);
+  }
+}
+
 if (isMain) try {
   const fps = readContentFrameRate();
   console.log(`content frame rate (ffprobe, init.mp4 + seg-00000.m4s): ${fps} fps`);
@@ -272,6 +287,7 @@ if (isMain) try {
     mediaDir: MEDIA_DIR,
     browserPlatform: BROWSER.name,
     chrome: BROWSER.locate(),
+    chromeVersions,
     flags: [...FLAGS, ...PLATFORM_FLAGS],
     frameRate: fps,
     frameRateSource: 'ffprobe(init.mp4 + seg-00000.m4s)',

@@ -195,7 +195,7 @@ export default async function playbackHoldSuite() {
     const acquisition = createPlaybackAcquisition({
       client,
       clock,
-      settings: { transitionLeadMs: 300, maxFutureMs: 60_000, holds: () => true },
+      settings: { transitionLeadMs: 300, maxFutureMs: 60_000, holds: () => true, autoStart: () => true },
       mintLineage: () => 'lineage-rejoin',
       report: () => {},
     });

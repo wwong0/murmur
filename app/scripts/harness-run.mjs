@@ -31,6 +31,7 @@ import { createAskEvidence, recordHostStats } from './harness/ask-evidence.mjs';
 import { finalizeRosterEvent, isHeldJoin, rosterEventTarget } from './harness/roster-event.mjs';
 import { viewerOrder } from '../public/lib/edge-assignment.mjs';
 import { createSessionLoops, edgeRosterEvent, issueRosterEvent, setupSessions, stopSessionLoops } from './harness/run-sessions.mjs';
+import { requireAutoStart } from './delivery-pin.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -559,7 +560,7 @@ async function disposeSession(session) {
   if (session.dispose) await session.dispose();
 }
 
-export async function runHarness({ conditionName, condition = conditionForName(conditionName), runDir = null, originUrl, clientOriginUrl = originUrl, hostPageUrl = clientOriginUrl, topology = section3Topology(), clientFactory = noClientFactory, establishCadence = defaultEstablishCadence, qualifyCdpBytes = defaultQualifyCdpBytes, beginLinkQualification = defaultBeginLinkQualification, finishLinkQualification = defaultFinishLinkQualification } = {}) {
+export async function runHarness({ conditionName, condition = conditionForName(conditionName), runDir = null, originUrl, clientOriginUrl = originUrl, hostPageUrl = clientOriginUrl, topology = section3Topology(), clientFactory = noClientFactory, establishCadence = defaultEstablishCadence, qualifyCdpBytes = defaultQualifyCdpBytes, beginLinkQualification = defaultBeginLinkQualification, finishLinkQualification = defaultFinishLinkQualification, pinAutoStart = false } = {}) {
   validateCondition(condition, conditionName ?? condition.name);
   const arm = armFor(condition);
   requireDeclaredDelivery(condition, conditionName ?? condition.name);
@@ -612,6 +613,13 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     manifestFile.merge({ topology: { status: 'prepared', ...preparedTopology } });
     manifestFile.set(mergeVerifiedContext(manifestFile.get(), preparedTopology));
     manifestFile.write();
+    if (pinAutoStart) {
+      const origins = [...new Set([preparedTopology.countersUrl, preparedTopology.hostPageUrl].filter((origin) => typeof origin === 'string' && origin.length > 0))];
+      if (origins.length === 0) throw new Error('harness topology gave no room-server origin for auto-start pin');
+      for (const origin of origins) await requireAutoStart(origin);
+      manifestFile.merge({ autoStart: true });
+      manifestFile.write();
+    }
     const qdiscs = await topology.applyQdiscs({ condition, runDir: prepared.runDir, manifest: manifestFile.get() });
     manifestFile.merge({ topology: readyTopology(manifestFile.get().topology, qdiscs, condition) });
     manifestFile.write();
@@ -891,6 +899,7 @@ export async function main(argv = process.argv.slice(2)) {
     hostPageUrl: urls.hostPageUrl,
     topology: composed,
     clientFactory: (request) => composed.clientFactory(request),
+    pinAutoStart: true,
   });
   return result.exitCode;
 }

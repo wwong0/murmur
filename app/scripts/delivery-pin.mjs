@@ -28,3 +28,27 @@ export async function requireDelivery(origin, expected, { fetchImpl = fetch, tra
   }
   return settings;
 }
+
+export async function requireAutoStart(origin, { fetchImpl = fetch } = {}) {
+  const refusal = (value, detail = '') => new Error(
+    `refusing to run: ${origin} reports autoStart ${value}; start the server with APP_AUTO_START=1${detail ? `: ${detail}` : ''}`
+  );
+  let response;
+  try {
+    response = await fetchImpl(`${origin}/app-settings`, { cache: 'no-store' });
+  } catch (error) {
+    throw refusal('unavailable', error?.message ?? String(error));
+  }
+  if (!response || response.ok === false || (Number.isFinite(response.status) && response.status >= 400)) {
+    throw refusal(`HTTP ${response?.status ?? 'error'}`);
+  }
+  let settings;
+  try {
+    settings = await response.json();
+  } catch (error) {
+    throw refusal('unavailable', error?.message ?? String(error));
+  }
+  const value = settings?.autoStart;
+  if (value !== true) throw refusal(value);
+  return value;
+}

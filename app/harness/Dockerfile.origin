@@ -1,7 +1,7 @@
 # The origin: the existing app server, its built bundle, and `tc`.
 #
-# `npm ci --omit=dev` plus an explicit esbuild, because the bundle is built in
-# the image and esbuild is a devDependency: `--omit=dev` would leave the image
+# `npm ci --omit=dev` plus an explicit esbuild and tailwindcss, because the bundle and
+# stylesheet are built in the image and both are devDependencies: `--omit=dev` would leave the image
 # with no bundler and `npm run build` would fail at the one step that makes the
 # page the clients load the page this tree describes.
 #
@@ -19,7 +19,7 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev \
- && npm install --no-save --no-package-lock esbuild@0.25.12
+ && npm install --no-save --no-package-lock esbuild@0.25.12 tailwindcss@3.4.19
 
 COPY . .
 RUN npm run build

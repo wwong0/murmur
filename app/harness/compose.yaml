@@ -62,6 +62,7 @@ services:
       APP_PORT: '8100'
       APP_HOST: 0.0.0.0
       APP_DELIVERY: ${WA_DELIVERY:-http}
+      APP_AUTO_START: "1"
       APP_TRACKER_PORT: ${WA_TRACKER_PORT:-}
       APP_TRACKER_HOST: origin-media
       WA_ORIGIN_ROLE: ${WA_ORIGIN_ROLE:-server}
@@ -93,6 +94,7 @@ services:
       APP_PORT: '8100'
       APP_HOST: 0.0.0.0
       APP_DELIVERY: host
+      APP_AUTO_START: "1"
       APP_TRACKER_PORT: ${WA_TRACKER_PORT:-}
       APP_TRACKER_HOST: server-media
       WA_ORIGIN_ROLE: server

@@ -18,6 +18,7 @@ const SETTINGS = Object.freeze({
   maxFutureMs: 1000,
   requestTimeoutMs: 10,
   backoffMs: 2,
+  autoStart: () => true,
 });
 
 function roster(ids) {

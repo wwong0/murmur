@@ -8,10 +8,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { attach, CHROME, disposeChrome, FLAGS, sleep } from './cdp.mjs';
+import { attach, cdpHttp, CHROME, disposeChrome, FLAGS, sleep } from './cdp.mjs';
 import { assertServedBundle, createManifestFile, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
-import { requireDelivery } from './delivery-pin.mjs';
+import { requireAutoStart, requireDelivery } from './delivery-pin.mjs';
 import { FETCH_SHIM_BARS, evaluateFetchShim } from './figures/fetch-shim-bars.mjs';
 
 const args = new Set(process.argv.slice(2));
@@ -83,6 +83,7 @@ const failures = [];
 const children = [];
 const tabs = [];
 let server = null;
+let autoStartRefused = false;
 
 function recordFailure(error) {
   const text = error?.stack ?? error?.message ?? String(error);
@@ -101,6 +102,7 @@ async function startServer(origin) {
     ...process.env,
     APP_PORT: String(SERVER_PORT),
     APP_DELIVERY: 'host',
+    APP_AUTO_START: '1',
     APP_ICE_SERVERS: '[]',
     APP_MEDIA_DIR: MEDIA_DIR,
   };
@@ -144,6 +146,10 @@ const SEAM = `(() => {
   };
 })()`;
 
+// The pass's Chrome, printed once before any row; set before the await so
+// two pages launched together print it once.
+let chromePrinted = false;
+
 async function launchPage(label, url) {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), `app-fetch-shim-${label.toLowerCase()}-`));
   const cdpPort = await unusedPort();
@@ -157,6 +163,11 @@ async function launchPage(label, url) {
   children.push(child);
   try {
     const tab = await attach(cdpPort, 'about:blank', { label });
+    if (!chromePrinted) {
+      chromePrinted = true;
+      manifest.chrome = (await cdpHttp(cdpPort, '/json/version')).Browser ?? null;
+      console.log(`chrome: ${manifest.chrome} · ${CHROME}`);
+    }
     await tab.send('Page.navigate', { url });
     const page = { label, child, profile, cdpPort, tab, url };
     tabs.push(page);
@@ -379,6 +390,8 @@ async function main() {
   const origin = manifest.config.origin;
   await startServer(origin);
   const settings = await requireDelivery(origin, 'host');
+  try { await requireAutoStart(origin); } catch (error) { autoStartRefused = true; throw error; }
+  console.log('autoStart: on');
   manifest.settings = settings;
 
   const hostPage = await launchPage('host', `${origin}/room.html?room=${ROOM}&role=host&tab=host`);
@@ -441,5 +454,5 @@ try {
   manifestFile.write();
   console.log(`\n${manifest.outcome === 'pass' ? 'ALL PASS' : `${failures.length || manifest.failures.length} FAILURE(S)`}`);
   console.log(`evidence: ${RUN_DIR}`);
-  process.exitCode = manifest.outcome === 'pass' ? 0 : 1;
+  process.exitCode = autoStartRefused ? 2 : manifest.outcome === 'pass' ? 0 : 1;
 }

@@ -7,6 +7,10 @@
 
 const harness = () => globalThis.__entryHarness;
 
+export function mountScreens({ view, actions }) {
+  harness().screens = { view, actions, appAtMount: globalThis.__app !== undefined };
+}
+
 /** Subscribers are kept so a test can emit `joined` and deliver room envelopes. */
 export function createRoomClient() {
   const subscribe = (map, type, fn) => {

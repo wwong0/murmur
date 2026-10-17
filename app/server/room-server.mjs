@@ -212,7 +212,7 @@ function msUntilNameReleased(member, livenessMs) {
  * short liveness interval and a temporary media root, in-process, without
  * spawning anything.
  *
- * @param {{port?: number, host?: string, mediaDir?: string, livenessMs?: number, quiet?: boolean, delivery?: 'host'|'http', iceServers?: object[], trackerUrl?: string|null, mediaSource?: 'dir'|'file', targetSegmentSeconds?: number}} [opts]
+ * @param {{port?: number, host?: string, mediaDir?: string, livenessMs?: number, quiet?: boolean, delivery?: 'host'|'http', iceServers?: object[], trackerUrl?: string|null, mediaSource?: 'dir'|'file', targetSegmentSeconds?: number, autoStart?: boolean}} [opts]
  */
 export function startRoomServer(opts = {}) {
   const host = opts.host ?? DEFAULT_HOST;
@@ -226,6 +226,7 @@ export function startRoomServer(opts = {}) {
   const targetSegmentSeconds = opts.targetSegmentSeconds === undefined
     ? DEFAULT_TARGET_SEGMENT_SECONDS
     : opts.targetSegmentSeconds;
+  const autoStart = opts.autoStart ?? false;
   if (delivery !== 'host' && delivery !== 'http') {
     throw new TypeError(`delivery must be "host" or "http", got ${JSON.stringify(delivery)}`);
   }
@@ -482,7 +483,7 @@ export function startRoomServer(opts = {}) {
 
     if (req.method === 'GET' && pathname === '/app-settings') {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-      res.end(JSON.stringify({ delivery, iceServers, trackerUrl, mediaSource, targetSegmentSeconds }));
+      res.end(JSON.stringify({ delivery, iceServers, trackerUrl, mediaSource, targetSegmentSeconds, autoStart }));
       return;
     }
 
@@ -914,6 +915,9 @@ export function optionsFromEnv(env = process.env) {
     iceServers = JSON.parse(env.APP_ICE_SERVERS);
     if (!Array.isArray(iceServers)) throw new TypeError('APP_ICE_SERVERS must be a JSON array');
   }
+  // D8: unset is the product's start, paused at 0; drivers and the harness set 1.
+  const autoStartText = env.APP_AUTO_START ?? '';
+  if (autoStartText !== '' && autoStartText !== '1') throw new TypeError('APP_AUTO_START must be 1 or unset');
   return {
     port: env.APP_PORT ? Number(env.APP_PORT) : undefined,
     mediaDir: env.APP_MEDIA_DIR,
@@ -923,6 +927,7 @@ export function optionsFromEnv(env = process.env) {
     targetSegmentSeconds: env.APP_SEGMENT_TARGET_S === undefined ? undefined : Number(env.APP_SEGMENT_TARGET_S),
     iceServers,
     trackerUrl: normalizeTrackerUrl(env.APP_TRACKER_URL),
+    autoStart: autoStartText === '1',
   };
 }
 

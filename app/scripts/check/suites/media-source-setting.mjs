@@ -60,7 +60,7 @@ export default async function mediaSourceSettingSuite() {
       const settings = await (await fetch(`${origin}/app-settings`)).json();
       assertEqual(response.status, 200, 'directory media status');
       assertEqual(bytes.toString('hex'), expected.toString('hex'), 'directory media bytes');
-      assertEqual(JSON.stringify(settings), JSON.stringify({ delivery: 'host', iceServers: [], trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 2 }), 'directory settings');
+      assertEqual(JSON.stringify(settings), JSON.stringify({ delivery: 'host', iceServers: [], trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 2, autoStart: false }), 'directory settings');
       await sleep(10);
       assert(server.counters.snapshot().playlistBytesDelivered > 0, 'directory playlist is counted as media');
     });

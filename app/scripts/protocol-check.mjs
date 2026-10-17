@@ -165,6 +165,11 @@ import playbackStateRulesSuite from './check/suites/playback-state-rules.mjs';
 import playbackAcquisitionSuite from './check/suites/playback-acquisition.mjs';
 import playbackAcquisitionTimingSuite from './check/suites/playback-acquisition-timing.mjs';
 import playbackElectionSuite from './check/suites/playback-election.mjs';
+import autoStartSuite from './check/suites/auto-start.mjs';
+import autoStartPinSuite from './check/suites/auto-start-pin.mjs';
+import pausedSeekSuite from './check/suites/paused-seek.mjs';
+import titleEndSuite from './check/suites/title-end.mjs';
+import routeSuite from './check/suites/route.mjs';
 import driftSuite from './check/suites/drift.mjs';
 import driftControllerSuite from './check/suites/drift-controller.mjs';
 import driftLoadSuite from './check/suites/drift-load.mjs';
@@ -190,6 +195,7 @@ import playbackTreatmentSuite from './check/suites/playback-treatment.mjs';
 import playbackTreatmentEntrySuite from './check/suites/playback-treatment-entry.mjs';
 import roomControlsEntrySuite from './check/suites/room-controls-entry.mjs';
 import hostEntrySuite from './check/suites/host-entry.mjs';
+import hostAnswerSuite from './check/suites/host-answer.mjs';
 import runnerCoreSuite from './check/suites/runner-core.mjs';
 import remuxCutPlanSuite from './check/suites/remux-cut-plan.mjs';
 import remuxIndexSuite from './check/suites/remux-index.mjs';
@@ -204,6 +210,9 @@ import hostFileEntrySuite from './check/suites/host-file-entry.mjs';
 import hostFileStepsSuite from './check/suites/host-file-steps.mjs';
 import browserCheckListSuite from './check/suites/browser-check-list.mjs';
 import browserResultLogSuite from './check/suites/browser-result-log.mjs';
+import pageViewSuite from './check/suites/page-view.mjs';
+import fileHelpSuite from './check/suites/file-help.mjs';
+import syncDotSuite from './check/suites/sync-dot.mjs';
 
 console.log(describeFixtures());
 
@@ -348,6 +357,11 @@ for (const suite of [
   playbackAcquisitionSuite,
   playbackAcquisitionTimingSuite,
   playbackElectionSuite,
+  autoStartSuite,
+  autoStartPinSuite,
+  pausedSeekSuite,
+  titleEndSuite,
+  routeSuite,
   driftSuite,
   driftControllerSuite,
   driftLoadSuite,
@@ -373,6 +387,7 @@ for (const suite of [
   playbackTreatmentEntrySuite,
   roomControlsEntrySuite,
   hostEntrySuite,
+  hostAnswerSuite,
   runnerCoreSuite,
   remuxCutPlanSuite,
   remuxIndexSuite,
@@ -387,6 +402,9 @@ for (const suite of [
   hostFileStepsSuite,
   browserCheckListSuite,
   browserResultLogSuite,
+  pageViewSuite,
+  fileHelpSuite,
+  syncDotSuite,
 ]) {
   await suite();
 }

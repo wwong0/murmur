@@ -41,7 +41,7 @@ async function measure({ room, peer, client }, requestTimeoutMs, backoffMs, labe
   const d = createPlaybackAcquisition({
     client: c,
     clock,
-    settings: { transitionLeadMs: 150, maxFutureMs: 1150, requestTimeoutMs, backoffMs },
+    settings: { transitionLeadMs: 150, maxFutureMs: 1150, requestTimeoutMs, backoffMs, autoStart: () => true },
     mintLineage: () => `${label}-lineage`,
   });
   const joinedClient = waitEvent(c, 'joined');

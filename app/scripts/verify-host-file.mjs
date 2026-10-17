@@ -22,6 +22,7 @@ import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
 import { readSourceIndex } from '../public/lib/remux-index.mjs';
 import { storeKey } from '../public/lib/prepared-store.mjs';
 import { segmentName } from '../public/lib/remux-publish.mjs';
+import { requireAutoStart } from './delivery-pin.mjs';
 import {
   boundariesFromPlaylist,
   chooseSegments,
@@ -318,18 +319,21 @@ async function runPass(options) {
 
     server = spawn(process.execPath, [path.join(APP_DIR, 'server', 'room-server.mjs')], {
       cwd: APP_DIR,
-      env: { ...process.env, APP_PORT: String(SERVER_PORT), APP_MEDIA_SOURCE: 'file', APP_DELIVERY: 'host', APP_SEGMENT_TARGET_S: String(options.target), APP_ICE_SERVERS: '[]', APP_TRACKER_URL: '' },
+      env: { ...process.env, APP_PORT: String(SERVER_PORT), APP_MEDIA_SOURCE: 'file', APP_DELIVERY: 'host', APP_AUTO_START: '1', APP_SEGMENT_TARGET_S: String(options.target), APP_ICE_SERVERS: '[]', APP_TRACKER_URL: '' },
       stdio: 'ignore',
     });
     const up = await poll(async () => {
       try { return (await fetch(`${ORIGIN}/room.html`, { cache: 'no-store' })).ok; } catch { return false; }
     }, (ok) => ok || server.exitCode !== null, 15_000);
     if (!up || server.exitCode !== null) throw new Error('the room server did not start');
+    await requireAutoStart(ORIGIN);
+    console.log('autoStart: on');
 
     chromePort = await unusedPort();
     fs.mkdirSync(profile, { recursive: true });
     chrome = spawn(CHROME, [...FLAGS, `--remote-debugging-port=${chromePort}`, `--user-data-dir=${profile}`, '--window-size=900,650', 'about:blank'], { stdio: 'ignore' });
     manifest.chromeVersion = (await cdpHttp(chromePort, '/json/version')).Browser ?? null;
+    console.log(`chrome: ${manifest.chromeVersion} · ${CHROME}`);
     manifest.gitHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_DIR, encoding: 'utf8' }).trim();
     manifest.gitDirty = execFileSync('git', ['status', '--porcelain', '--', 'app/public', 'app/server', 'app/scripts'], { cwd: REPO_DIR, encoding: 'utf8' }).trim().split('\n').filter(Boolean).length;
 

@@ -73,13 +73,18 @@ export default async function hostFileEntrySuite() {
   await check('host-file-entry: a worker refusal stays out of the room', async () => {
     const page = hostPage(product.code);
     await drain();
-    const input = page.element('host-file');
-    input.files = [new Blob([Uint8Array.from([1, 2, 3])])];
-    input.dispatch('change');
+    page.chooseHostFile(new Blob([Uint8Array.from([1, 2, 3])]));
     await drain();
     assertEqual(page.app.hostFile().state, 'refused', 'worker refusal is published');
     assertEqual(page.app.hostFile().refusal.reason, 'video-codec', 'worker refusal reason is preserved');
     assertEqual(page.count('connect'), 0, 'worker refusal does not connect');
+  });
+
+  await check('host-file-entry: choosing before the input opens does nothing', async () => {
+    const page = hostPage(product.code);
+    page.chooseHostFile(new Blob([Uint8Array.from([1, 2, 3])]));
+    assertEqual(page.count('connect'), 0, 'early choice does not connect');
+    assertEqual(page.app.hostFile().state, 'off', 'early choice does not replace the initial view');
   });
 
   await check('host-file-entry: missing host capabilities fail by name and do not join', async () => {

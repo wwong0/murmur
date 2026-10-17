@@ -30,7 +30,7 @@ async function sourceFiles(dir) {
   for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) found.push(...await sourceFiles(full));
-    else if (/\.m?js$/.test(entry.name) && !entry.name.includes('.bundle.')) found.push(full);
+    else if (/\.(m?js|jsx)$/.test(entry.name) && !entry.name.includes('.bundle.')) found.push(full);
   }
   return found;
 }
