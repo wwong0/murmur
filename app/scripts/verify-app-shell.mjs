@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CHROME, FLAGS, attach, cdpHttp, disposeChrome, sleep } from './cdp.mjs';
+import { CHROME, FLAGS, attach, cdpHttp, clickElement, disposeChrome, sleep } from './cdp.mjs';
 import { createResultLog } from './browser-result-log.mjs';
 import { assertServedBundle, prepareRunDirectory } from './runner/core.mjs';
 import { requireAutoStart } from './delivery-pin.mjs';
@@ -128,19 +128,6 @@ async function until(tabToRead, expression, predicate, timeoutMs = WAIT_MS) {
   return { ok: false, value, reason: `timed out after ${timeoutMs}ms` };
 }
 
-async function clickElement(tabToClick, selector) {
-  const box = await read(tabToClick, `(() => {
-    const element = document.querySelector(${JSON.stringify(selector)});
-    if (!element) return null;
-    element.scrollIntoView({ block: 'center' });
-    const rect = element.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-  })()`);
-  if (!box) throw new Error(`${selector} is not on the page`);
-  await tabToClick.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: box.x, y: box.y, button: 'left', clickCount: 1 });
-  await tabToClick.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: box.x, y: box.y, button: 'left', clickCount: 1 });
-}
-
 async function clickWhenEnabled(selector) {
   const ready = await until(tab, `document.querySelector(${JSON.stringify(selector)})?.disabled === false`, Boolean);
   if (!ready.ok) return ready;
@@ -148,11 +135,10 @@ async function clickWhenEnabled(selector) {
   return { ok: true, value: true };
 }
 
-// Post-result repair (coordinator, 2026-10-16): a play or pause is scheduled, and the
-// moved controlsReady keeps both buttons disabled until the room reaches its instant.
-// The watcher samples every 10 ms from before the click: its first read after the flag
-// flips lands inside that lead, and its settled read comes one 250 ms tick plus margin
-// after the instant, so the renderer has run.
+// A play or pause is scheduled, and controlsReady keeps both buttons disabled until the
+// room reaches its instant. The watcher samples every 10 ms from before the click: its first
+// read after the flag flips lands inside that lead, and its settled read comes one 250 ms
+// tick plus margin after the instant, so the renderer has run.
 const SETTLE_MS = 300;
 const transitionWatcher = (playing) => `(() => {
   const watch = { first: null, settled: null };
@@ -262,7 +248,7 @@ async function runS2() {
   }
   await recordIdentity('S2 the media element is unchanged after pause', pauseStep);
 
-  // Post-result repair: wait for the scheduled play's instant, as S3 does.
+  // Wait for the scheduled play's instant, as S3 does.
   const playStep = await scheduledTransition('#play', true);
   await recordIdentity('S2 the media element is unchanged after play', playStep);
 

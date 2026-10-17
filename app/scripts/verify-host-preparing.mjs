@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket as CdpWebSocket } from 'ws';
 
-import { attach, cdpHttp, CHROME, disposeChrome, FLAGS, rewriteWebSocketDebuggerUrl, sleep, Tab } from './cdp.mjs';
+import { attach, cdpHttp, CHROME, clickElement, disposeChrome, FLAGS, rewriteWebSocketDebuggerUrl, sleep, Tab } from './cdp.mjs';
 import { createResultLog } from './browser-result-log.mjs';
 import { assertServedBundle, createManifestFile, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
@@ -171,20 +171,6 @@ async function setFileInput(page, filename) {
   const { nodeId } = await page.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#host-file' });
   if (!nodeId) throw new Error('host file input is missing');
   await page.send('DOM.setFileInputFiles', { nodeId, files: [filename] });
-}
-
-async function clickElement(page, selector) {
-  const box = await page.evaluate(`(() => {
-    const element = document.querySelector(${JSON.stringify(selector)});
-    if (!element) return null;
-    element.scrollIntoView({ block: 'center' });
-    const rect = element.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-  })()`);
-  if (!box) throw new Error(`${selector} is not on the page`);
-  for (const type of ['mousePressed', 'mouseReleased']) {
-    await page.send('Input.dispatchMouseEvent', { type, x: box.x, y: box.y, button: 'left', clickCount: 1 });
-  }
 }
 
 function row(index, status, detail = null) {

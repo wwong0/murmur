@@ -162,6 +162,21 @@ export class Tab {
   }
 }
 
+/** A trusted mouse click at the centre of `selector`, scrolled into view first. */
+export async function clickElement(tab, selector) {
+  const box = await tab.evaluate(`(() => {
+    const element = document.querySelector(${JSON.stringify(selector)});
+    if (!element) return null;
+    element.scrollIntoView({ block: 'center' });
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  })()`);
+  if (!box) throw new Error(`${selector} is not on the page`);
+  for (const type of ['mousePressed', 'mouseReleased']) {
+    await tab.send('Input.dispatchMouseEvent', { type, x: box.x, y: box.y, button: 'left', clickCount: 1 });
+  }
+}
+
 /**
  * Wait for the page target serving `url` and connect to it.
  *

@@ -265,7 +265,7 @@ async function installHostSide() {
     RTCPeerConnection,
     rtcConfig,
     origin: () => hostOrigin,
-    isActive: () => delivery === 'host' && client.role === 'host',
+    isActive: isHostSide,
     report: addSubscriberFailure,
   });
   onEnvelope('host-link-offer', 'host-link offer', hostAnswer.answerOffer);
@@ -421,6 +421,19 @@ const PREPARED_KEY_NAME = 'watchalong.prepared-key';
 const endLatch = createEndLatch();
 let lastEndPauseInstant = null;
 
+function isHostSide() {
+  return delivery === 'host' && client.role === 'host';
+}
+
+function ownStatus() {
+  return ownHostStatus({ mediaSource, hostFile: hostFile?.snapshot() ?? null });
+}
+
+// The preparing status this page acts on: its own as the host, the believed report otherwise.
+function hostStatusNow() {
+  return isHostSide() ? ownStatus() : hostStatusBook.current(client.roster);
+}
+
 // 11-2 D5: under `file` this is the host's only route into the room.
 function paintHostFile(snapshot) {
   const detail = snapshot.refusal?.message ?? snapshot.failure;
@@ -437,8 +450,8 @@ function paintHostFile(snapshot) {
 }
 
 function sendHostStatus(force) {
-  if (delivery !== 'host' || client.role !== 'host' || !client.isJoined) return;
-  const next = ownHostStatus({ mediaSource, hostFile: hostFile?.snapshot() ?? null });
+  if (!isHostSide() || !client.isJoined) return;
+  const next = ownStatus();
   const nowMs = pageNow();
   if (force || statusDue({ nowMs, last: lastStatusSent, next })) {
     client.send(buildHostStatusEnvelope(next));
@@ -448,10 +461,8 @@ function sendHostStatus(force) {
 }
 
 function paintHostStatus() {
-  const own = delivery === 'host' && client.role === 'host';
-  const status = own
-    ? ownHostStatus({ mediaSource, hostFile: hostFile?.snapshot() ?? null })
-    : hostStatusBook.current(client.roster);
+  const own = isHostSide();
+  const status = hostStatusNow();
   const counts = hostStatusBook.counts();
   view.set('hostStatus', {
     state: status.state,
@@ -548,7 +559,7 @@ client.onEvent('gap', ({ expected, actual }) => {
 client.on('presence', (env) => {
   const body = readBody(env);
   // A member can relay an envelope typed `presence`; only the server's closes peers (7a d1-findings D1-1).
-  if (env.from === ADDR_SERVER && delivery === 'host' && client.role === 'host') hostAnswer?.closeDeparted(body.roster);
+  if (env.from === ADDR_SERVER && isHostSide()) hostAnswer?.closeDeparted(body.roster);
   if (env.from === ADDR_SERVER && body.event === 'join' && body.member?.clientId !== client.clientId) sendHostStatus(true);
   addNotice(`presence: ${body.event} — ${body.member?.tabId ?? body.member?.clientId}`);
   renderRoster(body.roster);
@@ -611,11 +622,9 @@ const acquisition = createPlaybackAcquisition({
   },
   mintLineage: newReclaimSecret,
   onOutcome: ({ env, outcome }) => {
-    const ownEndPauseRejection = outcome !== 'applied'
-      && env.from === client.clientId
-      && env.payload?.kind === 'pause'
-      && env.payload?.atSharedMs === lastEndPauseInstant;
-    if (outcome !== 'applied' && !ownEndPauseRejection && env.from === client.clientId) {
+    // D7: this member's end pause may be rejected as stale or by the control mode; no notice.
+    const ownEndPause = env.payload?.kind === 'pause' && env.payload?.atSharedMs === lastEndPauseInstant;
+    if (outcome !== 'applied' && env.from === client.clientId && !ownEndPause) {
       addNotice(`your ${env.payload?.kind ?? 'operation'} was rejected: ${outcome}`, { warn: true });
     }
     renderControls();
@@ -765,10 +774,18 @@ function controlsReady(kind) {
     && acquisition.permitted(kind);
 }
 
+// The title's end, as the playlist gives it; null until the last segment is known.
+function titleEndMs() {
+  return player.lastSegment()?.mediaEndMs ?? null;
+}
+
+function titleEnded() {
+  return isEnded(acquisition.state, titleEndMs());
+}
+
 function renderControls() {
   const state = acquisition.state;
-  const durationMs = player.lastSegment()?.mediaEndMs ?? null;
-  const ended = isEnded(state, durationMs);
+  const ended = titleEnded();
   const preparing = hostPreparingNow();
   const ready = (kind) => controlsReady(kind);
   const controls = {
@@ -796,8 +813,7 @@ function formatTime(mediaMs) {
 }
 
 function renderBar() {
-  const state = acquisition.state;
-  const durationMs = player.lastSegment()?.mediaEndMs ?? null;
+  const durationMs = titleEndMs();
   const nowSharedMs = clockSync.sharedNow();
   const mappedMs = Number.isFinite(nowSharedMs) ? timeline.mediaMsAt(nowSharedMs) : null;
   const positionMs = Number.isFinite(mappedMs)
@@ -807,7 +823,7 @@ function renderBar() {
   const nowPageMs = pageNow();
   if (lastPointerMoveAt === null) lastPointerMoveAt = nowPageMs;
   const faded = playing && nowPageMs - lastPointerMoveAt >= FADE_AFTER_MS;
-  const ended = isEnded(state, durationMs);
+  const ended = titleEnded();
   const preparing = hostPreparingNow();
   const controllerState = controllerView();
   view.set('bar', {
@@ -867,13 +883,7 @@ function joinRoom(text) {
 const actions = {
   host: hostRoom,
   join: joinRoom,
-  play: () => {
-    const state = acquisition.state;
-    const durationMs = player.lastSegment()?.mediaEndMs ?? null;
-    return isEnded(state, durationMs)
-      ? issue('seek', { positionMs: 0 })
-      : issue('play');
-  },
+  play: () => (titleEnded() ? issue('seek', { positionMs: 0 }) : issue('play')),
   pause: () => issue('pause'),
   back10: () => seekBy(-10_000),
   forward10: () => seekBy(10_000),
@@ -1202,19 +1212,11 @@ function schedulePollStart(delayMs) {
 }
 
 function titleReady() {
-  if (delivery !== 'host') return true;
-  const status = client.role === 'host'
-    ? ownHostStatus({ mediaSource, hostFile: hostFile?.snapshot() ?? null })
-    : hostStatusBook.current(client.roster);
-  return status.state === 'ready';
+  return delivery !== 'host' || hostStatusNow().state === 'ready';
 }
 
 function hostPreparingNow() {
-  if (delivery !== 'host') return false;
-  const status = client.role === 'host'
-    ? ownHostStatus({ mediaSource, hostFile: hostFile?.snapshot() ?? null })
-    : hostStatusBook.current(client.roster);
-  return status.state === 'preparing';
+  return delivery === 'host' && hostStatusNow().state === 'preparing';
 }
 
 function pollStart() {
@@ -1306,7 +1308,7 @@ function tickPlayback() {
     ['title-end', () => {
       const state = acquisition.state;
       // D7, joint D1 F1: the element's own end, or it parks short of it and never ends.
-      const durationMs = endPauseMs(player.lastSegment()?.mediaEndMs ?? null, video.duration);
+      const durationMs = endPauseMs(titleEndMs(), video.duration);
       const instant = endInstant(state, durationMs);
       const nowSharedMs = clockSync.sharedNow();
       if (instant === null || !Number.isFinite(nowSharedMs) || nowSharedMs < instant

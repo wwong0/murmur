@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 
-import { attach, cdpHttp, CHROME, disposeChrome, FLAGS, sleep } from './cdp.mjs';
+import { attach, cdpHttp, CHROME, clickElement, disposeChrome, FLAGS, sleep } from './cdp.mjs';
 import { createResultLog } from './browser-result-log.mjs';
 import { assertServedBundle, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
@@ -110,20 +110,6 @@ async function poll(readValue, done, timeoutMs = WAIT_MS) {
 
 async function until(tab, expression, done, timeoutMs = WAIT_MS) {
   return poll(() => read(tab, expression), done, timeoutMs);
-}
-
-async function clickElement(tab, selector) {
-  const box = await read(tab, `(() => {
-    const element = document.querySelector(${JSON.stringify(selector)});
-    if (!element) return null;
-    element.scrollIntoView({ block: 'center' });
-    const rect = element.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-  })()`);
-  if (!box) throw new Error(`${selector} is not on the page`);
-  for (const type of ['mousePressed', 'mouseReleased']) {
-    await tab.send('Input.dispatchMouseEvent', { type, x: box.x, y: box.y, button: 'left', clickCount: 1 });
-  }
 }
 
 async function clickWhenEnabled(tab, selector, timeoutMs = WAIT_MS) {

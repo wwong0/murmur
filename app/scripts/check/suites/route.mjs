@@ -1,6 +1,7 @@
 import { assert, assertEqual, check } from '../harness.mjs';
 import { bundleProductEntry, runEntry } from '../entry-harness.mjs';
 import { joinTarget, readRoute } from '../../../public/lib/route.mjs';
+import { createRoomClient } from '../../../public/lib/room-client.mjs';
 
 export default async function routeSuite() {
   const product = await bundleProductEntry();
@@ -69,5 +70,14 @@ export default async function routeSuite() {
     assertEqual(typeof probeClient?.echo, 'function', 'the probe client has echo');
     await probeClient.echo(250);
     assertEqual(page.count('echo'), 1, 'the echo reaches the room client');
+  });
+
+  // Joint D1 F12: the wrapper restates the client by hand, which is how `echo` once went missing.
+  await check('R8 route: the lazy wrapper restates every member of the room client', async () => {
+    const page = runEntry(product.code, { search: '?room=demo&role=viewer&tab=t' });
+    await page.settled();
+    const surface = (object) => JSON.stringify(Object.getOwnPropertyNames(object).sort());
+    const real = createRoomClient({ url: 'ws://127.0.0.1:9/ws', room: 'r', tabId: 't', role: 'viewer', WebSocketImpl: class {} });
+    assertEqual(surface(page.harness.probeClient), surface(real), 'wrapper and client members');
   });
 }

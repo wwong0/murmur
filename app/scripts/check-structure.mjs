@@ -1,6 +1,6 @@
 // scripts/check-structure.mjs
 //
-// Build-time structural linter. Enforces five rules that keep the app's
+// Build-time structural linter. Enforces the rules that keep the app's
 // architecture honest without a real parser — deliberately dumb regex/
 // substring scans over the source tree, so this file stays auditable no
 // matter how many changes land on top of it. Run via `npm run build` /
@@ -8,7 +8,7 @@
 // found (not just the first) if anything trips, exits 0 with a short
 // summary otherwise.
 //
-// The five rules (see PLAN.md / CLAUDE.md for the "why"):
+// The rules (see PLAN.md / CLAUDE.md for the "why"):
 //   1. No non-empty inline <script> in app/public/**/*.html — pages are
 //      shells, all behaviour lives in bundled modules.
 //   1b. Each page has one bundled script and at most one bundled stylesheet.
@@ -148,15 +148,11 @@ function checkDomFile(file) {
   const text = fs.readFileSync(file, 'utf8');
   const lines = text.split('\n');
   lines.forEach((line, idx) => {
-    if (DOM_ACCESS_RE.test(line)) {
-      const inLib = file.startsWith(`${LIB_DIR}${path.sep}`);
-      const allowed = file === ENTRY_FILE || file.startsWith(`${ROOM_DIR}${path.sep}`);
-      if (!inLib && !allowed) {
-        addViolation(file, idx + 1, line, 'rule 2: DOM access outside the entry and the component tree (public/room.entry.js, public/room/**)');
-        return;
-      }
-      if (!inLib) return;
+    if (!DOM_ACCESS_RE.test(line)) return;
+    if (file.startsWith(`${LIB_DIR}${path.sep}`)) {
       addViolation(file, idx + 1, line, 'rule 2: DOM access (document./location./window.) is forbidden under public/lib/** — modules must take config as arguments');
+    } else if (file !== ENTRY_FILE && !file.startsWith(`${ROOM_DIR}${path.sep}`)) {
+      addViolation(file, idx + 1, line, 'rule 2: DOM access outside the entry and the component tree (public/room.entry.js, public/room/**)');
     }
   });
 }
