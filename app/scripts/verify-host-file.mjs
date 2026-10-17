@@ -78,6 +78,14 @@ const snapshotExpression = (from) => `(() => {
   const quality = video?.getVideoPlaybackQuality?.();
   return {
     present: true, buildId: app.buildId, hostFile: app.hostFile(), hostLink: app.hostLink(), playbackState: app.playbackState(),
+    hostPreparing: (() => {
+      const element = document.querySelector('#host-preparing');
+      if (!element) return null;
+      const fraction = element.dataset.fraction;
+      return { state: element.dataset.state ?? null, fraction: fraction === '' || fraction === undefined ? null : Number(fraction) };
+    })(),
+    roster: [...document.querySelectorAll('#roster li')].map((li) => li.textContent),
+    playDisabled: document.querySelector('#play')?.disabled ?? null,
     notices: [...document.querySelectorAll('#notices li')].map((li) => li.textContent),
     videoError: video?.error ? { code: video.error.code } : null,
     quality: quality ? { corruptedVideoFrames: quality.corruptedVideoFrames, totalVideoFrames: quality.totalVideoFrames } : null,
@@ -360,7 +368,11 @@ async function runPass(options) {
       await sleep(5_000);
       const hostNow = await read(host);
       const viewerNow = await read(viewer);
-      return s1({ host: hostNow.hostFile, viewer: linkOf(viewerNow), counters: (await getJson('/harness/counters')).counters });
+      return s1({
+        host: hostNow.hostFile,
+        viewer: { roster: viewerNow.roster, hostPreparing: viewerNow.hostPreparing, playDisabled: viewerNow.playDisabled, requestsByPath: viewerNow.hostLink?.requestsByPath },
+        counters: (await getJson('/harness/counters')).counters,
+      });
     });
 
     let prepared = null;
@@ -605,7 +617,7 @@ async function runPass(options) {
       return s10({ key, h2: { state: h2Start.hostFile?.state, swept: h2Start.hostFile?.swept, beforeListing: tabListing, listing: h2Listing }, h3: { state: h3Start.hostFile?.state, swept: h3Start.hostFile?.swept, prepared: await listPrepared(h3) } });
     });
 
-    await step('S11', 'a refused file leaves the host out', async () => {
+    await step('S11', 'a refused file leaves the title unready', async () => {
       if (!passed(r10)) return s11({ precondition: false });
       const room3 = new URL(await h3.tab.evaluate('location.href')).searchParams.get('room');
       const v2 = await open('v2', 'viewer', room3);
@@ -613,7 +625,12 @@ async function runPass(options) {
       await setFileInput(h3, REFUSED_FIXTURE);
       const refused = await until(h3, (value) => ['refused', 'failed', 'ready'].includes(value.hostFile?.state), 30_000);
       await sleep(5_000);
-      return s11({ host: refused.hostFile, viewer: linkOf(await read(v2)), prepared: await listPrepared(h3) });
+      const refusedViewer = await read(v2);
+      return s11({
+        host: refused.hostFile,
+        viewer: { roster: refusedViewer.roster, hostPreparing: refusedViewer.hostPreparing, playDisabled: refusedViewer.playDisabled, requestsByPath: refusedViewer.hostLink?.requestsByPath },
+        prepared: await listPrepared(h3),
+      });
     });
 
     if (options.wiringRefusals) {

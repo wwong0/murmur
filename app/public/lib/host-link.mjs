@@ -50,7 +50,7 @@ function reportStats(stats) {
 /**
  * @param {{client: object, RTCPeerConnection: Function, rtcConfig?: object, clock?: object, onChange?: Function, urgency?: (path: string) => boolean|string}} config
  */
-export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, clock, onChange, wallNow = () => Date.now(), receiptCapacity = 4096, urgency = null } = {}) {
+export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, clock, onChange, wallNow = () => Date.now(), receiptCapacity = 4096, urgency = null, hostPreparing = () => false } = {}) {
   if (!client || typeof client.on !== 'function' || typeof client.onEvent !== 'function') throw new TypeError('createHostLink: client is required');
   if (typeof RTCPeerConnection !== 'function') throw new TypeError('createHostLink: RTCPeerConnection is required');
   if (typeof wallNow !== 'function') throw new TypeError('createHostLink: wallNow must be a function');
@@ -375,6 +375,10 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
     },
     request({ path, range = null, handlers = {} }) {
       const onError = typeof handlers.onError === 'function' ? handlers.onError : () => {};
+      if (hostPreparing() === true) {
+        queueMicrotask(() => onError(0));
+        return { abort() {} };
+      }
       if (state.state !== 'open' || !channel || channel.readyState !== 'open') {
         queueMicrotask(() => onError(0));
         return { abort() {} };

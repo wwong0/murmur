@@ -105,7 +105,7 @@ function PlayerBar({ view, actions }) {
   useLayoutEffect(() => {
     const seek = seekRef.current;
     if (seek) {
-      seek.disabled = bar.durationMs === null;
+      seek.disabled = bar.durationMs === null || bar.preparing;
       seek.max = String(bar.durationMs ?? 0);
       seek.value = String(bar.positionMs);
     }
@@ -143,6 +143,7 @@ function PlayerBar({ view, actions }) {
 function Connection({ view, actions }) {
   const hostFile = useView(view, (snapshot) => snapshot.hostFile);
   const status = useView(view, (snapshot) => snapshot.status);
+  const hostStatus = useView(view, (snapshot) => snapshot.hostStatus);
   const overlayVisible = useView(view, (snapshot) => snapshot.overlayVisible);
   const help = hostFile.help;
   const notice = hostFile.notice;
@@ -158,6 +159,16 @@ function Connection({ view, actions }) {
     </> : null}
     <div id="keyframe-notice">{notice ? `${notice.text}: ${notice.command}` : ''}</div>
     <div id="status-line">{status}</div>
+    <div
+      id="host-preparing"
+      data-state={hostStatus.state}
+      data-fraction={hostStatus.fraction ?? ''}
+      data-received={hostStatus.received}
+      data-last-at={hostStatus.lastAtMs ?? ''}
+      data-disbelieved={hostStatus.disbelieved}
+    >
+      {hostStatus.state === 'preparing' ? `the host is preparing the video · ${Math.floor(hostStatus.fraction * 100)} %` : ''}
+    </div>
     <div id="overlay" hidden={!overlayVisible}>
       <OverlayLine view={view} id="clock-line" name="clock" />
       <OverlayLine view={view} id="drift-line" name="drift" />

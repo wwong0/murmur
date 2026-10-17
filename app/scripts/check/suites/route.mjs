@@ -60,4 +60,14 @@ export default async function routeSuite() {
     assertEqual(page.app.room, 'demo', 'the invite supplies the room');
     assertEqual(page.count('connect'), 1, 'an invited room connects at load');
   });
+
+  // The fakes replace the clock, so this is the only read of the probe's route (11b-2 R1).
+  await check('R7 route: the clock probe reaches the room client through the lazy wrapper', async () => {
+    const page = runEntry(product.code, { search: '?room=demo&role=viewer&tab=t' });
+    await page.settled();
+    const probeClient = page.harness.probeClient;
+    assertEqual(typeof probeClient?.echo, 'function', 'the probe client has echo');
+    await probeClient.echo(250);
+    assertEqual(page.count('echo'), 1, 'the echo reaches the room client');
+  });
 }

@@ -205,8 +205,12 @@ import fileIdentitySuite from './check/suites/file-identity.mjs';
 import remuxRunnerSuite from './check/suites/remux-runner.mjs';
 import preparedStoreSuite from './check/suites/prepared-store.mjs';
 import prepareRunnerSuite from './check/suites/prepare-runner.mjs';
+import preparationProgressSuite from './check/suites/preparation-progress.mjs';
+import hostStatusSuite from './check/suites/host-status.mjs';
 import hostFileSourceSuite from './check/suites/host-file-source.mjs';
 import hostFileEntrySuite from './check/suites/host-file-entry.mjs';
+import hostPreparingEntrySuite from './check/suites/host-preparing-entry.mjs';
+import hostTitleGateSuite from './check/suites/host-title-gate.mjs';
 import hostFileStepsSuite from './check/suites/host-file-steps.mjs';
 import browserCheckListSuite from './check/suites/browser-check-list.mjs';
 import browserResultLogSuite from './check/suites/browser-result-log.mjs';
@@ -397,8 +401,12 @@ for (const suite of [
   remuxRunnerSuite,
   preparedStoreSuite,
   prepareRunnerSuite,
+  preparationProgressSuite,
+  hostStatusSuite,
   hostFileSourceSuite,
   hostFileEntrySuite,
+  hostPreparingEntrySuite,
+  hostTitleGateSuite,
   hostFileStepsSuite,
   browserCheckListSuite,
   browserResultLogSuite,

@@ -7,7 +7,7 @@ import { startOriginMonitor, stopOriginMonitor } from './runner/origin-monitor.m
 import { recomputeRunDirectory } from './harness-figures.mjs';
 import { isPublishedFigure } from './figures/publication.mjs';
 import { attachClockJoinRecorder, attachPresenceRecorder, attachTabTakenDetector, boundaryExpression, createRequestRecorder, installStallRecorder } from './harness/cdp-records.mjs';
-import { urlsForDelivery } from './harness/topology.mjs';
+import { ORIGIN_HOST_URL, urlsForDelivery } from './harness/topology.mjs';
 import { maybeInjectDisturbance } from './harness/disturbance.mjs';
 import {
   beginLinkQualification as defaultBeginLinkQualification, finishLinkQualification as defaultFinishLinkQualification,
@@ -560,6 +560,13 @@ async function disposeSession(session) {
   if (session.dispose) await session.dispose();
 }
 
+// D8: the machine-side origins whose /app-settings the pin reads. Under host delivery the
+// host page's URL is the origin container's own address, unreachable from here (11b-2 H).
+export function autoStartPinOrigins(topology, delivery) {
+  const pageOrigin = delivery === 'host' ? ORIGIN_HOST_URL : topology.hostPageUrl;
+  return [...new Set([topology.countersUrl, pageOrigin].filter((origin) => typeof origin === 'string' && origin.length > 0))];
+}
+
 export async function runHarness({ conditionName, condition = conditionForName(conditionName), runDir = null, originUrl, clientOriginUrl = originUrl, hostPageUrl = clientOriginUrl, topology = section3Topology(), clientFactory = noClientFactory, establishCadence = defaultEstablishCadence, qualifyCdpBytes = defaultQualifyCdpBytes, beginLinkQualification = defaultBeginLinkQualification, finishLinkQualification = defaultFinishLinkQualification, pinAutoStart = false } = {}) {
   validateCondition(condition, conditionName ?? condition.name);
   const arm = armFor(condition);
@@ -614,7 +621,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     manifestFile.set(mergeVerifiedContext(manifestFile.get(), preparedTopology));
     manifestFile.write();
     if (pinAutoStart) {
-      const origins = [...new Set([preparedTopology.countersUrl, preparedTopology.hostPageUrl].filter((origin) => typeof origin === 'string' && origin.length > 0))];
+      const origins = autoStartPinOrigins(preparedTopology, condition.delivery);
       if (origins.length === 0) throw new Error('harness topology gave no room-server origin for auto-start pin');
       for (const origin of origins) await requireAutoStart(origin);
       manifestFile.merge({ autoStart: true });

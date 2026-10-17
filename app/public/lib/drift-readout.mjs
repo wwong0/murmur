@@ -13,6 +13,7 @@ import { REFUSAL_REASONS } from './frame-drift.mjs';
 import {
   MISSING_CLOCK,
   MISSING_HOST_LINK,
+  MISSING_HOST_TITLE,
   MISSING_STATE,
   WAITING_HELD,
   WAITING_PAUSED,
@@ -52,7 +53,7 @@ export const DRIFT_LINE_RE =
   /^drift: [+-]\d+\.\d+ms · rolling window over the last (\d+) frames: median [+-]\d+\.\d+ms, p99 [+-]\d+\.\d+ms$/;
 
 const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const MISSING_RE = [MISSING_CLOCK, MISSING_STATE, MISSING_HOST_LINK].map(escapeRegex).join('|');
+const MISSING_RE = [MISSING_CLOCK, MISSING_STATE, MISSING_HOST_LINK, MISSING_HOST_TITLE].map(escapeRegex).join('|');
 // The text notPlayingReason renders for WAITING_PAUSED, WAITING_PREPARING and
 // WAITING_REFUSED; the drift suite renders each one against this.
 const WAITING_RE = [

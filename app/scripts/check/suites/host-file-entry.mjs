@@ -42,10 +42,10 @@ function hostPage(code, { mediaSource = 'file', search = '?room=r&role=host&tab=
 export default async function hostFileEntrySuite() {
   const product = await bundleProductEntry();
 
-  await check('host-file-entry: a file host waits for a choice before joining', async () => {
+  await check('host-file-entry: a file host joins at once and awaits a choice', async () => {
     const page = hostPage(product.code);
     await drain();
-    assertEqual(page.count('connect'), 0, 'file host does not connect before a ready title');
+    assertEqual(page.count('connect'), 1, 'file host connects before a ready title');
     assertEqual(page.app.hostFile().state, 'awaiting-file', 'file host awaits a choice');
   });
 
@@ -70,14 +70,14 @@ export default async function hostFileEntrySuite() {
     assert(page.notices().some((text) => text.includes('invalid application settings')), 'invalid settings are noticed');
   });
 
-  await check('host-file-entry: a worker refusal stays out of the room', async () => {
+  await check('host-file-entry: a worker refusal keeps the host in the room', async () => {
     const page = hostPage(product.code);
     await drain();
     page.chooseHostFile(new Blob([Uint8Array.from([1, 2, 3])]));
     await drain();
     assertEqual(page.app.hostFile().state, 'refused', 'worker refusal is published');
     assertEqual(page.app.hostFile().refusal.reason, 'video-codec', 'worker refusal reason is preserved');
-    assertEqual(page.count('connect'), 0, 'worker refusal does not connect');
+    assertEqual(page.count('connect'), 1, 'worker refusal stays connected');
   });
 
   await check('host-file-entry: choosing before the input opens does nothing', async () => {

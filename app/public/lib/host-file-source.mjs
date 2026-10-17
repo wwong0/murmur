@@ -10,11 +10,11 @@ function manifestOf(result) {
 
 // The one shape __app.hostFile() reports, whether or not this page has a source.
 export function hostFileSnapshot({
-  mediaSource, targetSegmentSeconds, state = 'off', origin = null, key = null, manifest = null, refusal = null,
+  mediaSource, targetSegmentSeconds, state = 'off', fraction = null, origin = null, key = null, manifest = null, refusal = null,
   failure = null, storage = null, swept = null, workerCalls = { inspect: 0, prepare: 0 }, workerBuildId = null,
 }) {
   return {
-    mediaSource, targetSegmentSeconds, state, origin, key, manifest,
+    mediaSource, targetSegmentSeconds, state, fraction, origin, key, manifest,
     refusal, failure, storage, swept, workerCalls,
     workerBuildId, cleanup: 'next-host-page-start',
   };
@@ -26,6 +26,7 @@ function storageOf(estimateValue) {
 
 export function createHostFileSource({ store, locks, memory, client, isTypeSupported, estimate, targetSeconds, onChange }) {
   let state = 'starting';
+  let fraction = null;
   let origin = null;
   let key = null;
   let manifest = null;
@@ -39,13 +40,15 @@ export function createHostFileSource({ store, locks, memory, client, isTypeSuppo
 
   function snapshot() {
     return hostFileSnapshot({
-      mediaSource: 'file', targetSegmentSeconds: targetSeconds, state, origin, key, manifest,
+      mediaSource: 'file', targetSegmentSeconds: targetSeconds, state, fraction, origin, key, manifest,
       refusal, failure, storage, swept, workerCalls: { ...workerCalls }, workerBuildId: client.buildId(),
     });
   }
 
   function publish(next) {
     state = next;
+    if (next === 'preparing') fraction = 0;
+    if (next === 'ready' || next === 'refused' || next === 'failed') fraction = null;
     onChange(snapshot());
   }
 
@@ -59,12 +62,14 @@ export function createHostFileSource({ store, locks, memory, client, isTypeSuppo
     release();
     key = null;
     failure = message;
+    fraction = null;
     publish('failed');
   }
 
   function refuse(next) {
     release();
     refusal = next;
+    fraction = null;
     publish('refused');
   }
 
@@ -103,6 +108,7 @@ export function createHostFileSource({ store, locks, memory, client, isTypeSuppo
     if (!['awaiting-file', 'refused', 'failed'].includes(state)) return;
     refusal = null;
     failure = null;
+    fraction = null;
     origin = null;
     key = null;
     manifest = null;
@@ -143,7 +149,14 @@ export function createHostFileSource({ store, locks, memory, client, isTypeSuppo
       }
       publish('preparing');
       workerCalls.prepare += 1;
-      const prepared = await client.prepare(file, key, targetSeconds);
+      const prepared = await client.prepare(file, key, targetSeconds, (report) => {
+        if (state !== 'preparing' || !(report.totalBytes > 0)) return;
+        const next = Math.min(1, Math.max(0, report.doneBytes / report.totalBytes));
+        if (next > fraction) {
+          fraction = next;
+          onChange(snapshot());
+        }
+      });
       if (prepared.t === 'refused') {
         refuse({ reason: prepared.reason, message: prepared.message });
         return;

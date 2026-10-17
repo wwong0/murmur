@@ -229,6 +229,7 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     clock: { offsetMs: null, halfWidthMs: null, sampleCount: 0, counters: { reanchors: 0 } },
     sharedNowMs: null,
     clientId: null,
+    isJoined: false,
     role,
     roster: [],
     clientEvents: new Map(),
@@ -329,6 +330,13 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     sent: () => events.filter((event) => event.kind === 'send').map((event) => event.detail),
     /** A room-client event (`joined`, …) as the fake client's subscribers receive it. */
     emit(type, value) {
+      if (type === 'joined') {
+        harness.clientId = value.clientId ?? harness.clientId;
+        harness.role = value.role ?? harness.role;
+        harness.roster = value.roster ?? harness.roster;
+        harness.isJoined = true;
+      }
+      if (type === 'presence' && value?.payload?.roster) harness.roster = value.payload.roster;
       for (const fn of harness.clientEvents.get(type) ?? []) fn(value);
     },
     emitFinished() {
@@ -336,7 +344,10 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     },
     /** A room-scoped envelope delivered to the fake client's `on(type)` subscribers. */
     deliver(env) {
-      for (const fn of harness.clientHandlers.get(env.type) ?? []) fn(env);
+      // A real websocket client receives JSON parsed in the page realm. Clone
+      // here so exact plain-object checks see that same realm's prototype.
+      const delivered = vm.runInContext(`JSON.parse(${JSON.stringify(JSON.stringify(env))})`, context);
+      for (const fn of harness.clientHandlers.get(delivered.type) ?? []) fn(delivered);
     },
     /** Resolves the real acquisition as a sole host whose own creation echo arrives. */
     resolveSole({ clientId = 'c1', nowMs = 10_000 } = {}) {

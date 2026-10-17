@@ -72,15 +72,28 @@ function fragmentTrack({ track, range, data }, video) {
 
 // Exported so a check can hand it a wrong plan; prepare is the only product caller. A
 // segment may carry its own video sample range as videoFrom and videoTo.
-export async function writePlanned({ index, segments, audioRanges, source, sink }) {
+export async function writePlanned({ index, segments, audioRanges, source, sink, onProgress = null }) {
   const computed = segments.some((segment) => segment.videoFrom === undefined) ? videoRanges(index.video, segments) : null;
+  const ranges = segments.map((segment, i) => ({
+    video: computed ? computed[i] : { from: segment.videoFrom, to: segment.videoTo },
+    audio: index.audio && audioRanges?.[i] ? audioRanges[i] : null,
+  }));
+  const totalBytes = ranges.reduce((total, { video, audio }) => {
+    const trackBytes = (track, range) => track && range
+      ? Array.from(track.sizes.subarray(range.from, range.to)).reduce((sum, size) => sum + size, 0)
+      : 0;
+    return total + trackBytes(index.video, video) + trackBytes(index.audio, audio);
+  }, 0);
+  let doneBytes = 0;
   const sizes = [];
-  for (const [i, segment] of segments.entries()) {
-    const video = segmentPart(index.video, computed ? computed[i] : { from: segment.videoFrom, to: segment.videoTo });
-    const audio = index.audio && audioRanges?.[i] ? segmentPart(index.audio, audioRanges[i]) : null;
+  for (const [i, range] of ranges.entries()) {
+    const video = segmentPart(index.video, range.video);
+    const audio = index.audio && range.audio ? segmentPart(index.audio, range.audio) : null;
     await readSegmentBytes(source, audio ? [video, audio] : [video]);
     const bytes = writeFragment({ sequence: i + 1, video: fragmentTrack(video, true), audio: audio ? fragmentTrack(audio, false) : null });
     await sink.write(segmentName(i), bytes);
+    doneBytes += video.data.length + (audio?.data.length ?? 0);
+    onProgress?.({ doneBytes, totalBytes });
     sizes.push(bytes.length);
   }
   return sizes;
@@ -89,7 +102,7 @@ export async function writePlanned({ index, segments, audioRanges, source, sink 
 // The order is the contract: a bad target throws before any read, a refusal before any
 // write, and the manifest is written last because change 11-2 reads its presence as
 // "complete".
-export async function prepare({ source, sink, targetSeconds = DEFAULT_TARGET_SEGMENT_SECONDS }) {
+export async function prepare({ source, sink, targetSeconds = DEFAULT_TARGET_SEGMENT_SECONDS, onProgress = null }) {
   const targetMs = targetMillis(targetSeconds);
   const index = await readSourceIndex(source);
   const { video } = index;
@@ -101,7 +114,7 @@ export async function prepare({ source, sink, targetSeconds = DEFAULT_TARGET_SEG
   const audioRanges = index.audio ? assignAudio({ segments, video, audio: index.audio }) : [];
   const identity = await fileIdentity(source);
   await sink.write('init.mp4', writeInitSegment(index));
-  const segmentSizes = await writePlanned({ index, segments, audioRanges, source, sink });
+  const segmentSizes = await writePlanned({ index, segments, audioRanges, source, sink, onProgress });
   await sink.write('master.m3u8', new TextEncoder().encode(writePlaylist(segments, video.timescale)));
   const manifestText = writeManifest({ index, segments, segmentSizes, targetSeconds, identity, sourceBytes: source.size });
   await sink.write('content-manifest.json', new TextEncoder().encode(manifestText));

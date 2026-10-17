@@ -27,7 +27,7 @@ export default async function syncDotSuite() {
 
   await check('D5 sync-dot: a non-finite estimate is idle', async () => {
     assertEqual(syncDot({ playing: true, mode: 'settled', estimateMs: Number.NaN }).state, 'idle', 'missing estimate');
-    assertEqual(syncDot({ playing: true, mode: 'settled', estimateMs: 12 }).title, '+12.0ms', 'finite title');
+    assertEqual(syncDot({ playing: true, mode: 'settled', estimateMs: 12 }).title, '+12.0 ms', 'finite title');
   });
 
   const product = await bundleProductEntry();

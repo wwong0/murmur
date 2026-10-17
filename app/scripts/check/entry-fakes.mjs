@@ -22,11 +22,13 @@ export function createRoomClient() {
     get clientId() { return harness().clientId; },
     get role() { return harness().role; },
     get roster() { return harness().roster; },
+    get isJoined() { return harness().isJoined; },
     onEvent(type, fn) { return subscribe(harness().clientEvents, type, fn); },
     on(type, fn) { return subscribe(harness().clientHandlers, type, fn); },
     send(envelope) { harness().log('send', envelope); },
     request: () => new Promise(() => {}),
     connect() { harness().log('connect'); },
+    echo(timeoutMs) { harness().log('echo', timeoutMs); return Promise.resolve(null); },
   };
 }
 
@@ -34,7 +36,8 @@ export function createClockSync() {
   return { start() {}, read: () => harness().clock, sharedNow: () => harness().sharedNowMs };
 }
 
-export function websocketProbe() {
+export function websocketProbe(roomClient) {
+  harness().probeClient = roomClient;
   return () => {};
 }
 

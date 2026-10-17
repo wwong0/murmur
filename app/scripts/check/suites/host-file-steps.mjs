@@ -55,10 +55,17 @@ export default async function hostFileStepsSuite() {
     ['worker id', { ...clone(s0Good), workerBuildId: 'old-worker' }],
   ]);
 
-  const s1Good = { host: { state: 'awaiting-file' }, viewer: { state: 'absent' }, counters: baseCounters() };
+  const s1Good = {
+    host: { state: 'awaiting-file' },
+    viewer: { roster: ['viewer · viewer · v1', 'host · host · h1'], hostPreparing: { state: 'preparing', fraction: 0 }, playDisabled: true, requestsByPath: {} },
+    counters: baseCounters(),
+  };
   await verdictCases('S1', s1, s1Good, [
     ['host state', { ...clone(s1Good), host: { state: 'ready' } }],
-    ['viewer state', { ...clone(s1Good), viewer: { state: 'open' } }],
+    ['roster', { ...clone(s1Good), viewer: { ...s1Good.viewer, roster: ['viewer · viewer · v1'] } }],
+    ['host preparing', { ...clone(s1Good), viewer: { ...s1Good.viewer, hostPreparing: { state: 'ready', fraction: null } } }],
+    ['play disabled', { ...clone(s1Good), viewer: { ...s1Good.viewer, playDisabled: false } }],
+    ['requests', { ...clone(s1Good), viewer: { ...s1Good.viewer, requestsByPath: { '/media/master.m3u8': 1 } } }],
     ['media record', { ...clone(s1Good), counters: baseCounters([{ urlPath: '/media/init.mp4' }]) }],
   ]);
 
@@ -187,12 +194,19 @@ export default async function hostFileStepsSuite() {
     ['removed listing', { ...clone(s10Good), h3: { ...s10Good.h3, prepared: ['k'] } }],
   ]);
 
-  const refusal = { host: { refusal: { reason: 'video-codec', message: 'video-codec: found mp4v.20.1' }, }, viewer: { state: 'absent' }, prepared: [] };
+  const refusal = {
+    host: { refusal: { reason: 'video-codec', message: 'video-codec: found mp4v.20.1' } },
+    viewer: { roster: ['viewer · viewer · v2', 'host · host · h2'], hostPreparing: { state: 'preparing', fraction: 0 }, playDisabled: true, requestsByPath: {} },
+    prepared: [],
+  };
   await verdictCases('S11', s11, refusal, [
     ['reason', { ...clone(refusal), host: { refusal: { ...refusal.host.refusal, reason: 'storage' } } }],
     ['codec', { ...clone(refusal), host: { refusal: { ...refusal.host.refusal, message: 'video-codec' } } }],
     ['prepared', { ...clone(refusal), prepared: listing() }],
-    ['viewer', { ...clone(refusal), viewer: { state: 'open' } }],
+    ['roster', { ...clone(refusal), viewer: { ...refusal.viewer, roster: ['viewer · viewer · v2'] } }],
+    ['host preparing', { ...clone(refusal), viewer: { ...refusal.viewer, hostPreparing: { state: 'ready', fraction: null } } }],
+    ['play disabled', { ...clone(refusal), viewer: { ...refusal.viewer, playDisabled: false } }],
+    ['requests', { ...clone(refusal), viewer: { ...refusal.viewer, requestsByPath: { '/media/master.m3u8': 1 } } }],
   ]);
   const s12Good = { host: { refusal: { reason: 'codec-unplayable', message: 'codec-unplayable: browser cannot play avc1.640028' } }, reference: { videoCodec: 'avc1.640028' }, prepared: [] };
   await verdictCases('S12', s12, s12Good, [

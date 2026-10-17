@@ -10,7 +10,8 @@
 
 import { createRoomClient } from './lib/room-client.mjs';
 import {
-  ADDR_SERVER, TYPE_AHEAD, buildAheadEnvelope, newReclaimSecret, readAheadReport, readBody,
+  ADDR_SERVER, TYPE_AHEAD, TYPE_HOST_STATUS, buildAheadEnvelope, buildHostStatusEnvelope,
+  newReclaimSecret, readAheadReport, readBody, readHostStatus,
 } from './lib/envelope.mjs';
 import { createPlayer } from './lib/player.mjs';
 import { createPeerBytes } from './lib/peer-bytes.mjs';
@@ -55,6 +56,7 @@ import { createPageView } from './lib/page-view.mjs';
 import { syncDot } from './lib/sync-dot.mjs';
 import { joinTarget, readRoute } from './lib/route.mjs';
 import { createHostAnswer } from './lib/host-answer.mjs';
+import { createHostStatusBook, ownHostStatus, statusDue } from './lib/host-status.mjs';
 import { mountScreens } from './room/screens.jsx';
 
 const BUILD_ID = __BUILD_ID__;
@@ -148,12 +150,14 @@ const INITIAL_VIEW = {
   status: 'unknown',
   ended: false,
   hostFile: { status: 'off', inputHidden: true, help: null, notice: null },
+  hostStatus: { state: 'unknown', fraction: null, received: 0, lastAtMs: null, disbelieved: 0 },
   overlay: { clock: '', drift: '', bytes: '', controller: '' },
   overlayVisible: false,
   bar: {
     faded: false,
     positionMs: 0,
     durationMs: null,
+    preparing: false,
     time: '0:00 / 0:00',
     syncDot: { state: 'idle', title: 'no figure' },
   },
@@ -304,6 +308,7 @@ function installViewerLink() {
     RTCPeerConnection,
     rtcConfig: rtcConfig(),
     urgency: urgentRequestFor,
+    hostPreparing: () => delivery === 'host' && hostStatusBook.current(client.roster).state === 'preparing',
     onChange: (snapshot) => {
       if (snapshot.state !== lastState) {
         lastState = snapshot.state;
@@ -359,6 +364,9 @@ const client = {
   get clientId() { return activeClient?.clientId ?? null; },
   get role() { return activeClient?.role ?? role; },
   get roster() { return activeClient?.roster ?? []; },
+  get lastSeq() { return activeClient?.lastSeq ?? null; },
+  get isConnected() { return activeClient?.isConnected ?? false; },
+  get isJoined() { return activeClient?.isJoined ?? false; },
   onEvent(type, listener) { return subscribe(eventSubscribers, 'onEvent', type, listener); },
   on(type, listener) { return subscribe(envelopeSubscribers, 'on', type, listener); },
   send(envelope) {
@@ -367,7 +375,12 @@ const client = {
   request(options) {
     return activeClient ? activeClient.request(options) : Promise.reject(new Error('room is not active'));
   },
+  // The clock probe's only route to the server: without it no page ever has an estimate.
+  echo(timeoutMs) {
+    return activeClient ? activeClient.echo(timeoutMs) : Promise.reject(new Error('room is not active'));
+  },
   connect() { activeClient?.connect(); },
+  close() { activeClient?.close(); },
 };
 
 if (route === 'room') activateClient();
@@ -398,7 +411,9 @@ let hostFile = null;
 let hostFileChooserOpen = false;
 let mediaSource = null;
 let targetSegmentSeconds = null;
-let hostFileConnected = false;
+const hostStatusBook = createHostStatusBook();
+let lastStatusSent = null;
+let statusSends = 0;
 // Design D10: the bar fades after this long without a pointer move over #player.
 const FADE_AFTER_MS = 3000;
 let lastPointerMoveAt = null;
@@ -417,10 +432,50 @@ function paintHostFile(snapshot) {
     help,
     notice,
   });
-  if (snapshot.state !== 'ready' || hostFileConnected) return;
-  hostFileConnected = true;
-  client.connect();
+  sendHostStatus(false);
+  paintHostStatus();
 }
+
+function sendHostStatus(force) {
+  if (delivery !== 'host' || client.role !== 'host' || !client.isJoined) return;
+  const next = ownHostStatus({ mediaSource, hostFile: hostFile?.snapshot() ?? null });
+  const nowMs = pageNow();
+  if (force || statusDue({ nowMs, last: lastStatusSent, next })) {
+    client.send(buildHostStatusEnvelope(next));
+    lastStatusSent = { ...next, atMs: pageNow() };
+    statusSends += 1;
+  }
+}
+
+function paintHostStatus() {
+  const own = delivery === 'host' && client.role === 'host';
+  const status = own
+    ? ownHostStatus({ mediaSource, hostFile: hostFile?.snapshot() ?? null })
+    : hostStatusBook.current(client.roster);
+  const counts = hostStatusBook.counts();
+  view.set('hostStatus', {
+    state: status.state,
+    fraction: status.fraction,
+    received: own ? statusSends : counts.received,
+    lastAtMs: own ? lastStatusSent?.atMs ?? null : status.atMs,
+    disbelieved: own ? 0 : counts.disbelieved,
+  });
+}
+
+let malformedHostStatus = 0;
+
+onEnvelope(TYPE_HOST_STATUS, 'host status', (env) => {
+  if (client.role === 'host') return;
+  const report = readHostStatus(env);
+  if (!report) {
+    malformedHostStatus += 1;
+    return;
+  }
+  hostStatusBook.accept(report, client.roster, pageNow());
+  paintHostStatus();
+  renderControls();
+  schedulePollStart(0);
+});
 
 async function loadHostTransport() {
   if (createHostLink && createHostOrigin) return;
@@ -446,11 +501,13 @@ client.onEvent('joined', (joined) => {
   // The role reported is the one the server gave this membership, not the one
   // the query string asked for.
   if (delivery === 'host' && joined.role === 'host') {
+    sendHostStatus(true);
     hostAnswer?.closeAll();
     if (nativeFetch) installHostSide().catch((error) => addSubscriberFailure('host transport', error));
   }
   addNotice(`joined as ${joined.clientId} (${joined.role})`);
   renderRoster(joined.roster);
+  paintHostStatus();
   runTickSteps([['urgent-context', updateUrgentContext]], reportStep);
   schedulePollStart(0);
 });
@@ -492,8 +549,10 @@ client.on('presence', (env) => {
   const body = readBody(env);
   // A member can relay an envelope typed `presence`; only the server's closes peers (7a d1-findings D1-1).
   if (env.from === ADDR_SERVER && delivery === 'host' && client.role === 'host') hostAnswer?.closeDeparted(body.roster);
+  if (env.from === ADDR_SERVER && body.event === 'join' && body.member?.clientId !== client.clientId) sendHostStatus(true);
   addNotice(`presence: ${body.event} — ${body.member?.tabId ?? body.member?.clientId}`);
   renderRoster(body.roster);
+  paintHostStatus();
   runTickSteps([['urgent-context', updateUrgentContext]], reportStep);
   schedulePollStart(0);
 });
@@ -710,18 +769,19 @@ function renderControls() {
   const state = acquisition.state;
   const durationMs = player.lastSegment()?.mediaEndMs ?? null;
   const ended = isEnded(state, durationMs);
+  const preparing = hostPreparingNow();
   const ready = (kind) => controlsReady(kind);
   const controls = {
     play: {
       text: ended ? 'Watch again' : 'play',
-      disabled: ended ? !ready('seek') : !(ready('play') && !state?.current.playing),
+      disabled: preparing || (ended ? !ready('seek') : !(ready('play') && !state?.current.playing)),
       hidden: false,
     },
     // T5 (design.md D3, "any member's own play or pause ends a hold"): a held
     // state is paused, so pause is enabled to let a person end the hold.
     pause: { text: 'pause', disabled: !(ready('pause') && (state?.current.playing || state?.current.held)), hidden: false },
-    'back-10': { text: 'back 10s', disabled: !ready('seek'), hidden: false },
-    'forward-10': { text: 'forward 10s', disabled: !ready('seek'), hidden: false },
+    'back-10': { text: 'back 10s', disabled: preparing || !ready('seek'), hidden: false },
+    'forward-10': { text: 'forward 10s', disabled: preparing || !ready('seek'), hidden: false },
     'control-mode': { text: `mode: ${state?.controlMode === 'host' ? 'open' : 'host'}`, disabled: !ready('control-mode'), hidden: client.role !== 'host' },
     mute: { text: view.get().controls.mute.text, disabled: false, hidden: false },
   };
@@ -748,11 +808,13 @@ function renderBar() {
   if (lastPointerMoveAt === null) lastPointerMoveAt = nowPageMs;
   const faded = playing && nowPageMs - lastPointerMoveAt >= FADE_AFTER_MS;
   const ended = isEnded(state, durationMs);
+  const preparing = hostPreparingNow();
   const controllerState = controllerView();
   view.set('bar', {
     faded,
     positionMs,
     durationMs: Number.isFinite(durationMs) ? durationMs : null,
+    preparing,
     time: ended ? 'Ended' : `${formatTime(positionMs)} / ${formatTime(durationMs)}`,
     syncDot: syncDot({ playing, mode: controllerState.mode, estimateMs: controllerState.estimateMs }),
   });
@@ -1139,6 +1201,22 @@ function schedulePollStart(delayMs) {
   }, Math.max(0, delayMs));
 }
 
+function titleReady() {
+  if (delivery !== 'host') return true;
+  const status = client.role === 'host'
+    ? ownHostStatus({ mediaSource, hostFile: hostFile?.snapshot() ?? null })
+    : hostStatusBook.current(client.roster);
+  return status.state === 'ready';
+}
+
+function hostPreparingNow() {
+  if (delivery !== 'host') return false;
+  const status = client.role === 'host'
+    ? ownHostStatus({ mediaSource, hostFile: hostFile?.snapshot() ?? null })
+    : hostStatusBook.current(client.roster);
+  return status.state === 'preparing';
+}
+
 function pollStart() {
   if (positionOffset.error !== null || engineWindows.error !== null || harnessSeekConfig.error !== null) return;
   checkReady();
@@ -1149,6 +1227,7 @@ function pollStart() {
     resolved: acquisition.snapshot.resolved,
     state,
     linkOpen: link ? link.snapshot().state === 'open' : true,
+    titleReady: titleReady(),
     finished: player.finishedSegments(),
     last: player.lastSegment(),
   });
@@ -1377,6 +1456,7 @@ async function startApp() {
         onChange: paintHostFile,
       });
       await installHostFileLink();
+      client.connect();
       view.set('hostFile', { ...view.get().hostFile, inputHidden: false });
       // 11-2 D7: the page hands the File over and never reads its name.
       hostFileChooserOpen = true;

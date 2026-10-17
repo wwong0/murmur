@@ -91,6 +91,29 @@ export function buildPlaybackStateAnswerEnvelope({ to, replyTo, payload }) {
 // room's own websocket — no server change (server/** carries no "payload").
 export const TYPE_AHEAD = 'ahead';
 
+export const TYPE_HOST_STATUS = 'host-status';
+
+export function buildHostStatusEnvelope(status) {
+  const payload = status.state === 'ready'
+    ? { state: 'ready' }
+    : { state: 'preparing', fraction: status.fraction };
+  return buildClientEnvelope({ type: TYPE_HOST_STATUS, to: ADDR_ROOM, payload });
+}
+
+export function readHostStatus(env) {
+  if (env === null || typeof env !== 'object') return null;
+  if (typeof env.from !== 'string' || env.from.length === 0) return null;
+  const body = env.payload;
+  if (body === null || typeof body !== 'object' || Array.isArray(body) || Object.getPrototypeOf(body) !== Object.prototype) return null;
+  const keys = Object.keys(body);
+  if (body.state === 'ready' && keys.length === 1 && keys[0] === 'state') return { from: env.from, state: 'ready', fraction: null };
+  if (body.state === 'preparing' && keys.length === 2 && keys.includes('state') && keys.includes('fraction')
+    && typeof body.fraction === 'number' && Number.isFinite(body.fraction) && body.fraction >= 0 && body.fraction <= 1) {
+    return { from: env.from, state: 'preparing', fraction: body.fraction };
+  }
+  return null;
+}
+
 /** Build a viewer's held-ahead report, addressed to one member (the host). */
 export function buildAheadEnvelope({ to, lineage, version, heldAheadMs }) {
   return buildClientEnvelope({ type: TYPE_AHEAD, to, payload: { lineage, version, heldAheadMs } });

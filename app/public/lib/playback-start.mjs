@@ -12,6 +12,7 @@ const ADVANCE_RANGE_MS = Object.freeze([0, 250]);
 export const MISSING_CLOCK = 'clock-estimate';
 export const MISSING_STATE = 'playback-state';
 export const MISSING_HOST_LINK = 'host-link';
+export const MISSING_HOST_TITLE = 'host-title';
 export const WAITING_PAUSED = 'room-paused';
 // T9 (design.md D6): a held room is a paused mapping everywhere the timeline
 // reads it, but it is never reported as a paused room — checked before
@@ -87,6 +88,7 @@ export function createPlaybackStart({
   let lastLatenessMs = null;
   let lastPlayError = null;
   let linkOpen = true;
+  let titleReady = true;
   let finished = null;
   let last = null;
   let pendingSkip = null;
@@ -108,6 +110,8 @@ export function createPlaybackStart({
       reportedMissing = null;
     } else if (!linkOpen && reportedMissing === null) {
       reportedMissing = MISSING_HOST_LINK;
+    } else if (!titleReady && reportedMissing === null) {
+      reportedMissing = MISSING_HOST_TITLE;
     } else if (reportedMissing === null) {
       if (refused) waiting = WAITING_REFUSED;
       else if (lastState?.current?.playing) waiting = WAITING_PREPARING;
@@ -307,10 +311,12 @@ export function createPlaybackStart({
     resolved: nextResolved = false,
     state = null,
     linkOpen: nextLinkOpen = true,
+    titleReady: nextTitleReady = true,
     finished: nextFinished = null,
     last: nextLast = null,
   } = {}) {
     linkOpen = nextLinkOpen === true;
+    titleReady = nextTitleReady === true;
     finished = nextFinished;
     last = nextLast;
     resolved = nextResolved === true && state !== null;
@@ -336,6 +342,11 @@ export function createPlaybackStart({
 
     if (!loaded && !linkOpen) {
       missing = MISSING_HOST_LINK;
+      invalidateAttempt();
+      return result([], null);
+    }
+    if (!loaded && !titleReady) {
+      missing = MISSING_HOST_TITLE;
       invalidateAttempt();
       return result([], null);
     }

@@ -30,10 +30,17 @@ export function createPrepareRunner({ store, buildId, post }) {
 
   async function prepareFile(data) {
     await store.remove(data.key);
+    let lastProgress = -1;
     const manifest = await prepare({
       source: fileSource(data.file),
       sink: store.sink(data.key),
       targetSeconds: data.targetSeconds,
+      onProgress: data.reportProgress ? ({ doneBytes, totalBytes }) => {
+        const perMille = Math.floor(1000 * doneBytes / totalBytes);
+        if (perMille <= lastProgress) return;
+        lastProgress = perMille;
+        reply({ t: 'progress', id: data.id, doneBytes, totalBytes });
+      } : null,
     });
     return { t: 'prepared', id: data.id, manifest };
   }

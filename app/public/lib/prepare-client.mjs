@@ -8,6 +8,10 @@ export function createPrepareClient({ worker }) {
     if (typeof reply?.buildId === 'string') lastBuildId = reply.buildId;
     const request = pending.get(reply?.id);
     if (!request) return;
+    if (reply.t === 'progress') {
+      try { request.onProgress?.(reply); } catch {}
+      return;
+    }
     pending.delete(reply.id);
     request.resolve(reply);
   });
@@ -18,10 +22,10 @@ export function createPrepareClient({ worker }) {
     pending.clear();
   });
 
-  function call(message) {
+  function call(message, onProgress = null) {
     const id = nextId++;
     return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
+      pending.set(id, { resolve, reject, onProgress });
       try { worker.postMessage({ ...message, id }); } catch (error) {
         pending.delete(id);
         reject(error);
@@ -31,7 +35,7 @@ export function createPrepareClient({ worker }) {
 
   return {
     inspect: (file) => call({ t: 'inspect', file }),
-    prepare: (file, key, targetSeconds) => call({ t: 'prepare', file, key, targetSeconds }),
+    prepare: (file, key, targetSeconds, onProgress) => call({ t: 'prepare', file, key, targetSeconds, reportProgress: typeof onProgress === 'function' }, onProgress),
     buildId: () => lastBuildId,
   };
 }

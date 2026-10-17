@@ -170,12 +170,18 @@ export function s0(reading) {
 export function s1(reading) {
   const early = precondition(reading);
   if (early) return early;
-  if (!pageState(reading.host) || !pageState(reading.viewer) || !object(reading.counters) || !Array.isArray(reading.counters.responseRecords)) return missing(reading);
+  if (!pageState(reading.host) || !object(reading.viewer) || !Array.isArray(reading.viewer.roster)
+    || !object(reading.viewer.hostPreparing) || typeof reading.viewer.hostPreparing.state !== 'string'
+    || !('fraction' in reading.viewer.hostPreparing) || typeof reading.viewer.playDisabled !== 'boolean'
+    || !object(reading.viewer.requestsByPath) || !object(reading.counters) || !Array.isArray(reading.counters.responseRecords)) return missing(reading);
   const reasons = [];
   if (reading.host.state !== 'awaiting-file') reasons.push('host is not awaiting-file');
-  if (reading.viewer.state !== 'absent') reasons.push('viewer host link is not absent');
+  if (!reading.viewer.roster.some((entry) => typeof entry === 'string' && entry.includes(' · host · '))) reasons.push('viewer roster does not list the host');
+  if (reading.viewer.hostPreparing.state !== 'preparing' || reading.viewer.hostPreparing.fraction !== 0) reasons.push('viewer does not show preparation at fraction 0');
+  if (reading.viewer.playDisabled !== true) reasons.push('viewer play is not disabled');
+  if (Object.keys(reading.viewer.requestsByPath).length !== 0) reasons.push('viewer requested media before preparation');
   if (reading.counters.responseRecords.some(mediaRecord)) reasons.push('server recorded a media path before preparation');
-  return verdict(reasons.length ? 'fail' : 'pass', reading, reasons.length ? reasons : ['viewer waits and no media record exists']);
+  return verdict(reasons.length ? 'fail' : 'pass', reading, reasons.length ? reasons : ['viewer lists the host, waits, and no media record exists']);
 }
 
 export function s2(reading) {
@@ -413,13 +419,19 @@ export function s10(reading) {
 export function s11(reading) {
   const early = precondition(reading);
   if (early) return early;
-  if (!object(reading.host) || !object(reading.viewer) || typeof reading.viewer.state !== 'string' || !object(reading.host.refusal) || !Array.isArray(reading.prepared)) return missing(reading);
+  if (!object(reading.host) || !object(reading.viewer) || !Array.isArray(reading.viewer.roster)
+    || !object(reading.viewer.hostPreparing) || typeof reading.viewer.hostPreparing.state !== 'string'
+    || !('fraction' in reading.viewer.hostPreparing) || typeof reading.viewer.playDisabled !== 'boolean'
+    || !object(reading.viewer.requestsByPath) || !object(reading.host.refusal) || !Array.isArray(reading.prepared)) return missing(reading);
   const reasons = [];
   if (reading.host.refusal.reason !== 'video-codec') reasons.push('refused fixture did not report video-codec');
   if (typeof reading.host.refusal.message !== 'string' || !reading.host.refusal.message.includes('mp4v')) reasons.push('refusal did not name mp4v');
   if (reading.prepared.length !== 0) reasons.push('refused file left prepared output');
-  if (reading.viewer.state !== 'absent') reasons.push('viewer link did not remain absent');
-  return verdict(reasons.length ? 'fail' : 'pass', reading, reasons.length ? reasons : ['refused file stayed out of the room']);
+  if (!reading.viewer.roster.some((entry) => typeof entry === 'string' && entry.includes(' · host · '))) reasons.push('viewer roster does not list the host');
+  if (reading.viewer.hostPreparing.state !== 'preparing' || reading.viewer.hostPreparing.fraction !== 0) reasons.push('viewer does not show preparation at fraction 0');
+  if (reading.viewer.playDisabled !== true) reasons.push('viewer play is not disabled');
+  if (Object.keys(reading.viewer.requestsByPath).length !== 0) reasons.push('viewer requested media before preparation');
+  return verdict(reasons.length ? 'fail' : 'pass', reading, reasons.length ? reasons : ['refused file stayed unready and out of the room']);
 }
 
 export function s12(reading) {
