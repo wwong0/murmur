@@ -246,11 +246,19 @@ async function runS2() {
   const joined = await until(tab, `document.getElementById('status-line')?.textContent ?? ''`, (status) => status.startsWith('connected'));
   await recordIdentity('S2 the media element is unchanged after join', joined);
 
-  const pauseReady = await clickWhenEnabled('#pause');
+  // Joint D1 F2: in a held room #play is enabled before the pause is pressed, so wait for the
+  // pause itself to land (paused, unheld, a later version) before reading #play. The version is
+  // read once #pause is enabled: before that the room may not have created its state.
+  const pauseEnabled = await until(tab, `document.querySelector('#pause')?.disabled === false`, Boolean);
+  const beforePause = pauseEnabled.ok ? await read(tab, `window.__app.playbackState()?.version ?? null`) : null;
+  const pauseReady = pauseEnabled.ok ? await clickWhenEnabled('#pause') : pauseEnabled;
   let pauseStep = pauseReady;
   if (pauseReady.ok) {
-    const playReady = await until(tab, `document.querySelector('#play')?.disabled === false`, Boolean);
-    pauseStep = playReady;
+    const landed = await until(tab, `window.__app.playbackState()`, (state) => state?.playing === false
+      && state.held === false && Number.isInteger(beforePause) && state.version > beforePause);
+    pauseStep = landed.ok
+      ? await until(tab, `document.querySelector('#play')?.disabled === false`, Boolean)
+      : landed;
   }
   await recordIdentity('S2 the media element is unchanged after pause', pauseStep);
 

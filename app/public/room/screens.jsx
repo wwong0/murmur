@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createPortal, flushSync } from 'react-dom';
+import { createSeekScrub } from '../lib/seek-scrub.mjs';
 
 function useView(view, select) {
   return useSyncExternalStore(
@@ -97,6 +98,8 @@ function PlayerBar({ view, actions }) {
   const seekRef = useRef(null);
   const timeRef = useRef(null);
   const dotRef = useRef(null);
+  const scrub = useRef(null);
+  if (!scrub.current) scrub.current = createSeekScrub({ seek: (positionMs) => actions.seek(positionMs) });
   const bar = useView(view, (snapshot) => snapshot.bar);
   useLayoutEffect(() => {
     const element = ref.current;
@@ -107,7 +110,7 @@ function PlayerBar({ view, actions }) {
     if (seek) {
       seek.disabled = bar.durationMs === null || bar.preparing;
       seek.max = String(bar.durationMs ?? 0);
-      seek.value = String(bar.positionMs);
+      if (!scrub.current.holds()) seek.value = String(bar.positionMs);
     }
     if (timeRef.current) timeRef.current.textContent = bar.time;
     if (dotRef.current) {
@@ -115,6 +118,20 @@ function PlayerBar({ view, actions }) {
       dotRef.current.title = bar.syncDot.title;
     }
   }, [bar]);
+  useLayoutEffect(() => {
+    const seek = seekRef.current;
+    if (!seek) return undefined;
+    const commit = () => scrub.current.commit(Number(seek.value));
+    const release = () => scrub.current.release();
+    seek.addEventListener('change', commit);
+    seek.addEventListener('pointerup', release);
+    seek.addEventListener('pointercancel', release);
+    return () => {
+      seek.removeEventListener('change', commit);
+      seek.removeEventListener('pointerup', release);
+      seek.removeEventListener('pointercancel', release);
+    };
+  }, []);
   useLayoutEffect(() => {
     const player = document.getElementById('player');
     if (!player) return undefined;
@@ -127,7 +144,7 @@ function PlayerBar({ view, actions }) {
     <div className="bar-controls">
       <ImperativeButton view={view} actions={actions} id="play" action="play" />
       <ImperativeButton view={view} actions={actions} id="pause" action="pause" />
-      <input ref={seekRef} id="seek" type="range" min="0" step="1" onInput={(event) => actions.seek(Number(event.currentTarget.value))} />
+      <input ref={seekRef} id="seek" type="range" min="0" step="1" onInput={() => scrub.current.input()} />
       <span id="time" ref={timeRef} />
       <ImperativeButton view={view} actions={actions} id="back-10" action="back10" />
       <ImperativeButton view={view} actions={actions} id="forward-10" action="forward10" />

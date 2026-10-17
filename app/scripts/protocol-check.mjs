@@ -169,6 +169,7 @@ import autoStartSuite from './check/suites/auto-start.mjs';
 import autoStartPinSuite from './check/suites/auto-start-pin.mjs';
 import pausedSeekSuite from './check/suites/paused-seek.mjs';
 import titleEndSuite from './check/suites/title-end.mjs';
+import seekScrubSuite from './check/suites/seek-scrub.mjs';
 import routeSuite from './check/suites/route.mjs';
 import driftSuite from './check/suites/drift.mjs';
 import driftControllerSuite from './check/suites/drift-controller.mjs';
@@ -365,6 +366,7 @@ for (const suite of [
   autoStartPinSuite,
   pausedSeekSuite,
   titleEndSuite,
+  seekScrubSuite,
   routeSuite,
   driftSuite,
   driftControllerSuite,

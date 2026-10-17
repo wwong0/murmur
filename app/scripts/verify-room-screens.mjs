@@ -32,6 +32,7 @@ const LABELS = [
   'RS-C2 volume and mute change this page only',
   'RS-C3 the overlay is hidden until Stats',
   'RS-C4 the sync dot shows idle when paused, a state when playing',
+  'RS-C5 a drag of the seek bar seeks once, to where it is released',
   'RS-E1 the room pauses at the title\'s end',
   'RS-E2 Ended and Watch again',
   'RS-E3 a host-controlled room ends on the host\'s pause',
@@ -234,6 +235,13 @@ async function runRow(label, body) {
   }
 }
 
+// The title's end (joint D1 F1): one millisecond past the element's end where that lies past
+// the playlist's, else the playlist's. Read from the host's element, as the end pause is.
+async function titleEndMs(tab, playlistEndMs) {
+  const elementS = await read(tab, "document.querySelector('#video')?.duration ?? null");
+  return Number.isFinite(elementS) ? Math.max(playlistEndMs, Math.floor(elementS * 1000) + 1) : playlistEndMs;
+}
+
 async function roomStates() { return Promise.all([read(host, roomSnapshot), read(viewer, roomSnapshot)]); }
 
 async function waitRoomStates(done, timeoutMs = WAIT_MS) {
@@ -368,7 +376,36 @@ async function runRows() {
     return { exercised: paused, ok: paused && clicked && ['in-sync', 'correcting'].includes(dot.state) && dot.title.endsWith(' ms'), detail: dot };
   });
 
+  // Joint D1 F4: a real pointer drag. Each move fires `input`; the release fires `change`.
   await runRow(LABELS[9], async () => {
+    if (!await setPlaying(false)) return { exercised: false };
+    const track = await read(host, `(() => {
+      const element = document.querySelector('#seek');
+      if (!element || element.disabled || !(Number(element.max) > 0)) return null;
+      element.scrollIntoView({ block: 'center' });
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, width: rect.width, y: rect.top + rect.height / 2 };
+    })()`);
+    if (!track) return { exercised: false };
+    const before = (await roomStates())[0].state;
+    const at = (fraction) => ({ x: track.left + track.width * fraction, y: track.y, button: 'left' });
+    await host.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...at(0.2), clickCount: 1 });
+    for (let step = 1; step <= 8; step += 1) {
+      await sleep(150);
+      await host.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...at(0.2 + step * 0.05), buttons: 1 });
+    }
+    await host.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...at(0.6), clickCount: 1 });
+    const released = await read(host, "Number(document.querySelector('#seek')?.value)");
+    const settled = await waitRoomStates((states) => states.every(({ state }) => state && Math.abs(state.positionMs - released) <= 1));
+    await sleep(1_000);
+    const after = await roomStates();
+    const versions = after.map(({ state }) => (state?.version ?? 0) - (before?.version ?? 0));
+    const ok = settled.ok && versions.every((delta) => delta === 1)
+      && after.every(({ state }) => Math.abs(state.positionMs - released) <= 1);
+    return { exercised: Number.isFinite(released) && released > 0, ok, detail: { released, versions, states: after } };
+  });
+
+  await runRow(LABELS[10], async () => {
     if (!await setPlaying(false)) return { exercised: false };
     const duration = await until(host, "Number(document.querySelector('#seek')?.max)", (value) => Number.isFinite(value) && value > 6_000);
     if (!duration.ok) return { exercised: false };
@@ -376,13 +413,14 @@ async function runRows() {
     const seekValue = await setRange(host, '#seek', target);
     const sought = await waitRoomStates((states) => states.every(({ state }) => state && Math.abs(state.positionMs - target) <= 1));
     const clicked = await clickWhenEnabled(host, '#play');
-    const ended = await waitRoomStates((states) => states.every(({ state }) => state?.playing === false && Math.abs(state.positionMs - duration.value) <= END_TOLERANCE_MS), 20_000);
+    const endMs = await titleEndMs(host, duration.value);
+    const ended = await waitRoomStates((states) => states.every(({ state, video }) => state?.playing === false && Math.abs(state.positionMs - endMs) <= END_TOLERANCE_MS && video?.ended === true), 20_000);
     const states = ended.value;
     const identity = states.length === 2 && states[0].state?.lineage === states[1].state?.lineage && states[0].state?.version === states[1].state?.version;
-    return { exercised: true, ok: seekValue !== null && sought.ok && clicked && ended.ok && identity, detail: { duration: duration.value, states } };
+    return { exercised: true, ok: seekValue !== null && sought.ok && clicked && ended.ok && identity, detail: { duration: duration.value, endMs, states } };
   });
 
-  await runRow(LABELS[10], async () => {
+  await runRow(LABELS[11], async () => {
     const ended = await until(host, "({ time: document.querySelector('#time')?.textContent, play: document.querySelector('#play')?.textContent })", (value) => value.time === 'Ended' && value.play === 'Watch again', 5_000);
     if (!ended.ok) return { exercised: false };
     const watched = await clickWhenEnabled(host, '#play');
@@ -391,7 +429,7 @@ async function runRows() {
     return { exercised: true, ok: watched && reset.ok && played, detail: { ended: ended.value, reset: reset.value } };
   });
 
-  await runRow(LABELS[11], async () => {
+  await runRow(LABELS[12], async () => {
     const mode = await until(host, "window.__app.timeline()?.controlMode ?? null", (value) => value === 'open');
     if (!mode.ok) return { exercised: false };
     const modeClick = await clickWhenEnabled(host, '#control-mode');
@@ -403,7 +441,8 @@ async function runRows() {
     await setRange(host, '#seek', duration - 6_000);
     const sought = await waitRoomStates((states) => states.every(({ state }) => state && Math.abs(state.positionMs - (duration - 6_000)) <= 1));
     const played = await clickWhenEnabled(host, '#play');
-    const ended = await waitRoomStates((states) => states.every(({ state }) => state?.playing === false && Math.abs(state.positionMs - duration) <= END_TOLERANCE_MS), 20_000);
+    const endMs = await titleEndMs(host, duration);
+    const ended = await waitRoomStates((states) => states.every(({ state }) => state?.playing === false && Math.abs(state.positionMs - endMs) <= END_TOLERANCE_MS), 20_000);
     const rejection = await until(viewer, "window.__app.timeline()?.rejected?.notPermitted ?? null", (value) => value === beforeRejected + 1, 5_000);
     const afterRejected = rejection.value;
     const notices = await read(host, "[...document.querySelectorAll('#notices li')].map((li) => li.textContent)");
@@ -414,14 +453,14 @@ async function runRows() {
   const fixture = (name) => path.join(APP_DIR, 'scripts', 'check', 'remux-fixtures', name);
   await clickElement(fileHost, '#host');
   await until(fileHost, "window.__app.hostFile()?.state === 'awaiting-file'", Boolean, WAIT_MS);
-  await runRow(LABELS[12], async () => {
+  await runRow(LABELS[13], async () => {
     const state = await prepareFile(fixture('refuse-audio-codec.mp4'));
     const snapshot = await read(fileHost, fileSnapshot);
     const ok = state?.state === 'refused' && Boolean(snapshot.reason) && snapshot.command === AUDIO_COMMAND && !snapshot.command.includes('refuse') && !snapshot.command.includes('audio-codec');
     return { exercised: true, ok, detail: snapshot };
   });
 
-  await runRow(LABELS[13], async () => {
+  await runRow(LABELS[14], async () => {
     // The clipboard read needs a focused document; A's windows were driven last.
     await fileHost.send('Page.bringToFront');
     await browser.send('Browser.grantPermissions', { origin: ORIGIN_B, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
@@ -438,13 +477,13 @@ async function runRows() {
   });
   if (clipboardRefused) throw new Error('clipboard read refused with the requested permissions');
 
-  await runRow(LABELS[14], async () => {
+  await runRow(LABELS[15], async () => {
     const state = await prepareFile(fixture('refuse-encrypted.mp4'));
     const snapshot = await read(fileHost, fileSnapshot);
     return { exercised: true, ok: state?.state === 'refused' && Boolean(snapshot.reason) && snapshot.command === '', detail: snapshot };
   });
 
-  await runRow(LABELS[15], async () => {
+  await runRow(LABELS[16], async () => {
     const state = await prepareFile(fixture('varying.mp4'));
     const snapshot = await read(fileHost, fileSnapshot);
     const ok = state?.state === 'ready' && /5 s/.test(snapshot.notice) && snapshot.notice.includes(KEYFRAME_COMMAND);

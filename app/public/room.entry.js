@@ -23,7 +23,7 @@ import { HEADROOM_DEFAULT, validateHeadroomFraction } from './lib/send-pace.mjs'
 import { createClockSync, websocketProbe } from './lib/clock-sync.mjs';
 import { createRoomTimeline } from './lib/room-timeline.mjs';
 import { offsetView } from './lib/playback-state.mjs';
-import { createEndLatch, endInstant, isEnded } from './lib/title-end.mjs';
+import { createEndLatch, endInstant, endPauseMs, isEnded } from './lib/title-end.mjs';
 import { createDriftLog } from './lib/frame-drift.mjs';
 import { createDriftController } from './lib/drift-controller.mjs';
 import { initializePlaybackTreatment } from './lib/playback-treatment.mjs';
@@ -1305,7 +1305,8 @@ function tickPlayback() {
     ['playback-start', pollStart],
     ['title-end', () => {
       const state = acquisition.state;
-      const durationMs = player.lastSegment()?.mediaEndMs ?? null;
+      // D7, joint D1 F1: the element's own end, or it parks short of it and never ends.
+      const durationMs = endPauseMs(player.lastSegment()?.mediaEndMs ?? null, video.duration);
       const instant = endInstant(state, durationMs);
       const nowSharedMs = clockSync.sharedNow();
       if (instant === null || !Number.isFinite(nowSharedMs) || nowSharedMs < instant

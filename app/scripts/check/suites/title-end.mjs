@@ -1,6 +1,6 @@
 import { assert, assertEqual, check } from '../harness.mjs';
 import { bundleProductEntry, runEntry } from '../entry-harness.mjs';
-import { createEndLatch, endInstant, isEnded } from '../../../public/lib/title-end.mjs';
+import { createEndLatch, endInstant, endPauseMs, isEnded } from '../../../public/lib/title-end.mjs';
 
 const DURATION = 5_000;
 const START_AT = 1_000;
@@ -62,6 +62,28 @@ export default async function titleEndSuite() {
     assert(latch.take({ lineage: 'l', version: 1 }), 'the first identity is accepted');
     assert(!latch.take({ lineage: 'l', version: 1 }), 'the same identity is accepted once');
     assert(latch.take({ lineage: 'l', version: 2 }), 'a new version is accepted');
+  });
+
+  // Joint D1 F1: a 14.016 s element over a 14 000 ms playlist parked at 14 000 never ended.
+  await check('E9 title-end: the end pause names the element\'s own end, and Ended reads the playlist\'s', async () => {
+    assertEqual(endPauseMs(14_000, 14.016), 14_017, 'an element past the playlist ends the room one millisecond past its own end');
+    assertEqual(endPauseMs(14_000, 13.99), 14_000, 'an element short of the playlist keeps the playlist end');
+    assertEqual(endPauseMs(14_000, Number.NaN), 14_000, 'an unknown element duration keeps the playlist end');
+    assertEqual(endPauseMs(null, 14.016), null, 'no playlist end, no end pause');
+    const page = createPage(product, { id: 'tail', ids: ['tail', 'other'] });
+    Object.defineProperty(page.video, 'duration', { value: (DURATION + 16) / 1000, configurable: true });
+    page.harness.sharedNowMs = END_AT + 1;
+    page.tick();
+    assertEqual(endOperations(page).length, 0, 'the playlist end alone issues no pause while the element plays on');
+    page.harness.sharedNowMs = END_AT + 17;
+    page.tick();
+    const [pause] = endOperations(page);
+    assertEqual(pause?.payload.atSharedMs, END_AT + 17, 'the end pause names the instant of the element end plus one millisecond');
+    operation(page, 3, 'tail', pause.payload);
+    assertEqual(page.app.playbackState().positionMs, DURATION + 17, 'the room holds that position');
+    page.tick();
+    assertEqual(page.view().ended, true, 'Ended reads the playlist end, so every member agrees');
+    assertEqual(page.view().controls.play.text, 'Watch again', 'Watch again follows');
   });
 
   await check('E2 title-end: three open members converge on one end pause', async () => {
