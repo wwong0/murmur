@@ -51,7 +51,7 @@ import { controlInForce } from './lib/edge-control.mjs';
 import { createOpfsBackend, createWebLocks } from './lib/prepared-store-opfs.mjs';
 import { createPreparedStore } from './lib/prepared-store.mjs';
 import { createPrepareClient } from './lib/prepare-client.mjs';
-import { createHostFileSource, hostFileSnapshot } from './lib/host-file-source.mjs';
+import { CHOOSABLE_STATES, createHostFileSource, hostFileSnapshot } from './lib/host-file-source.mjs';
 import { keyframeNotice, refusalHelp } from './lib/file-help.mjs';
 import { createPageView } from './lib/page-view.mjs';
 import { syncDot } from './lib/sync-dot.mjs';
@@ -691,14 +691,7 @@ const acquisition = createPlaybackAcquisition({
     }
     renderControls();
     if (outcome === 'applied') {
-      if (loadedTitle !== undefined && (acquisition.state?.title ?? null) !== loadedTitle) {
-        sampler.stop();
-        player.destroy();
-        peerEngine = null;
-        start.unload();
-        loadedTitle = undefined;
-        schedulePollStart(0);
-      }
+      discardStaleTitle();
       maybeIssueTitle();
       updateUrgentContext();
       schedulePollStart(0);
@@ -913,6 +906,18 @@ function issue(kind, args) {
   return issued;
 }
 
+// D8: a viewer holds one title's media. An adopted state changes the title with no
+// applied operation, so the tick runs this as well as the outcome handler.
+function discardStaleTitle() {
+  if (loadedTitle === undefined || (acquisition.state?.title ?? null) === loadedTitle) return;
+  sampler.stop();
+  player.destroy();
+  peerEngine = null;
+  start.unload();
+  loadedTitle = undefined;
+  schedulePollStart(0);
+}
+
 function maybeIssueTitle() {
   const state = acquisition.state;
   const id = titleDue({ own: ownStatus(), state });
@@ -1001,6 +1006,8 @@ const actions = {
   chooseHostFile: (file) => {
     if (!hostFileChooserOpen) return;
     if (file) {
+      // A pick the source ignores must not rename the title it is preparing (12a D8).
+      if (!CHOOSABLE_STATES.includes(hostFile.snapshot().state)) return;
       try {
         if (isValidHostName(file.name)) globalThis.sessionStorage?.setItem(PREPARED_NAME_KEY, file.name);
         else globalThis.sessionStorage?.removeItem(PREPARED_NAME_KEY);
@@ -1405,6 +1412,7 @@ function paintOverlay() {
 function tickPlayback() {
   runTickSteps([
     ['acquisition', () => acquisition.poll()],
+    ['title-discard', discardStaleTitle],
     ['title', maybeIssueTitle],
     ['playback-start', pollStart],
     ['title-end', () => {

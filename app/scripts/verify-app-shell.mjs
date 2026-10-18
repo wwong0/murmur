@@ -29,7 +29,7 @@ const APP_KEYS = [
   'controller', 'startTiming', 'pitch', 'treatmentEvidence', 'delivery', 'hostLink',
   'urgentContext', 'hostAsks', 'hostCounters', 'hostReceipts', 'peerExchange',
   'urgentDelay', 'peerEngineConfig', 'peerBytes', 'heldAhead', 'resumes', 'playback',
-  'playbackState', 'timeline', 'hostFile',
+  'playbackState', 'timeline', 'hostFile', 'title', 'hostGrace',
 ];
 
 const PRELOAD = `(() => {
@@ -200,7 +200,7 @@ async function runS1() {
   const assigned = await until(tab, snapshotExpression, (probe) => probe?.assignments >= 1);
   if (timeoutRow('S1 window.__app is assigned once', assigned)) {
     log.rowNotExercised('S1 the screens are empty when window.__app is assigned', assigned.reason);
-    log.rowNotExercised('S1 window.__app has its 33 keys in the first task after the bundle ran', assigned.reason);
+    log.rowNotExercised('S1 window.__app has its 35 keys in the first task after the bundle ran', assigned.reason);
     log.rowNotExercised('S1 the screens are drawn in the first task after the bundle ran', assigned.reason);
     log.rowNotExercised('S1 the page\'s build id is the served bundle\'s', assigned.reason);
     return;
@@ -209,12 +209,12 @@ async function runS1() {
   row('S1 the screens are empty when window.__app is assigned', assigned.value.screensChildrenAtAssignment === 0, assigned.value);
 
   const firstTask = await until(tab, snapshotExpression, (probe) => Array.isArray(probe?.keys));
-  if (timeoutRow('S1 window.__app has its 33 keys in the first task after the bundle ran', firstTask)) {
+  if (timeoutRow('S1 window.__app has its 35 keys in the first task after the bundle ran', firstTask)) {
     log.rowNotExercised('S1 the screens are drawn in the first task after the bundle ran', firstTask.reason);
     log.rowNotExercised('S1 the page\'s build id is the served bundle\'s', firstTask.reason);
     return;
   }
-  row('S1 window.__app has its 33 keys in the first task after the bundle ran', appKeysEqual(firstTask.value.keys), firstTask.value.keys);
+  row('S1 window.__app has its 35 keys in the first task after the bundle ran', appKeysEqual(firstTask.value.keys), firstTask.value.keys);
   row('S1 the screens are drawn in the first task after the bundle ran', firstTask.value.screensChildren === 4, firstTask.value);
 
   try {

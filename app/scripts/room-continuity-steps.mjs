@@ -102,8 +102,9 @@ export function rc2(reading) {
   return pass('RC2', 'the refused fixture leaves both viewers choosing without media requests');
 }
 
+// titleName is #title-name's text: R-Name reads the element, not the seam (12a D1 F5).
 function member(value) {
-  return object(value) && title(value.title) && state(value.state);
+  return object(value) && title(value.title) && state(value.state) && typeof value.titleName === 'string';
 }
 
 function rc3Poll(value, expected) {
@@ -117,7 +118,7 @@ export function rc3(reading) {
     || !finite(reading.stableMs) || !rc3Poll(reading.stablePolls, reading.expected)) return missing('RC3');
   const all = [...reading.members, ...reading.stablePolls.flatMap((poll) => poll.members)];
   const bad = all.find((entry) => entry.title.title !== reading.expected.identity || entry.title.name !== reading.expected.name
-    || entry.state.playing || entry.state.positionMs !== 0 || entry.state.held);
+    || entry.titleName !== reading.expected.name || entry.state.playing || entry.state.positionMs !== 0 || entry.state.held);
   if (reading.stablePolls.some((poll) => poll.members.some((entry) => !entry.videoPaused))) return fail('RC3', 'a video element played during the title A observation');
   if (reading.stableMs < 3000) return fail('RC3', 'the paused title A observation was shorter than three seconds');
   return bad ? fail('RC3', 'title A was not paused at zero on every member') : pass('RC3', 'title A is named and paused at zero without automatic start');
@@ -171,30 +172,47 @@ function graceShape(value) {
     && typeof value.playDisabled === 'boolean';
 }
 
+// Post-result (12a C2, coordinator 2026-10-18): state.version is the envelope seq, so the spec's +1 clause
+// is kept and reported, and this one-operation reading is added beside it for D1.
+function oneOperation(versions, before) {
+  return Array.isArray(versions) && versions.length === 2 && versions[0] === before && versions[1] > before;
+}
+
+const clause = (ok) => (ok ? 'PASS' : 'FAIL');
+
 export function rc6(reading) {
-  if (!object(reading) || !integer(reading.graceMs) || !Array.isArray(reading.viewers) || reading.viewers.length !== 2
-    || !reading.viewers.every((viewer) => graceShape(viewer) && Array.isArray(viewer.polls) && viewer.polls.length > 0
+  if (!object(reading) || !integer(reading.graceMs) || !integer(reading.gracePauses) || !Array.isArray(reading.viewers) || reading.viewers.length !== 2
+    || !reading.viewers.every((viewer) => graceShape(viewer) && Array.isArray(viewer.versions) && viewer.versions.every(integer)
+      && Array.isArray(viewer.polls) && viewer.polls.length > 0
       && viewer.polls.every((poll) => object(poll) && finite(poll.atSharedMs) && state(poll.state)))) return missing('RC6');
   const reasons = [];
+  let plusOne = true;
+  let single = reading.gracePauses === 1;
   for (const viewer of reading.viewers) {
     const { grace: interval, prev, paused } = viewer;
+    if (paused.version !== prev.version + 1) plusOne = false;
+    if (!oneOperation(viewer.versions, prev.version)) single = false;
     if (interval.endsAtSharedMs - interval.startedAtSharedMs !== reading.graceMs) reasons.push('grace interval differs from its setting');
     if (reading.graceMs !== 3000) reasons.push('grace setting is not 3000 ms');
     if (!viewer.polls.some((poll) => poll.atSharedMs < interval.endsAtSharedMs - 100)) reasons.push('no pre-end poll was captured');
     if (viewer.polls.some((poll) => poll.atSharedMs < interval.endsAtSharedMs - 100 && !poll.state.playing)) reasons.push('a pre-end poll was not playing');
-    if (paused.lineage !== prev.lineage || paused.version !== prev.version + 1 || paused.playing || paused.held) reasons.push('applied pause identity or state is wrong');
+    if (paused.lineage !== prev.lineage || paused.playing || paused.held) reasons.push('applied pause identity or state is wrong');
     if (viewer.hostPreparing.state !== 'absent' || viewer.hostPreparing.text !== 'the host has left' || viewer.playDisabled !== true) reasons.push('viewer does not show the absent host');
     if (!reading.viewers.some((other) => other.grace.endsAtSharedMs === paused.atSharedMs)) reasons.push('pause instant differs from every viewer grace end');
     if (paused.lineage !== reading.viewers[0].paused.lineage || paused.version !== reading.viewers[0].paused.version) reasons.push('viewers hold different pause identities');
     const expected = prev.positionMs + (paused.atSharedMs - prev.atSharedMs);
     if (Math.abs(paused.positionMs - expected) > 1) reasons.push('pause media position is not projected at grace end');
   }
-  return reasons.length ? fail('RC6', [...new Set(reasons)].join('; ')) : pass('RC6', 'both viewers pause once at the shared grace end and show the absent host');
+  if (!plusOne) reasons.push('version +1 clause failed');
+  if (!single) reasons.push('post-result one-operation assertion failed');
+  const clauses = `+1 clause ${clause(plusOne)}; post-result one-operation ${clause(single)}`;
+  return reasons.length ? fail('RC6', `${[...new Set(reasons)].join('; ')}; ${clauses}`) : pass('RC6', `both viewers pause once at the shared grace end and show the absent host; ${clauses}`);
 }
 
 function peerRecords(value) {
   return object(value) && Array.isArray(value.records) && value.records.every((record) => object(record)
-    && (record.source !== 'p2p' || text(record.peerId))) && text(value.peerId);
+    && (record.source !== 'p2p' || text(record.peerId))) && text(value.peerId)
+    && Array.isArray(value.priorPeerIds) && value.priorPeerIds.every(text);
 }
 
 function bFrames(value) {
@@ -208,13 +226,23 @@ function oldFrames(value) {
 export function rc7(reading) {
   if (!object(reading) || !object(reading.expected) || !text(reading.expected.identity) || !text(reading.expected.name)
     || !integer(reading.expected.version) || !text(reading.expected.swarmId) || !text(reading.previousSwarmId)
+    || !Array.isArray(reading.stateChanges) || reading.stateChanges.length !== 2
+    || !reading.stateChanges.every((changes) => Array.isArray(changes) && changes.every((change) => object(change) && integer(change.version)))
     || !Array.isArray(reading.members) || reading.members.length !== 3 || !reading.members.every(member)
     || !Array.isArray(reading.swarmIds) || reading.swarmIds.length !== 2 || !reading.swarmIds.every(text)
     || !bFrames(reading.playFrames) || !peerRecords(reading.peerBytes?.[0]) || !peerRecords(reading.peerBytes?.[1])
     || !object(reading.precondition) || typeof reading.precondition.noOldFrame !== 'boolean') return missing('RC7');
   const reasons = [];
   if (reading.members.some((entry) => entry.title.title !== reading.expected.identity || entry.title.name !== reading.expected.name
-    || entry.state.playing || entry.state.positionMs !== 0 || entry.state.held || entry.state.version !== reading.expected.version)) reasons.push('title B was not paused at zero on every member');
+    || entry.titleName !== reading.expected.name || entry.state.playing || entry.state.positionMs !== 0 || entry.state.held)) reasons.push('title B was not paused at zero on every member');
+  const plusOne = reading.members.every((entry) => entry.state.version === reading.expected.version);
+  // Post-result: from RC6's pause to the play press each viewer sees exactly one change, the title operation to B.
+  const rc6Version = reading.expected.version - 1;
+  const single = reading.stateChanges.every((changes) => oneOperation(changes.map((change) => change.version), rc6Version)
+    && changes[1].title === reading.expected.identity);
+  if (!plusOne) reasons.push('version +1 clause failed');
+  if (!single) reasons.push('post-result one-operation assertion failed');
+  const clauses = `+1 clause ${clause(plusOne)}; post-result one-operation ${clause(single)}`;
   if (reading.swarmIds.some((swarmId) => swarmId !== reading.expected.swarmId) || reading.swarmIds[0] !== reading.swarmIds[1] || reading.expected.swarmId === reading.previousSwarmId) reasons.push('viewer swarm ids do not identify a new room/title B swarm');
   if (reading.playFrames.some((entries) => entries[0].mediaTime > 1 || Math.max(...entries.map((entry) => entry.mediaTime)) - Math.min(...entries.map((entry) => entry.mediaTime)) < 5)) reasons.push('title B playback did not start near zero and advance five seconds');
   let noOld = 'NOT EXERCISED';
@@ -227,13 +255,15 @@ export function rc7(reading) {
   let peer = 'NOT EXERCISED';
   if (peerRecordsSeen) {
     const ids = reading.peerBytes.map((value) => value.records.filter((record) => record.source === 'p2p').map((record) => record.peerId));
-    if (ids.some((values, index) => values.some((peerId) => peerId !== reading.peerBytes[1 - index].peerId))) peer = 'FAIL';
+    // peerId is the other viewer's current (title B) engine, which must be new since RC6 (12a D1 F4).
+    const other = (index) => reading.peerBytes[1 - index];
+    if (ids.some((values, index) => other(index).priorPeerIds.includes(other(index).peerId)
+      || values.some((peerId) => peerId !== other(index).peerId))) peer = 'FAIL';
     else peer = 'PASS';
     if (peer === 'FAIL') reasons.push('peer byte records name the wrong viewer engine');
   }
-  if (noOld === 'FAIL' || peer === 'FAIL') return fail('RC7', `no-old-frame ${noOld}; peer-bytes ${peer}; ${reasons.join('; ')}`);
-  if (noOld === 'UNESTABLISHED' || peer === 'UNESTABLISHED') return missing('RC7');
-  return reasons.length ? fail('RC7', reasons.join('; ')) : pass('RC7', `title B is new and paused; no-old-frame ${noOld}; peer-bytes ${peer}`);
+  if (noOld === 'FAIL' || peer === 'FAIL') return fail('RC7', `no-old-frame ${noOld}; peer-bytes ${peer}; ${reasons.join('; ')}; ${clauses}`);
+  return reasons.length ? fail('RC7', `${reasons.join('; ')}; ${clauses}`) : pass('RC7', `title B is new and paused; no-old-frame ${noOld}; peer-bytes ${peer}; ${clauses}`);
 }
 
 function parked(value) {

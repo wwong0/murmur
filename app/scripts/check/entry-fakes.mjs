@@ -26,7 +26,8 @@ export function createRoomClient() {
     onEvent(type, fn) { return subscribe(harness().clientEvents, type, fn); },
     on(type, fn) { return subscribe(harness().clientHandlers, type, fn); },
     send(envelope) { harness().log('send', envelope); },
-    request: () => new Promise(() => {}),
+    // Unanswered unless a check scripts `onRequest`, as the adoption check does.
+    request: (fields) => harness().onRequest?.(fields) ?? new Promise(() => {}),
     connect() { harness().log('connect'); },
     echo(timeoutMs) { harness().log('echo', timeoutMs); return Promise.resolve(null); },
   };

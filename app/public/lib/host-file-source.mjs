@@ -1,5 +1,8 @@
 import { MANIFEST_NAME, lockName, storageFit, storeKey } from './prepared-store.mjs';
 
+// The states in which choose() takes a file; in any other it ignores the pick.
+export const CHOOSABLE_STATES = Object.freeze(['awaiting-file', 'refused', 'failed']);
+
 function errorMessage(error) {
   return `${error?.name ?? 'Error'}: ${error?.message ?? String(error)}`;
 }
@@ -105,7 +108,7 @@ export function createHostFileSource({ store, locks, memory, client, isTypeSuppo
   }
 
   async function choose(file) {
-    if (!['awaiting-file', 'refused', 'failed'].includes(state)) return;
+    if (!CHOOSABLE_STATES.includes(state)) return;
     refusal = null;
     failure = null;
     fraction = null;

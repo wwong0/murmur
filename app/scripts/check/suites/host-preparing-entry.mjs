@@ -239,4 +239,21 @@ export default async function hostPreparingEntrySuite() {
     for (const id of ['play', 'back-10', 'forward-10']) assertEqual(preparing.controls[id].disabled, true, `${id} is disabled for a preparing file host`);
     assertEqual(preparing.bar.preparing, true, 'file host bar records preparing');
   });
+
+  // 12a D1 F1: the source ignores a pick while it prepares, so the page must not store that pick's name.
+  await check('host-preparing-entry: a pick ignored while preparing keeps the first file name', async () => {
+    const globals = browserGlobals({ lock: { request: async (name, options, callback) => callback({ name, options }) } });
+    const page = hostPage(product.code, { globals });
+    await drain();
+    joined(page);
+    const named = (name, bytes) => Object.assign(new Blob([Uint8Array.from(bytes)]), { name });
+    page.chooseHostFile(named('first.mp4', [1, 2, 3]));
+    await drain();
+    assertEqual(page.app.hostFile().state, 'preparing', `the first pick is preparing (${page.app.hostFile().failure})`);
+    assertEqual(globals.sessionStorage.getItem('watchalong.prepared-name'), 'first.mp4', 'the accepted pick stores its name');
+    page.chooseHostFile(named('second.mp4', [4, 5, 6]));
+    await drain();
+    assertEqual(page.app.hostFile().workerCalls.inspect, 1, 'the source ignored the second pick');
+    assertEqual(globals.sessionStorage.getItem('watchalong.prepared-name'), 'first.mp4', 'an ignored pick does not replace the stored name');
+  });
 }

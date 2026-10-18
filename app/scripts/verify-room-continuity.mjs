@@ -94,6 +94,7 @@ const snapshotExpression = (afterPeerSeq = 0) => `(() => {
     present: true,
     buildId: app.buildId,
     title: app.title(),
+    titleName: document.querySelector('#title-name')?.textContent ?? null,
     state: app.playbackState(),
     grace: app.hostGrace(),
     hostFile: file ? { state: file.state ?? null, fraction: file.fraction ?? null, origin: file.origin ?? null, workerCalls: file.workerCalls ?? null } : null,
@@ -186,7 +187,14 @@ function newHostIn(snapshot, oldIds) {
 }
 
 function memberOf(snapshot) {
-  return { title: snapshot?.title ?? null, state: snapshot?.state ?? null, videoPaused: snapshot?.video?.paused ?? null };
+  return { title: snapshot?.title ?? null, titleName: snapshot?.titleName ?? null, state: snapshot?.state ?? null, videoPaused: snapshot?.video?.paused ?? null };
+}
+
+// The distinct state versions a page observed, in order, over the given phases.
+function versionTrail(page, phases, seed = []) {
+  const seen = [...seed, ...page.polls.filter((entry) => phases.includes(entry.phase) && entry.snapshot?.state)
+    .map((entry) => ({ version: entry.snapshot.state.version, title: entry.snapshot.title?.title ?? null }))];
+  return seen.filter((entry, index) => index === 0 || entry.version !== seen[index - 1].version);
 }
 
 function framesAfter(page, mark) {
@@ -483,8 +491,10 @@ async function main(runDir) {
     }, (value) => [value.v1, value.v2].every((entry) => entry.hostPreparing?.state === 'absent' && entry.state?.playing === false), GRACE_WAIT_MS);
     record(evaluate(rc6, {
       graceMs: 3000,
+      gracePauses: (leaveLatest.v1.grace?.pauses ?? NaN) + (leaveLatest.v2.grace?.pauses ?? NaN),
       viewers: [v1, v2].map((page, index) => ({
         prev: beforeClose[page.tag].state,
+        versions: versionTrail(page, ['RC6-pre', 'RC6']).map((entry) => entry.version),
         grace: leaveLatest[page.tag].grace,
         polls: leavePolls[page.tag].filter((poll) => poll.state && poll.atSharedMs !== null),
         paused: leaveLatest[page.tag].state,
@@ -494,7 +504,8 @@ async function main(runDir) {
     }));
 
     host2 = await openPage('host2', `${F_ORIGIN}/room.html?room=${room}&role=host&tab=host2`);
-    await waitUntil('returning host', async () => ({ host: await read(host2, 'RC7-choosing'), v1: await read(v1, 'RC7-choosing'), v2: await read(v2, 'RC7-choosing') }), (value) => value.host.present && value.v1.hostPreparing?.state === 'choosing' && value.v2.hostPreparing?.state === 'choosing', ROOM_WAIT_MS);
+    await waitUntil('returning host', async () => ({ host: await read(host2, 'RC7-choosing'), v1: await read(v1, 'RC7-choosing'), v2: await read(v2, 'RC7-choosing') }), (value) => value.host.present && value.host.hostFile?.state === 'awaiting-file'
+      && value.v1.hostPreparing?.state === 'choosing' && value.v2.hostPreparing?.state === 'choosing', ROOM_WAIT_MS);
     await setFileInput(host2, TITLE_B);
     const bMark = { v1: null, v2: null };
     const bReady = await waitUntil('title B', async () => {
@@ -517,13 +528,16 @@ async function main(runDir) {
       const entries = framesAfter(page, playBMarks[page.tag]);
       return entries.length > 1 && Math.max(...entries.map((entry) => entry.mediaTime)) - Math.min(...entries.map((entry) => entry.mediaTime)) >= 5;
     }), 30_000);
-    const bPeer = [v1, v2].map((page) => ({ peerId: page.polls.at(-1)?.snapshot?.peerBytes?.peerId ?? null, records: page.polls.filter((entry) => entry.phase === 'B-load-mark' || entry.phase === 'RC7-play').flatMap((entry) => entry.snapshot?.peerBytes?.records ?? []).filter((record) => typeof record.source === 'string').filter((record, index, all) => all.findIndex((candidate) => candidate.seq === record.seq) === index) }));
+    // peerId stays the first engine's; the current (title B) engine is the last of peerIds (12a D1 F4).
+    const bPeer = [v1, v2].map((page) => ({ peerId: page.polls.at(-1)?.snapshot?.peerBytes?.peerIds?.at(-1) ?? null, priorPeerIds: leaveLatest[page.tag].peerBytes?.peerIds ?? null, records: page.polls.filter((entry) => entry.phase === 'B-load-mark' || entry.phase === 'RC7-play').flatMap((entry) => entry.snapshot?.peerBytes?.records ?? []).filter((record) => typeof record.source === 'string').filter((record, index, all) => all.findIndex((candidate) => candidate.seq === record.seq) === index) }));
     record(evaluate(rc7, {
       precondition: { noOldFrame: (leaveLatest.v1.state?.positionMs ?? 0) >= 20_000 },
       expected: { identity: fixtures.b.identity, name: FIXTURE_NAMES.b, version: (leaveLatest.v1.state?.version ?? 0) + 1, swarmId: `${room}:${fixtures.b.identity}` },
       previousSwarmId: swarmIds[0], members: [bReady.host, bReady.v1, bReady.v2].map(memberOf),
       oldFrames: [v1.frames.slice(bMark.v1, playBMarks.v1), v2.frames.slice(bMark.v2, playBMarks.v2)], playFrames: [framesAfter(v1, playBMarks.v1), framesAfter(v2, playBMarks.v2)],
       swarmIds: [bReady.v1.swarmId, bReady.v2.swarmId], peerBytes: bPeer,
+      stateChanges: [v1, v2].map((page) => versionTrail(page, ['RC7-choosing', 'RC7', 'B-load-mark'],
+        [{ version: leaveLatest[page.tag].state?.version, title: leaveLatest[page.tag].state ? fixtures.a.identity : null }])),
     }));
 
     await closePage(v2);
@@ -533,6 +547,8 @@ async function main(runDir) {
     await sleep(1_000);
     const created = await waitUntil('D viewer', () => read(v1, 'RC8'), (value) => value.present && value.state !== null && value.forwardDisabled === false, ROOM_WAIT_MS);
     for (const positionMs of [10_000, 20_000, 30_000]) {
+      // A seek disables forward-10 until it lands; a click before then does nothing (12a D1 F6).
+      await waitUntil('D forward enabled', () => read(v1, 'RC8-seek'), (value) => value.forwardDisabled === false, 5_000);
       await clickElement(v1.tab, '#forward-10');
       await waitUntil('D forward seek', () => read(v1, 'RC8-seek'), (value) => value.state?.playing === false && value.state.positionMs === positionMs, 5_000);
     }

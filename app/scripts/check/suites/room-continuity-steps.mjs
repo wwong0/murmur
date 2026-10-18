@@ -7,7 +7,7 @@ const idA = `v1:${'a'.repeat(64)}`;
 const idB = `v1:${'b'.repeat(64)}`;
 const state = (patch = {}) => ({ lineage: 'lineage-a', version: 4, playing: false, positionMs: 0, held: false, atSharedMs: 0, ...patch });
 const title = (identity = idA, name = 'title-a.mp4') => ({ title: identity, name });
-const member = (identity = idA, name = 'title-a.mp4', patch = {}) => ({ title: title(identity, name), state: state(patch) });
+const member = (identity = idA, name = 'title-a.mp4', patch = {}) => ({ title: title(identity, name), titleName: name, state: state(patch) });
 const frame = (mediaTime, wallTime) => ({ mediaTime, wallTime });
 const clone = (value) => structuredClone(value);
 
@@ -45,7 +45,9 @@ const reload = () => ({
 const rc5Good = { expected: { identity: idA, name: 'title-a.mp4' }, reloads: Array.from({ length: 5 }, reload) };
 const rc6Good = {
   graceMs: 3000,
+  gracePauses: 1,
   viewers: [1, 2].map(() => ({
+    versions: [4, 5],
     prev: state({ playing: true, positionMs: 20000, atSharedMs: 1000 }),
     grace: { startedAtSharedMs: 1000, endsAtSharedMs: 4000 },
     polls: [{ atSharedMs: 2000, state: state({ playing: true, positionMs: 21000, atSharedMs: 2000 }) }, { atSharedMs: 3000, state: state({ playing: true, positionMs: 22000, atSharedMs: 3000 }) }],
@@ -62,7 +64,8 @@ const rc7Good = {
   oldFrames: [[frame(0.5, 0)], [frame(0.7, 0)]],
   playFrames: [[frame(0.2, 0), frame(5.4, 5100)], [frame(0.3, 0), frame(5.6, 5100)]],
   swarmIds: ['room-b', 'room-b'],
-  peerBytes: [{ peerId: 'peer-a', records: [{ source: 'p2p', peerId: 'peer-b' }] }, { peerId: 'peer-b', records: [{ source: 'p2p', peerId: 'peer-a' }] }],
+  stateChanges: [1, 2].map(() => [{ version: 5, title: idA }, { version: 6, title: idB }]),
+  peerBytes: [{ peerId: 'peer-a', priorPeerIds: ['peer-a0'], records: [{ source: 'p2p', peerId: 'peer-b' }] }, { peerId: 'peer-b', priorPeerIds: ['peer-b0'], records: [{ source: 'p2p', peerId: 'peer-a' }] }],
 };
 const rc8Good = { created: state(), seeked: { ...state({ positionMs: 30000 }), controlMode: 'open' }, reloaded: { ...state({ positionMs: 30000 }), controlMode: 'open' }, noRoom: { sessionStorage: null } };
 
@@ -75,6 +78,19 @@ export default async function roomContinuityStepsSuite() {
   await cases('RC5 host reload', rc5, rc5Good, { ...clone(rc5Good), reloads: rc5Good.reloads.map((entry, index) => index ? entry : { ...entry, polls: [{ viewers: [{ state: state() }, { state: state({ playing: true }) }] }] }) });
   await cases('RC6 grace pause', rc6, rc6Good, { ...clone(rc6Good), viewers: rc6Good.viewers.map((viewer, index) => index ? viewer : { ...viewer, paused: { ...viewer.paused, playing: true } }) });
   await cases('RC7 title B', rc7, rc7Good, { ...clone(rc7Good), members: [member(idB, 'title-b.mp4', { version: 6, positionMs: 1 }), ...rc7Good.members.slice(1)] });
+  // 12a D1 F4, F5: the element's name, and peer bytes from the other viewer's new engine.
+  await check('room-continuity-steps: RC3 and RC7 read #title-name; RC7 peer bytes name the new engine', async () => {
+    const wrongElement = (good) => ({ ...clone(good), members: good.members.map((entry, index) => (index === 1 ? { ...entry, titleName: '' } : entry)) });
+    assertEqual(rc3(wrongElement(rc3Good)).verdict, 'FAIL', 'RC3 fails when #title-name is not the name');
+    assertEqual(rc7(wrongElement(rc7Good)).verdict, 'FAIL', 'RC7 fails when #title-name is not the name');
+    const oldId = clone(rc7Good);
+    oldId.peerBytes[0].records = [{ source: 'p2p', peerId: 'peer-b0' }];
+    assertEqual(rc7(oldId).detail.includes('peer-bytes FAIL'), true, 'a record naming the old engine fails');
+    const notNew = clone(rc7Good);
+    notNew.peerBytes[1].priorPeerIds = ['peer-b'];
+    assertEqual(rc7(notNew).detail.includes('peer-bytes FAIL'), true, 'a current id present before RC7 fails');
+    assertEqual(rc7(rc7Good).detail.includes('peer-bytes PASS'), true, 'records naming the other viewer\'s new engine pass');
+  });
   await cases('RC8 stored seek', rc8, rc8Good, { ...clone(rc8Good), reloaded: { ...rc8Good.reloaded, controlMode: 'host' } });
   await check('room-continuity-steps: RC2 viewer media request and RC6 pause instant fail', async () => {
     const requested = { ...clone(rc2Good), viewers: rc2Good.viewers.map((viewer, index) => index ? viewer : { ...viewer, requestsByPath: { '/media/seg.m4s': 1 } }) };
@@ -83,6 +99,19 @@ export default async function roomContinuityStepsSuite() {
     assertEqual(rc6(late).verdict, 'FAIL', 'a pause off every grace end fails RC6');
     const split = { ...clone(rc6Good), viewers: rc6Good.viewers.map((viewer, index) => index ? { ...viewer, paused: { ...viewer.paused, version: 6 } } : viewer) };
     assertEqual(rc6(split).verdict, 'FAIL', 'viewers holding different pauses fail RC6');
+  });
+  await check('room-continuity-steps: version +1 clause and post-result one-operation reading are reported apart', async () => {
+    const seqJump = { ...clone(rc6Good), viewers: rc6Good.viewers.map((viewer) => ({ ...viewer, versions: [4, 35], paused: { ...viewer.paused, version: 35 } })) };
+    assertEqual(rc6(seqJump).verdict, 'FAIL', 'an envelope-seq jump still fails the kept +1 clause');
+    assertEqual(rc6(seqJump).detail.endsWith('+1 clause FAIL; post-result one-operation PASS'), true, 'RC6 reports both clauses');
+    const twoOps = { ...clone(rc6Good), viewers: rc6Good.viewers.map((viewer) => ({ ...viewer, versions: [4, 5, 7], paused: { ...viewer.paused, version: 7 } })) };
+    assertEqual(rc6(twoOps).detail.includes('post-result one-operation FAIL'), true, 'two observed changes fail the one-operation reading');
+    assertEqual(rc6({ ...clone(rc6Good), gracePauses: 2 }).detail.includes('post-result one-operation FAIL'), true, 'two grace pauses fail it');
+    assertEqual(rc6(rc6Good).detail.endsWith('+1 clause PASS; post-result one-operation PASS'), true, 'RC6 pass names both clauses');
+    const bJump = { ...clone(rc7Good), members: rc7Good.members.map((entry) => ({ ...entry, state: { ...entry.state, version: 40 } })), stateChanges: [1, 2].map(() => [{ version: 5, title: idA }, { version: 40, title: idB }]) };
+    assertEqual(rc7(bJump).detail.endsWith('+1 clause FAIL; post-result one-operation PASS'), true, 'RC7 reports both clauses');
+    const extra = { ...clone(rc7Good), stateChanges: [1, 2].map(() => [{ version: 5, title: idA }, { version: 6, title: idB }, { version: 7, title: idB }]) };
+    assertEqual(rc7(extra).detail.includes('post-result one-operation FAIL'), true, 'an extra operation before play fails RC7');
   });
   await check('room-continuity-steps: R-Grace outcomes and boundary', async () => {
     assertEqual(JSON.stringify(grace(rc5Good.reloads)), JSON.stringify({ outcome: 'confirmed', maxReady: 700, maxRejoin: 400, replacementMs: null }), 'confirmed grace');

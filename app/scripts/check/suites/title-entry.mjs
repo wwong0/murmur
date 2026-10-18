@@ -192,6 +192,31 @@ export default async function titleEntrySuite() {
     assertEqual(page.app.title().loadedTitle, TITLE_B, 'the replacement load records title B');
   });
 
+  // 12a D1 F2: a rejoin adopts the room's state with no applied operation; the old title must still go.
+  await check('title-entry: a state adopted with a new title discards the old media', async () => {
+    const page = viewerPage(product.code);
+    await preparePage(page);
+    readyReport(page, TITLE_A, 'title-a.mp4');
+    page.act([loadAction(9_000)], { resolved: true });
+    assertEqual(page.app.title().loadedTitle, TITLE_A, 'the initial load records title A');
+    const adopted = {
+      lineage: 'entry-title-adopted', version: 7, current: { playing: false, atSharedMs: 10_100, mediaMs: 0 },
+      previous: null, controlMode: 'open', title: TITLE_B,
+    };
+    page.harness.onRequest = (fields) => Promise.resolve({
+      type: 'playback-state-answer', from: fields.to, to: 'v', payload: { state: adopted, throughSeq: 7 },
+    });
+    const before = page.kinds().length;
+    page.emit('joined', { clientId: 'v', role: 'viewer', seq: 5, roster: [HOST, VIEWER] });
+    await drain();
+    assertEqual(page.app.title().title, TITLE_B, 'the rejoined viewer adopted title B');
+    page.tick();
+    const kinds = page.kinds().slice(before);
+    const destroyed = kinds.indexOf('player-destroy');
+    assert(destroyed >= 0 && kinds.indexOf('start-unload') > destroyed, 'adoption of title B destroys the player, then unloads the start');
+    assertEqual(page.app.title().loadedTitle, null, 'the old loaded title is cleared');
+  });
+
   await check('title-entry: viewer report name is shown and an omitted name is empty', async () => {
     const page = viewerPage(product.code);
     await preparePage(page);
