@@ -79,6 +79,7 @@ import joinSuite from './check/suites/join.mjs';
 import hostSuite from './check/suites/host.mjs';
 import identitySuite from './check/suites/identity.mjs';
 import routingSuite from './check/suites/routing.mjs';
+import serverOnlyTypesSuite from './check/suites/server-only-types.mjs';
 import presenceSuite from './check/suites/presence.mjs';
 import timeEchoSuite from './check/suites/time-echo.mjs';
 import robustnessSuite from './check/suites/robustness.mjs';
@@ -161,16 +162,22 @@ import playbackHoldSuite from './check/suites/playback-hold.mjs';
 import heldAheadLiveSuite from './check/suites/held-ahead-live.mjs';
 import holdResumeSuite from './check/suites/hold-resume.mjs';
 import playbackStateSuite from './check/suites/playback-state.mjs';
+import playbackTitleSuite from './check/suites/playback-title.mjs';
 import playbackStateRulesSuite from './check/suites/playback-state-rules.mjs';
 import playbackAcquisitionSuite from './check/suites/playback-acquisition.mjs';
+import acquisitionPresenceSuite from './check/suites/acquisition-presence.mjs';
+import playbackStoreSuite from './check/suites/playback-store.mjs';
+import serverRestartSuite from './check/suites/server-restart.mjs';
 import playbackAcquisitionTimingSuite from './check/suites/playback-acquisition-timing.mjs';
 import playbackElectionSuite from './check/suites/playback-election.mjs';
 import autoStartSuite from './check/suites/auto-start.mjs';
 import autoStartPinSuite from './check/suites/auto-start-pin.mjs';
 import pausedSeekSuite from './check/suites/paused-seek.mjs';
 import titleEndSuite from './check/suites/title-end.mjs';
+import hostGraceSuite from './check/suites/host-grace.mjs';
 import seekScrubSuite from './check/suites/seek-scrub.mjs';
 import routeSuite from './check/suites/route.mjs';
+import roomRoleStatusSuite from './check/suites/room-role-status.mjs';
 import driftSuite from './check/suites/drift.mjs';
 import driftControllerSuite from './check/suites/drift-controller.mjs';
 import driftLoadSuite from './check/suites/drift-load.mjs';
@@ -207,12 +214,18 @@ import remuxRunnerSuite from './check/suites/remux-runner.mjs';
 import preparedStoreSuite from './check/suites/prepared-store.mjs';
 import prepareRunnerSuite from './check/suites/prepare-runner.mjs';
 import preparationProgressSuite from './check/suites/preparation-progress.mjs';
+import hostChoosingProgressSuite from './check/suites/host-choosing-progress.mjs';
 import hostStatusSuite from './check/suites/host-status.mjs';
+import titleReportSuite from './check/suites/title-report.mjs';
 import hostFileSourceSuite from './check/suites/host-file-source.mjs';
 import hostFileEntrySuite from './check/suites/host-file-entry.mjs';
 import hostPreparingEntrySuite from './check/suites/host-preparing-entry.mjs';
+import hostGraceEntrySuite from './check/suites/host-grace-entry.mjs';
 import hostTitleGateSuite from './check/suites/host-title-gate.mjs';
+import titleGateSuite from './check/suites/title-gate.mjs';
+import titleEntrySuite from './check/suites/title-entry.mjs';
 import hostFileStepsSuite from './check/suites/host-file-steps.mjs';
+import roomContinuityStepsSuite from './check/suites/room-continuity-steps.mjs';
 import browserCheckListSuite from './check/suites/browser-check-list.mjs';
 import browserResultLogSuite from './check/suites/browser-result-log.mjs';
 import pageViewSuite from './check/suites/page-view.mjs';
@@ -276,6 +289,7 @@ for (const suite of [
   hostSuite,
   identitySuite,
   routingSuite,
+  serverOnlyTypesSuite,
   presenceSuite,
   timeEchoSuite,
   robustnessSuite,
@@ -358,16 +372,22 @@ for (const suite of [
   heldAheadLiveSuite,
   holdResumeSuite,
   playbackStateSuite,
+  playbackTitleSuite,
   playbackStateRulesSuite,
   playbackAcquisitionSuite,
+  acquisitionPresenceSuite,
+  playbackStoreSuite,
+  serverRestartSuite,
   playbackAcquisitionTimingSuite,
   playbackElectionSuite,
   autoStartSuite,
   autoStartPinSuite,
   pausedSeekSuite,
   titleEndSuite,
+  hostGraceSuite,
   seekScrubSuite,
   routeSuite,
+  roomRoleStatusSuite,
   driftSuite,
   driftControllerSuite,
   driftLoadSuite,
@@ -404,12 +424,18 @@ for (const suite of [
   preparedStoreSuite,
   prepareRunnerSuite,
   preparationProgressSuite,
+  hostChoosingProgressSuite,
   hostStatusSuite,
+  titleReportSuite,
   hostFileSourceSuite,
   hostFileEntrySuite,
   hostPreparingEntrySuite,
+  hostGraceEntrySuite,
   hostTitleGateSuite,
+  titleGateSuite,
+  titleEntrySuite,
   hostFileStepsSuite,
+  roomContinuityStepsSuite,
   browserCheckListSuite,
   browserResultLogSuite,
   pageViewSuite,

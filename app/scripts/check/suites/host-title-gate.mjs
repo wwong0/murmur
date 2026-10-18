@@ -109,6 +109,38 @@ export default async function hostTitleGateSuite() {
 
   const product = await bundleProductEntry();
 
+  await check('host-title-gate: a choosing host rejects media requests before the channel', async () => {
+    const clock = createFakeClock();
+    const rtc = createFakeRtcFactory({ clock });
+    const page = runEntry(product.code, {
+      role: 'viewer',
+      search: '?room=r&role=viewer&tab=v',
+      settings: { delivery: 'host', iceServers: [], mediaSource: 'dir' },
+      globals: { RTCPeerConnection: rtc.RTCPeerConnection, TextEncoder, TextDecoder },
+    });
+    await drain();
+    const host = { clientId: 'h', tabId: 'h', role: 'host', joinedAt: 1 };
+    const viewer = { clientId: 'v', tabId: 'v', role: 'viewer', joinedAt: 2 };
+    page.emit('joined', { clientId: 'v', role: 'viewer', roster: [host, viewer] });
+    await flush();
+    const offer = page.sent().find((env) => env.type === 'host-link-offer');
+    if (!offer) throw new Error('viewer link offer was not sent');
+    page.deliver({ type: 'host-link-answer', from: 'h', payload: { linkId: offer.payload.linkId, sdp: 'answer' } });
+    await flush();
+    assertEqual(page.app.hostLink().state, 'open', 'viewer link is open');
+    page.deliver({ type: 'host-status', from: 'h', payload: { state: 'choosing' } });
+    assertEqual(page.view().hostStatus.state, 'choosing', 'viewer believes the host is choosing');
+    const xhr = page.xhr();
+    let failed = false;
+    xhr.addEventListener('error', () => { failed = true; });
+    xhr.open('GET', 'http://127.0.0.1:8100/media/seg.m4s');
+    xhr.send();
+    await flush();
+    assertEqual(failed, true, 'choosing request fails');
+    assertEqual(xhr.status, 0, 'choosing request has status zero');
+    assertEqual(page.app.hostLink().requestsByPath['/media/seg.m4s'], undefined, 'choosing request is not counted');
+  });
+
   await check('host-title-gate: viewer titleReady follows only the roster host report', async () => {
     const page = viewerPage(product.code);
     const host = { clientId: 'h', tabId: 'h', role: 'host', joinedAt: 1 };

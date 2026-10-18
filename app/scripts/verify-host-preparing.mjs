@@ -267,8 +267,8 @@ async function runRows(file, fileBytes) {
   const countersBefore = await readCounters('HP1');
   const hp1Ok = hostBefore.hostFile?.state === 'awaiting-file'
     && hostEntry(viewerBefore.roster)
-    && viewerBefore.hostPreparing?.state === 'preparing'
-    && viewerBefore.hostPreparing?.fraction === 0
+    && viewerBefore.hostPreparing?.state === 'choosing'
+    && viewerBefore.hostPreparing?.fraction === null
     && viewerBefore.controls?.play === true && viewerBefore.controls?.back === true && viewerBefore.controls?.forward === true
     && Object.keys(viewerBefore.requestsByPath ?? {}).length === 0
     && !(countersBefore?.responseRecords ?? []).some((record) => record.urlPath?.startsWith('/media/'));
@@ -286,7 +286,7 @@ async function runRows(file, fileBytes) {
   const hp2Opportunity = Number(forged.hostPreparing?.disbelieved) >= 1;
   if (!hp2Opportunity) row(1, 'NOT EXERCISED', 'precondition did not happen');
   else {
-    const hp2Ok = forged.hostPreparing.state === 'preparing' && !mediaRequested(forged) && forged.controls.play === true;
+    const hp2Ok = forged.hostPreparing.state === 'choosing' && !mediaRequested(forged) && forged.controls.play === true;
     row(1, hp2Ok ? 'PASS' : 'FAIL', hp2Ok ? null : JSON.stringify(forged));
   }
   forger?.close();

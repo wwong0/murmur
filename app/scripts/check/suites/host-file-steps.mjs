@@ -57,7 +57,7 @@ export default async function hostFileStepsSuite() {
 
   const s1Good = {
     host: { state: 'awaiting-file' },
-    viewer: { roster: ['viewer · viewer · v1', 'host · host · h1'], hostPreparing: { state: 'preparing', fraction: 0 }, playDisabled: true, requestsByPath: {} },
+    viewer: { roster: ['viewer · viewer · v1', 'host · host · h1'], hostPreparing: { state: 'choosing', fraction: null }, playDisabled: true, requestsByPath: {} },
     counters: baseCounters(),
   };
   await verdictCases('S1', s1, s1Good, [
@@ -196,7 +196,7 @@ export default async function hostFileStepsSuite() {
 
   const refusal = {
     host: { refusal: { reason: 'video-codec', message: 'video-codec: found mp4v.20.1' } },
-    viewer: { roster: ['viewer · viewer · v2', 'host · host · h2'], hostPreparing: { state: 'preparing', fraction: 0 }, playDisabled: true, requestsByPath: {} },
+    viewer: { roster: ['viewer · viewer · v2', 'host · host · h2'], hostPreparing: { state: 'choosing', fraction: null }, playDisabled: true, requestsByPath: {} },
     prepared: [],
   };
   await verdictCases('S11', s11, refusal, [

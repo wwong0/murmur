@@ -161,6 +161,7 @@ function Connection({ view, actions }) {
   const hostFile = useView(view, (snapshot) => snapshot.hostFile);
   const status = useView(view, (snapshot) => snapshot.status);
   const hostStatus = useView(view, (snapshot) => snapshot.hostStatus);
+  const title = useView(view, (snapshot) => snapshot.title);
   const overlayVisible = useView(view, (snapshot) => snapshot.overlayVisible);
   const help = hostFile.help;
   const notice = hostFile.notice;
@@ -184,8 +185,12 @@ function Connection({ view, actions }) {
       data-last-at={hostStatus.lastAtMs ?? ''}
       data-disbelieved={hostStatus.disbelieved}
     >
-      {hostStatus.state === 'preparing' ? `the host is preparing the video · ${Math.floor(hostStatus.fraction * 100)} %` : ''}
+      {hostStatus.state === 'preparing'
+        ? `the host is preparing the video · ${Math.floor(hostStatus.fraction * 100)} %`
+        : hostStatus.state === 'choosing' ? 'the host is choosing a video'
+          : hostStatus.state === 'absent' ? 'the host has left' : ''}
     </div>
+    <div id="title-name">{title.name ?? ''}</div>
     <div id="overlay" hidden={!overlayVisible}>
       <OverlayLine view={view} id="clock-line" name="clock" />
       <OverlayLine view={view} id="drift-line" name="drift" />

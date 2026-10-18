@@ -1,7 +1,9 @@
+import { FILE_IDENTITY_PATTERN } from './file-identity.mjs';
+
 export const REJECTION_REASONS = Object.freeze(['malformed', 'stale', 'notPermitted', 'notApplicable']);
 export const CONTROL_MODES = Object.freeze(['open', 'host']);
 
-const KINDS = new Set(['create', 'play', 'pause', 'seek', 'control-mode']);
+const KINDS = new Set(['create', 'play', 'pause', 'seek', 'control-mode', 'title']);
 
 function object(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -31,6 +33,10 @@ function validMode(value) {
   return CONTROL_MODES.includes(value);
 }
 
+function validTitle(value) {
+  return value === undefined || (typeof value === 'string' && FILE_IDENTITY_PATTERN.test(value));
+}
+
 function freezeMapping(value) {
   return Object.freeze({
     playing: value.playing,
@@ -48,13 +54,14 @@ function freezeState(value) {
     || !finiteInteger(value.version) || !validMapping(value.current)
     || !(value.previous === null || validMapping(value.previous))
     || (value.previous && value.previous.atSharedMs > value.current.atSharedMs)
-    || !validMode(value.controlMode)) return null;
+    || !validMode(value.controlMode) || !validTitle(value.title)) return null;
   return Object.freeze({
     lineage: value.lineage,
     version: value.version,
     current: freezeMapping(value.current),
     previous: value.previous === null ? null : freezeMapping(value.previous),
     controlMode: value.controlMode,
+    ...(value.title === undefined ? {} : { title: value.title }),
   });
 }
 
@@ -113,13 +120,19 @@ function malformedEnvelope(env, maxFutureMs) {
       || !validMapping(payload.current)
       || !(payload.previous === null || validMapping(payload.previous))
       || (payload.previous && payload.previous.atSharedMs > payload.current.atSharedMs)
-      || !validMode(payload.controlMode)) return true;
+      || !validMode(payload.controlMode)
+      || !validTitle(payload.title)) return true;
     const limit = env.ts.recv + maxFutureMs;
     return payload.current.atSharedMs > limit
       || (payload.previous !== null && payload.previous.atSharedMs > limit);
   }
 
   if (!validBasis(payload.basis)) return true;
+  if (payload.kind === 'title') {
+    if (!Number.isFinite(payload.atSharedMs) || typeof payload.title !== 'string'
+      || !FILE_IDENTITY_PATTERN.test(payload.title)) return true;
+    return payload.atSharedMs > env.ts.recv + maxFutureMs;
+  }
   if (payload.kind === 'play' || payload.kind === 'pause' || payload.kind === 'seek') {
     if (!Number.isFinite(payload.atSharedMs)) return true;
     if (payload.kind === 'seek' && !Number.isFinite(payload.positionMs)) return true;
@@ -166,7 +179,9 @@ export function createPlaybackStateHolder({ maxFutureMs }) {
     }
 
     const role = senderRole(roster, env.from);
-    if (payload.kind === 'control-mode' && role !== 'host') return reject('notPermitted');
+    if ((payload.kind === 'control-mode' || payload.kind === 'title') && role !== 'host') {
+      return reject('notPermitted');
+    }
     if (held?.controlMode === 'host' && (payload.kind === 'play' || payload.kind === 'pause' || payload.kind === 'seek')
       && rosterHasHost(roster) && role !== 'host') return reject('notPermitted');
 
@@ -185,6 +200,7 @@ export function createPlaybackStateHolder({ maxFutureMs }) {
         current: payload.current,
         previous: payload.previous,
         controlMode: payload.controlMode,
+        title: payload.title,
       });
       awaiting = false;
     } else if (payload.kind === 'control-mode') {
@@ -196,6 +212,8 @@ export function createPlaybackStateHolder({ maxFutureMs }) {
         current = { playing: false, atSharedMs: effective, mediaMs: mediaMsAt(held, effective) };
       } else if (payload.kind === 'play') {
         current = { playing: true, atSharedMs: effective, mediaMs: held.current.mediaMs };
+      } else if (payload.kind === 'title') {
+        current = { playing: false, atSharedMs: effective, mediaMs: 0 };
       } else if (payload.hold === true) {
         // T5: a held seek pauses at the landing whatever the prior playing flag.
         current = { playing: false, atSharedMs: effective, mediaMs: Math.max(0, payload.positionMs), held: true };
@@ -212,6 +230,7 @@ export function createPlaybackStateHolder({ maxFutureMs }) {
         current,
         previous: held.current,
         controlMode: held.controlMode,
+        title: payload.kind === 'title' ? payload.title : held.title,
       });
     }
     applied += 1;

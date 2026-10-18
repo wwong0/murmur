@@ -145,6 +145,11 @@ export function createPlaybackStart({
     attempt = null;
   }
 
+  function unload() {
+    loaded = false;
+    invalidateAttempt();
+  }
+
   function pauseAction(actions, id) {
     if (!elementPlaying) return;
     actions.push({ kind: 'pause', attemptId: id });
@@ -463,5 +468,5 @@ export function createPlaybackStart({
     retryRequested = true;
   }
 
-  return { poll, ready, playResolved, playRejected, skip, click, state: snapshot };
+  return { poll, ready, playResolved, playRejected, skip, click, unload, state: snapshot };
 }

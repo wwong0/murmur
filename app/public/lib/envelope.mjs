@@ -1,5 +1,8 @@
 // Shared wire constructors (D2/D3).
 
+import { FILE_IDENTITY_PATTERN } from './file-identity.mjs';
+import { isValidHostName } from './host-status.mjs';
+
 /** Protocol version; checked on join (D2). */
 export const PROTOCOL_VERSION = 1;
 
@@ -30,7 +33,7 @@ export function newReclaimSecret() {
   return hex;
 }
 
-/** Types interpreted by the server; all others relay blind. */
+/** Types the server interprets or emits; all others relay blind. */
 export const TYPE_JOIN = 'join';
 export const TYPE_LEAVE = 'leave';
 export const TYPE_ECHO = 'echo';
@@ -38,6 +41,14 @@ export const TYPE_ECHO_REPLY = 'echo-reply';
 export const TYPE_JOINED = 'joined';
 export const TYPE_PRESENCE = 'presence';
 export const TYPE_ERROR = 'error';
+
+/** Types only the server emits. A member's envelope of one is refused, never relayed (12a D5). */
+export const SERVER_ONLY_TYPES = Object.freeze([
+  TYPE_PRESENCE,
+  TYPE_JOINED,
+  TYPE_ERROR,
+  TYPE_ECHO_REPLY,
+]);
 
 /** Fields overwritten from server connection state by relayEnvelope. */
 export const SERVER_OWNED_FIELDS = Object.freeze(['room', 'from', 'seq', 'ts']);
@@ -94,9 +105,25 @@ export const TYPE_AHEAD = 'ahead';
 export const TYPE_HOST_STATUS = 'host-status';
 
 export function buildHostStatusEnvelope(status) {
-  const payload = status.state === 'ready'
-    ? { state: 'ready' }
-    : { state: 'preparing', fraction: status.fraction };
+  let payload;
+  if (status.state === 'ready') {
+    payload = { state: 'ready' };
+    if (status.identity !== undefined) {
+      if (typeof status.identity !== 'string' || !FILE_IDENTITY_PATTERN.test(status.identity)) {
+        throw new TypeError('ready host status identity is invalid');
+      }
+      payload.identity = status.identity;
+      if (status.name !== undefined) {
+        if (!isValidHostName(status.name)) throw new TypeError('ready host status name is invalid');
+        payload.name = status.name;
+      }
+    } else if (status.name !== undefined) {
+      throw new TypeError('ready host status name needs an identity');
+    }
+  }
+  else if (status.state === 'preparing') payload = { state: 'preparing', fraction: status.fraction };
+  else if (status.state === 'choosing') payload = { state: 'choosing' };
+  else throw new TypeError(`invalid host status state: ${status.state}`);
   return buildClientEnvelope({ type: TYPE_HOST_STATUS, to: ADDR_ROOM, payload });
 }
 
@@ -107,6 +134,17 @@ export function readHostStatus(env) {
   if (body === null || typeof body !== 'object' || Array.isArray(body) || Object.getPrototypeOf(body) !== Object.prototype) return null;
   const keys = Object.keys(body);
   if (body.state === 'ready' && keys.length === 1 && keys[0] === 'state') return { from: env.from, state: 'ready', fraction: null };
+  if (body.state === 'ready' && keys.length >= 2 && keys.length <= 3
+    && keys.includes('state') && keys.includes('identity')
+    && (keys.length === 2 || keys.includes('name'))
+    && typeof body.identity === 'string' && FILE_IDENTITY_PATTERN.test(body.identity)
+    && (keys.length === 2 || isValidHostName(body.name))) {
+    return {
+      from: env.from, state: 'ready', fraction: null, identity: body.identity,
+      ...(keys.length === 3 ? { name: body.name } : {}),
+    };
+  }
+  if (body.state === 'choosing' && keys.length === 1 && keys[0] === 'state') return { from: env.from, state: 'choosing', fraction: null };
   if (body.state === 'preparing' && keys.length === 2 && keys.includes('state') && keys.includes('fraction')
     && typeof body.fraction === 'number' && Number.isFinite(body.fraction) && body.fraction >= 0 && body.fraction <= 1) {
     return { from: env.from, state: 'preparing', fraction: body.fraction };

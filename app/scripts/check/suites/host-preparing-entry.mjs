@@ -27,6 +27,20 @@ class AwaitingWorker {
   }
 }
 
+class RefuseOnceWorker extends AwaitingWorker {
+  constructor() { super(); this.inspections = 0; }
+  postMessage(message) {
+    if (message.t === 'inspect' && this.inspections++ === 0) {
+      queueMicrotask(() => {
+        const data = { t: 'refused', id: message.id, buildId: 'entry-worker', reason: 'video-codec', message: 'the video codec is not H.264' };
+        for (const fn of this.listeners.get('message')) fn({ data });
+      });
+      return;
+    }
+    super.postMessage(message);
+  }
+}
+
 function browserGlobals({ Worker = AwaitingWorker, lock = null } = {}) {
   const locks = lock ?? { request: async (name, options, callback) => callback(null) };
   return {
@@ -81,7 +95,22 @@ export default async function hostPreparingEntrySuite() {
     joined(page);
     const sent = statuses(page);
     assertEqual(sent.length, 1, 'joined host sends one status');
-    assertEqual(JSON.stringify(sent[0].payload), JSON.stringify({ state: 'preparing', fraction: 0 }), 'joined host reports preparing zero');
+    assertEqual(JSON.stringify(sent[0].payload), JSON.stringify({ state: 'choosing' }), 'joined host reports choosing');
+  });
+
+  await check('host-preparing-entry: refusal returns a joined file host to choosing', async () => {
+    const page = hostPage(product.code, { globals: browserGlobals({ Worker: RefuseOnceWorker }) });
+    await drain();
+    joined(page);
+    page.chooseHostFile(new Blob([Uint8Array.from([1, 2, 3])]));
+    await drain();
+    assertEqual(JSON.stringify(statuses(page).at(-1).payload), JSON.stringify({ state: 'choosing' }), 'refusal reports choosing');
+    assert(page.view().hostFile.status.includes('the video codec is not H.264'), 'file status names the refusal');
+    assertEqual(page.view().hostFile.inputHidden, false, 'file input remains visible');
+    assertEqual(page.sent().filter((env) => env.type === 'leave').length, 0, 'refusal does not leave the room');
+    page.chooseHostFile(new Blob([Uint8Array.from([4, 5, 6])]));
+    await drain();
+    assert(statuses(page).some(({ payload }) => JSON.stringify(payload) === JSON.stringify({ state: 'preparing', fraction: 0 })), 'an answering worker reports preparing on retry');
   });
 
   await check('host-preparing-entry: only another member join forces a status', async () => {
@@ -150,10 +179,10 @@ export default async function hostPreparingEntrySuite() {
     assertEqual(page.app.hostFile().state, 'preparing', 'worker preparation is active');
     page.setNow(500);
     worker.progress(100, 1000);
-    assertEqual(statuses(page).length, 1, 'half-interval progress is not sent');
+    assertEqual(statuses(page).length, 2, 'half-interval progress is not sent');
     page.setNow(1000);
     worker.progress(200, 1000);
-    assertEqual(statuses(page).length, 2, 'one-second progress is sent');
+    assertEqual(statuses(page).length, 3, 'one-second progress is sent');
     assertEqual(statuses(page).at(-1).payload.fraction, 0.2, 'sent progress carries the new fraction');
   });
 
@@ -175,13 +204,20 @@ export default async function hostPreparingEntrySuite() {
     const viewer = { clientId: 'v', tabId: 'v', role: 'viewer', joinedAt: 2 };
     page.emit('joined', { clientId: 'v', role: 'viewer', roster: [hostMember, viewer] });
     page.deliver({ ...creation, room: 'r', from: 'h', seq: 1, ts: { recv: 10_000, send: 10_000 } });
-    page.deliver({ type: 'host-status', from: 'h', payload: { state: 'preparing', fraction: 0.4 } });
+    page.deliver({ type: 'host-status', from: 'h', payload: { state: 'choosing' } });
     page.harness.sharedNowMs = 11_000;
+    page.tick();
+    const choosing = page.view();
+    assertEqual(choosing.hostStatus.state, 'choosing', 'viewer believes the host is choosing');
+    for (const id of ['play', 'back-10', 'forward-10']) assertEqual(choosing.controls[id].disabled, true, `${id} is disabled while choosing`);
+    assertEqual(choosing.bar.preparing, true, 'bar records choosing as blocked');
+    assertEqual(page.count('load'), 0, 'choosing host does not load media');
+    page.deliver({ type: 'host-status', from: 'h', payload: { state: 'preparing', fraction: 0.4 } });
     page.tick();
     const preparing = page.view();
     assertEqual(preparing.hostStatus.state, 'preparing', 'viewer believes the host is preparing');
     assertEqual(preparing.hostStatus.fraction, 0.4, 'viewer shows the host fraction');
-    assertEqual(preparing.hostStatus.received, 1, 'viewer counts one host report');
+    assertEqual(preparing.hostStatus.received, 2, 'viewer counts the choosing and preparing reports');
     for (const id of ['play', 'back-10', 'forward-10']) assertEqual(preparing.controls[id].disabled, true, `${id} is disabled while preparing`);
     assertEqual(preparing.bar.preparing, true, 'bar records preparing');
 
@@ -199,7 +235,7 @@ export default async function hostPreparingEntrySuite() {
     page.harness.sharedNowMs = 11_000;
     page.tick();
     const preparing = page.view();
-    assertEqual(preparing.hostStatus.state, 'preparing', 'file host is preparing before a choice');
+    assertEqual(preparing.hostStatus.state, 'choosing', 'file host is choosing before a choice');
     for (const id of ['play', 'back-10', 'forward-10']) assertEqual(preparing.controls[id].disabled, true, `${id} is disabled for a preparing file host`);
     assertEqual(preparing.bar.preparing, true, 'file host bar records preparing');
   });

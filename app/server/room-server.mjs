@@ -35,6 +35,7 @@ import {
   TYPE_JOIN,
   TYPE_LEAVE,
   TYPE_ECHO,
+  SERVER_ONLY_TYPES,
   relayEnvelope,
   validateClientEnvelope,
   readJoinRequest,
@@ -63,6 +64,7 @@ const DEFAULT_MEDIA_DIR = path.resolve(APP_DIR, '..', 'step0', 'content');
 // The 5s default is sized against change 7a's saturated host; see 1b
 // design.md, "Challenged and left standing", before shortening it.
 const DEFAULT_LIVENESS_MS = 5000;
+const DEFAULT_HOST_GRACE_MS = 10_000;
 
 function normalizeTrackerUrl(value) {
   if (value === undefined || value === null || value === '') return null;
@@ -212,7 +214,7 @@ function msUntilNameReleased(member, livenessMs) {
  * short liveness interval and a temporary media root, in-process, without
  * spawning anything.
  *
- * @param {{port?: number, host?: string, mediaDir?: string, livenessMs?: number, quiet?: boolean, delivery?: 'host'|'http', iceServers?: object[], trackerUrl?: string|null, mediaSource?: 'dir'|'file', targetSegmentSeconds?: number, autoStart?: boolean}} [opts]
+ * @param {{port?: number, host?: string, mediaDir?: string, livenessMs?: number, quiet?: boolean, delivery?: 'host'|'http', iceServers?: object[], trackerUrl?: string|null, mediaSource?: 'dir'|'file', targetSegmentSeconds?: number, autoStart?: boolean, hostGraceMs?: number}} [opts]
  */
 export function startRoomServer(opts = {}) {
   const host = opts.host ?? DEFAULT_HOST;
@@ -227,6 +229,7 @@ export function startRoomServer(opts = {}) {
     ? DEFAULT_TARGET_SEGMENT_SECONDS
     : opts.targetSegmentSeconds;
   const autoStart = opts.autoStart ?? false;
+  const hostGraceMs = opts.hostGraceMs ?? DEFAULT_HOST_GRACE_MS;
   if (delivery !== 'host' && delivery !== 'http') {
     throw new TypeError(`delivery must be "host" or "http", got ${JSON.stringify(delivery)}`);
   }
@@ -235,6 +238,9 @@ export function startRoomServer(opts = {}) {
   }
   if (mediaSource === 'file' && delivery === 'http') {
     throw new TypeError('APP_MEDIA_SOURCE=file requires APP_DELIVERY=host; file delivery cannot use http');
+  }
+  if (!Number.isInteger(hostGraceMs) || hostGraceMs < 0 || hostGraceMs > 3_600_000) {
+    throw new TypeError('APP_HOST_GRACE_MS must be an integer from 0 through 3600000');
   }
   try {
     targetMillis(targetSegmentSeconds);
@@ -483,7 +489,7 @@ export function startRoomServer(opts = {}) {
 
     if (req.method === 'GET' && pathname === '/app-settings') {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-      res.end(JSON.stringify({ delivery, iceServers, trackerUrl, mediaSource, targetSegmentSeconds, autoStart }));
+      res.end(JSON.stringify({ delivery, iceServers, trackerUrl, mediaSource, targetSegmentSeconds, autoStart, hostGraceMs }));
       return;
     }
 
@@ -592,6 +598,11 @@ export function startRoomServer(opts = {}) {
         // Only reachable if a room were reaped out from under a live member,
         // which the reap rule makes impossible. Refuse rather than throw.
         refuse(ws, conn, recv, ERROR_CODES.NOT_JOINED, 'room no longer exists');
+        return;
+      }
+
+      if (SERVER_ONLY_TYPES.includes(env.type)) {
+        refuse(ws, conn, recv, ERROR_CODES.BAD_ENVELOPE, `members may not send server-only type "${env.type}"`);
         return;
       }
 
@@ -918,6 +929,14 @@ export function optionsFromEnv(env = process.env) {
   // D8: unset is the product's start, paused at 0; drivers and the harness set 1.
   const autoStartText = env.APP_AUTO_START ?? '';
   if (autoStartText !== '' && autoStartText !== '1') throw new TypeError('APP_AUTO_START must be 1 or unset');
+  const hostGraceText = env.APP_HOST_GRACE_MS;
+  if (hostGraceText !== undefined && !/^\d+$/.test(hostGraceText)) {
+    throw new TypeError('APP_HOST_GRACE_MS must contain decimal digits only');
+  }
+  const hostGraceMs = hostGraceText === undefined ? DEFAULT_HOST_GRACE_MS : Number(hostGraceText);
+  if (!Number.isInteger(hostGraceMs) || hostGraceMs < 0 || hostGraceMs > 3_600_000) {
+    throw new TypeError('APP_HOST_GRACE_MS must be an integer from 0 through 3600000');
+  }
   return {
     port: env.APP_PORT ? Number(env.APP_PORT) : undefined,
     mediaDir: env.APP_MEDIA_DIR,
@@ -928,6 +947,7 @@ export function optionsFromEnv(env = process.env) {
     iceServers,
     trackerUrl: normalizeTrackerUrl(env.APP_TRACKER_URL),
     autoStart: autoStartText === '1',
+    hostGraceMs,
   };
 }
 

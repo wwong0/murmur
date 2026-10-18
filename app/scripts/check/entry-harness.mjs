@@ -216,6 +216,7 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     search,
     protocol: 'http:',
     host: '127.0.0.1:8100',
+    href: 'http://127.0.0.1:8100/room.html',
     assignments: [],
     assign(url) { this.assignments.push(url); },
   };
@@ -255,7 +256,7 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     crypto: globalThis.crypto,
     // The page's settings read; `settings: null` leaves the page without fetch.
     fetch: settings && (async (resource) => (fetches.push(String(resource)), String(resource) === '/app-settings'
-      ? { ok: true, status: 200, json: async () => ({ trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 2, autoStart: true, ...settings }) }
+      ? { ok: true, status: 200, json: async () => ({ trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 2, autoStart: true, hostGraceMs: 10_000, ...settings }) }
       : { ok: false, status: 404, json: async () => null, arrayBuffer: async () => new ArrayBuffer(0) })),
     location,
     history,
@@ -264,6 +265,7 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     performance: { timeOrigin: 1_700_000_000_000, now: () => pinnedNowMs ?? events.length },
     setInterval: (fn) => { intervals.push(fn); return intervals.length; },
     clearInterval() {},
+    queueMicrotask,
     setTimeout: () => 0,
     clearTimeout() {},
     document: {
@@ -297,6 +299,10 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     location,
     fetches,
     app: context.__app,
+    xhr() {
+      if (typeof context.XMLHttpRequest !== 'function') throw new Error('entry harness: XMLHttpRequest is not installed');
+      return new context.XMLHttpRequest();
+    },
     remedy: () => context.__remedyBrowser ?? null,
     view: () => requireScreens().view.get(),
     screens: () => requireScreens(),
@@ -347,6 +353,9 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
       // A real websocket client receives JSON parsed in the page realm. Clone
       // here so exact plain-object checks see that same realm's prototype.
       const delivered = vm.runInContext(`JSON.parse(${JSON.stringify(JSON.stringify(env))})`, context);
+      if (delivered.type === 'presence' && delivered.from === 'server' && Array.isArray(delivered.payload?.roster)) {
+        harness.roster = delivered.payload.roster;
+      }
       for (const fn of harness.clientHandlers.get(delivered.type) ?? []) fn(delivered);
     },
     /** Resolves the real acquisition as a sole host whose own creation echo arrives. */

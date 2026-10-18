@@ -63,4 +63,27 @@ export default async function peerEngineConfigSuite() {
       assert(error instanceof TypeError, `non-${label} input throws TypeError`);
     }
   });
+
+  const TITLE_A = `v1:${'a'.repeat(64)}`;
+  const TITLE_B = `v1:${'b'.repeat(64)}`;
+
+  await check('peer-engine-config (T11): room and title identity form the swarm id', async () => {
+    const first = peerEngineConfig({ roomId: 'room-1', trackerUrl: 'ws://tracker.test:1', iceServers: [], titleId: TITLE_A });
+    const second = peerEngineConfig({ roomId: 'room-1', trackerUrl: 'ws://tracker.test:1', iceServers: [], titleId: TITLE_B });
+    const anotherViewer = peerEngineConfig({ roomId: 'room-1', trackerUrl: 'ws://tracker.test:1', iceServers: [], titleId: TITLE_A });
+    assertEqual(first.core.swarmId, `room-1:${TITLE_A}`, 'title A is namespaced by room');
+    assertEqual(second.core.swarmId, `room-1:${TITLE_B}`, 'title B is namespaced by room');
+    assert(first.core.swarmId !== second.core.swarmId, 'different titles use different swarms');
+    assertEqual(anotherViewer.core.swarmId, first.core.swarmId, 'same title is shared by viewers');
+  });
+
+  await check('peer-engine-config (T11): null title keeps the room swarm and malformed titles throw', async () => {
+    const noTitle = peerEngineConfig({ roomId: 'room-1', trackerUrl: 'ws://tracker.test:1', iceServers: [], titleId: null });
+    assertEqual(noTitle.core.swarmId, 'room-1', 'null title keeps the room swarm');
+    for (const titleId of ['v1:bad', 'V1:' + 'a'.repeat(64), 42]) {
+      let error = null;
+      try { peerEngineConfig({ roomId: 'room-1', trackerUrl: 'ws://tracker.test:1', iceServers: [], titleId }); } catch (caught) { error = caught; }
+      assert(error instanceof TypeError, `malformed title ${String(titleId)} throws TypeError`);
+    }
+  });
 }

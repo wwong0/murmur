@@ -58,6 +58,9 @@ export function createPlayer({ video }) {
       harness().log('load', options);
       harness().onLoad?.();
     },
+    destroy() {
+      harness().log('player-destroy');
+    },
     park(positionMs) {
       harness().log('park', { positionMs, paused: video.paused });
       harness().onPark?.();
@@ -98,6 +101,7 @@ export function createPlaybackStart(options) {
     ready(attemptId, observedSharedMs) { harness().log('ready', { attemptId, observedSharedMs }); },
     playResolved(attemptId) { harness().log('play-resolved', attemptId); },
     playRejected(attemptId, error) { harness().log('play-rejected', { attemptId, error }); },
+    unload() { harness().log('start-unload'); },
     click() { harness().log('start-click'); },
     state: () => ({ ...harness().startState, playing: harness().playing, skips: harness().skips ?? 0 }),
   };

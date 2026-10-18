@@ -207,7 +207,8 @@ export default async function hostReceiptsSuite() {
     await joinAfter(host, first);
     assertEqual(await tagAtOffer(host, first), 'c01', "F1 host resolves a later joiner's tag");
 
-    const forged = nextEnvelope(host, 'presence', (env) => env.from === first.clientId);
+    // The server refuses a member's presence (12a D5), so the forgery never reaches the host.
+    const forged = nextEnvelope(first, 'error', (env) => env.payload?.code === 'bad-envelope');
     first.send({ type: 'presence', to: ADDR_ROOM, payload: { roster: [{ clientId: first.clientId, tabId: 'forged', role: 'viewer' }] } });
     await forged;
     assertEqual(await tagAtOffer(host, first), 'c01', "F1 a member's relayed presence does not rewrite the tag");

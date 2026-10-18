@@ -327,7 +327,7 @@ async function runPass(options) {
 
     server = spawn(process.execPath, [path.join(APP_DIR, 'server', 'room-server.mjs')], {
       cwd: APP_DIR,
-      env: { ...process.env, APP_PORT: String(SERVER_PORT), APP_MEDIA_SOURCE: 'file', APP_DELIVERY: 'host', APP_AUTO_START: '1', APP_SEGMENT_TARGET_S: String(options.target), APP_ICE_SERVERS: '[]', APP_TRACKER_URL: '' },
+      env: { ...process.env, APP_PORT: String(SERVER_PORT), APP_MEDIA_SOURCE: 'file', APP_DELIVERY: 'host', APP_AUTO_START: '1', APP_HOST_GRACE_MS: '30000', APP_SEGMENT_TARGET_S: String(options.target), APP_ICE_SERVERS: '[]', APP_TRACKER_URL: '' },
       stdio: 'ignore',
     });
     const up = await poll(async () => {

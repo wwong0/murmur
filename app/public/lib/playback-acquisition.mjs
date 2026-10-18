@@ -3,6 +3,7 @@ import {
   TYPE_PLAYBACK_STATE_REQUEST,
   TYPE_PLAYBACK_STATE_ANSWER,
   TYPE_PRESENCE,
+  ADDR_SERVER,
   buildPlaybackOperationEnvelope,
   buildPlaybackStateAnswerEnvelope,
   readBody,
@@ -30,6 +31,8 @@ export function createPlaybackAcquisition({
   clock,
   settings = {},
   mintLineage,
+  store,
+  room,
   onOutcome = () => {},
   report = () => {},
 }) {
@@ -74,6 +77,9 @@ export function createPlaybackAcquisition({
   let subscriberErrors = 0;
   let bufferedOperations = 0;
   const unsubs = [];
+  // The entry enters a room in-page after construction (hostRoom), so the
+  // room's name is read at each use, not captured here.
+  const roomName = () => (typeof room === 'function' ? room() : room);
 
   function reportFailure(where, error) {
     try {
@@ -82,6 +88,33 @@ export function createPlaybackAcquisition({
       // Reporting is diagnostic and must not become a subscriber failure.
     }
   }
+
+  function persistState() {
+    const name = roomName();
+    if (!store || typeof name !== 'string') return;
+    try {
+      store.set(JSON.stringify({ room: name, state: holder.state }));
+    } catch (error) {
+      reportFailure('store', error);
+    }
+  }
+
+  function loadProposal() {
+    const name = roomName();
+    if (!store || typeof name !== 'string') return;
+    try {
+      const raw = store.get();
+      if (raw === null) return;
+      const entry = JSON.parse(raw);
+      if (!object(entry) || Object.keys(entry).length !== 2 || !('room' in entry) || !('state' in entry) || entry.room !== name) return;
+      const state = readPlaybackState(entry.state);
+      if (state) proposal = state;
+    } catch (error) {
+      reportFailure('store', error);
+    }
+  }
+
+  loadProposal();
 
   function safe(where, fn) {
     try {
@@ -140,6 +173,7 @@ export function createPlaybackAcquisition({
     if (result.outcome === 'applied') {
       if (env.payload?.kind === 'create' && env.from === client.clientId) created += 1;
       proposal = holder.state;
+      persistState();
     }
     if (Number.isInteger(env.seq)) lastFoldedSeq = Math.max(lastFoldedSeq ?? env.seq, env.seq);
     return result;
@@ -183,6 +217,7 @@ export function createPlaybackAcquisition({
       current,
       previous: proposal?.previous ?? null,
       controlMode: proposal?.controlMode ?? 'open',
+      ...(proposal?.title === undefined ? {} : { title: proposal.title }),
     };
     try {
       client.send(buildPlaybackOperationEnvelope(payload));
@@ -310,6 +345,7 @@ export function createPlaybackAcquisition({
     }
     holder.adopt(answer.state);
     proposal = holder.state;
+    persistState();
     adopted += 1;
     activePass = null;
     if (passTimer !== null) clearTimeout(passTimer);
@@ -351,7 +387,7 @@ export function createPlaybackAcquisition({
   }
 
   function handlePresence(env) {
-    if (disposed) return;
+    if (env.from !== ADDR_SERVER || disposed) return;
     const body = readBody(env);
     const nextRoster = object(body) && Array.isArray(body.roster) ? body.roster : roster;
     if (!holder.state) {
@@ -434,6 +470,8 @@ export function createPlaybackAcquisition({
         // paused, unheld one must not, or a seek while paused would start it.
         ...(holds() && (holder.state.current.playing || holder.state.current.held === true) ? { hold: true } : {}),
       };
+    } else if (kind === 'title') {
+      payload = { ...payload, atSharedMs: now + transitionLeadMs, title: args.title };
     } else if (kind === 'control-mode') {
       payload = { ...payload, controlMode: args.controlMode };
     } else {
@@ -451,6 +489,7 @@ export function createPlaybackAcquisition({
   function permitted(kind) {
     if (disposed || !holder.state) return false;
     if (kind === 'control-mode') return client.role === 'host';
+    if (kind === 'title') return client.role === 'host';
     if (kind !== 'play' && kind !== 'pause' && kind !== 'seek') return false;
     if (holder.state.controlMode !== 'host') return true;
     return !roster.some((member) => member?.role === 'host') || client.role === 'host';

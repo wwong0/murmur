@@ -103,6 +103,7 @@ async function startServer(origin, delivery, iceServers) {
       APP_PORT: String(SERVER_PORT),
       APP_DELIVERY: delivery,
       APP_AUTO_START: '1',
+      APP_HOST_GRACE_MS: '30000',
       APP_ICE_SERVERS: JSON.stringify(iceServers),
     },
     stdio: ['ignore', 'pipe', 'pipe'],

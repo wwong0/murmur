@@ -177,7 +177,7 @@ export function s1(reading) {
   const reasons = [];
   if (reading.host.state !== 'awaiting-file') reasons.push('host is not awaiting-file');
   if (!reading.viewer.roster.some((entry) => typeof entry === 'string' && entry.includes(' · host · '))) reasons.push('viewer roster does not list the host');
-  if (reading.viewer.hostPreparing.state !== 'preparing' || reading.viewer.hostPreparing.fraction !== 0) reasons.push('viewer does not show preparation at fraction 0');
+  if (reading.viewer.hostPreparing.state !== 'choosing' || reading.viewer.hostPreparing.fraction !== null) reasons.push('viewer does not show the host choosing');
   if (reading.viewer.playDisabled !== true) reasons.push('viewer play is not disabled');
   if (Object.keys(reading.viewer.requestsByPath).length !== 0) reasons.push('viewer requested media before preparation');
   if (reading.counters.responseRecords.some(mediaRecord)) reasons.push('server recorded a media path before preparation');
@@ -428,7 +428,7 @@ export function s11(reading) {
   if (typeof reading.host.refusal.message !== 'string' || !reading.host.refusal.message.includes('mp4v')) reasons.push('refusal did not name mp4v');
   if (reading.prepared.length !== 0) reasons.push('refused file left prepared output');
   if (!reading.viewer.roster.some((entry) => typeof entry === 'string' && entry.includes(' · host · '))) reasons.push('viewer roster does not list the host');
-  if (reading.viewer.hostPreparing.state !== 'preparing' || reading.viewer.hostPreparing.fraction !== 0) reasons.push('viewer does not show preparation at fraction 0');
+  if (reading.viewer.hostPreparing.state !== 'choosing' || reading.viewer.hostPreparing.fraction !== null) reasons.push('viewer does not show the host choosing');
   if (reading.viewer.playDisabled !== true) reasons.push('viewer play is not disabled');
   if (Object.keys(reading.viewer.requestsByPath).length !== 0) reasons.push('viewer requested media before preparation');
   return verdict(reasons.length ? 'fail' : 'pass', reading, reasons.length ? reasons : ['refused file stayed unready and out of the room']);

@@ -1,4 +1,5 @@
 import { validateEngineWindows, PRODUCT_ENGINE_WINDOWS } from './engine-windows.mjs';
+import { FILE_IDENTITY_PATTERN } from './file-identity.mjs';
 
 export const HOST_LOAD_NO_BYTES_TIMEOUT_MS = 15_000;
 export const PRODUCT_STREAM_CONFIG = Object.freeze({
@@ -11,10 +12,13 @@ function requireString(value, name) {
   return value;
 }
 
-export function peerEngineConfig({ roomId, trackerUrl, iceServers, windows = null } = {}) {
+export function peerEngineConfig({ roomId, trackerUrl, iceServers, titleId = null, windows = null } = {}) {
   requireString(roomId, 'roomId');
   requireString(trackerUrl, 'trackerUrl');
   if (!Array.isArray(iceServers)) throw new TypeError('peerEngineConfig: iceServers must be an array');
+  if (titleId !== null && (typeof titleId !== 'string' || !FILE_IDENTITY_PATTERN.test(titleId))) {
+    throw new TypeError('peerEngineConfig: titleId must match v1:<64 lowercase hexadecimal characters>');
+  }
   if (windows !== null && windows !== undefined) {
     const result = validateEngineWindows(windows);
     if (result.error) throw new TypeError(`peerEngineConfig: ${result.error}`);
@@ -22,7 +26,7 @@ export function peerEngineConfig({ roomId, trackerUrl, iceServers, windows = nul
   }
 
   const core = Object.freeze({
-    swarmId: roomId,
+    swarmId: titleId === null ? roomId : `${roomId}:${titleId}`,
     announceTrackers: Object.freeze([trackerUrl]),
     rtcConfig: Object.freeze({ iceServers }),
     ...(windows ?? PRODUCT_ENGINE_WINDOWS),

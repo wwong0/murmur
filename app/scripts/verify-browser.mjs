@@ -239,6 +239,12 @@ const URL_B_MEASURED = `${URL_B}&treatmentEvidence=1`;
 try {
   await requireAutoStart(ORIGIN);
   console.log('autoStart: on');
+  const settingsResponse = await fetch(`${ORIGIN}/app-settings`, { cache: 'no-store' });
+  const settings = await settingsResponse.json();
+  if (!Number.isInteger(settings?.hostGraceMs) || settings.hostGraceMs < 10_000) {
+    throw new Error(`refusing to run: ${ORIGIN} reports hostGraceMs ${settings?.hostGraceMs ?? 'absent'}; require at least 10000`);
+  }
+  console.log(`hostGraceMs: ${settings.hostGraceMs}`);
 } catch (error) {
   console.error(error.message ?? String(error));
   process.exit(2);

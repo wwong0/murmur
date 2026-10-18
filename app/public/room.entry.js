@@ -22,7 +22,8 @@ import { PRODUCT_ENGINE_WINDOWS, validateEngineWindows } from './lib/engine-wind
 import { HEADROOM_DEFAULT, validateHeadroomFraction } from './lib/send-pace.mjs';
 import { createClockSync, websocketProbe } from './lib/clock-sync.mjs';
 import { createRoomTimeline } from './lib/room-timeline.mjs';
-import { offsetView } from './lib/playback-state.mjs';
+import { offsetView, stateIdentity } from './lib/playback-state.mjs';
+import { createHostGrace } from './lib/host-grace.mjs';
 import { createEndLatch, endInstant, endPauseMs, isEnded } from './lib/title-end.mjs';
 import { createDriftLog } from './lib/frame-drift.mjs';
 import { createDriftController } from './lib/drift-controller.mjs';
@@ -56,7 +57,7 @@ import { createPageView } from './lib/page-view.mjs';
 import { syncDot } from './lib/sync-dot.mjs';
 import { joinTarget, readRoute } from './lib/route.mjs';
 import { createHostAnswer } from './lib/host-answer.mjs';
-import { createHostStatusBook, ownHostStatus, statusDue } from './lib/host-status.mjs';
+import { createHostStatusBook, isValidHostName, ownHostStatus, statusDue, titleDue } from './lib/host-status.mjs';
 import { mountScreens } from './room/screens.jsx';
 
 const BUILD_ID = __BUILD_ID__;
@@ -116,6 +117,29 @@ let tabId = initialRoute.room ? (initialRoute.tab ?? randomTabId()) : null;
 let activeClient = null;
 let appStarted = false;
 
+const PLAYBACK_STATE_KEY = 'watchalong.playback-state';
+const playbackStore = (() => {
+  let storage;
+  try {
+    storage = globalThis.sessionStorage;
+  } catch {
+    return undefined;
+  }
+  if (!storage) return undefined;
+  return {
+    get() {
+      try { return storage.getItem(PLAYBACK_STATE_KEY); } catch { return null; }
+    },
+    set(value) {
+      try { storage.setItem(PLAYBACK_STATE_KEY, value); } catch {}
+    },
+    clear() {
+      try { storage.removeItem(PLAYBACK_STATE_KEY); } catch {}
+    },
+  };
+})();
+if (route !== 'room') playbackStore?.clear();
+
 // Start-timing instrumentation (executor-spec.md §11.2), off unless asked for.
 // `record` returns early when disabled, so every site below is unconditional
 // and the product keeps one code path either way.
@@ -151,6 +175,7 @@ const INITIAL_VIEW = {
   ended: false,
   hostFile: { status: 'off', inputHidden: true, help: null, notice: null },
   hostStatus: { state: 'unknown', fraction: null, received: 0, lastAtMs: null, disbelieved: 0 },
+  title: { name: null },
   overlay: { clock: '', drift: '', bytes: '', controller: '' },
   overlayVisible: false,
   bar: {
@@ -308,7 +333,7 @@ function installViewerLink() {
     RTCPeerConnection,
     rtcConfig: rtcConfig(),
     urgency: urgentRequestFor,
-    hostPreparing: () => delivery === 'host' && hostStatusBook.current(client.roster).state === 'preparing',
+    hostPreparing: () => hostWithholds(),
     onChange: (snapshot) => {
       if (snapshot.state !== lastState) {
         lastState = snapshot.state;
@@ -411,6 +436,9 @@ let hostFile = null;
 let hostFileChooserOpen = false;
 let mediaSource = null;
 let targetSegmentSeconds = null;
+let hostGraceMs = 10_000;
+let hostGrace = null;
+let gracePauses = 0;
 const hostStatusBook = createHostStatusBook();
 let lastStatusSent = null;
 let statusSends = 0;
@@ -418,20 +446,46 @@ let statusSends = 0;
 const FADE_AFTER_MS = 3000;
 let lastPointerMoveAt = null;
 const PREPARED_KEY_NAME = 'watchalong.prepared-key';
+const PREPARED_NAME_KEY = 'watchalong.prepared-name';
 const endLatch = createEndLatch();
+const graceLatch = createEndLatch();
+const titleLatch = createEndLatch();
 let lastEndPauseInstant = null;
+let lastGracePauseInstant = null;
+let loadedTitle;
 
 function isHostSide() {
   return delivery === 'host' && client.role === 'host';
 }
 
 function ownStatus() {
-  return ownHostStatus({ mediaSource, hostFile: hostFile?.snapshot() ?? null });
+  let name = null;
+  if (mediaSource === 'file') {
+    try { name = globalThis.sessionStorage?.getItem(PREPARED_NAME_KEY) ?? null; } catch {}
+  }
+  return ownHostStatus({ mediaSource, hostFile: hostFile?.snapshot() ?? null, name });
 }
 
-// The preparing status this page acts on: its own as the host, the believed report otherwise.
+// The host status this page acts on: its own as the host, the believed report otherwise.
+function hostGate() {
+  if (delivery !== 'host') return 'ready';
+  if (isHostSide()) return ownStatus().state;
+  if (!client.roster.some((member) => member?.role === 'host')) return 'absent';
+  return hostStatusBook.current(client.roster).state;
+}
+
 function hostStatusNow() {
-  return isHostSide() ? ownStatus() : hostStatusBook.current(client.roster);
+  if (isHostSide()) return ownStatus();
+  const status = hostStatusBook.current(client.roster);
+  return hostGate() === 'absent' ? { ...status, state: 'absent', fraction: null, hostId: null, atMs: null } : status;
+}
+
+function observeHostGrace() {
+  if (!hostGrace || delivery !== 'host' || isHostSide()) return;
+  hostGrace.observe({
+    hostPresent: client.roster.some((member) => member?.role === 'host'),
+    atSharedMs: clockSync.sharedNow(),
+  });
 }
 
 // 11-2 D5: under `file` this is the host's only route into the room.
@@ -447,6 +501,7 @@ function paintHostFile(snapshot) {
   });
   sendHostStatus(false);
   paintHostStatus();
+  maybeIssueTitle();
 }
 
 function sendHostStatus(force) {
@@ -471,6 +526,7 @@ function paintHostStatus() {
     lastAtMs: own ? lastStatusSent?.atMs ?? null : status.atMs,
     disbelieved: own ? 0 : counts.disbelieved,
   });
+  view.set('title', { name: status.state === 'ready' ? status.name ?? null : null });
 }
 
 let malformedHostStatus = 0;
@@ -499,7 +555,7 @@ async function loadHostTransport() {
 }
 
 client.onEvent('status', ({ connected }) => {
-  setStatus(connected ? `connected (room "${room}", tab "${tabId}", role "${role}")` : 'disconnected');
+  setStatus(connected ? `connected (room "${room}", tab "${tabId}", role "${client.role}")` : 'disconnected');
   addNotice(connected ? 'connected' : 'disconnected');
 });
 
@@ -511,6 +567,7 @@ client.onEvent('reconnecting', ({ inMs }) => {
 client.onEvent('joined', (joined) => {
   // The role reported is the one the server gave this membership, not the one
   // the query string asked for.
+  setStatus(`connected (room "${room}", tab "${tabId}", role "${client.role}")`);
   if (delivery === 'host' && joined.role === 'host') {
     sendHostStatus(true);
     hostAnswer?.closeAll();
@@ -518,6 +575,7 @@ client.onEvent('joined', (joined) => {
   }
   addNotice(`joined as ${joined.clientId} (${joined.role})`);
   renderRoster(joined.roster);
+  observeHostGrace();
   paintHostStatus();
   runTickSteps([['urgent-context', updateUrgentContext]], reportStep);
   schedulePollStart(0);
@@ -563,6 +621,7 @@ client.on('presence', (env) => {
   if (env.from === ADDR_SERVER && body.event === 'join' && body.member?.clientId !== client.clientId) sendHostStatus(true);
   addNotice(`presence: ${body.event} — ${body.member?.tabId ?? body.member?.clientId}`);
   renderRoster(body.roster);
+  if (env.from === ADDR_SERVER) observeHostGrace();
   paintHostStatus();
   runTickSteps([['urgent-context', updateUrgentContext]], reportStep);
   schedulePollStart(0);
@@ -612,6 +671,8 @@ const treatment = initializePlaybackTreatment({
 const acquisition = createPlaybackAcquisition({
   client,
   clock: clockSync,
+  store: playbackStore,
+  room: () => room,
   settings: {
     transitionLeadMs: TRANSITION_LEAD_MS,
     maxFutureMs: MAX_FUTURE_MS,
@@ -624,11 +685,21 @@ const acquisition = createPlaybackAcquisition({
   onOutcome: ({ env, outcome }) => {
     // D7: this member's end pause may be rejected as stale or by the control mode; no notice.
     const ownEndPause = env.payload?.kind === 'pause' && env.payload?.atSharedMs === lastEndPauseInstant;
-    if (outcome !== 'applied' && env.from === client.clientId && !ownEndPause) {
+    const ownGracePause = env.payload?.kind === 'pause' && env.payload?.atSharedMs === lastGracePauseInstant;
+    if (outcome !== 'applied' && env.from === client.clientId && !ownEndPause && !ownGracePause) {
       addNotice(`your ${env.payload?.kind ?? 'operation'} was rejected: ${outcome}`, { warn: true });
     }
     renderControls();
     if (outcome === 'applied') {
+      if (loadedTitle !== undefined && (acquisition.state?.title ?? null) !== loadedTitle) {
+        sampler.stop();
+        player.destroy();
+        peerEngine = null;
+        start.unload();
+        loadedTitle = undefined;
+        schedulePollStart(0);
+      }
+      maybeIssueTitle();
       updateUrgentContext();
       schedulePollStart(0);
     }
@@ -786,7 +857,7 @@ function titleEnded() {
 function renderControls() {
   const state = acquisition.state;
   const ended = titleEnded();
-  const preparing = hostPreparingNow();
+  const preparing = hostBlocks();
   const ready = (kind) => controlsReady(kind);
   const controls = {
     play: {
@@ -824,7 +895,7 @@ function renderBar() {
   if (lastPointerMoveAt === null) lastPointerMoveAt = nowPageMs;
   const faded = playing && nowPageMs - lastPointerMoveAt >= FADE_AFTER_MS;
   const ended = titleEnded();
-  const preparing = hostPreparingNow();
+  const preparing = hostBlocks();
   const controllerState = controllerView();
   view.set('bar', {
     faded,
@@ -840,6 +911,15 @@ function issue(kind, args) {
   const issued = acquisition.issue(kind, args);
   renderControls();
   return issued;
+}
+
+function maybeIssueTitle() {
+  const state = acquisition.state;
+  const id = titleDue({ own: ownStatus(), state });
+  const nowSharedMs = clockSync.sharedNow();
+  if (!id || !state || !Number.isFinite(nowSharedMs) || nowSharedMs < state.current.atSharedMs
+    || !titleLatch.take({ lineage: state.lineage, version: state.version })) return;
+  issue('title', { title: id });
 }
 
 function seekBy(deltaMs) {
@@ -920,7 +1000,13 @@ const actions = {
   },
   chooseHostFile: (file) => {
     if (!hostFileChooserOpen) return;
-    if (file) void hostFile.choose(file);
+    if (file) {
+      try {
+        if (isValidHostName(file.name)) globalThis.sessionStorage?.setItem(PREPARED_NAME_KEY, file.name);
+        else globalThis.sessionStorage?.removeItem(PREPARED_NAME_KEY);
+      } catch {}
+      void hostFile.choose(file);
+    }
   },
 };
 renderMute();
@@ -1179,7 +1265,13 @@ function execute(result) {
           elementPositionMs = null;
           const p2p = roomHasPeerExchange && client.role !== 'host'
             ? {
-                core: peerEngineConfig({ roomId: room, trackerUrl, iceServers, windows: engineWindows.windows }).core,
+                core: peerEngineConfig({
+                  roomId: room,
+                  titleId: mediaSource === 'file' ? acquisition.state?.title ?? null : null,
+                  trackerUrl,
+                  iceServers,
+                  windows: engineWindows.windows,
+                }).core,
                 onEngine: (engine) => {
                   peerEngine = engine;
                   peerBytesPublisher.attach(engine);
@@ -1192,6 +1284,7 @@ function execute(result) {
               }
             : null;
           treatment.open(() => player.load({ startPositionMs: action.positionMs, p2p }), 'load');
+          loadedTitle = acquisition.state?.title ?? null;
         }
         else player.park(action.positionMs);
       });
@@ -1212,11 +1305,19 @@ function schedulePollStart(delayMs) {
 }
 
 function titleReady() {
-  return delivery !== 'host' || hostStatusNow().state === 'ready';
+  const status = hostStatusNow();
+  return delivery !== 'host'
+    || (status.state === 'ready' && (status.identity == null || status.identity === acquisition.state?.title));
 }
 
-function hostPreparingNow() {
-  return delivery === 'host' && hostStatusNow().state === 'preparing';
+function hostBlocks() {
+  return delivery === 'host' && ['choosing', 'preparing', 'absent'].includes(hostGate());
+}
+
+function hostWithholds() {
+  const status = hostStatusNow();
+  return delivery === 'host' && (['choosing', 'preparing'].includes(hostGate())
+    || (status.state === 'ready' && status.identity != null && status.identity !== acquisition.state?.title));
 }
 
 function pollStart() {
@@ -1304,6 +1405,7 @@ function paintOverlay() {
 function tickPlayback() {
   runTickSteps([
     ['acquisition', () => acquisition.poll()],
+    ['title', maybeIssueTitle],
     ['playback-start', pollStart],
     ['title-end', () => {
       const state = acquisition.state;
@@ -1314,6 +1416,13 @@ function tickPlayback() {
       if (instant === null || !Number.isFinite(nowSharedMs) || nowSharedMs < instant
         || !endLatch.take(acquisition.snapshot.identity)) return;
       if (issue('pause', { atSharedMs: instant })) lastEndPauseInstant = instant;
+    }],
+    ['host-grace', () => {
+      const endsAt = hostGrace?.due(clockSync.sharedNow()) ?? null;
+      const state = acquisition.state;
+      if (endsAt === null || state?.current.playing !== true || !graceLatch.take(stateIdentity(state))) return;
+      lastGracePauseInstant = endsAt;
+      if (issue('pause', { atSharedMs: endsAt })) gracePauses += 1;
     }],
     ['urgent-context', updateUrgentContext],
     ['held-ahead', updateHeldAhead],
@@ -1375,6 +1484,15 @@ window.__app = {
   hostAsks: (afterSeq = 0) => readHostAsks(afterSeq),
   hostCounters: () => (hostOrigin ? hostOrigin.snapshot() : null),
   hostReceipts: (afterSeq = 0) => (link ? link.receipts(afterSeq) : null),
+  title: () => {
+    const status = hostStatusNow();
+    return {
+      title: acquisition.state?.title ?? null,
+      reportIdentity: status.state === 'ready' ? status.identity ?? null : null,
+      name: status.state === 'ready' ? status.name ?? null : null,
+      loadedTitle: loadedTitle ?? null,
+    };
+  },
   peerExchange: () => peerExchange,
   urgentDelay,
   peerEngineConfig: () => (peerEngine ? peerEngine.getConfig().core : null),
@@ -1408,6 +1526,16 @@ window.__app = {
   },
   timeline: () => acquisition.snapshot,
   hostFile: () => hostFile ? hostFile.snapshot() : hostFileSnapshot({ mediaSource, targetSegmentSeconds }),
+  hostGrace: () => ({
+    ...(hostGrace?.snapshot() ?? {
+      running: false,
+      pending: false,
+      startedAtSharedMs: null,
+      endsAtSharedMs: null,
+    }),
+    graceMs: hostGraceMs,
+    pauses: gracePauses,
+  }),
 };
 
 async function startApp() {
@@ -1417,7 +1545,7 @@ async function startApp() {
     const settingsResponse = await window.fetch('/app-settings', { cache: 'no-store' });
     if (!settingsResponse.ok) throw new Error(`HTTP ${settingsResponse.status}`);
     const settings = await settingsResponse.json();
-    if (!settings || (settings.delivery !== 'host' && settings.delivery !== 'http') || !Array.isArray(settings.iceServers) || (settings.trackerUrl !== null && typeof settings.trackerUrl !== 'string') || (settings.mediaSource !== 'dir' && settings.mediaSource !== 'file') || !Number.isFinite(settings.targetSegmentSeconds) || settings.targetSegmentSeconds <= 0 || typeof settings.autoStart !== 'boolean') {
+    if (!settings || (settings.delivery !== 'host' && settings.delivery !== 'http') || !Array.isArray(settings.iceServers) || (settings.trackerUrl !== null && typeof settings.trackerUrl !== 'string') || (settings.mediaSource !== 'dir' && settings.mediaSource !== 'file') || !Number.isFinite(settings.targetSegmentSeconds) || settings.targetSegmentSeconds <= 0 || typeof settings.autoStart !== 'boolean' || !Number.isInteger(settings.hostGraceMs) || settings.hostGraceMs < 0 || settings.hostGraceMs > 3_600_000) {
       throw new TypeError('invalid application settings');
     }
     delivery = settings.delivery;
@@ -1426,6 +1554,8 @@ async function startApp() {
     iceServers = settings.iceServers;
     trackerUrl = settings.trackerUrl;
     autoStart = settings.autoStart;
+    hostGraceMs = settings.hostGraceMs;
+    hostGrace = createHostGrace({ graceMs: hostGraceMs });
     peerExchange = delivery !== 'host'
       ? 'off'
       : client.role === 'host'
@@ -1448,7 +1578,10 @@ async function startApp() {
       const memory = {
         get: () => sessionStorage.getItem(PREPARED_KEY_NAME),
         set: (value) => sessionStorage.setItem(PREPARED_KEY_NAME, value),
-        clear: () => sessionStorage.removeItem(PREPARED_KEY_NAME),
+        clear: () => {
+          sessionStorage.removeItem(PREPARED_KEY_NAME);
+          sessionStorage.removeItem(PREPARED_NAME_KEY);
+        },
       };
       hostFile = createHostFileSource({
         store, locks, memory,

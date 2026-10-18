@@ -23,15 +23,15 @@ async function settingsAt(origin) {
 
 export default async function settingsSuite() {
   await check('settings: the default server serves host delivery and no ICE servers', async () => {
-    assertEqual(JSON.stringify(await settingsAt(HTTP)), JSON.stringify({ delivery: 'host', iceServers: [], trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 2, autoStart: false }), 'default settings are exact');
+    assertEqual(JSON.stringify(await settingsAt(HTTP)), JSON.stringify({ delivery: 'host', iceServers: [], trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 2, autoStart: false, hostGraceMs: 10_000 }), 'default settings are exact');
   });
 
   await check('settings: configured delivery and ICE servers are served exactly', async () => {
     const iceServers = [{ urls: 'turn:turn.example.test:3478', username: 'u', credential: 'c' }];
-    const configured = startRoomServer({ ...optionsFromEnv({ APP_AUTO_START: '1' }), port: 0, mediaDir, delivery: 'http', iceServers, livenessMs: 120, quiet: true });
+    const configured = startRoomServer({ ...optionsFromEnv({ APP_AUTO_START: '1', APP_HOST_GRACE_MS: '2500' }), port: 0, mediaDir, delivery: 'http', iceServers, livenessMs: 120, quiet: true });
     try {
       const port = await configured.ready;
-      assertEqual(JSON.stringify(await settingsAt(`http://127.0.0.1:${port}`)), JSON.stringify({ delivery: 'http', iceServers, trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 2, autoStart: true }), 'configured settings round-trip');
+      assertEqual(JSON.stringify(await settingsAt(`http://127.0.0.1:${port}`)), JSON.stringify({ delivery: 'http', iceServers, trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 2, autoStart: true, hostGraceMs: 2500 }), 'configured settings round-trip');
     } finally {
       await configured.close();
     }
@@ -43,7 +43,7 @@ export default async function settingsSuite() {
     const configured = startRoomServer({ port: 0, mediaDir, delivery: 'host', iceServers, trackerUrl, livenessMs: 120, quiet: true });
     try {
       const port = await configured.ready;
-      assertEqual(JSON.stringify(await settingsAt(`http://127.0.0.1:${port}`)), JSON.stringify({ delivery: 'host', iceServers, trackerUrl, mediaSource: 'dir', targetSegmentSeconds: 2, autoStart: false }), 'configured tracker round-trips');
+      assertEqual(JSON.stringify(await settingsAt(`http://127.0.0.1:${port}`)), JSON.stringify({ delivery: 'host', iceServers, trackerUrl, mediaSource: 'dir', targetSegmentSeconds: 2, autoStart: false, hostGraceMs: 10_000 }), 'configured tracker round-trips');
     } finally {
       await configured.close();
     }
@@ -72,6 +72,15 @@ export default async function settingsSuite() {
     }
     assert(error instanceof TypeError, 'tracker with http delivery throws a TypeError');
     assert(error.message.includes('APP_TRACKER_URL') && error.message.includes('APP_DELIVERY'), 'tracker refusal names both settings');
+  });
+
+  await check('settings: invalid host grace values name the setting', async () => {
+    for (const value of ['abc', '-1', '1.5', '3600001']) {
+      let error = null;
+      try { optionsFromEnv({ APP_HOST_GRACE_MS: value }); } catch (caught) { error = caught; }
+      assert(error instanceof TypeError, `APP_HOST_GRACE_MS=${value} throws a TypeError`);
+      assert(error.message.includes('APP_HOST_GRACE_MS'), `APP_HOST_GRACE_MS=${value} refusal names the setting`);
+    }
   });
 
   await check('settings: tracker and http delivery refuse in a child process', async () => {
