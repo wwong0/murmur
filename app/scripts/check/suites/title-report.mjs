@@ -1,8 +1,9 @@
 import { assert, assertEqual, check } from '../harness.mjs';
 import { buildHostStatusEnvelope, readHostStatus } from '../../../public/lib/envelope.mjs';
-import { FILE_IDENTITY_PATTERN, fileIdentity } from '../../../public/lib/file-identity.mjs';
+import { fileIdentity } from '../../../public/lib/file-identity.mjs';
 import { createHostFileSource, hostFileSnapshot } from '../../../public/lib/host-file-source.mjs';
-import { isValidHostName, ownHostStatus } from '../../../public/lib/host-status.mjs';
+import { ownHostStatus } from '../../../public/lib/host-status.mjs';
+import { isFileIdentity, isValidHostName } from '../../../public/lib/title-fields.mjs';
 import { createPrepareClient } from '../../../public/lib/prepare-client.mjs';
 import { createPrepareRunner } from '../../../public/lib/prepare-runner.mjs';
 import { createPreparedStore } from '../../../public/lib/prepared-store.mjs';
@@ -55,7 +56,7 @@ export default async function titleReportSuite() {
     const snapshot = source.snapshot();
     assertEqual(snapshot.state, 'ready', 'the real prepare runner reaches ready');
     assertEqual(snapshot.manifest.identity, identity, 'manifest identity matches the independent file identity');
-    assert(FILE_IDENTITY_PATTERN.test(identity), 'the fixture identity has the wire shape');
+    assert(isFileIdentity(identity), 'the fixture identity has the wire shape');
     const ready = ownHostStatus({ mediaSource: 'file', hostFile: snapshot, name: 'holiday.mp4' });
     assertEqual(JSON.stringify(ready), JSON.stringify({ state: 'ready', fraction: null, identity, name: 'holiday.mp4' }), 'file ready status carries identity and name');
     const directory = ownHostStatus({ mediaSource: 'dir', hostFile: snapshot, name: fixture.name });

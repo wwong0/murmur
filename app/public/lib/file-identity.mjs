@@ -1,9 +1,6 @@
 const RANGE = 1024 * 1024;
 const COUNT = 16;
-// Encoded at use: the page bundle loads this module through envelope.mjs.
-const LABEL_TEXT = 'watchalong-file-identity v1\n';
-
-export const FILE_IDENTITY_PATTERN = /^v1:[0-9a-f]{64}$/;
+const LABEL = new TextEncoder().encode('watchalong-file-identity v1\n');
 
 function hex(bytes) {
   return [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('');
@@ -32,7 +29,6 @@ export async function fileIdentity(source) {
   }
   const size = new Uint8Array(8);
   new DataView(size.buffer).setBigUint64(0, BigInt(source.size));
-  const LABEL = new TextEncoder().encode(LABEL_TEXT);
   const material = new Uint8Array(LABEL.length + size.length + digests.length * 32);
   material.set(LABEL);
   material.set(size, LABEL.length);

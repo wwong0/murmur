@@ -1,7 +1,6 @@
 // Shared wire constructors (D2/D3).
 
-import { FILE_IDENTITY_PATTERN } from './file-identity.mjs';
-import { isValidHostName } from './host-status.mjs';
+import { isFileIdentity, isValidHostName } from './title-fields.mjs';
 
 /** Protocol version; checked on join (D2). */
 export const PROTOCOL_VERSION = 1;
@@ -109,7 +108,7 @@ export function buildHostStatusEnvelope(status) {
   if (status.state === 'ready') {
     payload = { state: 'ready' };
     if (status.identity !== undefined) {
-      if (typeof status.identity !== 'string' || !FILE_IDENTITY_PATTERN.test(status.identity)) {
+      if (!isFileIdentity(status.identity)) {
         throw new TypeError('ready host status identity is invalid');
       }
       payload.identity = status.identity;
@@ -133,19 +132,21 @@ export function readHostStatus(env) {
   const body = env.payload;
   if (body === null || typeof body !== 'object' || Array.isArray(body) || Object.getPrototypeOf(body) !== Object.prototype) return null;
   const keys = Object.keys(body);
-  if (body.state === 'ready' && keys.length === 1 && keys[0] === 'state') return { from: env.from, state: 'ready', fraction: null };
-  if (body.state === 'ready' && keys.length >= 2 && keys.length <= 3
-    && keys.includes('state') && keys.includes('identity')
-    && (keys.length === 2 || keys.includes('name'))
-    && typeof body.identity === 'string' && FILE_IDENTITY_PATTERN.test(body.identity)
-    && (keys.length === 2 || isValidHostName(body.name))) {
-    return {
-      from: env.from, state: 'ready', fraction: null, identity: body.identity,
-      ...(keys.length === 3 ? { name: body.name } : {}),
-    };
+  const only = (...names) => keys.length === names.length && names.every((name) => keys.includes(name));
+  if (body.state === 'ready') {
+    if (only('state')) return { from: env.from, state: 'ready', fraction: null };
+    const named = only('state', 'identity', 'name');
+    if ((named || only('state', 'identity'))
+      && isFileIdentity(body.identity)
+      && (!named || isValidHostName(body.name))) {
+      return {
+        from: env.from, state: 'ready', fraction: null, identity: body.identity,
+        ...(named ? { name: body.name } : {}),
+      };
+    }
   }
-  if (body.state === 'choosing' && keys.length === 1 && keys[0] === 'state') return { from: env.from, state: 'choosing', fraction: null };
-  if (body.state === 'preparing' && keys.length === 2 && keys.includes('state') && keys.includes('fraction')
+  if (body.state === 'choosing' && only('state')) return { from: env.from, state: 'choosing', fraction: null };
+  if (body.state === 'preparing' && only('state', 'fraction')
     && typeof body.fraction === 'number' && Number.isFinite(body.fraction) && body.fraction >= 0 && body.fraction <= 1) {
     return { from: env.from, state: 'preparing', fraction: body.fraction };
   }

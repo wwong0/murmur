@@ -1,4 +1,4 @@
-import { FILE_IDENTITY_PATTERN } from './file-identity.mjs';
+import { isFileIdentity } from './title-fields.mjs';
 
 export const REJECTION_REASONS = Object.freeze(['malformed', 'stale', 'notPermitted', 'notApplicable']);
 export const CONTROL_MODES = Object.freeze(['open', 'host']);
@@ -34,7 +34,7 @@ function validMode(value) {
 }
 
 function validTitle(value) {
-  return value === undefined || (typeof value === 'string' && FILE_IDENTITY_PATTERN.test(value));
+  return value === undefined || isFileIdentity(value);
 }
 
 function freezeMapping(value) {
@@ -129,8 +129,7 @@ function malformedEnvelope(env, maxFutureMs) {
 
   if (!validBasis(payload.basis)) return true;
   if (payload.kind === 'title') {
-    if (!Number.isFinite(payload.atSharedMs) || typeof payload.title !== 'string'
-      || !FILE_IDENTITY_PATTERN.test(payload.title)) return true;
+    if (!Number.isFinite(payload.atSharedMs) || !isFileIdentity(payload.title)) return true;
     return payload.atSharedMs > env.ts.recv + maxFutureMs;
   }
   if (payload.kind === 'play' || payload.kind === 'pause' || payload.kind === 'seek') {

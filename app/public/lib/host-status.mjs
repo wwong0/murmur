@@ -1,17 +1,12 @@
 export const STATUS_INTERVAL_MS = 1000;
 
-import { FILE_IDENTITY_PATTERN } from './file-identity.mjs';
-
-export function isValidHostName(name) {
-  return typeof name === 'string' && name.length >= 1 && name.length <= 255
-    && !/[\\/\u0000-\u001f\u007f]/.test(name);
-}
+import { isFileIdentity, isValidHostName } from './title-fields.mjs';
 
 export function ownHostStatus({ mediaSource, hostFile, name, report = () => {} }) {
   if (mediaSource !== 'file') return { state: 'ready', fraction: null };
   if (hostFile?.state === 'ready') {
     const identity = hostFile.manifest?.identity;
-    if (typeof identity !== 'string' || !FILE_IDENTITY_PATTERN.test(identity)) {
+    if (!isFileIdentity(identity)) {
       report('host-status', new TypeError('ready host file has an invalid identity'));
       return { state: 'choosing', fraction: null };
     }

@@ -66,6 +66,12 @@ const DEFAULT_MEDIA_DIR = path.resolve(APP_DIR, '..', 'step0', 'content');
 const DEFAULT_LIVENESS_MS = 5000;
 const DEFAULT_HOST_GRACE_MS = 10_000;
 
+function requireHostGraceMs(value) {
+  if (!Number.isInteger(value) || value < 0 || value > 3_600_000) {
+    throw new TypeError('APP_HOST_GRACE_MS must be an integer from 0 through 3600000');
+  }
+}
+
 function normalizeTrackerUrl(value) {
   if (value === undefined || value === null || value === '') return null;
   if (typeof value !== 'string' || (!value.startsWith('ws://') && !value.startsWith('wss://'))) {
@@ -239,9 +245,7 @@ export function startRoomServer(opts = {}) {
   if (mediaSource === 'file' && delivery === 'http') {
     throw new TypeError('APP_MEDIA_SOURCE=file requires APP_DELIVERY=host; file delivery cannot use http');
   }
-  if (!Number.isInteger(hostGraceMs) || hostGraceMs < 0 || hostGraceMs > 3_600_000) {
-    throw new TypeError('APP_HOST_GRACE_MS must be an integer from 0 through 3600000');
-  }
+  requireHostGraceMs(hostGraceMs);
   try {
     targetMillis(targetSegmentSeconds);
   } catch (error) {
@@ -934,9 +938,7 @@ export function optionsFromEnv(env = process.env) {
     throw new TypeError('APP_HOST_GRACE_MS must contain decimal digits only');
   }
   const hostGraceMs = hostGraceText === undefined ? DEFAULT_HOST_GRACE_MS : Number(hostGraceText);
-  if (!Number.isInteger(hostGraceMs) || hostGraceMs < 0 || hostGraceMs > 3_600_000) {
-    throw new TypeError('APP_HOST_GRACE_MS must be an integer from 0 through 3600000');
-  }
+  requireHostGraceMs(hostGraceMs);
   return {
     port: env.APP_PORT ? Number(env.APP_PORT) : undefined,
     mediaDir: env.APP_MEDIA_DIR,

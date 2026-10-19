@@ -57,7 +57,8 @@ import { createPageView } from './lib/page-view.mjs';
 import { syncDot } from './lib/sync-dot.mjs';
 import { joinTarget, readRoute } from './lib/route.mjs';
 import { createHostAnswer } from './lib/host-answer.mjs';
-import { createHostStatusBook, isValidHostName, ownHostStatus, statusDue, titleDue } from './lib/host-status.mjs';
+import { createHostStatusBook, ownHostStatus, statusDue, titleDue } from './lib/host-status.mjs';
+import { isValidHostName } from './lib/title-fields.mjs';
 import { mountScreens } from './room/screens.jsx';
 
 const BUILD_ID = __BUILD_ID__;
@@ -117,8 +118,8 @@ let tabId = initialRoute.room ? (initialRoute.tab ?? randomTabId()) : null;
 let activeClient = null;
 let appStarted = false;
 
-const PLAYBACK_STATE_KEY = 'watchalong.playback-state';
-const playbackStore = (() => {
+// One session-storage key whose failures are swallowed; undefined without storage.
+function sessionKey(key) {
   let storage;
   try {
     storage = globalThis.sessionStorage;
@@ -128,16 +129,20 @@ const playbackStore = (() => {
   if (!storage) return undefined;
   return {
     get() {
-      try { return storage.getItem(PLAYBACK_STATE_KEY); } catch { return null; }
+      try { return storage.getItem(key); } catch { return null; }
     },
     set(value) {
-      try { storage.setItem(PLAYBACK_STATE_KEY, value); } catch {}
+      try { storage.setItem(key, value); } catch {}
     },
     clear() {
-      try { storage.removeItem(PLAYBACK_STATE_KEY); } catch {}
+      try { storage.removeItem(key); } catch {}
     },
   };
-})();
+}
+
+const PREPARED_NAME_KEY = 'watchalong.prepared-name';
+const playbackStore = sessionKey('watchalong.playback-state');
+const preparedName = sessionKey(PREPARED_NAME_KEY);
 if (route !== 'room') playbackStore?.clear();
 
 // Start-timing instrumentation (executor-spec.md §11.2), off unless asked for.
@@ -446,7 +451,6 @@ let statusSends = 0;
 const FADE_AFTER_MS = 3000;
 let lastPointerMoveAt = null;
 const PREPARED_KEY_NAME = 'watchalong.prepared-key';
-const PREPARED_NAME_KEY = 'watchalong.prepared-name';
 const endLatch = createEndLatch();
 const graceLatch = createEndLatch();
 const titleLatch = createEndLatch();
@@ -459,33 +463,27 @@ function isHostSide() {
 }
 
 function ownStatus() {
-  let name = null;
-  if (mediaSource === 'file') {
-    try { name = globalThis.sessionStorage?.getItem(PREPARED_NAME_KEY) ?? null; } catch {}
-  }
+  const name = mediaSource === 'file' ? preparedName?.get() ?? null : null;
   return ownHostStatus({ mediaSource, hostFile: hostFile?.snapshot() ?? null, name });
 }
 
-// The host status this page acts on: its own as the host, the believed report otherwise.
-function hostGate() {
-  if (delivery !== 'host') return 'ready';
-  if (isHostSide()) return ownStatus().state;
-  if (!client.roster.some((member) => member?.role === 'host')) return 'absent';
-  return hostStatusBook.current(client.roster).state;
+function rosterHasHost() {
+  return client.roster.some((member) => member?.role === 'host');
 }
 
+// The host status this page acts on: its own as the host, the believed report
+// otherwise, and `absent` under host delivery while the roster has no host.
 function hostStatusNow() {
   if (isHostSide()) return ownStatus();
   const status = hostStatusBook.current(client.roster);
-  return hostGate() === 'absent' ? { ...status, state: 'absent', fraction: null, hostId: null, atMs: null } : status;
+  return delivery === 'host' && !rosterHasHost()
+    ? { ...status, state: 'absent', fraction: null, hostId: null, atMs: null }
+    : status;
 }
 
 function observeHostGrace() {
   if (!hostGrace || delivery !== 'host' || isHostSide()) return;
-  hostGrace.observe({
-    hostPresent: client.roster.some((member) => member?.role === 'host'),
-    atSharedMs: clockSync.sharedNow(),
-  });
+  hostGrace.observe({ hostPresent: rosterHasHost(), atSharedMs: clockSync.sharedNow() });
 }
 
 // 11-2 D5: under `file` this is the host's only route into the room.
@@ -684,9 +682,10 @@ const acquisition = createPlaybackAcquisition({
   mintLineage: newReclaimSecret,
   onOutcome: ({ env, outcome }) => {
     // D7: this member's end pause may be rejected as stale or by the control mode; no notice.
-    const ownEndPause = env.payload?.kind === 'pause' && env.payload?.atSharedMs === lastEndPauseInstant;
-    const ownGracePause = env.payload?.kind === 'pause' && env.payload?.atSharedMs === lastGracePauseInstant;
-    if (outcome !== 'applied' && env.from === client.clientId && !ownEndPause && !ownGracePause) {
+    // The same holds for its grace pause.
+    const ownSystemPause = env.payload?.kind === 'pause'
+      && [lastEndPauseInstant, lastGracePauseInstant].includes(env.payload?.atSharedMs);
+    if (outcome !== 'applied' && env.from === client.clientId && !ownSystemPause) {
       addNotice(`your ${env.payload?.kind ?? 'operation'} was rejected: ${outcome}`, { warn: true });
     }
     renderControls();
@@ -1008,10 +1007,8 @@ const actions = {
     if (file) {
       // A pick the source ignores must not rename the title it is preparing (12a D8).
       if (!CHOOSABLE_STATES.includes(hostFile.snapshot().state)) return;
-      try {
-        if (isValidHostName(file.name)) globalThis.sessionStorage?.setItem(PREPARED_NAME_KEY, file.name);
-        else globalThis.sessionStorage?.removeItem(PREPARED_NAME_KEY);
-      } catch {}
+      if (isValidHostName(file.name)) preparedName?.set(file.name);
+      else preparedName?.clear();
       void hostFile.choose(file);
     }
   },
@@ -1311,20 +1308,25 @@ function schedulePollStart(delayMs) {
   }, Math.max(0, delayMs));
 }
 
+// A ready report that names a title other than the room state's.
+function readyForOtherTitle(status) {
+  return status.state === 'ready' && status.identity != null && status.identity !== acquisition.state?.title;
+}
+
 function titleReady() {
+  if (delivery !== 'host') return true;
   const status = hostStatusNow();
-  return delivery !== 'host'
-    || (status.state === 'ready' && (status.identity == null || status.identity === acquisition.state?.title));
+  return status.state === 'ready' && !readyForOtherTitle(status);
 }
 
 function hostBlocks() {
-  return delivery === 'host' && ['choosing', 'preparing', 'absent'].includes(hostGate());
+  return delivery === 'host' && ['choosing', 'preparing', 'absent'].includes(hostStatusNow().state);
 }
 
 function hostWithholds() {
+  if (delivery !== 'host') return false;
   const status = hostStatusNow();
-  return delivery === 'host' && (['choosing', 'preparing'].includes(hostGate())
-    || (status.state === 'ready' && status.identity != null && status.identity !== acquisition.state?.title));
+  return status.state === 'choosing' || status.state === 'preparing' || readyForOtherTitle(status);
 }
 
 function pollStart() {

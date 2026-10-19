@@ -1,10 +1,10 @@
 import { REMUX_FORMAT_VERSION, targetMillis } from './remux-settings.mjs';
-import { FILE_IDENTITY_PATTERN } from './file-identity.mjs';
+import { isFileIdentity } from './title-fields.mjs';
 
 export const MANIFEST_NAME = 'content-manifest.json';
 
 export function storeKey({ identity, targetSeconds }) {
-  if (typeof identity !== 'string' || !FILE_IDENTITY_PATTERN.test(identity)) {
+  if (!isFileIdentity(identity)) {
     throw new TypeError('identity must match v1:<64 lowercase hexadecimal characters>');
   }
   return `${identity.replace(':', '-')}-t${targetMillis(targetSeconds)}-f${REMUX_FORMAT_VERSION}`;
