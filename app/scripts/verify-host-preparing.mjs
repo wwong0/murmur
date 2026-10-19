@@ -10,6 +10,7 @@ import { attach, cdpHttp, CHROME, clickElement, disposeChrome, FLAGS, rewriteWeb
 import { createResultLog } from './browser-result-log.mjs';
 import { assertServedBundle, createManifestFile, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
+import { closeNamePrompt } from './room-page-steps.mjs';
 import { buildClientEnvelope, buildJoinEnvelope } from '../public/lib/envelope.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -237,6 +238,7 @@ async function openPages() {
   await host.send('DOM.enable');
   const v1Url = `${ORIGIN}/room.html?room=${room}`;
   v1 = await openTarget(v1Url, 'v1');
+  console.log(`name prompt v1: ${JSON.stringify(await closeNamePrompt(v1))}`);
   const hostFirst = await pageReady(host, 'host');
   const v1First = await pageReady(v1, 'v1');
   const bundle = await assertServedBundle({ origin: ORIGIN, bundlePath: BUNDLE_PATH, pageBuildId: hostFirst.buildId });
@@ -333,6 +335,7 @@ async function runRows(file, fileBytes) {
       f0 = status.fraction;
       v2OpenAt = Date.now();
       v2 = await openTarget(`${ORIGIN}/room.html?room=${room}`, 'v2');
+      console.log(`name prompt v2: ${JSON.stringify(await closeNamePrompt(v2))}`);
       await pageReady(v2, 'v2');
     }
     if (v1Snapshot.hostPreparing?.state === 'ready') {

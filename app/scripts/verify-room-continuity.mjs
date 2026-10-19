@@ -12,6 +12,7 @@ import {
 import { assertServedBundle, createManifestFile, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
 import { startTracker } from './runner/tracker.mjs';
+import { closeNamePrompt } from './room-page-steps.mjs';
 import { fileIdentity } from '../public/lib/file-identity.mjs';
 import {
   exitCode, grace, rc0, rc1, rc2, rc3, rc4, rc5, rc6, rc7, rc8,
@@ -206,6 +207,29 @@ function safeError(error) {
   return text.replaceAll(TITLE_A, FIXTURE_NAMES.a).replaceAll(TITLE_B, FIXTURE_NAMES.b).replaceAll(REFUSED, 'refuse-audio-codec.mp4');
 }
 
+// post-result diagnostic (12b C2, T10)
+const RC7_PLAY_READ = `(() => {
+  const play = document.querySelector('#play');
+  const box = play?.getBoundingClientRect() ?? null;
+  const style = play ? getComputedStyle(play) : null;
+  const x = box ? box.left + box.width / 2 : null;
+  const y = box ? box.top + box.height / 2 : null;
+  const hit = box ? document.elementFromPoint(x, y) : null;
+  return {
+    box: box ? { x: box.x, y: box.y, width: box.width, height: box.height } : null,
+    disabled: play?.disabled ?? null,
+    visibility: style?.visibility ?? null,
+    display: style?.display ?? null,
+    opacity: style?.opacity ?? null,
+    hit: hit ? { tag: hit.tagName, id: hit.id, class: hit.getAttribute('class'), insidePlay: play.contains(hit) } : null,
+    pointInViewport: box ? x >= 0 && y >= 0 && x < window.innerWidth && y < window.innerHeight : null,
+    scrollY: window.scrollY,
+    innerWidth: window.innerWidth,
+    innerHeight: window.innerHeight,
+    playbackState: window.__app?.playbackState?.() ?? null,
+  };
+})()`;
+
 async function main(runDir) {
   const startedAt = new Date();
   const fixtures = { a: await fixture(TITLE_A, FIXTURE_NAMES.a), b: await fixture(TITLE_B, FIXTURE_NAMES.b), refused: { name: 'refuse-audio-codec.mp4', bytes: (await fs.promises.stat(REFUSED)).size } };
@@ -391,6 +415,7 @@ async function main(runDir) {
     await launchBrowser(room);
     const fStart = await waitUntil('host page', () => read(host, 'start'), (value) => value.present === true && typeof value.buildId === 'string', ROOM_WAIT_MS);
     const dProbe = await openPage('d-probe', `${D_ORIGIN}/room.html?room=${room}-probe`);
+    console.log(`name prompt d-probe: ${JSON.stringify(await closeNamePrompt(dProbe.tab))}`);
     const dStart = await waitUntil('D probe page', () => read(dProbe, 'start'), (value) => value.present === true && typeof value.buildId === 'string', ROOM_WAIT_MS);
     await closePage(dProbe);
     const f1 = { pageBuildId: fStart.buildId, settings: settingsF, bundle: await buildInfo(F_ORIGIN, fStart.buildId) };
@@ -400,7 +425,9 @@ async function main(runDir) {
     record(evaluate(rc1, { expectedDGraceMs: 10000, f: { settings: settingsF }, d: { settings: settingsD } }));
 
     v1 = await openPage('v1', `${F_ORIGIN}/room.html?room=${room}`);
+    console.log(`name prompt v1: ${JSON.stringify(await closeNamePrompt(v1.tab))}`);
     v2 = await openPage('v2', `${F_ORIGIN}/room.html?room=${room}`);
+    console.log(`name prompt v2: ${JSON.stringify(await closeNamePrompt(v2.tab))}`);
     await waitUntil('viewer pages', async () => ({ host: await read(host, 'join'), v1: await read(v1, 'join'), v2: await read(v2, 'join') }), (value) => value.v1.present && value.v2.present && hostInRoster(value.v1) && hostInRoster(value.v2), ROOM_WAIT_MS);
     const beforeCounters = await getJson(F_ORIGIN, '/harness/counters');
     await setFileInput(host, REFUSED);
@@ -523,11 +550,19 @@ async function main(runDir) {
     await read(v1, 'B-load-mark');
     await read(v2, 'B-load-mark');
     const playBMarks = { v1: v1.frames.length, v2: v2.frames.length };
+    const playRead = await host2.tab.evaluate(RC7_PLAY_READ).catch((error) => ({ error: safeError(error) }));
     await clickElement(host2.tab, '#play');
-    await waitUntil('title B playback', async () => ({ v1: await read(v1, 'RC7-play'), v2: await read(v2, 'RC7-play') }), (value) => [v1, v2].every((page) => {
-      const entries = framesAfter(page, playBMarks[page.tag]);
-      return entries.length > 1 && Math.max(...entries.map((entry) => entry.mediaTime)) - Math.min(...entries.map((entry) => entry.mediaTime)) >= 5;
-    }), 30_000);
+    try {
+      await waitUntil('title B playback', async () => ({ v1: await read(v1, 'RC7-play'), v2: await read(v2, 'RC7-play') }), (value) => [v1, v2].every((page) => {
+        const entries = framesAfter(page, playBMarks[page.tag]);
+        return entries.length > 1 && Math.max(...entries.map((entry) => entry.mediaTime)) - Math.min(...entries.map((entry) => entry.mediaTime)) >= 5;
+      }), 30_000);
+    } catch (error) {
+      const after = await host2.tab.evaluate(RC7_PLAY_READ).catch((readError) => ({ error: safeError(readError) }));
+      const afterRead = after.error ? after : { playbackState: after.playbackState, disabled: after.disabled, hit: after.hit };
+      console.log(`RC7 play diagnostic: ${JSON.stringify({ before: playRead, after: afterRead })}`);
+      throw error;
+    }
     // peerId stays the first engine's; the current (title B) engine is the last of peerIds (12a D1 F4).
     const bPeer = [v1, v2].map((page) => ({ peerId: page.polls.at(-1)?.snapshot?.peerBytes?.peerIds?.at(-1) ?? null, priorPeerIds: leaveLatest[page.tag].peerBytes?.peerIds ?? null, records: page.polls.filter((entry) => entry.phase === 'B-load-mark' || entry.phase === 'RC7-play').flatMap((entry) => entry.snapshot?.peerBytes?.records ?? []).filter((record) => typeof record.source === 'string').filter((record, index, all) => all.findIndex((candidate) => candidate.seq === record.seq) === index) }));
     record(evaluate(rc7, {
@@ -544,6 +579,7 @@ async function main(runDir) {
     await closePage(host2);
     host2 = null;
     await navigate(v1, `${D_ORIGIN}/room.html?room=${room}-dir`);
+    console.log(`name prompt D viewer: ${JSON.stringify(await closeNamePrompt(v1.tab))}`);
     await sleep(1_000);
     const created = await waitUntil('D viewer', () => read(v1, 'RC8'), (value) => value.present && value.state !== null && value.forwardDisabled === false, ROOM_WAIT_MS);
     for (const positionMs of [10_000, 20_000, 30_000]) {

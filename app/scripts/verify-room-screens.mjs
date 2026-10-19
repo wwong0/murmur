@@ -12,6 +12,8 @@ import { attach, cdpHttp, CHROME, clickElement, disposeChrome, FLAGS, sleep } fr
 import { createResultLog } from './browser-result-log.mjs';
 import { assertServedBundle, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
+import { classifyEndPause, endPauseSettled } from './room-screens-steps.mjs';
+import { toggleControlMode } from './room-page-steps.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -416,24 +418,40 @@ async function runRows() {
   });
 
   await runRow(LABELS[12], async () => {
+    // post-result diagnostic (12b C2, T10)
+    const notExercised = (failed, observed) => ({ exercised: false, detail: detail({ failed, ...observed }) });
     const mode = await until(host, "window.__app.timeline()?.controlMode ?? null", (value) => value === 'open');
-    if (!mode.ok) return { exercised: false };
-    const modeClick = await clickWhenEnabled(host, '#control-mode');
+    if (!mode.ok) return notExercised('the initial control mode was not open', { mode: mode.value });
+    const settingsReady = await until(host, "document.querySelector('#settings')?.disabled === false", Boolean);
+    const modeClick = settingsReady.ok && await toggleControlMode(host);
     const hostMode = await until(host, "window.__app.timeline()?.controlMode ?? null", (value) => value === 'host');
-    if (!modeClick || !hostMode.ok || !await setPlaying(false)) return { exercised: false };
+    const observed = {
+      mode: mode.value,
+      settingsEnabled: settingsReady.ok,
+      settingsLastRead: settingsReady.value,
+      toggleControlMode: settingsReady.ok ? modeClick : 'not run',
+      hostModeLastValue: hostMode.value,
+    };
+    if (!modeClick) return notExercised('#settings never became enabled, so toggleControlMode did not run', observed);
+    if (!hostMode.ok) return notExercised('the control mode did not become host', observed);
+    if (!await setPlaying(false)) {
+      const roomStatesRead = await roomStates().catch((error) => `read failed: ${error.message}`);
+      return notExercised('setPlaying(false) did not leave both pages paused', { ...observed, setPlaying: false, roomStates: roomStatesRead });
+    }
     const duration = await read(host, "Number(document.querySelector('#seek')?.max)");
-    const beforeRejected = (await read(viewer, "window.__app.timeline()?.rejected?.notPermitted ?? null")) ?? 0;
+    const before = await read(viewer, "window.__app.timeline()?.rejected ?? null");
     const beforeNotices = await read(host, "[...document.querySelectorAll('#notices li')].map((li) => li.textContent)");
     await setRange(host, '#seek', duration - 6_000);
     const sought = await waitRoomStates((states) => states.every(({ state }) => state && Math.abs(state.positionMs - (duration - 6_000)) <= 1));
     const played = await clickWhenEnabled(host, '#play');
     const endMs = await titleEndMs(host, duration);
     const ended = await waitRoomStates((states) => states.every(({ state }) => state?.playing === false && Math.abs(state.positionMs - endMs) <= END_TOLERANCE_MS), 20_000);
-    const rejection = await until(viewer, "window.__app.timeline()?.rejected?.notPermitted ?? null", (value) => value === beforeRejected + 1, 5_000);
-    const afterRejected = rejection.value;
+    const rejection = await until(viewer, "window.__app.timeline()?.rejected ?? null", (value) => endPauseSettled(before, value), 5_000);
+    const after = rejection.value;
+    const end = classifyEndPause(before, after);
     const notices = await read(host, "[...document.querySelectorAll('#notices li')].map((li) => li.textContent)");
     const noRejectedPause = notices.slice(beforeNotices.length).every((text) => !text.includes('pause was rejected'));
-    return { exercised: true, ok: sought.ok && played && ended.ok && afterRejected === beforeRejected + 1 && noRejectedPause, detail: { ended: ended.value, beforeRejected, afterRejected, notices: notices.slice(beforeNotices.length) } };
+    return { exercised: true, ok: sought.ok && played && ended.ok && end.ok && noRejectedPause, detail: { ended: ended.value, endPause: { class: end.class, deltas: end.deltas, error: end.error }, before, after, notices: notices.slice(beforeNotices.length) } };
   });
 
   const fixture = (name) => path.join(APP_DIR, 'scripts', 'check', 'remux-fixtures', name);

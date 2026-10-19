@@ -75,8 +75,28 @@ export default async function roomControlsEntrySuite() {
       pause: { text: 'pause', disabled: true, hidden: false },
       'back-10': { text: 'back 10s', disabled: true, hidden: false },
       'forward-10': { text: 'forward 10s', disabled: true, hidden: false },
-      'control-mode': { text: 'mode: host', disabled: true, hidden: true },
+      // D11: every member sees the settings menu, so a viewer's entry is disabled, not hidden.
+      'control-mode': { text: 'mode: host', disabled: true, hidden: false },
       mute: { text: 'unmute', disabled: false, hidden: false },
     }), 'initial controls');
+    assertEqual(page.view().controlMode, 'open', 'the current mode starts open');
+  });
+
+  await check('room-controls-entry: the control-mode entry is enabled for a resolved host and the current mode follows the applied operation', async () => {
+    const page = runEntry(product.code);
+    page.resolveSole({ nowMs: 10_000 });
+    page.harness.sharedNowMs = 11_000;
+    page.tick();
+    assertEqual(page.view().controls['control-mode'].hidden, false, 'the host sees the control');
+    assertEqual(page.view().controls['control-mode'].disabled, false, 'a resolved host can press it');
+    assertEqual(page.view().controlMode, 'open', 'the room starts in open mode');
+
+    page.screens().actions.controlMode();
+    const change = page.sent().find((env) => env.payload?.kind === 'control-mode');
+    assert(change, 'the host issued a control-mode operation');
+    page.deliver({ ...change, seq: 3, from: 'c1', ts: { recv: 11_002 } });
+    page.tick();
+    assertEqual(page.view().controlMode, 'host', 'the applied operation moves the current mode');
+    assertEqual(page.view().controls['control-mode'].text, 'mode: open', 'the entry text still names the mode a press would set');
   });
 }

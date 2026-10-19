@@ -96,6 +96,7 @@ import { evaluatePeerExchange } from './figures/peer-exchange-bars.mjs';
 import { PEER_PAGE_READING } from './peer-exchange-probe.mjs';
 import { Core } from '../node_modules/p2p-media-loader-core/lib/core.js';
 import { requireAutoStart } from './delivery-pin.mjs';
+import { closeNamePrompt, toggleControlMode } from './room-page-steps.mjs';
 
 const PASS_STARTED_AT = Date.now();
 const PORT = 9223;
@@ -1968,7 +1969,7 @@ try {
   const controlPages = () => Promise.all([pageOf(a3), pageOf(v)]);
   const [hostStart] = await controlPages();
   expect('9.1 the room is not yet in host control', hostStart.present && hostStart.timeline?.controlMode !== 'host', JSON.stringify(hostStart.timeline?.controlMode));
-  await clickElement(a3, '#control-mode');
+  await toggleControlMode(a3, { click: clickElement });
   const hostMode = await pollUntil(
     controlPages,
     (pages) => pages.every((page) => page.timeline?.controlMode === 'host') && pages[1].buttons?.pause?.disabled === true,
@@ -1994,7 +1995,7 @@ try {
   expect('9.1 a viewer pause forced past the disabled button is rejected notPermitted by host and viewer', rejected.value.every((page, i) => rejectedOf(page) === rejectedOf(afterDisabled[i]) + 1), rejectedDetail);
   expect('9.1 the rejected pause left the state version unchanged', rejected.value.every((page, i) => page.timeline?.identity?.version === heldVersions[i]), rejectedDetail);
 
-  await clickElement(a3, '#control-mode');
+  await toggleControlMode(a3, { click: clickElement });
   const sharedAgain = await pollUntil(
     controlPages,
     (pages) => pages.every((page) => page.timeline?.controlMode !== 'host') && pages[1].buttons?.pause?.disabled === false,
@@ -2036,6 +2037,7 @@ try {
   expect('9.1 the reloaded creator rejoins as host', reloaded.ok, JSON.stringify(reloaded.value.members));
 
   const invited = inviteUrl ? await attach('I/invite', inviteUrl.href) : null;
+  if (invited) console.log(`name prompt I/invite: ${JSON.stringify(await closeNamePrompt(invited))}`);
   const joinedByInvite = await pollUntil(
     () => pageOf(n),
     (page) => page.members.length === 2 && page.members.some((member) => /^\S+ · viewer · /.test(member) && !member.startsWith(`${createdTab} · `)),

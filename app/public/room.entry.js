@@ -56,6 +56,8 @@ import { keyframeNotice, refusalHelp } from './lib/file-help.mjs';
 import { createPageView } from './lib/page-view.mjs';
 import { syncDot } from './lib/sync-dot.mjs';
 import { joinTarget, readRoute } from './lib/route.mjs';
+import { formatMediaTime } from './lib/media-time.mjs';
+import { activityText, labelMap, memberLabels } from './lib/room-people.mjs';
 import { createHostAnswer } from './lib/host-answer.mjs';
 import { createHostStatusBook, ownHostStatus, statusDue, titleDue } from './lib/host-status.mjs';
 import { isValidHostName } from './lib/title-fields.mjs';
@@ -192,7 +194,10 @@ const INITIAL_VIEW = {
     syncDot: { state: 'idle', title: 'no figure' },
   },
   roster: [],
+  people: [],
   notices: [],
+  activity: [],
+  controlMode: 'open',
   route,
   joinError: '',
   invite: { href: room ? `${location.origin}${location.pathname}?room=${encodeURIComponent(room)}` : '', text: 'invite link' },
@@ -201,7 +206,7 @@ const INITIAL_VIEW = {
     pause: { text: 'pause', disabled: false, hidden: false },
     'back-10': { text: 'back 10s', disabled: false, hidden: false },
     'forward-10': { text: 'forward 10s', disabled: false, hidden: false },
-    'control-mode': { text: 'mode: host', disabled: false, hidden: true },
+    'control-mode': { text: 'mode: host', disabled: false, hidden: false },
     mute: { text: 'unmute', disabled: false, hidden: false },
   },
 };
@@ -225,6 +230,27 @@ function addNotice(text, { warn = false } = {}) {
 
 function renderRoster(roster) {
   view.set('roster', (roster ?? []).map((member) => `${member.tabId} · ${member.role} · ${member.clientId}`));
+  try {
+    view.set('people', memberLabels(roster));
+  } catch (error) {
+    addSubscriberFailure('participants', error);
+  }
+}
+
+// The activity list is a view for a person, so a failure in it reports itself and never
+// reaches the handlers around it (a throw in a room-client subscriber reaches nobody).
+const ACTIVITY_CAP = 100;
+let activitySeq = 0;
+
+function addActivity(event, labels) {
+  try {
+    const text = activityText(event, labels ?? labelMap(view.get().people));
+    if (text === null) return;
+    const entry = { id: activitySeq++, text, warn: event.kind === 'refused' };
+    view.set('activity', [...view.get().activity, entry].slice(-ACTIVITY_CAP));
+  } catch (error) {
+    addSubscriberFailure('activity', error);
+  }
 }
 
 // What a person can DO about a refusal, where there is anything. Absence is the
@@ -552,9 +578,19 @@ async function loadHostTransport() {
   createHostOrigin = originModule.createHostOrigin;
 }
 
-client.onEvent('status', ({ connected }) => {
+// The first connect is not a reconnect, a second disconnect before any connect adds nothing
+// to a line already saying the connection is down, and a page that will not reconnect never
+// says it is trying.
+let everConnected = false;
+let connectionLost = false;
+
+client.onEvent('status', ({ connected, superseded }) => {
   setStatus(connected ? `connected (room "${room}", tab "${tabId}", role "${client.role}")` : 'disconnected');
   addNotice(connected ? 'connected' : 'disconnected');
+  if (connected && connectionLost) addActivity({ kind: 'reconnected' });
+  if (!connected && everConnected && !connectionLost && !superseded && !terminal) addActivity({ kind: 'reconnecting' });
+  connectionLost = everConnected && !connected;
+  everConnected = everConnected || connected;
 });
 
 client.onEvent('reconnecting', ({ inMs }) => {
@@ -612,13 +648,23 @@ client.onEvent('gap', ({ expected, actual }) => {
   addNotice(`gap detected: expected seq ${expected}, got ${actual}`, { warn: true });
 });
 
+// A leaver is gone from the roster that just arrived, so the label comes from the one held
+// before it; a joiner is only in the new one. Own join says nothing.
+function notePresence(body, labelsBefore) {
+  const clientId = body.member?.clientId;
+  if (body.event === 'leave') addActivity({ kind: 'leave', clientId }, labelsBefore);
+  if (body.event === 'join' && clientId !== client.clientId) addActivity({ kind: 'join', clientId });
+}
+
 client.on('presence', (env) => {
   const body = readBody(env);
   // A member can relay an envelope typed `presence`; only the server's closes peers (7a d1-findings D1-1).
   if (env.from === ADDR_SERVER && isHostSide()) hostAnswer?.closeDeparted(body.roster);
   if (env.from === ADDR_SERVER && body.event === 'join' && body.member?.clientId !== client.clientId) sendHostStatus(true);
   addNotice(`presence: ${body.event} — ${body.member?.tabId ?? body.member?.clientId}`);
+  const labelsBefore = labelMap(view.get().people);
   renderRoster(body.roster);
+  if (env.from === ADDR_SERVER) notePresence(body, labelsBefore);
   if (env.from === ADDR_SERVER) observeHostGrace();
   paintHostStatus();
   runTickSteps([['urgent-context', updateUrgentContext]], reportStep);
@@ -664,6 +710,23 @@ const treatment = initializePlaybackTreatment({
   evidence: params.get('treatmentEvidence') === '1',
 });
 
+// Applied play, pause and seek, and this member's own refusal, as activity lines (design.md
+// D13). The title's end is "The film ended", not a member's pause; a pause with no host in the
+// roster is the grace pause, which "Host left" already says.
+function noteOutcome(env, outcome, ownSystemPause) {
+  const kind = env.payload?.kind;
+  if (outcome === 'notPermitted' && env.from === client.clientId && !ownSystemPause) {
+    addActivity({ kind: 'refused', op: kind ?? 'operation' });
+  }
+  if (outcome !== 'applied') return;
+  if (kind === 'play') addActivity({ kind: 'play', from: env.from });
+  if (kind === 'seek') addActivity({ kind: 'seek', from: env.from, positionMs: env.payload.positionMs });
+  if (kind !== 'pause') return;
+  if (titleEnded()) addActivity({ kind: 'ended' });
+  // executor-spec T8 Stop, amended by C2: a pause carries no position, so the line takes the replicated state's.
+  else if (rosterHasHost()) addActivity({ kind: 'pause', from: env.from, positionMs: acquisition.state?.current.mediaMs });
+}
+
 // The replicated playback state (change 5 design.md D4). Built before connect
 // so its `joined` subscriber sees the first join.
 const acquisition = createPlaybackAcquisition({
@@ -695,6 +758,7 @@ const acquisition = createPlaybackAcquisition({
       updateUrgentContext();
       schedulePollStart(0);
     }
+    noteOutcome(env, outcome, ownSystemPause);
   },
   report: (where, error) => addNotice(`playback state ${where} failed: ${error?.message ?? error}`, { warn: true }),
 });
@@ -862,17 +926,13 @@ function renderControls() {
     pause: { text: 'pause', disabled: !(ready('pause') && (state?.current.playing || state?.current.held)), hidden: false },
     'back-10': { text: 'back 10s', disabled: preparing || !ready('seek'), hidden: false },
     'forward-10': { text: 'forward 10s', disabled: preparing || !ready('seek'), hidden: false },
-    'control-mode': { text: `mode: ${state?.controlMode === 'host' ? 'open' : 'host'}`, disabled: !ready('control-mode'), hidden: client.role !== 'host' },
+    // Every member sees the settings menu; a viewer's group is disabled, not hidden (design.md D11).
+    'control-mode': { text: `mode: ${state?.controlMode === 'host' ? 'open' : 'host'}`, disabled: client.role !== 'host' || !ready('control-mode'), hidden: false },
     mute: { text: view.get().controls.mute.text, disabled: false, hidden: false },
   };
   view.set('ended', ended);
   view.set('controls', controls);
-}
-
-function formatTime(mediaMs) {
-  if (!Number.isFinite(mediaMs) || mediaMs < 0) return '0:00';
-  const seconds = Math.floor(mediaMs / 1000);
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  view.set('controlMode', state?.controlMode === 'host' ? 'host' : 'open');
 }
 
 function renderBar() {
@@ -894,7 +954,7 @@ function renderBar() {
     positionMs,
     durationMs: Number.isFinite(durationMs) ? durationMs : null,
     preparing,
-    time: ended ? 'Ended' : `${formatTime(positionMs)} / ${formatTime(durationMs)}`,
+    time: ended ? 'Ended' : `${formatMediaTime(positionMs)} / ${formatMediaTime(durationMs)}`,
     syncDot: syncDot({ playing, mode: controllerState.mode, estimateMs: controllerState.estimateMs }),
   });
 }

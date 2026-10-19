@@ -226,11 +226,15 @@ import titleGateSuite from './check/suites/title-gate.mjs';
 import titleEntrySuite from './check/suites/title-entry.mjs';
 import hostFileStepsSuite from './check/suites/host-file-steps.mjs';
 import roomContinuityStepsSuite from './check/suites/room-continuity-steps.mjs';
+import roomScreensStepsSuite from './check/suites/room-screens-steps.mjs';
 import browserCheckListSuite from './check/suites/browser-check-list.mjs';
 import browserResultLogSuite from './check/suites/browser-result-log.mjs';
 import pageViewSuite from './check/suites/page-view.mjs';
 import fileHelpSuite from './check/suites/file-help.mjs';
 import syncDotSuite from './check/suites/sync-dot.mjs';
+import roomPeopleSuite from './check/suites/room-people.mjs';
+import roomActivityEntrySuite from './check/suites/room-activity-entry.mjs';
+import namePromptSuite from './check/suites/name-prompt.mjs';
 
 console.log(describeFixtures());
 
@@ -436,11 +440,15 @@ for (const suite of [
   titleEntrySuite,
   hostFileStepsSuite,
   roomContinuityStepsSuite,
+  roomScreensStepsSuite,
   browserCheckListSuite,
   browserResultLogSuite,
   pageViewSuite,
   fileHelpSuite,
   syncDotSuite,
+  roomPeopleSuite,
+  roomActivityEntrySuite,
+  namePromptSuite,
 ]) {
   await suite();
 }
