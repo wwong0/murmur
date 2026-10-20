@@ -634,8 +634,8 @@ async function rowTheatreIsRemembered() {
 }
 
 // A `display: none` element has no client rects, so "mounted" and "displayed" read apart: theatre
-// must close the header and the Stats row without unmounting them. `#settings` is one element
-// that moves, so its count is read too.
+// must close the header and the Stats row without unmounting them. Theatre has no `#settings`
+// at all (owner, 8.5; executor-spec §0c), so its count is read, and the dot ends the top group.
 const THEATRE_SURFACE = `(() => {
   const state = (selector) => {
     const element = document.querySelector(selector);
@@ -647,6 +647,7 @@ const THEATRE_SURFACE = `(() => {
     stats: state('#stats'),
     settings: settings.length,
     settingsInPlayer: settings.length === 1 ? document.getElementById('player').contains(settings[0]) : null,
+    topEndLast: document.querySelector('.player-top-end')?.lastElementChild?.id ?? null,
   };
 })()`;
 const closedButMounted = (part) => part?.mounted === true && part.displayed === false;
@@ -660,19 +661,21 @@ async function rowTheatreHidesChrome() {
     const on = await until(host, THEATRE, (value) => value === 'true', CLOSE_MS);
     if (!on.ok) return { exercised: false, detail: { theatre: on.value } };
     const inTheatre = await read(host, THEATRE_SURFACE);
-    await clickElement(host, '#settings');
-    const opened = await until(host, present('#control-mode'), Boolean, REVEAL_WAIT_MS);
-    await pressKey(host, 'Escape');
-    const closed = await until(host, present('#control-mode'), (value) => value === false, CLOSE_MS);
     await clickElement(host, '#theatre');
     const off = await until(host, THEATRE, (value) => value === null, CLOSE_MS);
     const after = await read(host, THEATRE_SURFACE);
+    const reachable = off.ok && after?.settings === 1;
+    if (reachable) await clickElement(host, '#settings');
+    const opened = reachable ? await until(host, present('#control-mode'), Boolean, REVEAL_WAIT_MS) : { ok: false };
+    if (opened.ok) await pressKey(host, 'Escape');
+    const closed = opened.ok ? await until(host, present('#control-mode'), (value) => value === false, CLOSE_MS) : { ok: false };
     return {
       exercised: true,
       ok: closedButMounted(inTheatre?.header) && closedButMounted(inTheatre?.stats)
-        && inTheatre.settings === 1 && inTheatre.settingsInPlayer === true && opened.ok && closed.ok
-        && off.ok && displayedAndMounted(after?.header) && displayedAndMounted(after?.stats) && after.settings === 1 && after.settingsInPlayer === false,
-      detail: { inTheatre, controlModeOpened: opened.ok, controlModeClosedByEscape: closed.ok, theatreOff: off.ok, after },
+        && inTheatre.settings === 0 && inTheatre.topEndLast === 'sync-dot'
+        && off.ok && displayedAndMounted(after?.header) && displayedAndMounted(after?.stats) && after.settings === 1 && after.settingsInPlayer === false
+        && opened.ok && closed.ok,
+      detail: { inTheatre, theatreOff: off.ok, after, controlModeOpened: opened.ok, controlModeClosedByEscape: closed.ok },
     };
   } finally {
     if (await read(host, present('#control-mode'))) await pressKey(host, 'Escape').catch(() => {});
@@ -784,7 +787,7 @@ async function runRows() {
   await runRow('RD-B3 a first touch on a faded bar only reveals it', rowFirstTouchOnlyReveals);
   await runRow('RD-T1 theatre mode issues no operation and keeps the media element', rowTheatreKeepsMedia);
   await runRow('RD-T2 theatre mode is remembered for the tab', rowTheatreIsRemembered);
-  await runRow('RD-T3 theatre hides the header and the Stats row, and settings opens from the player', rowTheatreHidesChrome);
+  await runRow('RD-T3 theatre hides the header, the Stats row and the settings button, and settings opens once theatre ends', rowTheatreHidesChrome);
   await runRow('RD-L1 the bar is flush with the player and stays one row', rowBarIsFlushAndOneRow);
   await runRow('RD-W1 both Watch again buttons seek to 0', rowWatchAgainSeeksToZero);
 }

@@ -134,16 +134,13 @@ function EndedMarker({ view }) {
 }
 
 // The popup mounts only while open. The group is the engine's `control-mode` entry: a viewer
-// sees it disabled with the current mode pressed (design.md D11). It is mounted in the header, or
-// in theatre in the player's top group, never both: the document has one `#settings`. In the
-// player the popup portals into the player, as the dot's tooltip does, so a fullscreen player
-// does not hide it.
-function SettingsMenu({ view, actions, inPlayer = false }) {
+// sees it disabled with the current mode pressed (design.md D11).
+function SettingsMenu({ view, actions }) {
   const mode = useView(view, (snapshot) => snapshot.controlMode);
   const disabled = useView(view, (snapshot) => snapshot.controls['control-mode'].disabled);
   return <Popover.Root>
     <Popover.Trigger id="settings" render={<IconButton icon={Settings} label="Settings" aria-label="Settings" className="icon-btn-chip" />} />
-    <PopoverPanel align="end" container={inPlayer ? document.getElementById('player') : undefined}>
+    <PopoverPanel align="end">
       <div id="control-mode-label" className="popover-label">Who can control</div>
       <SegmentedControl
         id="control-mode"
@@ -157,7 +154,8 @@ function SettingsMenu({ view, actions, inPlayer = false }) {
   </Popover.Root>;
 }
 
-// Theatre does not display the header (room.css), so the settings button is the player's then.
+// Theatre does not display the header (room.css) and shows no settings button anywhere: settings
+// is reached by leaving theatre (owner, 8.5, design.md D9).
 function RoomHeader({ view, actions, theatre }) {
   return <header className="room-header">
     <span className="text-[2rem] font-bold leading-none tracking-[-0.03em]" data-testid="wordmark">Uni<span className="text-accent">sono</span></span>
@@ -499,11 +497,7 @@ export function RoomScreens({ view, actions }) {
     <TheatreMarker theatre={theatre} />
     <RoomHeader view={view} actions={actions} theatre={inTheatre} />
     <NamePrompt fromFront={sawFront.current} />
-    <PlayerTop
-      view={view}
-      chips={inTheatre ? <TheatreChips view={view} /> : null}
-      settings={inTheatre ? <SettingsMenu view={view} actions={actions} inPlayer /> : null}
-    />
+    <PlayerTop view={view} chips={inTheatre ? <TheatreChips view={view} /> : null} />
     <HostFileControls view={view} actions={actions} />
     <ViewerWait view={view} />
     <EndedCard view={view} actions={actions} />

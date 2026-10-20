@@ -32,6 +32,7 @@
     --sync-ok: #3ddc84;
     --sync-correcting: #f5b544;
     --dot-idle: var(--secondary);
+    --dot-idle-ring: rgba(0, 0, 0, 0.6);
     --hairline: rgba(255, 255, 255, 0.08);
     --hairline-strong: rgba(255, 255, 255, 0.16);
     --hairline-hover: rgba(255, 255, 255, 0.28);
@@ -164,11 +165,12 @@
   }
   .player-top-end { display: flex; flex: none; align-items: center; gap: 0.75rem; }
   .player-top .participants-chips { margin-left: 0; }
-  .player-top #settings { pointer-events: auto; }
 
   /* No display here: the dot is closed with [hidden] until a title is loaded. The transparent
      border is the hit area; the background is clipped to the 14px dot inside it. Idle is the
-     base colour, so a state this sheet does not know reads as claiming nothing, never green. */
+     base colour, so a state this sheet does not know reads as claiming nothing, never green.
+     Idle's thin dark ring keeps the grey readable on a light frame (owner, 8.5); an inset shadow
+     sits at the padding edge, so it rings the dot, not the hit area. */
   #sync-dot {
     flex: none;
     box-sizing: border-box;
@@ -178,10 +180,11 @@
     border-radius: 50%;
     background-color: var(--dot-idle);
     background-clip: padding-box;
+    box-shadow: inset 0 0 0 1.5px var(--dot-idle-ring);
     pointer-events: auto;
   }
-  #sync-dot[data-state="in-sync"] { background-color: var(--sync-ok); }
-  #sync-dot[data-state="correcting"] { background-color: var(--sync-correcting); }
+  #sync-dot[data-state="in-sync"] { background-color: var(--sync-ok); box-shadow: none; }
+  #sync-dot[data-state="correcting"] { background-color: var(--sync-correcting); box-shadow: none; }
 
   /* The bar is one row on a bottom gradient, flush with the player's left, right and bottom. The
      gradient is the only shading, and it bleeds a pixel past those three edges so a fractional

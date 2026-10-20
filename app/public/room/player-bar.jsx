@@ -68,9 +68,9 @@ function SyncDot({ view, container }) {
 }
 
 // The tooltip portals into the player, not body: a body popup is hidden behind a fullscreen
-// player. `#title-name`'s text is exactly the name or nothing: N1 reads it. `chips` and
-// `settings` are theatre's, and `settings` goes last, after the dot.
-export function PlayerTop({ view, chips, settings }) {
+// player. `#title-name`'s text is exactly the name or nothing: N1 reads it. `chips` are
+// theatre's; the dot stays the last item, top-right.
+export function PlayerTop({ view, chips }) {
   const title = useView(view, (snapshot) => snapshot.title);
   const player = document.getElementById('player');
   if (!player) return null;
@@ -79,7 +79,6 @@ export function PlayerTop({ view, chips, settings }) {
     <div className="player-top-end">
       {chips}
       <SyncDot view={view} container={player} />
-      {settings}
     </div>
   </div>, player);
 }

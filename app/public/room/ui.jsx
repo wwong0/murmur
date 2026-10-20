@@ -38,10 +38,10 @@ export function Card({ className, ...rest }) {
   return <div className={clsx('card', className)} {...rest} />;
 }
 
-// The popup is portalled to body unless `container` names another element, so it floats over
-// the page and pushes nothing, and its content exists only while open.
-export function PopoverPanel({ className, children, container, ...positioning }) {
-  return <Popover.Portal container={container}>
+// The popup is portalled to body, so it floats over the page and pushes nothing, and its content
+// exists only while open.
+export function PopoverPanel({ className, children, ...positioning }) {
+  return <Popover.Portal>
     <Popover.Positioner className="popover-positioner" sideOffset={8} {...positioning}>
       <Popover.Popup className={clsx('popover', className)}>{children}</Popover.Popup>
     </Popover.Positioner>
