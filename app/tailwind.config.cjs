@@ -26,7 +26,7 @@ module.exports = {
         hairline: { DEFAULT: 'var(--hairline)', strong: 'var(--hairline-strong)' },
         wash: { DEFAULT: 'var(--wash)', strong: 'var(--wash-strong)' },
       },
-      borderRadius: { DEFAULT: 'var(--radius)', control: 'var(--radius-control)' },
+      borderRadius: { DEFAULT: 'var(--radius)', control: 'var(--radius-control)', inner: 'var(--radius-inner)' },
       fontFamily: { sans: 'var(--font-sans)', mono: 'var(--font-mono)' },
     },
   },

@@ -180,7 +180,7 @@ let elementPositionMs = null;
 const INITIAL_VIEW = {
   status: 'unknown',
   ended: false,
-  hostFile: { status: 'off', inputHidden: true, help: null, notice: null },
+  hostFile: { status: 'off', inputHidden: true, help: null, notice: null, state: 'off', choosable: false },
   hostStatus: { state: 'unknown', fraction: null, received: 0, lastAtMs: null, disbelieved: 0 },
   title: { name: null },
   overlay: { clock: '', drift: '', bytes: '', controller: '' },
@@ -192,7 +192,10 @@ const INITIAL_VIEW = {
     preparing: false,
     time: '0:00 / 0:00',
     syncDot: { state: 'idle', title: 'no figure' },
+    syncEstimateMs: null,
   },
+  // Which of `#play`/`#pause` the bar shows (design.md D8); both stay mounted either way.
+  playSlot: 'play',
   roster: [],
   people: [],
   notices: [],
@@ -522,6 +525,8 @@ function paintHostFile(snapshot) {
     inputHidden: snapshot.state === 'ready',
     help,
     notice,
+    state: snapshot.state,
+    choosable: CHOOSABLE_STATES.includes(snapshot.state),
   });
   sendHostStatus(false);
   paintHostStatus();
@@ -933,6 +938,7 @@ function renderControls() {
   view.set('ended', ended);
   view.set('controls', controls);
   view.set('controlMode', state?.controlMode === 'host' ? 'host' : 'open');
+  view.set('playSlot', state?.current.playing === true ? 'pause' : 'play');
 }
 
 function renderBar() {
@@ -956,6 +962,8 @@ function renderBar() {
     preparing,
     time: ended ? 'Ended' : `${formatMediaTime(positionMs)} / ${formatMediaTime(durationMs)}`,
     syncDot: syncDot({ playing, mode: controllerState.mode, estimateMs: controllerState.estimateMs }),
+    // Beside `syncDot`, whose two fields `sync-dot.mjs` holds: the tooltip's figure needs the number.
+    syncEstimateMs: Number.isFinite(controllerState.estimateMs) ? controllerState.estimateMs : null,
   });
 }
 
@@ -1640,7 +1648,9 @@ async function startApp() {
           snapshot: () => hostFileSnapshot({ mediaSource, targetSegmentSeconds, state: 'failed', failure: missing }),
           read: async () => ({ status: 404, bytes: new Uint8Array() }),
         };
-        view.set('hostFile', { status: `failed: ${missing}`, inputHidden: true });
+        // Not choosable although `failed` is a choosable state: the chooser never opens on this
+        // page, so an enabled input would take a pick and drop it (design.md D15).
+        view.set('hostFile', { status: `failed: ${missing}`, inputHidden: true, state: 'failed', choosable: false });
         return;
       }
       const locks = createWebLocks(navigator.locks);
@@ -1663,7 +1673,8 @@ async function startApp() {
       });
       await installHostFileLink();
       client.connect();
-      view.set('hostFile', { ...view.get().hostFile, inputHidden: false });
+      const openState = hostFile.snapshot().state;
+      view.set('hostFile', { ...view.get().hostFile, inputHidden: false, state: openState, choosable: CHOOSABLE_STATES.includes(openState) });
       // 11-2 D7: the page hands the File over and never reads its name.
       hostFileChooserOpen = true;
       await hostFile.start();

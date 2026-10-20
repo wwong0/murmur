@@ -1,51 +1,30 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { createRoot } from 'react-dom/client';
 import { createPortal, flushSync } from 'react-dom';
 import { Collapsible } from '@base-ui/react/collapsible';
 import { Dialog } from '@base-ui/react/dialog';
 import { Popover } from '@base-ui/react/popover';
-import { ChartNoAxesColumn, ChevronDown, Link, Settings } from 'lucide-react';
-import { createSeekScrub } from '../lib/seek-scrub.mjs';
+import { ChartNoAxesColumn, ChevronDown, FileVideo, Link, Settings, TriangleAlert } from 'lucide-react';
+import { fileCard } from '../lib/host-file-card.mjs';
 import { namePromptDue } from '../lib/name-prompt.mjs';
-import { joinTarget } from '../lib/route.mjs';
+import { PlayerBar, PlayerTop } from './player-bar.jsx';
 import { Button, DialogPanel, IconButton, PopoverPanel, SegmentedControl, TextField } from './ui.jsx';
+import { useView } from './use-view.js';
 
 const NAME_PROMPTED_KEY = 'watchalong.name-prompted';
+const THEATRE_KEY = 'watchalong.theatre';
 const COPIED_MS = 2_000;
 const HEADER_CHIPS = 4;
 const PINNED_SLACK_PX = 24;
+const CHOOSE_NOTE = 'MP4 from your computer. It stays on your device.';
+const PREPARING_NOTE = 'Your friends will see the video when this finishes.';
+const FAILED_NOTE = 'Choose it again, or pick another file. The details are in Stats.';
+const KEYFRAME_HINT = 'Skipping may land a little early in this file';
 const CONTROL_MODES = [
   { value: 'open', label: 'Everyone', 'data-mode': 'open' },
   { value: 'host', label: 'Host only', 'data-mode': 'host' },
 ];
-
-function useView(view, select) {
-  return useSyncExternalStore(
-    (onChange) => view.subscribe(() => onChange()),
-    () => select(view.get()),
-    () => select(view.get()),
-  );
-}
-
-function ImperativeButton({ view, actions, id, action }) {
-  const ref = useRef(null);
-  const controls = useView(view, (snapshot) => snapshot.controls);
-  const control = controls[id];
-  useLayoutEffect(() => {
-    const element = ref.current;
-    element.textContent = control.text;
-    element.disabled = control.disabled;
-    element.hidden = control.hidden;
-  }, [control]);
-  useLayoutEffect(() => {
-    const element = ref.current;
-    const listener = actions[action];
-    element.addEventListener('click', listener);
-    return () => element.removeEventListener('click', listener);
-  }, [actions, action]);
-  return <button ref={ref} id={id} type="button" />;
-}
 
 function OverlayLine({ view, id, name }) {
   const ref = useRef(null);
@@ -67,21 +46,11 @@ function Notices({ view }) {
   ))}</ul>;
 }
 
-// The join keeps the tab, so this flag outlives the navigation and the invite page skips
-// its name prompt (design.md D19). Joining must not depend on storage being writable.
-function markNamePrompted() {
-  try {
-    sessionStorage.setItem(NAME_PROMPTED_KEY, '1');
-  } catch {
-    // The prompt shows later; the join goes ahead.
-  }
-}
-
 // Writes the flag before it answers, so a reload shows nothing. Storage that throws is "not
 // due": a prompt that could not record itself would come back on every reload.
-function takeNamePrompt() {
+function takeNamePrompt(fromFront) {
   try {
-    if (!namePromptDue(location.search, sessionStorage.getItem(NAME_PROMPTED_KEY))) return false;
+    if (!namePromptDue(location.search, sessionStorage.getItem(NAME_PROMPTED_KEY), fromFront)) return false;
     sessionStorage.setItem(NAME_PROMPTED_KEY, '1');
     return true;
   } catch {
@@ -91,11 +60,12 @@ function takeNamePrompt() {
 
 // Calls no action and holds nothing up: the engine has joined behind it (design.md D19). Its
 // field keeps nothing. Focus is left alone on close, so a driver's next click lands as it
-// would have with no prompt.
-function NamePrompt() {
+// would have with no prompt. `fromFront` is read once, on mount: a host who pressed Host kept
+// this document, and its rig-style URL says nothing about how they got here.
+function NamePrompt({ fromFront }) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
-    if (takeNamePrompt()) setOpen(true);
+    if (takeNamePrompt(fromFront)) setOpen(true);
   }, []);
   const close = (event) => {
     event.preventDefault();
@@ -115,19 +85,14 @@ function NamePrompt() {
 function Front({ view, actions }) {
   const input = useRef(null);
   const joinError = useView(view, (snapshot) => snapshot.joinError);
-  const join = () => {
-    const text = input.current?.value ?? '';
-    if (joinTarget(text) !== null) markNamePrompted();
-    actions.join(text);
-  };
+  const join = () => actions.join(input.current?.value ?? '');
   return <div className="front" id="front">
     <div className="mx-auto flex w-full max-w-[34rem] flex-col">
       <h1 className="m-0 text-center text-[4.5rem] font-bold leading-none tracking-[-0.03em] text-ink">Uni<span className="text-accent">sono</span></h1>
-      <p className="mb-10 mt-4 text-center text-[1.75rem] text-secondary">Watch together, in sync.</p>
-      <TextField id="front-name" label="Your name" placeholder="Your name" size="xl" autoComplete="off" />
-      <Button id="host" variant="primary" size="xl" className="mt-3 w-full" onClick={actions.host}>Host a room</Button>
+      <p className="mb-9 mt-4 text-center text-[1.75rem] text-secondary">Watch together, in sync.</p>
+      <Button id="host" variant="primary" size="xl" className="w-full" onClick={actions.host}>Host a room</Button>
       <div className="or-divider my-6">or</div>
-      <div className="flex gap-3">
+      <div className="flex gap-5">
         <TextField
           ref={input}
           id="join-input"
@@ -139,7 +104,7 @@ function Front({ view, actions }) {
           aria-invalid={joinError ? 'true' : undefined}
           aria-describedby="join-error"
         />
-        <Button id="join" size="xl" className="shrink-0" onClick={join}>Join</Button>
+        <Button id="join" size="xl" className="min-w-[8rem] shrink-0" onClick={join}>Join</Button>
       </div>
       <div id="join-error" aria-live="polite" className="mt-3 min-h-5 text-sm text-warning">{joinError}</div>
     </div>
@@ -193,13 +158,40 @@ function RoomHeader({ view, actions }) {
   </header>;
 }
 
-// Portalled into the static #player, over the video. Its text is exactly the name or
-// nothing: N1 reads it.
-function TitleName({ view }) {
-  const title = useView(view, (snapshot) => snapshot.title);
-  const player = document.getElementById('player');
-  if (!player) return null;
-  return createPortal(<div id="title-name">{title.name ?? ''}</div>, player);
+// Storage that throws is "off": theatre is a convenience, and a tab that cannot keep it still
+// toggles (design.md D9).
+function readTheatre() {
+  try {
+    return sessionStorage.getItem(THEATRE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeTheatre(on) {
+  try {
+    if (on) sessionStorage.setItem(THEATRE_KEY, '1');
+    else sessionStorage.removeItem(THEATRE_KEY);
+  } catch {
+    // Nothing to do: the toggle already took effect on the page.
+  }
+}
+
+// The static .layout carries the flag for the stylesheet, as EndedMarker does for #player.
+// Theatre moves no element: the media element is the same one it was.
+function TheatreMarker({ theatre }) {
+  useLayoutEffect(() => {
+    const layout = document.querySelector('.layout');
+    if (!layout) return undefined;
+    if (theatre) layout.dataset.theatre = 'true';
+    return () => { delete layout.dataset.theatre; };
+  }, [theatre]);
+  return null;
+}
+
+function TheatreChips({ view }) {
+  const people = useView(view, (snapshot) => snapshot.people);
+  return <ParticipantsChips people={people} />;
 }
 
 function RoomActions({ view, actions }) {
@@ -233,24 +225,74 @@ function RoomActions({ view, actions }) {
   </div>;
 }
 
-// The file chooser and a refusal's command keep their ids, texts and `hidden` rule: drivers
-// set #host-file's files and click #file-copy by id.
+// The host's card over the video while there is nothing to play (design.md D15). #host-file is
+// the input drivers set files on, so it stays mounted and visually hidden, never `hidden`, and
+// carries the disabled flag itself: a CDP pick bypasses the button. The refusal's command keeps
+// its ids and texts, and `hidden` closes the card with no display class on `.file-state`.
 function HostFileControls({ view, actions }) {
   const hostFile = useView(view, (snapshot) => snapshot.hostFile);
-  const help = hostFile.help;
+  const hostStatus = useView(view, (snapshot) => snapshot.hostStatus);
+  const barFaded = useView(view, (snapshot) => snapshot.bar.faded);
+  const input = useRef(null);
   const player = document.getElementById('player');
   if (!player) return null;
-  return createPortal(<div className="file-state" hidden={hostFile.inputHidden && !help}>
-    <div className="file-card">
-      <input type="file" id="host-file" hidden={hostFile.inputHidden} onChange={(event) => actions.chooseHostFile(event.target.files?.[0])} />
-      <div id="file-reason">{help?.reason ?? ''}</div>
-      {help?.command ? <>
-        <code id="file-command">{help.command}</code>
-        <Button id="file-copy" onClick={actions.copyFile}>Copy</Button>
-        <div id="file-note">{help.note}</div>
-      </> : null}
+  const help = hostFile.help;
+  const card = fileCard(hostFile.state);
+  const preparing = hostFile.state === 'preparing';
+  const refused = hostFile.state === 'refused';
+  const failed = hostFile.state === 'failed';
+  const percent = Math.min(100, Math.floor((hostStatus.fraction ?? 0) * 100));
+  const note = failed ? FAILED_NOTE : refused || preparing ? null : CHOOSE_NOTE;
+  return createPortal(<>
+    <div className="file-state" data-kind={refused || failed || preparing ? 'status' : 'choosing'} hidden={hostFile.inputHidden && !help}>
+      <div className="file-card">
+        <input
+          ref={input}
+          type="file"
+          id="host-file"
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden="true"
+          disabled={!hostFile.choosable}
+          onChange={(event) => actions.chooseHostFile(event.target.files?.[0])}
+        />
+        <div className="file-body">
+          {preparing ? null : refused || failed
+            ? <TriangleAlert className="file-icon file-icon-warn" size={48} strokeWidth={1.75} aria-hidden="true" />
+            : <FileVideo className="file-icon" size={48} strokeWidth={1.75} aria-hidden="true" />}
+          <h2 className="file-title tabular">{preparing ? `${card.title} · ${percent}%` : card.title}</h2>
+          {preparing ? <div
+            className="file-progress"
+            role="progressbar"
+            aria-label="Preparing"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={percent}
+            style={{ '--fraction': percent / 100 }}
+          ><div className="file-progress-fill" /></div> : null}
+          <div id="file-reason">{help?.reason ?? ''}</div>
+          {note ? <p className="file-note">{note}</p> : null}
+          {preparing ? <p className="file-note">{PREPARING_NOTE}</p> : null}
+          {help?.command ? <>
+            <div className="file-codebox">
+              <code id="file-command">{help.command}</code>
+              <Button id="file-copy" onClick={actions.copyFile}>Copy</Button>
+            </div>
+            <div id="file-note">{help.note}</div>
+          </> : null}
+          {card.button === null ? null : <Button
+            variant="primary"
+            size="lg"
+            className="file-button"
+            data-testid="host-file-button"
+            disabled={!(card.enabled && hostFile.choosable)}
+            onClick={() => input.current?.click()}
+          >{card.button}</Button>}
+        </div>
+      </div>
     </div>
-  </div>, player);
+    {hostFile.notice ? <div className="file-hint" data-faded={barFaded ? 'true' : 'false'}>{KEYFRAME_HINT}</div> : null}
+  </>, player);
 }
 
 // Mounted always: closed it is `hidden` and every readout stays current by `textContent`
@@ -295,10 +337,21 @@ function StatsPanel({ view }) {
   </section>;
 }
 
+// Class names are whole literals so the stylesheet's tone rules are findable by search.
+const TONE_CLASS = {
+  host: 'member-chip-tone-host',
+  1: 'member-chip-tone-1',
+  2: 'member-chip-tone-2',
+  3: 'member-chip-tone-3',
+  4: 'member-chip-tone-4',
+  5: 'member-chip-tone-5',
+};
+
 // Initials only: the chip is a picture of the member, and the label beside it (or the header's
-// own text) is what a screen reader gets. The host's chip carries the accent ring.
+// own text) is what a screen reader gets. The fill is the member's tone; the host's chip
+// also carries an ink ring.
 function MemberChip({ person, size }) {
-  return <span className={clsx('member-chip', size === 'sm' && 'member-chip-sm', person.host && 'member-chip-host')} aria-hidden="true">{person.initial}</span>;
+  return <span className={clsx('member-chip', TONE_CLASS[person.tone], size === 'sm' && 'member-chip-sm', person.host && 'member-chip-host')} aria-hidden="true">{person.initial}</span>;
 }
 
 function ParticipantsChips({ people }) {
@@ -378,71 +431,19 @@ function RoomColumn({ view }) {
   </aside>;
 }
 
-function PlayerBar({ view, actions }) {
-  const ref = useRef(null);
-  const seekRef = useRef(null);
-  const timeRef = useRef(null);
-  const dotRef = useRef(null);
-  const scrub = useRef(null);
-  if (!scrub.current) scrub.current = createSeekScrub({ seek: (positionMs) => actions.seek(positionMs) });
-  const bar = useView(view, (snapshot) => snapshot.bar);
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (element) element.dataset.faded = bar.faded ? 'true' : 'false';
-  }, [bar.faded]);
-  useLayoutEffect(() => {
-    const seek = seekRef.current;
-    if (seek) {
-      seek.disabled = bar.durationMs === null || bar.preparing;
-      seek.max = String(bar.durationMs ?? 0);
-      if (!scrub.current.holds()) seek.value = String(bar.positionMs);
-    }
-    if (timeRef.current) timeRef.current.textContent = bar.time;
-    if (dotRef.current) {
-      dotRef.current.dataset.state = bar.syncDot.state;
-      dotRef.current.title = bar.syncDot.title;
-    }
-  }, [bar]);
-  useLayoutEffect(() => {
-    const seek = seekRef.current;
-    if (!seek) return undefined;
-    const commit = () => scrub.current.commit(Number(seek.value));
-    const release = () => scrub.current.release();
-    seek.addEventListener('change', commit);
-    seek.addEventListener('pointerup', release);
-    seek.addEventListener('pointercancel', release);
-    return () => {
-      seek.removeEventListener('change', commit);
-      seek.removeEventListener('pointerup', release);
-      seek.removeEventListener('pointercancel', release);
-    };
-  }, []);
-  useLayoutEffect(() => {
-    const player = document.getElementById('player');
-    if (!player) return undefined;
-    player.addEventListener('pointermove', actions.pointerMove);
-    return () => player.removeEventListener('pointermove', actions.pointerMove);
-  }, [actions]);
-  const player = document.getElementById('player');
-  if (!player) return null;
-  return createPortal(<div ref={ref} id="control-bar" className="player-bar">
-    <div className="bar-controls">
-      <ImperativeButton view={view} actions={actions} id="play" action="play" />
-      <ImperativeButton view={view} actions={actions} id="pause" action="pause" />
-      <input ref={seekRef} id="seek" type="range" min="0" step="1" onInput={() => scrub.current.input()} />
-      <span id="time" ref={timeRef} />
-      <ImperativeButton view={view} actions={actions} id="back-10" action="back10" />
-      <ImperativeButton view={view} actions={actions} id="forward-10" action="forward10" />
-      <ImperativeButton view={view} actions={actions} id="mute" action="mute" />
-      <input id="volume" type="range" min="0" max="1" step="0.01" defaultValue="1" onInput={(event) => actions.volume(event.currentTarget.value)} />
-      <button id="fullscreen" type="button" onClick={actions.fullscreen}>fullscreen</button>
-      <span ref={dotRef} id="sync-dot" data-state={bar.syncDot.state} title={bar.syncDot.title} />
-    </div>
-  </div>, player);
-}
-
 export function RoomScreens({ view, actions }) {
   const route = useView(view, (snapshot) => snapshot.route);
+  // Pressing Host swaps the route in this document, and the room's URL then reads like a rig
+  // URL: the prompt needs this to know the host came from the front page (design.md D19).
+  const sawFront = useRef(false);
+  useLayoutEffect(() => {
+    if (route === 'front') sawFront.current = true;
+  }, [route]);
+  const [theatre, setTheatre] = useState(readTheatre);
+  const toggleTheatre = () => {
+    writeTheatre(!theatre);
+    setTheatre(!theatre);
+  };
   if (route === 'front') {
     return <>
       <PlayerVisibility route={route} />
@@ -452,11 +453,12 @@ export function RoomScreens({ view, actions }) {
   return <>
     <PlayerVisibility route={route} />
     <EndedMarker view={view} />
+    <TheatreMarker theatre={theatre} />
     <RoomHeader view={view} actions={actions} />
-    <NamePrompt />
-    <TitleName view={view} />
+    <NamePrompt fromFront={sawFront.current} />
+    <PlayerTop view={view}>{theatre ? <TheatreChips view={view} /> : null}</PlayerTop>
     <HostFileControls view={view} actions={actions} />
-    <PlayerBar view={view} actions={actions} />
+    <PlayerBar view={view} actions={actions} theatre={theatre} onTheatre={toggleTheatre} />
     <RoomActions view={view} actions={actions} />
     <StatsPanel view={view} />
     <RoomColumn view={view} />

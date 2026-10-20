@@ -82,6 +82,26 @@ export default async function roomControlsEntrySuite() {
     assertEqual(page.view().controlMode, 'open', 'the current mode starts open');
   });
 
+  await check('room-controls-entry: the play/pause slot names pause while the replicated state plays and play otherwise (D8)', async () => {
+    const page = runEntry(product.code);
+    assertEqual(page.view().playSlot, 'play', 'play before any state');
+    page.resolveSole({ nowMs: 10_000 });
+    page.harness.sharedNowMs = 11_000;
+    page.tick();
+    assertEqual(page.view().playSlot, 'pause', 'pause once the created room plays');
+
+    const operation = (kind, seq, atSharedMs) => {
+      const { lineage, version } = page.app.playbackState();
+      return { type: 'playback-operation', from: 'c1', seq, ts: { recv: atSharedMs }, payload: { kind, basis: { lineage, version }, atSharedMs } };
+    };
+    page.deliver(operation('pause', 3, 11_000));
+    assertEqual(page.app.playbackState().playing, false, 'the pause was applied');
+    assertEqual(page.view().playSlot, 'play', 'play after an applied pause');
+    page.deliver(operation('play', 4, 12_000));
+    assertEqual(page.app.playbackState().playing, true, 'the play was applied');
+    assertEqual(page.view().playSlot, 'pause', 'pause after an applied play');
+  });
+
   await check('room-controls-entry: the control-mode entry is enabled for a resolved host and the current mode follows the applied operation', async () => {
     const page = runEntry(product.code);
     page.resolveSole({ nowMs: 10_000 });

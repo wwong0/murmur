@@ -8,8 +8,9 @@ import { ToggleGroup } from '@base-ui/react/toggle-group';
 // in styles/room.css.
 const BUTTON_VARIANT = { primary: 'btn-primary', secondary: 'btn-secondary', ghost: 'btn-ghost' };
 const BUTTON_SIZE = { md: undefined, lg: 'btn-lg', xl: 'btn-xl' };
-const ICON_BUTTON_SIZE = { md: undefined, sm: 'icon-btn-sm' };
-const ICON_PIXELS = { md: 20, sm: 16 };
+const ICON_BUTTON_SIZE = { md: undefined, sm: 'icon-btn-sm', bar: undefined };
+// `bar` is the player bar's: a larger icon in the same hit area as `md`.
+const ICON_PIXELS = { md: 20, sm: 16, bar: 26 };
 const FIELD_SIZE = { md: undefined, lg: 'field-lg', xl: 'field-xl' };
 
 export function VisuallyHidden({ as: Tag = 'span', className, ...rest }) {
@@ -22,10 +23,13 @@ export function Button({ variant = 'secondary', size = 'md', className, type = '
 
 // A kept engine button passes `labelRef` and no `label`: the engine writes its text into
 // that span, and the button's textContent must stay that text alone. A `title` on the icon
-// or any other text node breaks it.
-export function IconButton({ id, label, labelRef, icon: Icon, size = 'md', className, ...rest }) {
+// or any other text node breaks it. `iconClassName` wraps the icon so a stylesheet can draw
+// over it with generated content, which adds no text node either. `fill` is spread only when
+// asked for, so every other icon keeps lucide's outline default.
+export function IconButton({ id, label, labelRef, icon: Icon, size = 'md', filled = false, iconClassName, className, ...rest }) {
+  const icon = <Icon size={ICON_PIXELS[size]} strokeWidth={2} aria-hidden="true" {...(filled ? { fill: 'currentColor' } : {})} />;
   return <button id={id} type="button" className={clsx('icon-btn', ICON_BUTTON_SIZE[size], className)} {...rest}>
-    <Icon size={ICON_PIXELS[size]} strokeWidth={2} aria-hidden="true" />
+    {iconClassName ? <span className={iconClassName}>{icon}</span> : icon}
     <VisuallyHidden ref={labelRef}>{label}</VisuallyHidden>
   </button>;
 }

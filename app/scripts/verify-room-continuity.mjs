@@ -12,7 +12,7 @@ import {
 import { assertServedBundle, createManifestFile, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
 import { startTracker } from './runner/tracker.mjs';
-import { closeNamePrompt } from './room-page-steps.mjs';
+import { closeNamePrompt, waitHostFileEnabled } from './room-page-steps.mjs';
 import { fileIdentity } from '../public/lib/file-identity.mjs';
 import {
   exitCode, grace, rc0, rc1, rc2, rc3, rc4, rc5, rc6, rc7, rc8,
@@ -374,6 +374,7 @@ async function main(runDir) {
   }
 
   async function setFileInput(page, filename) {
+    await waitHostFileEnabled(page.tab);
     const { root } = await page.tab.send('DOM.getDocument', { depth: 0 });
     const { nodeId } = await page.tab.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#host-file' });
     if (!nodeId) throw new Error('host file input is missing');

@@ -1,5 +1,6 @@
 // Browser proof for the room design's inputs: the name prompt, the name and message inputs,
-// and the settings menu (change 12b, design.md D11 and D19). It owns one default-paused server.
+// the settings menu, and the player bar and theatre mode (change 12b, design.md D7, D11 and
+// D19). It owns one default-paused server.
 // Every row opens its own tabs, because the prompt's flag is per tab and a shared tab would
 // let one row's flag hide another row's prompt.
 
@@ -11,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 
-import { cdpHttp, CHROME, clickElement, disposeChrome, FLAGS, rewriteWebSocketDebuggerUrl, sleep, Tab } from './cdp.mjs';
+import { cdpHttp, CHROME, clickElement, disposeChrome, FLAGS, rewriteWebSocketDebuggerUrl, sleep, Tab, waitBarRevealed } from './cdp.mjs';
 import { createResultLog } from './browser-result-log.mjs';
 import { assertServedBundle, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
@@ -26,6 +27,7 @@ const ROOM = `rd-${crypto.randomBytes(6).toString('hex')}`;
 const INVITE = `${ORIGIN}/room.html?room=${ROOM}`;
 const WAIT_MS = 15_000;
 const CLOSE_MS = 3_000;
+const PROMPT_MS = 3_000;
 const ABSENT_MS = 3_000;
 const SAMPLE_MS = 100;
 const MIN_SAMPLES = 20;
@@ -284,15 +286,33 @@ async function rowRoleAndTabShowNoPrompt() {
   });
 }
 
-async function rowFrontJoinShowsNoPrompt() {
-  return withTab(`${ORIGIN}/room.html`, 'N4', async (tab) => {
-    const front = await until(tab, present('#join-input'), Boolean);
-    if (!front.ok) return { exercised: false, detail: 'the front page did not render' };
-    const typed = await typeInto(tab, '#join-input', INVITE);
-    await clickElement(tab, '#join');
-    const arrived = await until(tab, `new URLSearchParams(location.search).get('room') === ${JSON.stringify(ROOM)} && ${present('#message-input')}`, Boolean);
-    const samples = arrived.ok ? await watch(tab, present(PROMPT)) : [];
-    return { exercised: typed === true && arrived.ok, ok: absentThroughout(samples), detail: { typed, arrived: arrived.ok, ...sampleSummary(samples) } };
+// The host's page keeps its document when Host is pressed, so its prompt comes from the front
+// route, not the URL; the joiner navigates to a plain invite. The host stays open while the
+// joiner arrives, because the invite is the host's own room.
+async function rowFrontHostAndJoinShowPrompt() {
+  return withTab(`${ORIGIN}/room.html`, 'N4/host', async (hostTab) => {
+    const hostFront = await until(hostTab, present('#host'), Boolean);
+    if (!hostFront.ok) return { exercised: false, detail: 'the front page did not render' };
+    await clickElement(hostTab, '#host');
+    const hostUrlRole = await until(hostTab, "new URLSearchParams(location.search).get('role')", (value) => value === 'host');
+    const hostShown = await until(hostTab, present(PROMPT), Boolean, PROMPT_MS);
+    await pressKey(hostTab, 'Escape');
+    const invite = await until(hostTab, "document.querySelector('#invite')?.href ?? null", (value) => typeof value === 'string' && value.length > 0);
+    if (!invite.ok) return { exercised: true, ok: false, detail: { hostShown: hostShown.ok, hostUrlRole: hostUrlRole.value, joinShown: null, arrived: false } };
+    const inviteRoom = new URL(invite.value).searchParams.get('room');
+    return withTab(`${ORIGIN}/room.html`, 'N4/join', async (joinTab) => {
+      const joinFront = await until(joinTab, present('#join-input'), Boolean);
+      if (!joinFront.ok) return { exercised: false, detail: 'the second front page did not render' };
+      const typed = await typeInto(joinTab, '#join-input', invite.value);
+      await clickElement(joinTab, '#join');
+      const arrived = await until(joinTab, `new URLSearchParams(location.search).get('room') === ${JSON.stringify(inviteRoom)} && ${present('#message-input')}`, Boolean);
+      const joinShown = await until(joinTab, present(PROMPT), Boolean, PROMPT_MS);
+      return {
+        exercised: typed === true && arrived.ok,
+        ok: hostUrlRole.ok && hostShown.ok && joinShown.ok && arrived.ok,
+        detail: { hostShown: hostShown.ok, hostUrlRole: hostUrlRole.value, joinShown: joinShown.ok, arrived: arrived.ok },
+      };
+    });
   });
 }
 
@@ -309,35 +329,31 @@ async function closePrompt(tab) {
 
 async function rowInputsSendNothing() {
   const marker = `rd-n5-${crypto.randomBytes(6).toString('hex')}`;
-  const frames = { front: [], invite: [] };
-  const front = await openTab(`${ORIGIN}/room.html`, 'N5/front', { frames: frames.front });
-  const invite = await openTab(INVITE, 'N5/invite', { frames: frames.invite });
+  const frames = [];
+  const invite = await openTab(INVITE, 'N5/invite', { frames });
   try {
-    const ready = [await until(front, present('#front-name'), Boolean), await until(invite, present(PROMPT), Boolean)];
-    if (!ready.every((entry) => entry.ok)) return { exercised: false, detail: 'a page did not render its input' };
-    const before = { front: await read(front, pageMark(marker)), invite: await read(invite, pageMark(marker)) };
-    const typed = { front: await typeInto(front, '#front-name', marker) };
-    await pressKey(front, 'Enter');
-    typed.prompt = await typeInto(invite, `${PROMPT} input`, marker);
+    const ready = await until(invite, present(PROMPT), Boolean);
+    if (!ready.ok) return { exercised: false, detail: 'the invite page did not render its prompt' };
+    const before = await read(invite, pageMark(marker));
+    const typed = { prompt: await typeInto(invite, `${PROMPT} input`, marker) };
     await pressKey(invite, 'Enter');
     const prompt = await closePrompt(invite);
     typed.message = await typeInto(invite, '#message-input', marker);
     await pressKey(invite, 'Enter');
     const messageKept = await read(invite, `document.querySelector('#message-input')?.value === ${JSON.stringify(marker)}`);
     await sleep(1_000);
-    const after = { front: await read(front, PAGE_NOW), invite: await read(invite, PAGE_NOW) };
-    const storage = [await read(front, STORAGE_DUMP), await read(invite, STORAGE_DUMP)];
-    const hits = { frames: carrying(frames.front, marker) + carrying(frames.invite, marker), storage: storage.filter((text) => text?.includes(marker)).length };
-    const stayed = stayedOnPage(before.front, after.front) && stayedOnPage(before.invite, after.invite);
+    const after = await read(invite, PAGE_NOW);
+    const storage = [await read(invite, STORAGE_DUMP)];
+    const hits = { frames: carrying(frames, marker), storage: storage.filter((text) => text?.includes(marker)).length };
+    const stayed = stayedOnPage(before, after);
     // The join frame proves the capture works: an invite page that sent nothing was not watched.
-    const exercised = Object.values(typed).every((value) => value === true) && frames.invite.length > 0 && storage.every((text) => text !== null);
+    const exercised = Object.values(typed).every((value) => value === true) && frames.length > 0 && storage.every((text) => text !== null);
     return {
       exercised,
       ok: hits.frames === 0 && hits.storage === 0 && stayed,
-      detail: { typed, prompt, messageKept, framesSeen: { front: frames.front.length, invite: frames.invite.length }, hits, stayedOnPage: stayed },
+      detail: { typed, prompt, messageKept, framesSeen: frames.length, hits, stayedOnPage: stayed },
     };
   } finally {
-    await closeTab(front);
     await closeTab(invite);
   }
 }
@@ -367,13 +383,268 @@ async function rowSettingsMenuControlMode() {
   });
 }
 
+// The bar and theatre rows act on the host page. The room starts paused, so a row that needs it
+// playing presses #play and leaves no mouse movement until the bar has faded (design.md D7).
+const PLAYBACK = '(window.__app?.playbackState?.() ?? null)';
+const FADED = "document.querySelector('#control-bar')?.dataset.faded ?? null";
+// Faded and at rest: `data-faded` flips at the fade's start, so a box read then sits partway
+// down the slide (post-result, P2-guard-B3).
+const FADE_SETTLED = "(() => { const bar = document.querySelector('#control-bar'); return bar?.dataset.faded === 'true' && bar.getAnimations({ subtree: true }).length === 0; })()";
+const THEATRE = "document.querySelector('.layout')?.dataset.theatre ?? null";
+const THEATRE_STORED = "sessionStorage.getItem('watchalong.theatre')";
+const BAR_SLIDE = `(() => {
+  const bar = document.querySelector('#control-bar');
+  const pause = document.querySelector('#pause');
+  if (!bar || !pause) return null;
+  return { slidePx: parseFloat(getComputedStyle(bar).getPropertyValue('--bar-slide')), pauseHeight: pause.getBoundingClientRect().height };
+})()`;
+const MOUSE = { button: 'left', clickCount: 1 };
+const VIEWPORTS = [
+  { label: '1536x1024', width: 1536, height: 1024, scale: 1, mobile: false },
+  { label: '390x844', width: 390, height: 844, scale: 2, mobile: true },
+];
+const FADE_WAIT_MS = 10_000;
+const REVEAL_WAIT_MS = 2_000;
+const MISS_WAIT_MS = 1_000;
+const OUTSIDE_CLICK_MS = 500;
+const FLUSH_PX = 1;
+const ROW_CENTRE_PX = 2;
+
+const boxOf = (selector, { scroll = false } = {}) => `(() => {
+  const element = document.querySelector(${JSON.stringify(selector)});
+  if (!element) return null;
+  ${scroll ? "element.scrollIntoView({ block: 'center' });" : ''}
+  const r = element.getBoundingClientRect();
+  return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height, x: r.left + r.width / 2, y: r.top + r.height / 2 };
+})()`;
+
+// Every control the row shows: a closed one (`hidden`, or `display: none` on a narrow page)
+// has no client rects and is not in the row.
+const BAR_ROW = `(() => {
+  const shown = (element) => element.getClientRects().length > 0;
+  const row = [...document.querySelectorAll('#control-bar button:not([hidden]), #time, #volume')].filter(shown);
+  return {
+    centres: row.map((element) => {
+      const r = element.getBoundingClientRect();
+      return { id: element.id || element.tagName, cy: r.top + r.height / 2 };
+    }),
+    volume: { mounted: document.querySelector('#volume') !== null, shown: [...document.querySelectorAll('#volume')].some(shown) },
+    theatreShown: [...document.querySelectorAll('#theatre')].some(shown),
+  };
+})()`;
+
+const pressAt = async (tab, point) => {
+  for (const type of ['mousePressed', 'mouseReleased']) await tab.send('Input.dispatchMouseEvent', { type, x: point.x, y: point.y, ...MOUSE });
+};
+const moveTo = (tab, point) => tab.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y });
+const tapAt = async (tab, point) => {
+  await tab.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: point.x, y: point.y }] });
+  await tab.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+};
+const revealed = (tab) => waitBarRevealed(tab).then(() => true, () => false);
+
+async function setPlaying(wanted) {
+  if ((await read(host, `${PLAYBACK}?.playing`)) === wanted) return true;
+  const button = wanted ? '#play' : '#pause';
+  const enabled = await until(host, `document.querySelector('${button}')?.disabled === false`, Boolean);
+  if (!enabled.ok) return false;
+  await clickElement(host, button);
+  return (await until(host, `${PLAYBACK}?.playing === ${wanted}`, Boolean)).ok;
+}
+
+async function playUntilFaded() {
+  if (!await roomReady(host)) return 'the host did not render the room';
+  if (!await setPlaying(true)) return 'the room did not play';
+  const faded = await until(host, FADED, (value) => value === 'true', FADE_WAIT_MS);
+  return faded.ok ? null : `the bar read ${faded.value} while playing`;
+}
+
+const restPaused = () => setPlaying(false).catch(() => false);
+
+async function rowFadedBoxMisses() {
+  const failure = await playUntilFaded();
+  if (failure) return { exercised: false, detail: failure };
+  try {
+    const slide = await read(host, BAR_SLIDE);
+    const slideOk = Number.isFinite(slide?.slidePx) && slide.pauseHeight > 0 && slide.slidePx > slide.pauseHeight / 2;
+    const fadedBefore = (await until(host, FADE_SETTLED, Boolean, REVEAL_WAIT_MS)).ok;
+    const oldBox = await read(host, boxOf('#pause'));
+    const before = await read(host, PLAYBACK);
+    await moveTo(host, oldBox);
+    const startedAt = Date.now();
+    const settled = await revealed(host);
+    const revealMs = Date.now() - startedAt;
+    const newBox = await read(host, boxOf('#pause'));
+    await pressAt(host, oldBox);
+    await sleep(MISS_WAIT_MS);
+    const afterMiss = await read(host, PLAYBACK);
+    await clickElement(host, '#pause');
+    const paused = await until(host, `${PLAYBACK}?.playing === false`, Boolean);
+    const afterClick = paused.value === true ? await read(host, PLAYBACK) : null;
+    const moved = oldBox !== null && newBox !== null && (oldBox.y < newBox.top || oldBox.y > newBox.bottom);
+    return {
+      exercised: fadedBefore && oldBox !== null && before !== null,
+      ok: slideOk && settled && moved && afterMiss?.version === before.version && afterMiss?.playing === true
+        && afterClick?.playing === false && afterClick.version === before.version + 1,
+      detail: {
+        slidePx: slide?.slidePx ?? null, pauseHeight: slide?.pauseHeight ?? null, fadedBefore, revealMs, oldBox, newBox,
+        versionBefore: before?.version ?? null, versionAfterMiss: afterMiss?.version ?? null, versionAfterClick: afterClick?.version ?? null,
+        playingAfterMiss: afterMiss?.playing ?? null,
+      },
+    };
+  } finally {
+    await restPaused();
+  }
+}
+
+async function rowOutsideClickDoesNotWait() {
+  const failure = await playUntilFaded();
+  if (failure) return { exercised: false, detail: failure };
+  try {
+    const startedAt = Date.now();
+    await clickElement(host, '#stats');
+    const clickMs = Date.now() - startedAt;
+    const barAfter = await read(host, FADED);
+    const opened = await read(host, "document.querySelector('#stats')?.getAttribute('aria-expanded')");
+    await clickElement(host, '#stats');
+    const closed = await until(host, "document.querySelector('#stats')?.getAttribute('aria-expanded')", (value) => value === 'false', CLOSE_MS);
+    return {
+      exercised: opened === 'true',
+      ok: clickMs < OUTSIDE_CLICK_MS && barAfter === 'true' && closed.ok,
+      detail: { clickMs, barAfter, panelOpened: opened, panelClosed: closed.ok },
+    };
+  } finally {
+    await restPaused();
+  }
+}
+
+// The second tap lands inside the three seconds the first one's reveal holds the bar up.
+async function rowFirstTouchOnlyReveals() {
+  const failure = await playUntilFaded();
+  if (failure) return { exercised: false, detail: failure };
+  try {
+    await host.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+    const fadedBox = await read(host, boxOf('#pause', { scroll: true }));
+    const before = await read(host, PLAYBACK);
+    await tapAt(host, fadedBox);
+    const unfaded = await until(host, FADED, (value) => value === 'false', MISS_WAIT_MS);
+    await sleep(MISS_WAIT_MS);
+    const afterFirst = await read(host, PLAYBACK);
+    const settled = await revealed(host);
+    const shownBox = await read(host, boxOf('#pause'));
+    await tapAt(host, shownBox);
+    const paused = await until(host, `${PLAYBACK}?.playing === false`, Boolean);
+    const afterSecond = await read(host, PLAYBACK);
+    return {
+      exercised: fadedBox !== null && before !== null,
+      ok: unfaded.ok && settled && afterFirst?.version === before.version && afterFirst?.playing === true
+        && paused.ok && afterSecond?.version === before.version + 1,
+      detail: {
+        revealedByFirstTap: unfaded.ok, versionBefore: before?.version ?? null, versionAfterFirst: afterFirst?.version ?? null,
+        playingAfterFirst: afterFirst?.playing ?? null, pausedBySecond: paused.ok, versionAfterSecond: afterSecond?.version ?? null,
+      },
+    };
+  } finally {
+    await host.send('Emulation.setTouchEmulationEnabled', { enabled: false }).catch(() => {});
+    await restPaused();
+  }
+}
+
+async function rowTheatreKeepsMedia() {
+  if (!await roomReady(host)) return { exercised: false, detail: 'the host did not render the room' };
+  if (!await setPlaying(false)) return { exercised: false, detail: 'the room would not pause' };
+  const mark = `rd-t1-${crypto.randomBytes(6).toString('hex')}`;
+  await read(host, `document.querySelector('video').__rdMark = ${JSON.stringify(mark)}`);
+  const before = await read(host, PLAYBACK);
+  await clickElement(host, '#theatre');
+  const on = await until(host, THEATRE, (value) => value === 'true', CLOSE_MS);
+  await clickElement(host, '#theatre');
+  const off = await until(host, THEATRE, (value) => value === null, CLOSE_MS);
+  const kept = await read(host, `({ mark: document.querySelector('video').__rdMark ?? null, same: document.querySelector('video') === document.getElementById('video'), videos: document.querySelectorAll('video').length })`);
+  const after = await read(host, PLAYBACK);
+  return {
+    exercised: on.ok && before !== null,
+    ok: off.ok && kept?.mark === mark && kept.same === true && kept.videos === 1 && after?.version === before.version && after?.lineage === before.lineage,
+    detail: { onAfterFirst: on.ok, offAfterSecond: off.ok, markSurvived: kept?.mark === mark, sameElement: kept?.same ?? null, videos: kept?.videos ?? null, versionBefore: before?.version ?? null, versionAfter: after?.version ?? null },
+  };
+}
+
+async function rowTheatreIsRemembered() {
+  if (!await roomReady(host)) return { exercised: false, detail: 'the host did not render the room' };
+  try {
+    await clickElement(host, '#theatre');
+    const on = await until(host, THEATRE, (value) => value === 'true', CLOSE_MS);
+    const stored = await read(host, THEATRE_STORED);
+    await read(host, 'window.__rdLoaded = true');
+    await host.send('Page.reload');
+    const reloaded = await until(host, `window.__rdLoaded === undefined && ${present('#message-input')}`, Boolean);
+    const afterReload = reloaded.ok ? await until(host, THEATRE, (value) => value === 'true', CLOSE_MS) : { ok: false, value: null };
+    await clickElement(host, '#theatre');
+    const off = await until(host, THEATRE, (value) => value === null, CLOSE_MS);
+    const storedAfterOff = await read(host, THEATRE_STORED);
+    return {
+      exercised: on.ok && reloaded.ok,
+      ok: stored === '1' && afterReload.ok && off.ok && storedAfterOff === null,
+      detail: { onAfterToggle: on.ok, stored, reloaded: reloaded.ok, onAfterReload: afterReload.ok, offAfterToggle: off.ok, storedAfterOff },
+    };
+  } finally {
+    if ((await read(host, THEATRE)) !== null) await clickElement(host, '#theatre').catch(() => {});
+  }
+}
+
+async function readBarAt(viewport) {
+  const { width, height, scale, mobile } = viewport;
+  await host.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile });
+  const laidOut = await until(host, `window.innerWidth === ${width}`, Boolean, CLOSE_MS);
+  const settled = laidOut.ok && await revealed(host);
+  const player = await read(host, boxOf('#player'));
+  const bar = await read(host, boxOf('#control-bar'));
+  const row = await read(host, BAR_ROW);
+  return { laidOut: laidOut.ok, settled, player, bar, row };
+}
+
+const centreSpread = (row) => {
+  const centres = row?.centres.map((entry) => entry.cy) ?? [];
+  return centres.length > 0 ? Math.max(...centres) - Math.min(...centres) : null;
+};
+const flushWithin = ({ player, bar }) => player !== null && bar !== null
+  && Math.abs(bar.left - player.left) <= FLUSH_PX && Math.abs(bar.right - player.right) <= FLUSH_PX && Math.abs(bar.bottom - player.bottom) <= FLUSH_PX;
+
+async function rowBarIsFlushAndOneRow() {
+  if (!await roomReady(host)) return { exercised: false, detail: 'the host did not render the room' };
+  if (!await setPlaying(false)) return { exercised: false, detail: 'the room would not pause' };
+  const readings = {};
+  try {
+    for (const viewport of VIEWPORTS) readings[viewport.label] = await readBarAt(viewport);
+  } finally {
+    await host.send('Emulation.clearDeviceMetricsOverride').catch(() => {});
+  }
+  const wide = readings['1536x1024'];
+  const narrow = readings['390x844'];
+  const sound = (reading) => reading.laidOut && reading.settled && flushWithin(reading) && centreSpread(reading.row) !== null && centreSpread(reading.row) <= ROW_CENTRE_PX;
+  const detailOf = (reading) => ({ player: reading.player, bar: reading.bar, centres: reading.row?.centres ?? null, centreSpread: centreSpread(reading.row), volume: reading.row?.volume ?? null, theatreShown: reading.row?.theatreShown ?? null });
+  return {
+    exercised: Object.values(readings).every((reading) => reading.laidOut && reading.player !== null && reading.bar !== null && reading.row !== null),
+    ok: sound(wide) && sound(narrow)
+      && wide.row.volume.shown && wide.row.theatreShown
+      && narrow.row.volume.mounted && !narrow.row.volume.shown && !narrow.row.theatreShown,
+    detail: { '1536x1024': detailOf(wide), '390x844': detailOf(narrow) },
+  };
+}
+
 async function runRows() {
   await runRow('RD-N1 a plain invite shows the name prompt and joins the room behind it', rowInviteJoinsBehindPrompt);
   await runRow('RD-N2 the prompt closes on Escape and stays closed after a reload', rowEscapeClosesAndReloadStaysClosed);
   await runRow('RD-N3 a role and tab URL shows no prompt', rowRoleAndTabShowNoPrompt);
-  await runRow('RD-N4 a front-page join shows no prompt', rowFrontJoinShowsNoPrompt);
+  await runRow('RD-N4 a front-page host and a front-page join each show the name prompt', rowFrontHostAndJoinShowPrompt);
   await runRow('RD-N5 the name and message inputs send nothing', rowInputsSendNothing);
   await runRow('RD-M1 the settings menu changes the control mode for the host and is disabled for a viewer', rowSettingsMenuControlMode);
+  await runRow("RD-B1 a faded control's box read before the reveal misses, and the shipped click lands", rowFadedBoxMisses);
+  await runRow('RD-B2 a click outside the bar while faded does not wait', rowOutsideClickDoesNotWait);
+  await runRow('RD-B3 a first touch on a faded bar only reveals it', rowFirstTouchOnlyReveals);
+  await runRow('RD-T1 theatre mode issues no operation and keeps the media element', rowTheatreKeepsMedia);
+  await runRow('RD-T2 theatre mode is remembered for the tab', rowTheatreIsRemembered);
+  await runRow('RD-L1 the bar is flush with the player and stays one row', rowBarIsFlushAndOneRow);
 }
 
 async function main() {

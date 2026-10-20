@@ -25,9 +25,9 @@ class ReadyWorker {
   }
 }
 
-function browserGlobals({ worker = ReadyWorker, locks = true, storage = true } = {}) {
+function browserGlobals({ worker = ReadyWorker, locks = true, storage = true, estimate = async () => ({ quota: 10_000_000, usage: 0 }) } = {}) {
   const globals = { sessionStorage: sessionStorage(), MediaSource: { isTypeSupported: () => true }, TextEncoder, TextDecoder };
-  if (storage) globals.navigator = { storage: { getDirectory: async () => notFoundRoot(), estimate: async () => ({ quota: 10_000_000, usage: 0 }) } };
+  if (storage) globals.navigator = { storage: { getDirectory: async () => notFoundRoot(), estimate } };
   if (locks) globals.navigator = { ...(globals.navigator ?? {}), locks: { request: async (name, options, callback) => callback(null) } };
   if (worker) globals.Worker = worker;
   return globals;
@@ -54,6 +54,21 @@ export default async function hostFileEntrySuite() {
     await drain();
     assertEqual(page.count('connect'), 1, 'directory host connects');
     assertEqual(page.app.hostFile().state, 'off', 'directory host has no file source');
+    assertEqual(page.view().hostFile.state, 'off', 'directory host view carries no file state');
+    assertEqual(page.view().hostFile.choosable, false, 'directory host has nothing to choose');
+  });
+
+  await check('host-file-entry: the view is not choosable while the source starts, and is once it awaits a file', async () => {
+    const starting = hostPage(product.code, { globals: browserGlobals({ estimate: () => new Promise(() => {}) }) });
+    await drain();
+    assertEqual(starting.app.hostFile().state, 'starting', 'a source held at its estimate is starting');
+    assertEqual(starting.view().hostFile.state, 'starting', 'the view carries the starting state');
+    assertEqual(starting.view().hostFile.choosable, false, 'a starting source is not choosable');
+    assertEqual(starting.view().hostFile.inputHidden, false, 'the input is open while starting');
+    const awaiting = hostPage(product.code);
+    await drain();
+    assertEqual(awaiting.view().hostFile.state, 'awaiting-file', 'the view carries the awaiting state');
+    assertEqual(awaiting.view().hostFile.choosable, true, 'an awaiting source is choosable');
   });
 
   await check('host-file-entry: a viewer under file connects once', async () => {
@@ -78,6 +93,8 @@ export default async function hostFileEntrySuite() {
     assertEqual(page.app.hostFile().state, 'refused', 'worker refusal is published');
     assertEqual(page.app.hostFile().refusal.reason, 'video-codec', 'worker refusal reason is preserved');
     assertEqual(page.count('connect'), 1, 'worker refusal stays connected');
+    assertEqual(page.view().hostFile.state, 'refused', 'the view carries the refusal state');
+    assertEqual(page.view().hostFile.choosable, true, 'a refused source is choosable again');
   });
 
   await check('host-file-entry: choosing before the input opens does nothing', async () => {
@@ -99,6 +116,8 @@ export default async function hostFileEntrySuite() {
       assertEqual(page.count('connect'), 0, `${name} does not connect`);
       assertEqual(page.app.hostFile().state, 'failed', `${name} reports failed`);
       assertEqual(page.app.hostFile().failure, name, `${name} is named`);
+      assertEqual(page.view().hostFile.state, 'failed', `${name} view carries the failure`);
+      assertEqual(page.view().hostFile.choosable, false, `${name} offers no pick, because the chooser never opens`);
     }
   });
 }

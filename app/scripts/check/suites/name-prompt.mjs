@@ -25,4 +25,12 @@ export default async function namePromptSuite() {
     assertEqual(namePromptDue('?room=r&role=viewer&tab=t', '1'), false, 'flag set with a role URL');
     assertEqual(namePromptDue('?room=r', '0'), true, 'another value is not the flag');
   });
+
+  await check('name-prompt: a room reached from the front page is due, once, and only from there', async () => {
+    assertEqual(namePromptDue('?room=r&role=host&tab=t', null, true), true, 'a front-page host');
+    assertEqual(namePromptDue('?room=r&role=host&tab=t', '1', true), false, 'the flag set after it was shown');
+    assertEqual(namePromptDue('?room=r&role=host&tab=t', null, false), false, 'the same URL opened directly');
+    assertEqual(namePromptDue('?room=r&role=host&tab=t', null), false, 'fromFront defaults to false');
+    assertEqual(namePromptDue('?room=r', '1', true), false, 'a plain invite with the flag set, though from the front');
+  });
 }

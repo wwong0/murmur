@@ -162,15 +162,46 @@ export class Tab {
   }
 }
 
-/** A trusted mouse click at the centre of `selector`, scrolled into view first. */
+const BAR_REVEAL_TIMEOUT_MS = 2_000;
+const BAR_REVEAL_POLL_MS = 50;
+
+/**
+ * Wait until `#control-bar` is shown and its transition has ended. A faded bar keeps its controls
+ * in the player's box, but they sit a slide's distance from where the reveal puts them, so a box
+ * read before the reveal is a box the control then leaves (design.md D7). `getAnimations` omits
+ * finished animations, so an empty list is an ended transition.
+ */
+export async function waitBarRevealed(tab) {
+  const deadline = Date.now() + BAR_REVEAL_TIMEOUT_MS;
+  for (;;) {
+    const revealed = await tab.evaluate(`(() => {
+      const bar = document.querySelector('#control-bar');
+      return bar !== null && bar.getAttribute('data-faded') === 'false' && bar.getAnimations({ subtree: true }).length === 0;
+    })()`);
+    if (revealed) return;
+    if (Date.now() >= deadline) throw new Error('#control-bar did not reveal');
+    await sleep(BAR_REVEAL_POLL_MS);
+  }
+}
+
+/**
+ * A trusted mouse click at the centre of `selector`, scrolled into view first. The pointer moves
+ * there before the box is read, as a person's does; only a target inside `#control-bar` then
+ * waits for the reveal, because a pointer over anything else never unfades the bar.
+ */
 export async function clickElement(tab, selector) {
-  const box = await tab.evaluate(`(() => {
+  const read = (scroll) => tab.evaluate(`(() => {
     const element = document.querySelector(${JSON.stringify(selector)});
     if (!element) return null;
-    element.scrollIntoView({ block: 'center' });
+    if (${scroll}) element.scrollIntoView({ block: 'center' });
     const rect = element.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, inBar: element.closest('#control-bar') !== null };
   })()`);
+  const provisional = await read(true);
+  if (!provisional) throw new Error(`${selector} is not on the page`);
+  await tab.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: provisional.x, y: provisional.y });
+  if (provisional.inBar) await waitBarRevealed(tab);
+  const box = await read(false);
   if (!box) throw new Error(`${selector} is not on the page`);
   for (const type of ['mousePressed', 'mouseReleased']) {
     await tab.send('Input.dispatchMouseEvent', { type, x: box.x, y: box.y, button: 'left', clickCount: 1 });

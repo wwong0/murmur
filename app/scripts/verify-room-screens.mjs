@@ -13,7 +13,7 @@ import { createResultLog } from './browser-result-log.mjs';
 import { assertServedBundle, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
 import { classifyEndPause, endPauseSettled } from './room-screens-steps.mjs';
-import { toggleControlMode } from './room-page-steps.mjs';
+import { closeNamePrompt, toggleControlMode, waitHostFileEnabled } from './room-page-steps.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -244,6 +244,7 @@ async function setPlaying(wanted) {
 }
 
 async function setFileInput(filename) {
+  await waitHostFileEnabled(fileHost);
   const { root } = await fileHost.send('DOM.getDocument', { depth: 0 });
   const { nodeId } = await fileHost.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#host-file' });
   if (!nodeId) throw new Error('host file input is missing');
@@ -282,6 +283,7 @@ async function runRows() {
   await runRow(LABELS[1], async () => {
     if (!noRoom.ok) return { exercised: false };
     await clickElement(host, '#host');
+    console.log(`name prompt host: ${JSON.stringify(await closeNamePrompt(host))}`);
     const joined = await until(host, `(() => {
       const params = new URL(location.href).searchParams;
       const invite = document.querySelector('#invite');
@@ -299,6 +301,7 @@ async function runRows() {
     await viewer.evaluate("document.querySelector('#join-input')?.focus()");
     await viewer.send('Input.insertText', { text: invite });
     await clickElement(viewer, '#join');
+    console.log(`name prompt viewer: ${JSON.stringify(await closeNamePrompt(viewer))}`);
     const joined = await until(viewer, `(() => {
       const params = new URL(location.href).searchParams;
       return { room: params.get('room'), role: params.get('role'), roster: [...document.querySelectorAll('#roster li')].map((li) => li.textContent) };
@@ -456,6 +459,7 @@ async function runRows() {
 
   const fixture = (name) => path.join(APP_DIR, 'scripts', 'check', 'remux-fixtures', name);
   await clickElement(fileHost, '#host');
+  console.log(`name prompt file host: ${JSON.stringify(await closeNamePrompt(fileHost))}`);
   await until(fileHost, "window.__app.hostFile()?.state === 'awaiting-file'", Boolean, WAIT_MS);
   await runRow(LABELS[13], async () => {
     const state = await prepareFile(fixture('refuse-audio-codec.mp4'));

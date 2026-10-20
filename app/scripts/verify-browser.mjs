@@ -60,7 +60,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep, disposeChrome } from './cdp.mjs';
+import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep, disposeChrome, waitBarRevealed } from './cdp.mjs';
 import { evaluateRun, reportLines } from './browser-check-list.mjs';
 import { createResultLog } from './browser-result-log.mjs';
 import { assertServedBundle, prepareRunDirectory } from './runner/core.mjs';
@@ -411,14 +411,26 @@ async function pageOf(tab) {
 /**
  * A trusted click through Chrome's input pipeline at the element's centre —
  * never `element.click()`, which no user can do to a disabled button (D11).
- * `enableFirst` clears `disabled` in the same evaluation, just before the click,
- * so the page's next enablement pass has no time to restore it.
+ * The pointer moves to the element first, and a target inside `#control-bar`
+ * waits for the bar's reveal before its box is read (design.md D7).
+ * `enableFirst` clears `disabled` in the same evaluation that reads the final
+ * box, just before the click, so the page's next enablement pass has no time
+ * to restore it.
  */
 async function clickElement(tab, selector, { enableFirst = false } = {}) {
-  const box = await tab.evaluate(`(() => {
+  const provisional = await tab.evaluate(`(() => {
     const el = document.querySelector(${JSON.stringify(selector)});
     if (!el) return null;
     el.scrollIntoView({ block: 'center' });
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2, inBar: el.closest('#control-bar') !== null };
+  })()`);
+  if (!provisional) throw new Error(`${tab.label}: ${selector} is not on the page`);
+  await tab.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: provisional.x, y: provisional.y });
+  if (provisional.inBar) await waitBarRevealed(tab);
+  const box = await tab.evaluate(`(() => {
+    const el = document.querySelector(${JSON.stringify(selector)});
+    if (!el) return null;
     const disabledBefore = el.disabled === true;
     if (${enableFirst}) el.disabled = false;
     const r = el.getBoundingClientRect();
@@ -2017,6 +2029,7 @@ try {
   // D4: a room-less page makes no room until Host is pressed; the front page mounts after attach.
   await pollUntil(() => n.evaluate(`document.querySelector('#host') !== null`), (present) => present === true, { everyMs: 250, deadlineAt: Date.now() + 15_000 });
   await clickElement(n, '#host');
+  console.log(`name prompt N/creator: ${JSON.stringify(await closeNamePrompt(n))}`);
   const created = await pollUntil(() => pageOf(n), (page) => page.present && /[?&]room=/.test(page.search) && page.members.length > 0, { everyMs: 250, deadlineAt: Date.now() + 15_000 });
   const createdQuery = new URLSearchParams(created.value.search ?? '');
   const createdRoom = createdQuery.get('room');

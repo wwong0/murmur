@@ -457,6 +457,78 @@ export function s13(reading) {
   return verdict(reasons.length ? 'fail' : 'pass', reading, reasons.length ? reasons : ['browser storage wiring refusal was observed']);
 }
 
+// The `--held-lock` pass's rows (design.md D15, F10): the id is the row's, the text its label.
+export const F10_ROWS = Object.freeze({
+  'F10-1': "the chooser is disabled while another tab holds the remembered title's lock",
+  'F10-2': 'the chooser enables once the lock is released',
+  'F10-3': 'the first pick after it enables is prepared',
+});
+
+const STARTING_BUTTON = 'Getting ready…';
+
+function chooserSample(sample) {
+  return object(sample) && finiteNonNegative(sample.atMs)
+    && (sample.state === null || typeof sample.state === 'string')
+    && (sample.disabled === null || typeof sample.disabled === 'boolean')
+    && (sample.button === null || typeof sample.button === 'string');
+}
+
+/** One entry per run of identical readings, so fifty polls keep a few lines. */
+export function chooserRuns(samples) {
+  const runs = [];
+  for (const { atMs, state, disabled, button } of samples) {
+    const last = runs.at(-1);
+    if (last && last.state === state && last.disabled === disabled && last.button === button) {
+      last.count += 1;
+      last.lastAtMs = atMs;
+    } else {
+      runs.push({ state, disabled, button, count: 1, firstAtMs: atMs, lastAtMs: atMs });
+    }
+  }
+  return runs;
+}
+
+// The opportunity is a reading of `starting` with the input in the page: that is the one state
+// in which a pick used to be dropped. A page that never read it did not test the flag.
+export function f10Disabled(reading) {
+  const early = precondition(reading);
+  if (early) return early;
+  if (!Array.isArray(reading.samples) || reading.samples.length === 0 || !reading.samples.every(chooserSample)) return missing(reading);
+  const starting = reading.samples.filter((sample) => sample.state === 'starting' && sample.disabled !== null);
+  const observed = { samples: chooserRuns(reading.samples), total: reading.samples.length, starting: starting.length };
+  if (starting.length === 0) return notExercised(observed, 'the source never read starting with the chooser in the page, so the flag was not tested');
+  const reasons = [];
+  if (starting.some((sample) => sample.disabled !== true)) reasons.push('#host-file was enabled while the source read starting');
+  if (starting.some((sample) => sample.button !== STARTING_BUTTON)) reasons.push(`the card button did not read ${STARTING_BUTTON} while the source read starting`);
+  return verdict(reasons.length ? 'fail' : 'pass', observed, reasons.length ? reasons : ['every reading of a starting source had a disabled chooser and the waiting button']);
+}
+
+export function f10Enables(reading) {
+  const early = precondition(reading);
+  if (early) return early;
+  if (!object(reading) || !(reading.state === null || typeof reading.state === 'string')
+    || !(reading.disabled === null || typeof reading.disabled === 'boolean') || !finiteNonNegative(reading.waitedMs)) return missing(reading);
+  const reasons = [];
+  if (reading.state !== 'awaiting-file') reasons.push('the source was not awaiting-file after the lock was released');
+  if (reading.disabled !== false) reasons.push('#host-file was not enabled after the lock was released');
+  return verdict(reasons.length ? 'fail' : 'pass', reading, reasons.length ? reasons : ['the source awaited a file and the chooser was enabled']);
+}
+
+// A fast preparation can pass between two readings, so the worker's own count stands for a
+// `preparing` that was not read.
+export function f10Prepares(reading) {
+  const early = precondition(reading);
+  if (early) return early;
+  if (!object(reading) || !Array.isArray(reading.states) || !reading.states.every((state) => typeof state === 'string')
+    || !(reading.final === null || typeof reading.final === 'string') || !object(reading.workerCalls)) return missing(reading);
+  const reasons = [];
+  if (reading.final !== 'ready') reasons.push('the pick did not reach ready');
+  if (!reading.states.includes('preparing') && !(reading.workerCalls.prepare >= 1)) reasons.push('the source never prepared the pick');
+  const preparing = reading.states.indexOf('preparing');
+  if (preparing !== -1 && reading.states.indexOf('ready') !== -1 && reading.states.indexOf('ready') < preparing) reasons.push('the source read ready before preparing');
+  return verdict(reasons.length ? 'fail' : 'pass', reading, reasons.length ? reasons : ['the first pick after the chooser enabled was prepared']);
+}
+
 export function exitCode(results, { mutationControl = false } = {}) {
   if (!Array.isArray(results)) return 2;
   let code = 0;

@@ -6,6 +6,10 @@ import { clickElement, sleep } from './cdp.mjs';
 const STEP_WAIT_MS = 2_000;
 const PROMPT_WAIT_MS = 3_000;
 const POLL_MS = 50;
+const ENABLE_WAIT_MS = 10_000;
+const CHOOSABLE_WAIT_MS = 30_000;
+const CHOOSABLE_POLL_MS = 100;
+const ENABLED_UNPRESSED = '#control-mode [data-mode][aria-pressed="false"]:not([disabled]):not([data-disabled])';
 
 // `tolerant` reads a failed evaluate as "not there yet": a page that was only just told to
 // navigate answers from a context that is going away.
@@ -43,6 +47,24 @@ export async function closeNamePrompt(tab) {
 }
 
 /**
+ * Waits until the host's file input takes a pick. The input carries the disabled flag while the
+ * source is not choosable, and a pick set on it then is dropped with nothing to say so
+ * (design.md D15, F10): every driver that sets files over CDP calls this first. A page that was
+ * only just told to navigate reads as "not yet", as in `closeNamePrompt`.
+ */
+export async function waitHostFileEnabled(tab, timeoutMs = CHOOSABLE_WAIT_MS) {
+  const expression = `document.querySelector('#host-file')?.disabled === false`;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    let enabled = false;
+    try { enabled = await tab.evaluate(expression); } catch { /* the page is going away: not yet */ }
+    if (enabled === true) return true;
+    if (Date.now() >= deadline) throw new Error('host file never became choosable');
+    await sleep(CHOOSABLE_POLL_MS);
+  }
+}
+
+/**
  * Changes the room's control mode through the settings menu, as a person does: open
  * `#settings`, press the item that is not pressed, close the menu. The menu floats over the
  * page, so a step that left it open would take the next coordinate click (design.md D11, D18).
@@ -61,6 +83,11 @@ export async function toggleControlMode(tab, { click = clickElement } = {}) {
   });
   await step('opening #settings', () => click(tab, '#settings'));
   await wait('waiting for #control-mode', '#control-mode', true);
+  // post-result (12b C2): the toggle stays disabled while an operation is in flight, and a
+  // click on it then does nothing; the base waited for the control itself to be enabled.
+  await step('waiting for the unpressed mode to be enabled', async () => {
+    if (!await waitForPresence(tab, ENABLED_UNPRESSED, true, { waitMs: ENABLE_WAIT_MS })) throw new Error(`${ENABLED_UNPRESSED} was not present within ${ENABLE_WAIT_MS} ms`);
+  });
   await step('pressing the unpressed mode', () => click(tab, '#control-mode [data-mode][aria-pressed="false"]'));
   await step('sending Escape', () => pressEscape(tab));
   await wait('waiting for #control-mode to close', '#control-mode', false);

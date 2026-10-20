@@ -14,15 +14,29 @@ const labels = (roster) => labelMap(memberLabels(roster));
 export default async function roomPeopleSuite() {
   await check('room-people: the host is Host and the guests count from 1 in roster order, host skipped', async () => {
     assertEqual(JSON.stringify(memberLabels([HOST, G1, G2])), JSON.stringify([
-      { clientId: 'cid-host', label: 'Host', initial: 'H', host: true },
-      { clientId: 'cid-g1', label: 'Guest 1', initial: '1', host: false },
-      { clientId: 'cid-g2', label: 'Guest 2', initial: '2', host: false },
+      { clientId: 'cid-host', label: 'Host', initial: 'H', host: true, tone: 'host' },
+      { clientId: 'cid-g1', label: 'Guest 1', initial: '1', host: false, tone: 1 },
+      { clientId: 'cid-g2', label: 'Guest 2', initial: '2', host: false, tone: 2 },
     ]), 'host first');
-    assertEqual(JSON.stringify(memberLabels([G1, HOST, G2]).map((p) => p.label)), JSON.stringify(['Guest 1', 'Host', 'Guest 2']), 'the host in the middle is skipped in the count');
+    assertEqual(JSON.stringify(memberLabels([G1, HOST, G2]).map((p) => p.label)), JSON.stringify(['Host', 'Guest 1', 'Guest 2']), 'the host in the middle comes first and is skipped in the count');
     assertEqual(JSON.stringify(memberLabels([G1, G2])), JSON.stringify([
-      { clientId: 'cid-g1', label: 'Guest 1', initial: '1', host: false },
-      { clientId: 'cid-g2', label: 'Guest 2', initial: '2', host: false },
+      { clientId: 'cid-g1', label: 'Guest 1', initial: '1', host: false, tone: 1 },
+      { clientId: 'cid-g2', label: 'Guest 2', initial: '2', host: false, tone: 2 },
     ]), 'no host: guests only');
+  });
+
+  await check('room-people: a host who is not first in the roster comes back first, and the guests keep roster order', async () => {
+    const people = memberLabels([G2, HOST, G1, G3]);
+    assertEqual(JSON.stringify(people.map((p) => [p.clientId, p.label])), JSON.stringify([
+      ['cid-host', 'Host'], ['cid-g2', 'Guest 1'], ['cid-g1', 'Guest 2'], ['cid-g3', 'Guest 3'],
+    ]), 'host first, guests in roster order');
+    assertEqual(JSON.stringify(memberLabels([G1, G2, HOST]).map((p) => p.clientId)), JSON.stringify(['cid-host', 'cid-g1', 'cid-g2']), 'a last-placed host');
+  });
+
+  await check('room-people: the tones are host, then 1 to 5 in guest order, and the sixth guest wraps to 1', async () => {
+    const guests = Array.from({ length: 6 }, (_, i) => ({ tabId: `tab-${i}`, role: 'viewer', clientId: `cid-${i}` }));
+    assertEqual(JSON.stringify(memberLabels([HOST, ...guests]).map((p) => p.tone)), JSON.stringify(['host', 1, 2, 3, 4, 5, 1]), 'host and six guests');
+    assertEqual(JSON.stringify(memberLabels([guests[0], HOST, guests[1]]).map((p) => p.tone)), JSON.stringify(['host', 1, 2]), 'the host out of place still takes the host tone');
   });
 
   await check('room-people: no roster, or a roster with a null entry, gives only the real members', async () => {

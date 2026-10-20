@@ -2,19 +2,29 @@ import { formatMediaTime } from './media-time.mjs';
 
 const UNKNOWN = 'Someone';
 
+// How many guest chip colours `room.css` defines (`--chip-N`); a guest past them wraps round.
+const GUEST_TONES = 5;
+
 /**
- * The roster as the room shows its members: the host is "Host", the rest "Guest N" in
- * roster order with the host skipped (design.md D12). The text carries no tab or client id.
+ * The roster as the room shows its members: the host first as "Host", then the rest as
+ * "Guest N" in roster order with the host skipped (design.md D12). `tone` picks the chip
+ * colour: `'host'`, or a guest number cycling through the guest palette in guest order
+ * (executor-spec §0a A4). The text carries no tab or client id.
  */
 export function memberLabels(roster) {
-  let guests = 0;
-  return (Array.isArray(roster) ? roster : [])
-    .filter((member) => member !== null && typeof member === 'object')
-    .map((member) => {
-      if (member.role === 'host') return { clientId: member.clientId, label: 'Host', initial: 'H', host: true };
-      guests += 1;
-      return { clientId: member.clientId, label: `Guest ${guests}`, initial: String(guests), host: false };
-    });
+  const members = (Array.isArray(roster) ? roster : []).filter((member) => member !== null && typeof member === 'object');
+  const hosts = members.filter((member) => member.role === 'host');
+  const guests = members.filter((member) => member.role !== 'host');
+  return [
+    ...hosts.map((member) => ({ clientId: member.clientId, label: 'Host', initial: 'H', host: true, tone: 'host' })),
+    ...guests.map((member, index) => ({
+      clientId: member.clientId,
+      label: `Guest ${index + 1}`,
+      initial: String(index + 1),
+      host: false,
+      tone: (index % GUEST_TONES) + 1,
+    })),
+  ];
 }
 
 /** The lookup `activityText` reads: clientId to label, from one `memberLabels` result. */

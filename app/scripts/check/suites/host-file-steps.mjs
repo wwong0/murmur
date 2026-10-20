@@ -2,7 +2,9 @@ import { assert, assertEqual, check } from '../harness.mjs';
 import {
   boundariesFromPlaylist,
   chooseSegments,
+  chooserRuns,
   exitCode,
+  F10_ROWS, f10Disabled, f10Enables, f10Prepares,
   s0, s1, s2, s3, s4, s5, s6, s7a, s7f, s7b, s7c, s7d, s7e, s8, s9, s10, s11, s12, s13,
   showsFrameAt,
   stallTest,
@@ -221,6 +223,37 @@ export default async function hostFileStepsSuite() {
     ['free', { ...clone(s13Good), host: { refusal: { ...s13Good.host.refusal, freeBytes: 999 } } }],
     ['prepared', { ...clone(s13Good), prepared: listing() }],
   ]);
+
+  const sample = (atMs, state, disabled, button) => ({ atMs, state, disabled, button });
+  const waiting = 'Getting ready…';
+  await check('host-file-steps: F10-1 reads only the readings of a starting source, and calls a pass without one not exercised', async () => {
+    const held = [sample(0, null, null, null), sample(100, 'starting', true, waiting), sample(200, 'starting', true, waiting), sample(300, 'awaiting-file', false, 'Choose file')];
+    assertEqual(f10Disabled({ samples: held }).status, 'pass', 'a disabled chooser while starting passes');
+    assertEqual(f10Disabled({ samples: held.slice(0, 1).concat(held.slice(3)) }).status, 'not exercised', 'never starting is not exercised');
+    assertEqual(f10Disabled({ samples: [sample(0, 'starting', null, null), sample(100, 'awaiting-file', false, 'Choose file')] }).status, 'not exercised', 'a starting reading without the input in the page is no opportunity');
+    assertEqual(f10Disabled({ samples: [...held.slice(0, 2), sample(200, 'starting', false, waiting)] }).status, 'fail', 'enabled while starting fails');
+    assertEqual(f10Disabled({ samples: [sample(0, 'starting', true, 'Choose file')] }).status, 'fail', 'the wrong button text while starting fails');
+    assertEqual(f10Disabled({ samples: [] }).status, 'evidence missing', 'no samples is missing evidence');
+    assertEqual(f10Disabled({ samples: [{ atMs: 0, state: 'starting', disabled: 'yes', button: null }] }).status, 'evidence missing', 'a malformed sample is missing evidence');
+    assertEqual(f10Disabled(undefined).status, 'evidence missing', 'an absent reading is missing evidence');
+  });
+  await check('host-file-steps: F10 samples collapse to runs, and F10-2 and F10-3 read the state and the pick', async () => {
+    const runs = chooserRuns([sample(0, 'starting', true, waiting), sample(100, 'starting', true, waiting), sample(200, 'awaiting-file', false, 'Choose file'), sample(300, 'starting', true, waiting)]);
+    assertEqual(JSON.stringify(runs.map((run) => [run.state, run.count, run.firstAtMs, run.lastAtMs])), JSON.stringify([['starting', 2, 0, 100], ['awaiting-file', 1, 200, 200], ['starting', 1, 300, 300]]), 'identical neighbours merge and a return does not');
+    assertEqual(f10Enables({ state: 'awaiting-file', disabled: false, waitedMs: 40 }).status, 'pass', 'released and enabled passes');
+    assertEqual(f10Enables({ state: 'awaiting-file', disabled: true, waitedMs: 15000 }).status, 'fail', 'still disabled fails');
+    assertEqual(f10Enables({ state: 'starting', disabled: false, waitedMs: 15000 }).status, 'fail', 'still starting fails');
+    assertEqual(f10Prepares({ states: ['awaiting-file', 'inspecting', 'preparing', 'ready'], final: 'ready', workerCalls: { inspect: 1, prepare: 1 } }).status, 'pass', 'preparing then ready passes');
+    assertEqual(f10Prepares({ states: ['awaiting-file', 'ready'], final: 'ready', workerCalls: { inspect: 1, prepare: 1 } }).status, 'pass', 'a preparing between two readings stands on the worker count');
+    assertEqual(f10Prepares({ states: ['awaiting-file', 'ready'], final: 'ready', workerCalls: { inspect: 1, prepare: 0 } }).status, 'fail', 'ready without a preparation fails');
+    assertEqual(f10Prepares({ states: ['awaiting-file', 'preparing'], final: 'preparing', workerCalls: { inspect: 1, prepare: 1 } }).status, 'fail', 'a pick that never reached ready fails');
+    assertEqual(f10Prepares({ states: ['awaiting-file'], final: null }).status, 'evidence missing', 'no worker counts is missing evidence');
+    assertEqual(JSON.stringify(Object.keys(F10_ROWS)), JSON.stringify(['F10-1', 'F10-2', 'F10-3']), 'the rows are named by id');
+    assertEqual(F10_ROWS['F10-1'], "the chooser is disabled while another tab holds the remembered title's lock", 'F10-1 label');
+    assertEqual(F10_ROWS['F10-2'], 'the chooser enables once the lock is released', 'F10-2 label');
+    assertEqual(F10_ROWS['F10-3'], 'the first pick after it enables is prepared', 'F10-3 label');
+    assertEqual(exitCode([{ id: 'F10-1', status: 'not exercised' }, { id: 'F10-2', status: 'pass' }, { id: 'F10-3', status: 'pass' }]), 1, 'a not-exercised F10 row exits one');
+  });
 
   await check('host-file-steps: exit code honors evidence, not-exercised and mutation inversion', async () => {
     assertEqual(exitCode([{ id: 'S0', status: 'pass' }, { id: 'S8', status: 'pass' }]), 0, 'all pass exits zero');

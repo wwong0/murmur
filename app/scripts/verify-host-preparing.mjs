@@ -10,7 +10,7 @@ import { attach, cdpHttp, CHROME, clickElement, disposeChrome, FLAGS, rewriteWeb
 import { createResultLog } from './browser-result-log.mjs';
 import { assertServedBundle, createManifestFile, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
-import { closeNamePrompt } from './room-page-steps.mjs';
+import { closeNamePrompt, waitHostFileEnabled } from './room-page-steps.mjs';
 import { buildClientEnvelope, buildJoinEnvelope } from '../public/lib/envelope.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -168,6 +168,7 @@ async function readCounters(phase) {
 }
 
 async function setFileInput(page, filename) {
+  await waitHostFileEnabled(page);
   const { root } = await page.send('DOM.getDocument', { depth: 0 });
   const { nodeId } = await page.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#host-file' });
   if (!nodeId) throw new Error('host file input is missing');

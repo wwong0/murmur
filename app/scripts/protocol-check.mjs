@@ -218,6 +218,7 @@ import hostChoosingProgressSuite from './check/suites/host-choosing-progress.mjs
 import hostStatusSuite from './check/suites/host-status.mjs';
 import titleReportSuite from './check/suites/title-report.mjs';
 import hostFileSourceSuite from './check/suites/host-file-source.mjs';
+import hostFileCardSuite from './check/suites/host-file-card.mjs';
 import hostFileEntrySuite from './check/suites/host-file-entry.mjs';
 import hostPreparingEntrySuite from './check/suites/host-preparing-entry.mjs';
 import hostGraceEntrySuite from './check/suites/host-grace-entry.mjs';
@@ -235,6 +236,8 @@ import syncDotSuite from './check/suites/sync-dot.mjs';
 import roomPeopleSuite from './check/suites/room-people.mjs';
 import roomActivityEntrySuite from './check/suites/room-activity-entry.mjs';
 import namePromptSuite from './check/suites/name-prompt.mjs';
+import touchRevealSuite from './check/suites/touch-reveal.mjs';
+import syncWordsSuite from './check/suites/sync-words.mjs';
 
 console.log(describeFixtures());
 
@@ -432,6 +435,7 @@ for (const suite of [
   hostStatusSuite,
   titleReportSuite,
   hostFileSourceSuite,
+  hostFileCardSuite,
   hostFileEntrySuite,
   hostPreparingEntrySuite,
   hostGraceEntrySuite,
@@ -449,6 +453,8 @@ for (const suite of [
   roomPeopleSuite,
   roomActivityEntrySuite,
   namePromptSuite,
+  touchRevealSuite,
+  syncWordsSuite,
 ]) {
   await suite();
 }

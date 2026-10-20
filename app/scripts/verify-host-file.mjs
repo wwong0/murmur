@@ -20,13 +20,15 @@ import { attach, cdpHttp, CHROME, disposeChrome, FLAGS, sleep } from './cdp.mjs'
 import { assertServedBundle, createManifestFile, createNdjson, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
 import { readSourceIndex } from '../public/lib/remux-index.mjs';
-import { storeKey } from '../public/lib/prepared-store.mjs';
+import { lockName, storeKey } from '../public/lib/prepared-store.mjs';
 import { segmentName } from '../public/lib/remux-publish.mjs';
 import { requireAutoStart } from './delivery-pin.mjs';
+import { waitHostFileEnabled } from './room-page-steps.mjs';
 import {
   boundariesFromPlaylist,
   chooseSegments,
   exitCode,
+  F10_ROWS, f10Disabled, f10Enables, f10Prepares,
   s0, s1, s2, s3, s4, s5, s6, s7a, s7f, s7b, s7c, s7d, s7e, s8, s9, s10, s11, s12, s13,
 } from './host-file-steps.mjs';
 
@@ -48,6 +50,28 @@ const WIRING = {
   codec: `${HARNESS_SEEK} (() => { const native = MediaSource.isTypeSupported.bind(MediaSource); MediaSource.isTypeSupported = (mime) => (mime.includes('avc1') ? false : native(mime)); })();`,
   storage: `${HARNESS_SEEK} navigator.storage.estimate = async () => ({ quota: 1000, usage: 0 });`,
 };
+
+// The held-lock pass (--held-lock): the host remembers a title under this key, and a second
+// tab holds that title's lock. The key is the entry's sessionStorage name; the lock name is
+// the store's own rule, so a change to either leaves this pass holding the wrong lock.
+const F10_KEY = 'v1-f10-held';
+const PREPARED_KEY_NAME = 'watchalong.prepared-key';
+const F10_SAMPLE_MS = 100;
+const F10_WINDOW_MS = 5_000;
+const F10_RELEASE_MS = 15_000;
+const CHOOSER_SAMPLE = `(() => ({
+  state: globalThis.__app?.hostFile?.().state ?? null,
+  disabled: document.querySelector('#host-file')?.disabled ?? null,
+  button: document.querySelector('[data-testid="host-file-button"]')?.textContent ?? null,
+}))()`;
+const F10_PICK_POLL_MS = 25;
+const PICK_SAMPLE = `(() => {
+  const snapshot = globalThis.__app.hostFile();
+  return { state: snapshot.state, workerCalls: snapshot.workerCalls };
+})()`;
+const HOLD_LOCK = `new Promise((granted) => {
+  navigator.locks.request(${JSON.stringify(lockName(F10_KEY))}, () => { granted(true); return new Promise(() => {}); });
+})`;
 
 // Injected before the page's own scripts. Every presented frame, and the
 // element's events with the page's own clock, so a stall is read from frames
@@ -124,7 +148,7 @@ function valueAfter(args, index) {
 }
 
 function parseArgs(args) {
-  const options = { file: null, label: null, target: null, wiringRefusals: false, mutationControl: false, expectHeAac: false };
+  const options = { file: null, label: null, target: null, wiringRefusals: false, mutationControl: false, expectHeAac: false, heldLock: false };
   for (let i = 0; i < args.length; i += 1) {
     if (args[i] === '--file') { options.file = valueAfter(args, i); i += 1; }
     else if (args[i] === '--label') { options.label = valueAfter(args, i); i += 1; }
@@ -132,10 +156,14 @@ function parseArgs(args) {
     else if (args[i] === '--wiring-refusals') options.wiringRefusals = true;
     else if (args[i] === '--mutation-control') options.mutationControl = true;
     else if (args[i] === '--expect-he-aac') options.expectHeAac = true;
+    else if (args[i] === '--held-lock') options.heldLock = true;
     else throw new Error(`unknown option ${args[i]}`);
   }
   if (!options.file || !options.label || !Number.isFinite(options.target) || options.target <= 0) {
-    throw new Error('usage: node scripts/verify-host-file.mjs --file <path> --label <label> --target <seconds> [--wiring-refusals] [--mutation-control] [--expect-he-aac]');
+    throw new Error('usage: node scripts/verify-host-file.mjs --file <path> --label <label> --target <seconds> [--wiring-refusals] [--mutation-control] [--expect-he-aac] [--held-lock]');
+  }
+  if (options.heldLock && (options.wiringRefusals || options.mutationControl || options.expectHeAac)) {
+    throw new Error('--held-lock runs its own rows and cannot be combined with --wiring-refusals, --mutation-control or --expect-he-aac');
   }
   if (!/^[A-Za-z0-9_-]+$/.test(options.label)) throw new Error('label must contain only letters, numbers, underscore or hyphen');
   return options;
@@ -204,6 +232,7 @@ async function poll(read, done, timeoutMs) {
 }
 
 async function setFileInput(page, filename) {
+  await waitHostFileEnabled(page.tab);
   const { root } = await page.tab.send('DOM.getDocument', { depth: 0 });
   const { nodeId } = await page.tab.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#host-file' });
   if (!nodeId) throw new Error('host file input is missing');
@@ -231,7 +260,7 @@ async function runPass(options) {
     runDir,
     initial: {
       schemaVersion: 1, runner: 'verify-host-file', label: options.label, target: options.target, fileBytes: null,
-      options: { wiringRefusals: options.wiringRefusals, mutationControl: options.mutationControl, expectHeAac: options.expectHeAac },
+      options: { wiringRefusals: options.wiringRefusals, mutationControl: options.mutationControl, expectHeAac: options.expectHeAac, heldLock: options.heldLock },
       startedAt: startedAt.toISOString(), steps: [], failures: [],
     },
   });
@@ -262,7 +291,9 @@ async function runPass(options) {
   };
   const passed = (...results) => results.every((result) => result.status === 'pass');
 
-  async function open(tag, role, room, globals = '') {
+  // `url` opens a plain same-origin page instead of a room: the RECORDER loops while there is no
+  // `#video`, so a page without one must not get it.
+  async function open(tag, role, room, globals = '', { url = null } = {}) {
     const before = new Set((await cdpHttp(chromePort, '/json/list')).map((target) => target.id));
     spawn(CHROME, [...FLAGS, '--new-window', `--user-data-dir=${profile}`, '--window-size=900,650', 'about:blank'], { stdio: 'ignore' });
     const tab = await attach(chromePort, 'about:blank', { exclude: before });
@@ -277,8 +308,8 @@ async function runPass(options) {
     await tab.send('Page.enable');
     await tab.send('Network.enable');
     await tab.send('DOM.enable');
-    await tab.send('Page.addScriptToEvaluateOnNewDocument', { source: `${globals}\n${RECORDER}` });
-    await tab.send('Page.navigate', { url: `${ORIGIN}/room.html?room=${room}&role=${role}&tab=${tag}` });
+    if (!url) await tab.send('Page.addScriptToEvaluateOnNewDocument', { source: `${globals}\n${RECORDER}` });
+    await tab.send('Page.navigate', { url: url ?? `${ORIGIN}/room.html?room=${room}&role=${role}&tab=${tag}` });
     pages.push(page);
     return page;
   }
@@ -302,6 +333,69 @@ async function runPass(options) {
   const listCopy = (page, key) => page.tab.evaluate(LIST_COPY(key));
   const listPrepared = (page) => page.tab.evaluate(LIST_PREPARED);
   const linkOf = (snapshot) => snapshot.hostLink ?? null;
+
+  // The held-lock pass (--held-lock; executor-spec T15): a host that remembers a title whose lock
+  // another tab holds, then the same host once that tab is gone. A setup that fails leaves every
+  // row without a reading, which is missing evidence and not a verdict on the chooser.
+  async function heldLockRows(fileBytes) {
+    let failure = null;
+    let host = null;
+    let holder = null;
+    try {
+      host = await open('host', 'host', `r${crypto.randomBytes(6).toString('hex')}`);
+      const pageBuildId = (await settled(host)).buildId ?? null;
+      manifest.build = { pageBuildId, room: await assertServedBundle({ origin: ORIGIN, bundlePath: HOST_BUNDLE, pageBuildId }) };
+      manifest.heldLock = { key: F10_KEY, lockName: lockName(F10_KEY) };
+      await host.tab.evaluate(`sessionStorage.setItem(${JSON.stringify(PREPARED_KEY_NAME)}, ${JSON.stringify(F10_KEY)})`);
+      holder = await open('holder', 'host', '', '', { url: `${ORIGIN}/app-settings` });
+      await poll(() => holder.tab.evaluate('location.origin').catch(() => null), (origin) => origin === ORIGIN, 10_000);
+      if ((await holder.tab.evaluate(HOLD_LOCK)) !== true) throw new Error('the second tab was not granted the lock');
+    } catch (error) {
+      failure = error;
+    }
+    const requireSetup = () => { if (failure) throw failure; };
+    const chooser = (page) => page.tab.evaluate(CHOOSER_SAMPLE);
+
+    await step('F10-1', F10_ROWS['F10-1'], async () => {
+      requireSetup();
+      host.load += 1;
+      host.frames = [];
+      const startedMs = Date.now();
+      await host.tab.send('Page.reload', { ignoreCache: true });
+      const samples = [];
+      while (Date.now() - startedMs < F10_WINDOW_MS) {
+        // A page between documents has no reading; the gap is left in the samples.
+        try { samples.push({ atMs: Date.now() - startedMs, ...(await chooser(host)) }); } catch { /* no reading */ }
+        await sleep(F10_SAMPLE_MS);
+      }
+      return f10Disabled({ samples });
+    });
+
+    await step('F10-2', F10_ROWS['F10-2'], async () => {
+      requireSetup();
+      await holder.tab.send('Page.close');
+      await poll(async () => (await cdpHttp(chromePort, '/json/list')).some((target) => target.id === holder.tab.targetId), (open) => !open, 10_000);
+      const releasedMs = Date.now();
+      const reading = await poll(() => chooser(host).catch(() => null), (value) => value?.state === 'awaiting-file' && value.disabled === false, F10_RELEASE_MS);
+      if (!reading) throw new Error('the host page gave no reading after the lock was released');
+      return f10Enables({ state: reading.state, disabled: reading.disabled, waitedMs: Date.now() - releasedMs });
+    });
+
+    await step('F10-3', F10_ROWS['F10-3'], async () => {
+      requireSetup();
+      await setFileInput(host, options.file);
+      const deadline = Date.now() + 60_000 + Math.ceil(fileBytes / 5_000_000) * 1000;
+      const states = [];
+      let latest = null;
+      while (Date.now() < deadline) {
+        try { latest = await host.tab.evaluate(PICK_SAMPLE); } catch { latest = null; }
+        if (latest && states.at(-1) !== latest.state) states.push(latest.state);
+        if (latest && ['ready', 'refused', 'failed'].includes(latest.state)) break;
+        await sleep(F10_PICK_POLL_MS);
+      }
+      return f10Prepares({ states, final: latest?.state ?? null, workerCalls: latest?.workerCalls ?? {} });
+    });
+  }
 
   try {
     const stat = fs.statSync(options.file);
@@ -345,306 +439,311 @@ async function runPass(options) {
     manifest.gitHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_DIR, encoding: 'utf8' }).trim();
     manifest.gitDirty = execFileSync('git', ['status', '--porcelain', '--', 'app/public', 'app/server', 'app/scripts'], { cwd: REPO_DIR, encoding: 'utf8' }).trim().split('\n').filter(Boolean).length;
 
-    // S0, first half: what is being served, before any page is trusted (rule 9).
-    const settings = await getJson('/app-settings');
-    const workerBundle = await servedBundle('/prepare.worker.bundle.js', WORKER_BUNDLE);
+    // The reference remux above still ran: --held-lock takes the server and Chrome, and none of the S rows.
+    if (options.heldLock) {
+      await heldLockRows(stat.size);
+    } else {
+      // S0, first half: what is being served, before any page is trusted (rule 9).
+      const settings = await getJson('/app-settings');
+      const workerBundle = await servedBundle('/prepare.worker.bundle.js', WORKER_BUNDLE);
 
-    const room = `r${crypto.randomBytes(6).toString('hex')}`;
-    const viewer = await open('viewer', 'viewer', room);
-    await until(viewer, () => true, 20_000);
-    const host = await open('host', 'host', room, HARNESS_SEEK);
-    const hostStart = await settled(host);
-    const pageBuildId = hostStart.buildId ?? null;
-    const roomBundle = await assertServedBundle({ origin: ORIGIN, bundlePath: HOST_BUNDLE, pageBuildId });
-    manifest.settings = settings;
-    manifest.build = { pageBuildId, room: roomBundle, worker: workerBundle };
-    const fresh = s0({ target: options.target, pageBuildId, workerBuildId: pageBuildId, settings, roomBundle, workerBundle });
-    if (fresh.status !== 'pass') {
-      record('S0', 'freshness', fresh);
-      throw new Error('the pass is not talking to the build on disk; nothing after S0 was run');
-    }
+      const room = `r${crypto.randomBytes(6).toString('hex')}`;
+      const viewer = await open('viewer', 'viewer', room);
+      await until(viewer, () => true, 20_000);
+      const host = await open('host', 'host', room, HARNESS_SEEK);
+      const hostStart = await settled(host);
+      const pageBuildId = hostStart.buildId ?? null;
+      const roomBundle = await assertServedBundle({ origin: ORIGIN, bundlePath: HOST_BUNDLE, pageBuildId });
+      manifest.settings = settings;
+      manifest.build = { pageBuildId, room: roomBundle, worker: workerBundle };
+      const fresh = s0({ target: options.target, pageBuildId, workerBuildId: pageBuildId, settings, roomBundle, workerBundle });
+      if (fresh.status !== 'pass') {
+        record('S0', 'freshness', fresh);
+        throw new Error('the pass is not talking to the build on disk; nothing after S0 was run');
+      }
 
-    const r1 = await step('S1', 'viewers wait', async () => {
-      await sleep(5_000);
-      const hostNow = await read(host);
-      const viewerNow = await read(viewer);
-      return s1({
-        host: hostNow.hostFile,
-        viewer: { roster: viewerNow.roster, hostPreparing: viewerNow.hostPreparing, playDisabled: viewerNow.playDisabled, requestsByPath: viewerNow.hostLink?.requestsByPath },
-        counters: (await getJson('/harness/counters')).counters,
+      const r1 = await step('S1', 'viewers wait', async () => {
+        await sleep(5_000);
+        const hostNow = await read(host);
+        const viewerNow = await read(viewer);
+        return s1({
+          host: hostNow.hostFile,
+          viewer: { roster: viewerNow.roster, hostPreparing: viewerNow.hostPreparing, playDisabled: viewerNow.playDisabled, requestsByPath: viewerNow.hostLink?.requestsByPath },
+          counters: (await getJson('/harness/counters')).counters,
+        });
       });
-    });
 
-    let prepared = null;
-    const r2 = await step('S2', 'prepare', async () => {
-      await setFileInput(host, options.file);
-      const deadlineMs = 60_000 + Math.ceil(stat.size / 5_000_000) * 1000;
-      const startedMs = Date.now();
-      prepared = await until(host, (value) => ['ready', 'refused', 'failed'].includes(value.hostFile?.state), deadlineMs);
-      manifest.prepareWallMs = Date.now() - startedMs;
-      return s2({ target: options.target, fileBytes: stat.size, host: prepared.hostFile });
-    });
-    const key = prepared?.hostFile?.key ?? null;
-    const r0 = record('S0', 'freshness', s0({ target: options.target, pageBuildId, workerBuildId: prepared?.hostFile?.workerBuildId, settings, roomBundle, workerBundle }));
-
-    let tabListing = null;
-    const r3 = await step('S3', 'the same bytes', async () => {
-      if (!passed(r0, r2) || !key) return s3({ precondition: false });
-      tabListing = await listCopy(host, key);
-      return s3({ tab: tabListing, reference: reference.listing, key, expectedKey });
-    });
-
-    // The first member of a room creates it playing from 0, so by now the room is
-    // wherever the viewer's wait and the preparation left it. Every seek is made
-    // paused: the room's position is then the one read, and the delta is exact.
-    // A click made before the page holds the room's state is dropped, so the button is pressed until the state says so.
-    const setPlaying = async (wanted) => {
-      const reached = await poll(async () => {
-        if ((await read(host)).playbackState?.playing === wanted) return true;
-        await click(host, wanted ? '#play' : '#pause');
-        await sleep(500);
-        return false;
-      }, (done) => done, 15_000);
-      if (!reached) throw new Error(`the room did not become ${wanted ? 'playing' : 'paused'} within 15 s`);
-    };
-    const seekTo = async (targetSeconds) => {
-      let mark = null;
-      let fromSeconds = null;
-      let last = null;
-      const issued = await poll(async () => {
-        const state = (await read(host)).playbackState;
-        last = state;
-        if (!state || state.playing !== false || !Number.isFinite(state.positionMs)) return false;
-        fromSeconds = state.positionMs / 1000;
-        mark = await pageNow(viewer);
-        return (await host.tab.evaluate(`window.__app.harnessSeek(${targetSeconds * 1000 - state.positionMs})`))?.issued === true;
-      }, (done) => done, 10_000);
-      if (!issued) throw new Error(`the host issued no seek within 10 s of the pause; its room state was ${JSON.stringify(last)}`);
-      return { mark, fromSeconds };
-    };
-    const shown = (mark, lower, upper) => until(viewer, () => hasFrame(framesAfter(viewer, mark), lower, upper), 30_000);
-    const rewind = async () => {
-      await setPlaying(false);
-      const { mark } = await seekTo(0);
-      await until(viewer, (value) => hasFrame(framesAfter(viewer, mark), 0, 1.5 * frame) && value.poll.bufferedLength === 1, 15_000);
-    };
-
-    // S4 and S5 share one loop from the play click, so the viewer's window has no gap in its polls.
-    const k = Math.min(3, count - 1) - 1;
-    const boundaryIndexes = Array.from({ length: k + 1 }, (_, index) => index);
-    const viewerPolls = [];
-    let viewerNow = null;
-    let hostMark = null;
-    let viewerMark = null;
-    let played = false;
-    if (passed(r2)) {
-      try {
-        await rewind();
-        hostMark = await pageNow(host);
-        viewerMark = await pageNow(viewer);
-        await setPlaying(true);
-        played = true;
-        const hostDeadline = Date.now() + 30_000;
-        const viewerDeadline = Date.now() + (boundaries[k] + 60) * 1000;
-        let hostDone = false;
-        let viewerDone = false;
-        while (!(hostDone && viewerDone)) {
-          if (!hostDone) {
-            await read(host);
-            hostDone = hasFrame(framesAfter(host, hostMark), boundaries[0], Infinity) || Date.now() >= hostDeadline;
-          }
-          viewerNow = await read(viewer);
-          if (viewerNow.present && framesAfter(viewer, viewerMark).length > 0) viewerPolls.push(viewerNow.poll);
-          viewerDone = hasFrame(framesAfter(viewer, viewerMark), boundaries[k] + 0.25, Infinity) || Date.now() >= viewerDeadline;
-          if (!(hostDone && viewerDone)) await sleep(POLL_MS);
-        }
-      } catch (error) {
-        manifest.failures.push(`the rewind before S4: ${redact(error?.message ?? String(error), forbidden)}`);
-      }
-    }
-    const since = (list, mark) => (list ?? []).filter((wallTime) => wallTime >= mark);
-    const r4 = await step('S4', 'the host plays', async () => (played
-      ? s4({ frames: framesAfter(host, hostMark), boundaries, frame })
-      : s4({ precondition: false })));
-    const r5 = await step('S5', 'a viewer plays across boundaries', async () => (played
-      ? s5({ frames: framesAfter(viewer, viewerMark), boundaryIndexes, boundaries, frame, polls: viewerPolls, events: { waiting: since(viewerNow?.events?.waiting, viewerMark).map((wallTime) => ({ wallTime })) }, firstPlayingWallTime: since(viewerNow?.events?.playing, viewerMark)[0] ?? null })
-      : s5({ precondition: false })));
-    const audioAfterS5 = viewerNow?.webkitAudioDecodedByteCount ?? null;
-    // Where the title's first presented frame sits against the playlist's zero, as the element buffered it.
-    const presentedOffset = viewerNow?.element?.buffered?.[0]?.[0] ?? null;
-
-    const r6 = await step('S6', 'reload', async () => {
-      if (!passed(r5)) return s6({ precondition: false });
-      host.load += 1;
-      host.frames = [];
-      await host.tab.send('Page.reload', { ignoreCache: true });
-      const reloaded = await until(host, (value) => value.hostFile?.state === 'ready', 30_000);
-      const afterListing = await listCopy(host, key);
-      await read(viewer);
-      let mark = await pageNow(viewer);
-      let from = lastMediaTime(viewer);
-      const rewound = reference.duration - from < 10;
-      if (rewound) {
-        await rewind();
-        mark = await pageNow(viewer);
-        from = 0;
-        await setPlaying(true);
-      }
-      const latest = () => framesAfter(viewer, mark).at(-1)?.mediaTime ?? from;
-      const crossed = () => boundaries.some((boundary) => boundary > from && boundary <= latest());
-      await until(viewer, () => latest() - from >= 5 && crossed(), 30_000);
-      return s6({ host: reloaded.hostFile, key, beforeListing: tabListing, afterListing, frames: viewer.frames, boundaries, minimumAdvance: 5, mediaAdvance: latest() - from, crossedBoundary: crossed(), fromMediaTime: from, rewound });
-    });
-
-    let choice = null;
-    const r7a = await step('S7a', "seek to a segment's first frame", async () => {
-      if (!passed(r2)) return s7a({ precondition: false });
-      await setPlaying(false);
-      const paused = await until(host, (value) => value.playbackState?.playing === false, 10_000);
-      choice = chooseSegments({ boundaries, count, position: (paused.playbackState?.positionMs ?? NaN) / 1000 });
-      if (!choice) throw new Error('no segment could be chosen for the seeks');
-      const target = boundaries[choice.j - 1];
-      const requestsBefore = linkOf(await read(viewer))?.requestsByPath;
-      const { mark, fromSeconds } = await seekTo(target);
-      const after = await shown(mark, target - 1.5 * frame, target + 1.5 * frame);
-      const seg = (index) => `/media/${segmentName(index)}`;
-      return s7a({ position: fromSeconds, target, frame, afterWallTime: mark, frames: framesAfter(viewer, mark), longFile: choice.longFile, segment: choice.j, targetPath: seg(choice.j), previousPath: seg(choice.j - 1), requestsBefore, requestsAfter: linkOf(after)?.requestsByPath, element: after.element ?? null });
-    });
-    await step('S7f', "seek to a segment's first presented frame", async () => {
-      if (!passed(r2) || !choice) return s7f({ precondition: false });
-      if (!choice.longFile) return s7f({ precondition: false, reason: 'short file' });
-      const index = boundaries.findIndex((boundary, i) => i < count - 1 && boundary >= boundaries[choice.j - 1] + 150);
-      if (index === -1) throw new Error("no segment 150 s past S7a's");
-      await setPlaying(false);
-      const zero = (await seekTo(0)).mark;
-      await shown(zero, 0, 1);
-      const delta = framesAfter(viewer, zero)[0]?.mediaTime ?? null;
-      const segment = index + 1;
-      const target = boundaries[index] + delta;
-      // Without the settle, prefetch from the seek to 0 counts as an earlier segment the seek requested.
-      const requestKey = async () => JSON.stringify(linkOf(await read(viewer))?.requestsByPath ?? null);
-      for (let previous = await requestKey(), i = 0; i < 15; i += 1) {
-        await sleep(1_000);
-        const current = await requestKey();
-        if (current === previous) break;
-        previous = current;
-      }
-      const requestsBefore = linkOf(await read(viewer))?.requestsByPath;
-      const { mark } = await seekTo(target);
-      const after = await shown(mark, target - 1.5 * frame, target + 1.5 * frame);
-      return s7f({ delta, target, segment, frame, mediaTime: framesAfter(viewer, mark)[0]?.mediaTime ?? null, requestsBefore, requestsAfter: linkOf(after)?.requestsByPath, element: after.element ?? null });
-    });
-    await step('S7e', "seek to a segment's first presented frame", async () => {
-      if (!passed(r2) || !choice) return s7e({ precondition: false });
-      if (!choice.longFile) return s7e({ precondition: false, reason: 'short file' });
-      const index = boundaries.findIndex((boundary, i) => i < count - 1 && boundary >= boundaries[choice.j - 1] + 300);
-      if (index === -1 || !Number.isFinite(presentedOffset)) throw new Error('no far segment or no presented offset for the diagnostic seek');
-      const segment = index + 1;
-      const target = boundaries[index] + presentedOffset;
-      const seg = (n) => `/media/${segmentName(n)}`;
-      const requestsBefore = linkOf(await read(viewer))?.requestsByPath;
-      const { mark } = await seekTo(target);
-      const after = await shown(mark, target - 1.5 * frame, target + 1.5 * frame);
-      return s7e({ target, offset: presentedOffset, playlistBoundary: boundaries[index], frame, afterWallTime: mark, frames: framesAfter(viewer, mark), segment, targetPath: seg(segment), previousPath: seg(segment - 1), requestsBefore, requestsAfter: linkOf(after)?.requestsByPath, element: after.element ?? null });
-    }, { diagnostic: true, heading: DIAGNOSTIC_HEADING });
-    const r7b = await step('S7b', "seek to a segment's last frame", async () => {
-      if (!passed(r2) || !choice) return s7b({ precondition: false });
-      const target = boundaries[choice.m];
-      const { mark } = await seekTo(target - frame / 2);
-      await shown(mark, target - 1.5 * frame, target);
-      return s7b({ target, frame, afterWallTime: mark, segment: choice.m, frames: framesAfter(viewer, mark) });
-    });
-    const r7c = await step('S7c', 'seek to the last segment, play to the end', async () => {
-      if (!passed(r2) || !choice) return s7c({ precondition: false });
-      const target = boundaries[count - 2];
-      const { mark } = await seekTo(target);
-      await shown(mark, target - 1.5 * frame, target + 1.5 * frame);
-      await setPlaying(true);
-      const endedSince = (value) => (value.events?.ended ?? []).filter((wallTime) => wallTime >= mark).length;
-      const ending = await until(viewer, (value) => endedSince(value) >= 1, (reference.duration - target) * 1000 + 20_000);
-      await sleep(1_000);
-      const ended = await read(viewer);
-      return s7c({ target, duration: reference.duration, frame, afterWallTime: mark, frames: framesAfter(viewer, mark), events: { ended: endedSince(ended.present ? ended : ending) }, room: ended.playbackState ?? null, element: ended.element ?? null, start: await viewer.tab.evaluate('(() => { const p = window.__app.playback(); return { ...p, starts: p.starts.slice(-3) }; })()').catch(() => null), notices: (ended.notices ?? []).slice(-6) });
-    });
-
-    await step('S7d', 'play to the end from 4 s or more before it', async () => {
-      if (!passed(r2)) return s7d({ precondition: false });
-      const target = [0, ...boundaries].filter((boundary) => reference.duration - boundary >= 4).at(-1);
-      await setPlaying(false);
-      const { mark } = await seekTo(target);
-      await shown(mark, target - 1.5 * frame, target + 1.5 * frame);
-      await setPlaying(true);
-      const endedSince = (value) => (value.events?.ended ?? []).filter((wallTime) => wallTime >= mark).length;
-      await until(viewer, (value) => endedSince(value) >= 1, (reference.duration - target) * 1000 + 20_000);
-      await sleep(1_000);
-      const ended = await read(viewer);
-      return s7d({ target, duration: reference.duration, frame, afterWallTime: mark, frames: framesAfter(viewer, mark), events: { ended: endedSince(ended) }, room: ended.playbackState ?? null, element: ended.element ?? null });
-    }, { diagnostic: true, heading: DIAGNOSTIC_HEADING });
-
-    const r8 = await step('S8', 'no media reached the server', async () => {
-      // Under --mutation-control the pages are expected not to play, and the first reading is the point (G7).
-      if (!options.mutationControl && !passed(r4, r5)) return s8({ precondition: false });
-      const before = await getJson('/harness/counters');
-      fs.writeFileSync(path.join(runDir, 'counters-before.json'), `${JSON.stringify(before, null, 2)}\n`);
-      const control = await fetch(`${ORIGIN}/media/master.m3u8`, { headers: { 'x-app-tab': 'pass-control' }, cache: 'no-store' });
-      await control.arrayBuffer();
-      await sleep(250);
-      const after = await getJson('/harness/counters');
-      fs.writeFileSync(path.join(runDir, 'counters-after.json'), `${JSON.stringify(after, null, 2)}\n`);
-      const network = { bodyCount: host.network.bodyCount + viewer.network.bodyCount, nonGetCount: host.network.nonGetCount + viewer.network.nonGetCount, requests: { host: host.network.requests, viewer: viewer.network.requests } };
-      if (host.network.requests === 0 || viewer.network.requests === 0) throw new Error('Network recorded no request for a page, so its silence proves nothing');
-      return s8({ before: before.counters, after: after.counters, control: { status: control.status }, network, bodies: network.bodyCount });
-    });
-
-    await step('S9', 'health', async () => {
-      if (!passed(r2)) return s9({ precondition: false });
-      const health = (snapshot) => ({ notices: snapshot.notices, videoError: snapshot.videoError, quality: snapshot.quality, webkitAudioDecodedByteCount: snapshot.webkitAudioDecodedByteCount });
-      const viewerHealth = health(await read(viewer));
-      return s9({ host: health(await read(host)), viewer: { ...viewerHealth, audioDecodedAfterS5: audioAfterS5 }, expectHeAac: options.expectHeAac });
-    });
-
-    let h3 = null;
-    const r10 = await step('S10', "another tab's title is kept, a closed tab's is removed", async () => {
-      if (!passed(r6)) return s10({ precondition: false });
-      const h2 = await open('h2', 'host', `r${crypto.randomBytes(6).toString('hex')}`, HARNESS_SEEK);
-      const h2Start = await settled(h2);
-      const h2Listing = await listCopy(h2, key);
-      await host.tab.send('Page.close');
-      await poll(async () => (await cdpHttp(chromePort, '/json/list')).some((target) => target.id === host.tab.targetId), (open) => !open, 10_000);
-      await sleep(1_000);
-      h3 = await open('h3', 'host', `r${crypto.randomBytes(6).toString('hex')}`, HARNESS_SEEK);
-      const h3Start = await settled(h3);
-      return s10({ key, h2: { state: h2Start.hostFile?.state, swept: h2Start.hostFile?.swept, beforeListing: tabListing, listing: h2Listing }, h3: { state: h3Start.hostFile?.state, swept: h3Start.hostFile?.swept, prepared: await listPrepared(h3) } });
-    });
-
-    await step('S11', 'a refused file leaves the title unready', async () => {
-      if (!passed(r10)) return s11({ precondition: false });
-      const room3 = new URL(await h3.tab.evaluate('location.href')).searchParams.get('room');
-      const v2 = await open('v2', 'viewer', room3);
-      await until(v2, () => true, 20_000);
-      await setFileInput(h3, REFUSED_FIXTURE);
-      const refused = await until(h3, (value) => ['refused', 'failed', 'ready'].includes(value.hostFile?.state), 30_000);
-      await sleep(5_000);
-      const refusedViewer = await read(v2);
-      return s11({
-        host: refused.hostFile,
-        viewer: { roster: refusedViewer.roster, hostPreparing: refusedViewer.hostPreparing, playDisabled: refusedViewer.playDisabled, requestsByPath: refusedViewer.hostLink?.requestsByPath },
-        prepared: await listPrepared(h3),
+      let prepared = null;
+      const r2 = await step('S2', 'prepare', async () => {
+        await setFileInput(host, options.file);
+        const deadlineMs = 60_000 + Math.ceil(stat.size / 5_000_000) * 1000;
+        const startedMs = Date.now();
+        prepared = await until(host, (value) => ['ready', 'refused', 'failed'].includes(value.hostFile?.state), deadlineMs);
+        manifest.prepareWallMs = Date.now() - startedMs;
+        return s2({ target: options.target, fileBytes: stat.size, host: prepared.hostFile });
       });
-    });
+      const key = prepared?.hostFile?.key ?? null;
+      const r0 = record('S0', 'freshness', s0({ target: options.target, pageBuildId, workerBuildId: prepared?.hostFile?.workerBuildId, settings, roomBundle, workerBundle }));
 
-    if (options.wiringRefusals) {
-      const wired = async (tag, kind) => {
-        const page = await open(tag, 'host', `r${crypto.randomBytes(6).toString('hex')}`, WIRING[kind]);
-        await settled(page);
-        await setFileInput(page, options.file);
-        const refused = await until(page, (value) => ['refused', 'failed', 'ready'].includes(value.hostFile?.state), 60_000);
-        return { host: refused.hostFile, prepared: await listPrepared(page) };
+      let tabListing = null;
+      const r3 = await step('S3', 'the same bytes', async () => {
+        if (!passed(r0, r2) || !key) return s3({ precondition: false });
+        tabListing = await listCopy(host, key);
+        return s3({ tab: tabListing, reference: reference.listing, key, expectedKey });
+      });
+
+      // The first member of a room creates it playing from 0, so by now the room is
+      // wherever the viewer's wait and the preparation left it. Every seek is made
+      // paused: the room's position is then the one read, and the delta is exact.
+      // A click made before the page holds the room's state is dropped, so the button is pressed until the state says so.
+      const setPlaying = async (wanted) => {
+        const reached = await poll(async () => {
+          if ((await read(host)).playbackState?.playing === wanted) return true;
+          await click(host, wanted ? '#play' : '#pause');
+          await sleep(500);
+          return false;
+        }, (done) => done, 15_000);
+        if (!reached) throw new Error(`the room did not become ${wanted ? 'playing' : 'paused'} within 15 s`);
       };
-      await step('S12', 'codec refusal', async () => s12({ ...(await wired('s12', 'codec')), reference: { videoCodec: reference.videoCodec } }), { heading: WIRING_HEADING });
-      await step('S13', 'storage refusal', async () => s13({ ...(await wired('s13', 'storage')), fileBytes: stat.size }), { heading: WIRING_HEADING });
+      const seekTo = async (targetSeconds) => {
+        let mark = null;
+        let fromSeconds = null;
+        let last = null;
+        const issued = await poll(async () => {
+          const state = (await read(host)).playbackState;
+          last = state;
+          if (!state || state.playing !== false || !Number.isFinite(state.positionMs)) return false;
+          fromSeconds = state.positionMs / 1000;
+          mark = await pageNow(viewer);
+          return (await host.tab.evaluate(`window.__app.harnessSeek(${targetSeconds * 1000 - state.positionMs})`))?.issued === true;
+        }, (done) => done, 10_000);
+        if (!issued) throw new Error(`the host issued no seek within 10 s of the pause; its room state was ${JSON.stringify(last)}`);
+        return { mark, fromSeconds };
+      };
+      const shown = (mark, lower, upper) => until(viewer, () => hasFrame(framesAfter(viewer, mark), lower, upper), 30_000);
+      const rewind = async () => {
+        await setPlaying(false);
+        const { mark } = await seekTo(0);
+        await until(viewer, (value) => hasFrame(framesAfter(viewer, mark), 0, 1.5 * frame) && value.poll.bufferedLength === 1, 15_000);
+      };
+
+      // S4 and S5 share one loop from the play click, so the viewer's window has no gap in its polls.
+      const k = Math.min(3, count - 1) - 1;
+      const boundaryIndexes = Array.from({ length: k + 1 }, (_, index) => index);
+      const viewerPolls = [];
+      let viewerNow = null;
+      let hostMark = null;
+      let viewerMark = null;
+      let played = false;
+      if (passed(r2)) {
+        try {
+          await rewind();
+          hostMark = await pageNow(host);
+          viewerMark = await pageNow(viewer);
+          await setPlaying(true);
+          played = true;
+          const hostDeadline = Date.now() + 30_000;
+          const viewerDeadline = Date.now() + (boundaries[k] + 60) * 1000;
+          let hostDone = false;
+          let viewerDone = false;
+          while (!(hostDone && viewerDone)) {
+            if (!hostDone) {
+              await read(host);
+              hostDone = hasFrame(framesAfter(host, hostMark), boundaries[0], Infinity) || Date.now() >= hostDeadline;
+            }
+            viewerNow = await read(viewer);
+            if (viewerNow.present && framesAfter(viewer, viewerMark).length > 0) viewerPolls.push(viewerNow.poll);
+            viewerDone = hasFrame(framesAfter(viewer, viewerMark), boundaries[k] + 0.25, Infinity) || Date.now() >= viewerDeadline;
+            if (!(hostDone && viewerDone)) await sleep(POLL_MS);
+          }
+        } catch (error) {
+          manifest.failures.push(`the rewind before S4: ${redact(error?.message ?? String(error), forbidden)}`);
+        }
+      }
+      const since = (list, mark) => (list ?? []).filter((wallTime) => wallTime >= mark);
+      const r4 = await step('S4', 'the host plays', async () => (played
+        ? s4({ frames: framesAfter(host, hostMark), boundaries, frame })
+        : s4({ precondition: false })));
+      const r5 = await step('S5', 'a viewer plays across boundaries', async () => (played
+        ? s5({ frames: framesAfter(viewer, viewerMark), boundaryIndexes, boundaries, frame, polls: viewerPolls, events: { waiting: since(viewerNow?.events?.waiting, viewerMark).map((wallTime) => ({ wallTime })) }, firstPlayingWallTime: since(viewerNow?.events?.playing, viewerMark)[0] ?? null })
+        : s5({ precondition: false })));
+      const audioAfterS5 = viewerNow?.webkitAudioDecodedByteCount ?? null;
+      // Where the title's first presented frame sits against the playlist's zero, as the element buffered it.
+      const presentedOffset = viewerNow?.element?.buffered?.[0]?.[0] ?? null;
+
+      const r6 = await step('S6', 'reload', async () => {
+        if (!passed(r5)) return s6({ precondition: false });
+        host.load += 1;
+        host.frames = [];
+        await host.tab.send('Page.reload', { ignoreCache: true });
+        const reloaded = await until(host, (value) => value.hostFile?.state === 'ready', 30_000);
+        const afterListing = await listCopy(host, key);
+        await read(viewer);
+        let mark = await pageNow(viewer);
+        let from = lastMediaTime(viewer);
+        const rewound = reference.duration - from < 10;
+        if (rewound) {
+          await rewind();
+          mark = await pageNow(viewer);
+          from = 0;
+          await setPlaying(true);
+        }
+        const latest = () => framesAfter(viewer, mark).at(-1)?.mediaTime ?? from;
+        const crossed = () => boundaries.some((boundary) => boundary > from && boundary <= latest());
+        await until(viewer, () => latest() - from >= 5 && crossed(), 30_000);
+        return s6({ host: reloaded.hostFile, key, beforeListing: tabListing, afterListing, frames: viewer.frames, boundaries, minimumAdvance: 5, mediaAdvance: latest() - from, crossedBoundary: crossed(), fromMediaTime: from, rewound });
+      });
+
+      let choice = null;
+      const r7a = await step('S7a', "seek to a segment's first frame", async () => {
+        if (!passed(r2)) return s7a({ precondition: false });
+        await setPlaying(false);
+        const paused = await until(host, (value) => value.playbackState?.playing === false, 10_000);
+        choice = chooseSegments({ boundaries, count, position: (paused.playbackState?.positionMs ?? NaN) / 1000 });
+        if (!choice) throw new Error('no segment could be chosen for the seeks');
+        const target = boundaries[choice.j - 1];
+        const requestsBefore = linkOf(await read(viewer))?.requestsByPath;
+        const { mark, fromSeconds } = await seekTo(target);
+        const after = await shown(mark, target - 1.5 * frame, target + 1.5 * frame);
+        const seg = (index) => `/media/${segmentName(index)}`;
+        return s7a({ position: fromSeconds, target, frame, afterWallTime: mark, frames: framesAfter(viewer, mark), longFile: choice.longFile, segment: choice.j, targetPath: seg(choice.j), previousPath: seg(choice.j - 1), requestsBefore, requestsAfter: linkOf(after)?.requestsByPath, element: after.element ?? null });
+      });
+      await step('S7f', "seek to a segment's first presented frame", async () => {
+        if (!passed(r2) || !choice) return s7f({ precondition: false });
+        if (!choice.longFile) return s7f({ precondition: false, reason: 'short file' });
+        const index = boundaries.findIndex((boundary, i) => i < count - 1 && boundary >= boundaries[choice.j - 1] + 150);
+        if (index === -1) throw new Error("no segment 150 s past S7a's");
+        await setPlaying(false);
+        const zero = (await seekTo(0)).mark;
+        await shown(zero, 0, 1);
+        const delta = framesAfter(viewer, zero)[0]?.mediaTime ?? null;
+        const segment = index + 1;
+        const target = boundaries[index] + delta;
+        // Without the settle, prefetch from the seek to 0 counts as an earlier segment the seek requested.
+        const requestKey = async () => JSON.stringify(linkOf(await read(viewer))?.requestsByPath ?? null);
+        for (let previous = await requestKey(), i = 0; i < 15; i += 1) {
+          await sleep(1_000);
+          const current = await requestKey();
+          if (current === previous) break;
+          previous = current;
+        }
+        const requestsBefore = linkOf(await read(viewer))?.requestsByPath;
+        const { mark } = await seekTo(target);
+        const after = await shown(mark, target - 1.5 * frame, target + 1.5 * frame);
+        return s7f({ delta, target, segment, frame, mediaTime: framesAfter(viewer, mark)[0]?.mediaTime ?? null, requestsBefore, requestsAfter: linkOf(after)?.requestsByPath, element: after.element ?? null });
+      });
+      await step('S7e', "seek to a segment's first presented frame", async () => {
+        if (!passed(r2) || !choice) return s7e({ precondition: false });
+        if (!choice.longFile) return s7e({ precondition: false, reason: 'short file' });
+        const index = boundaries.findIndex((boundary, i) => i < count - 1 && boundary >= boundaries[choice.j - 1] + 300);
+        if (index === -1 || !Number.isFinite(presentedOffset)) throw new Error('no far segment or no presented offset for the diagnostic seek');
+        const segment = index + 1;
+        const target = boundaries[index] + presentedOffset;
+        const seg = (n) => `/media/${segmentName(n)}`;
+        const requestsBefore = linkOf(await read(viewer))?.requestsByPath;
+        const { mark } = await seekTo(target);
+        const after = await shown(mark, target - 1.5 * frame, target + 1.5 * frame);
+        return s7e({ target, offset: presentedOffset, playlistBoundary: boundaries[index], frame, afterWallTime: mark, frames: framesAfter(viewer, mark), segment, targetPath: seg(segment), previousPath: seg(segment - 1), requestsBefore, requestsAfter: linkOf(after)?.requestsByPath, element: after.element ?? null });
+      }, { diagnostic: true, heading: DIAGNOSTIC_HEADING });
+      const r7b = await step('S7b', "seek to a segment's last frame", async () => {
+        if (!passed(r2) || !choice) return s7b({ precondition: false });
+        const target = boundaries[choice.m];
+        const { mark } = await seekTo(target - frame / 2);
+        await shown(mark, target - 1.5 * frame, target);
+        return s7b({ target, frame, afterWallTime: mark, segment: choice.m, frames: framesAfter(viewer, mark) });
+      });
+      const r7c = await step('S7c', 'seek to the last segment, play to the end', async () => {
+        if (!passed(r2) || !choice) return s7c({ precondition: false });
+        const target = boundaries[count - 2];
+        const { mark } = await seekTo(target);
+        await shown(mark, target - 1.5 * frame, target + 1.5 * frame);
+        await setPlaying(true);
+        const endedSince = (value) => (value.events?.ended ?? []).filter((wallTime) => wallTime >= mark).length;
+        const ending = await until(viewer, (value) => endedSince(value) >= 1, (reference.duration - target) * 1000 + 20_000);
+        await sleep(1_000);
+        const ended = await read(viewer);
+        return s7c({ target, duration: reference.duration, frame, afterWallTime: mark, frames: framesAfter(viewer, mark), events: { ended: endedSince(ended.present ? ended : ending) }, room: ended.playbackState ?? null, element: ended.element ?? null, start: await viewer.tab.evaluate('(() => { const p = window.__app.playback(); return { ...p, starts: p.starts.slice(-3) }; })()').catch(() => null), notices: (ended.notices ?? []).slice(-6) });
+      });
+
+      await step('S7d', 'play to the end from 4 s or more before it', async () => {
+        if (!passed(r2)) return s7d({ precondition: false });
+        const target = [0, ...boundaries].filter((boundary) => reference.duration - boundary >= 4).at(-1);
+        await setPlaying(false);
+        const { mark } = await seekTo(target);
+        await shown(mark, target - 1.5 * frame, target + 1.5 * frame);
+        await setPlaying(true);
+        const endedSince = (value) => (value.events?.ended ?? []).filter((wallTime) => wallTime >= mark).length;
+        await until(viewer, (value) => endedSince(value) >= 1, (reference.duration - target) * 1000 + 20_000);
+        await sleep(1_000);
+        const ended = await read(viewer);
+        return s7d({ target, duration: reference.duration, frame, afterWallTime: mark, frames: framesAfter(viewer, mark), events: { ended: endedSince(ended) }, room: ended.playbackState ?? null, element: ended.element ?? null });
+      }, { diagnostic: true, heading: DIAGNOSTIC_HEADING });
+
+      const r8 = await step('S8', 'no media reached the server', async () => {
+        // Under --mutation-control the pages are expected not to play, and the first reading is the point (G7).
+        if (!options.mutationControl && !passed(r4, r5)) return s8({ precondition: false });
+        const before = await getJson('/harness/counters');
+        fs.writeFileSync(path.join(runDir, 'counters-before.json'), `${JSON.stringify(before, null, 2)}\n`);
+        const control = await fetch(`${ORIGIN}/media/master.m3u8`, { headers: { 'x-app-tab': 'pass-control' }, cache: 'no-store' });
+        await control.arrayBuffer();
+        await sleep(250);
+        const after = await getJson('/harness/counters');
+        fs.writeFileSync(path.join(runDir, 'counters-after.json'), `${JSON.stringify(after, null, 2)}\n`);
+        const network = { bodyCount: host.network.bodyCount + viewer.network.bodyCount, nonGetCount: host.network.nonGetCount + viewer.network.nonGetCount, requests: { host: host.network.requests, viewer: viewer.network.requests } };
+        if (host.network.requests === 0 || viewer.network.requests === 0) throw new Error('Network recorded no request for a page, so its silence proves nothing');
+        return s8({ before: before.counters, after: after.counters, control: { status: control.status }, network, bodies: network.bodyCount });
+      });
+
+      await step('S9', 'health', async () => {
+        if (!passed(r2)) return s9({ precondition: false });
+        const health = (snapshot) => ({ notices: snapshot.notices, videoError: snapshot.videoError, quality: snapshot.quality, webkitAudioDecodedByteCount: snapshot.webkitAudioDecodedByteCount });
+        const viewerHealth = health(await read(viewer));
+        return s9({ host: health(await read(host)), viewer: { ...viewerHealth, audioDecodedAfterS5: audioAfterS5 }, expectHeAac: options.expectHeAac });
+      });
+
+      let h3 = null;
+      const r10 = await step('S10', "another tab's title is kept, a closed tab's is removed", async () => {
+        if (!passed(r6)) return s10({ precondition: false });
+        const h2 = await open('h2', 'host', `r${crypto.randomBytes(6).toString('hex')}`, HARNESS_SEEK);
+        const h2Start = await settled(h2);
+        const h2Listing = await listCopy(h2, key);
+        await host.tab.send('Page.close');
+        await poll(async () => (await cdpHttp(chromePort, '/json/list')).some((target) => target.id === host.tab.targetId), (open) => !open, 10_000);
+        await sleep(1_000);
+        h3 = await open('h3', 'host', `r${crypto.randomBytes(6).toString('hex')}`, HARNESS_SEEK);
+        const h3Start = await settled(h3);
+        return s10({ key, h2: { state: h2Start.hostFile?.state, swept: h2Start.hostFile?.swept, beforeListing: tabListing, listing: h2Listing }, h3: { state: h3Start.hostFile?.state, swept: h3Start.hostFile?.swept, prepared: await listPrepared(h3) } });
+      });
+
+      await step('S11', 'a refused file leaves the title unready', async () => {
+        if (!passed(r10)) return s11({ precondition: false });
+        const room3 = new URL(await h3.tab.evaluate('location.href')).searchParams.get('room');
+        const v2 = await open('v2', 'viewer', room3);
+        await until(v2, () => true, 20_000);
+        await setFileInput(h3, REFUSED_FIXTURE);
+        const refused = await until(h3, (value) => ['refused', 'failed', 'ready'].includes(value.hostFile?.state), 30_000);
+        await sleep(5_000);
+        const refusedViewer = await read(v2);
+        return s11({
+          host: refused.hostFile,
+          viewer: { roster: refusedViewer.roster, hostPreparing: refusedViewer.hostPreparing, playDisabled: refusedViewer.playDisabled, requestsByPath: refusedViewer.hostLink?.requestsByPath },
+          prepared: await listPrepared(h3),
+        });
+      });
+
+      if (options.wiringRefusals) {
+        const wired = async (tag, kind) => {
+          const page = await open(tag, 'host', `r${crypto.randomBytes(6).toString('hex')}`, WIRING[kind]);
+          await settled(page);
+          await setFileInput(page, options.file);
+          const refused = await until(page, (value) => ['refused', 'failed', 'ready'].includes(value.hostFile?.state), 60_000);
+          return { host: refused.hostFile, prepared: await listPrepared(page) };
+        };
+        await step('S12', 'codec refusal', async () => s12({ ...(await wired('s12', 'codec')), reference: { videoCodec: reference.videoCodec } }), { heading: WIRING_HEADING });
+        await step('S13', 'storage refusal', async () => s13({ ...(await wired('s13', 'storage')), fileBytes: stat.size }), { heading: WIRING_HEADING });
+      }
+      void r1; void r3; void r7a; void r7b; void r7c; void r8;
     }
-    void r1; void r3; void r7a; void r7b; void r7c; void r8;
   } catch (error) {
     manifest.failures.push(redact(error?.message ?? String(error), forbidden));
   } finally {
