@@ -5,6 +5,7 @@ import { Maximize, Pause, Play, RectangleHorizontal, RotateCcw, RotateCw, Volume
 import { createSeekScrub } from '../lib/seek-scrub.mjs';
 import { syncWords } from '../lib/sync-words.mjs';
 import { swallowTouch } from '../lib/touch-reveal.mjs';
+import { inPlayer } from './in-player.js';
 import { IconButton } from './ui.jsx';
 import { useView } from './use-view.js';
 
@@ -152,9 +153,7 @@ export function PlayerBar({ view, actions, theatre, onTheatre }) {
       element.removeEventListener('click', click, true);
     };
   }, [view, actions]);
-  const player = document.getElementById('player');
-  if (!player) return null;
-  return createPortal(<div ref={ref} id="control-bar" className="player-bar">
+  return inPlayer(<div ref={ref} id="control-bar" className="player-bar">
     <input ref={seekRef} id="seek" className="range" type="range" min="0" step="1" onInput={(event) => {
       scrub.current.input();
       paintRange(event.currentTarget);
@@ -177,5 +176,5 @@ export function PlayerBar({ view, actions, theatre, onTheatre }) {
         <IconButton id="fullscreen" icon={Maximize} size="bar" label="fullscreen" onClick={actions.fullscreen} />
       </div>
     </div>
-  </div>, player);
+  </div>);
 }

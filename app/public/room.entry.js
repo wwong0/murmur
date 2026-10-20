@@ -740,7 +740,7 @@ function noteOutcome(env, outcome, ownSystemPause) {
   if (kind === 'seek') addActivity({ kind: 'seek', from: env.from, positionMs: env.payload.positionMs });
   if (kind !== 'pause') return;
   if (titleEnded()) addActivity({ kind: 'ended' });
-  // executor-spec T8 Stop, amended by C2: a pause carries no position, so the line takes the replicated state's.
+  // A pause carries no position, so the line takes the replicated state's.
   else if (rosterHasHost()) addActivity({ kind: 'pause', from: env.from, positionMs: acquisition.state?.current.mediaMs });
 }
 

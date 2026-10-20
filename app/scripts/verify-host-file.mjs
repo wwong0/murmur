@@ -23,7 +23,7 @@ import { readSourceIndex } from '../public/lib/remux-index.mjs';
 import { lockName, storeKey } from '../public/lib/prepared-store.mjs';
 import { segmentName } from '../public/lib/remux-publish.mjs';
 import { requireAutoStart } from './delivery-pin.mjs';
-import { waitHostFileEnabled } from './room-page-steps.mjs';
+import { setHostFile } from './room-page-steps.mjs';
 import {
   boundariesFromPlaylist,
   chooseSegments,
@@ -231,14 +231,6 @@ async function poll(read, done, timeoutMs) {
   return value;
 }
 
-async function setFileInput(page, filename) {
-  await waitHostFileEnabled(page.tab);
-  const { root } = await page.tab.send('DOM.getDocument', { depth: 0 });
-  const { nodeId } = await page.tab.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#host-file' });
-  if (!nodeId) throw new Error('host file input is missing');
-  await page.tab.send('DOM.setFileInputFiles', { nodeId, files: [filename] });
-}
-
 const click = (page, selector) => page.tab.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
 const pageNow = (page) => page.tab.evaluate('performance.now()');
 const framesAfter = (page, wallTime) => page.frames.filter((frame) => frame.wallTime >= wallTime);
@@ -383,7 +375,7 @@ async function runPass(options) {
 
     await step('F10-3', F10_ROWS['F10-3'], async () => {
       requireSetup();
-      await setFileInput(host, options.file);
+      await setHostFile(host.tab, options.file);
       const deadline = Date.now() + 60_000 + Math.ceil(fileBytes / 5_000_000) * 1000;
       const states = [];
       let latest = null;
@@ -475,7 +467,7 @@ async function runPass(options) {
 
       let prepared = null;
       const r2 = await step('S2', 'prepare', async () => {
-        await setFileInput(host, options.file);
+        await setHostFile(host.tab, options.file);
         const deadlineMs = 60_000 + Math.ceil(stat.size / 5_000_000) * 1000;
         const startedMs = Date.now();
         prepared = await until(host, (value) => ['ready', 'refused', 'failed'].includes(value.hostFile?.state), deadlineMs);
@@ -720,7 +712,7 @@ async function runPass(options) {
         const room3 = new URL(await h3.tab.evaluate('location.href')).searchParams.get('room');
         const v2 = await open('v2', 'viewer', room3);
         await until(v2, () => true, 20_000);
-        await setFileInput(h3, REFUSED_FIXTURE);
+        await setHostFile(h3.tab, REFUSED_FIXTURE);
         const refused = await until(h3, (value) => ['refused', 'failed', 'ready'].includes(value.hostFile?.state), 30_000);
         await sleep(5_000);
         const refusedViewer = await read(v2);
@@ -735,7 +727,7 @@ async function runPass(options) {
         const wired = async (tag, kind) => {
           const page = await open(tag, 'host', `r${crypto.randomBytes(6).toString('hex')}`, WIRING[kind]);
           await settled(page);
-          await setFileInput(page, options.file);
+          await setHostFile(page.tab, options.file);
           const refused = await until(page, (value) => ['refused', 'failed', 'ready'].includes(value.hostFile?.state), 60_000);
           return { host: refused.hostFile, prepared: await listPrepared(page) };
         };

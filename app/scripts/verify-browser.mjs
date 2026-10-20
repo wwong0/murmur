@@ -60,7 +60,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep, disposeChrome, waitBarRevealed } from './cdp.mjs';
+import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep, disposeChrome, pointAt } from './cdp.mjs';
 import { evaluateRun, reportLines } from './browser-check-list.mjs';
 import { createResultLog } from './browser-result-log.mjs';
 import { assertServedBundle, prepareRunDirectory } from './runner/core.mjs';
@@ -418,16 +418,7 @@ async function pageOf(tab) {
  * to restore it.
  */
 async function clickElement(tab, selector, { enableFirst = false } = {}) {
-  const provisional = await tab.evaluate(`(() => {
-    const el = document.querySelector(${JSON.stringify(selector)});
-    if (!el) return null;
-    el.scrollIntoView({ block: 'center' });
-    const r = el.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2, inBar: el.closest('#control-bar') !== null };
-  })()`);
-  if (!provisional) throw new Error(`${tab.label}: ${selector} is not on the page`);
-  await tab.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: provisional.x, y: provisional.y });
-  if (provisional.inBar) await waitBarRevealed(tab);
+  if (!await pointAt(tab, selector)) throw new Error(`${tab.label}: ${selector} is not on the page`);
   const box = await tab.evaluate(`(() => {
     const el = document.querySelector(${JSON.stringify(selector)});
     if (!el) return null;

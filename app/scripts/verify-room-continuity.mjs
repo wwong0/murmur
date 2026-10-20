@@ -12,7 +12,7 @@ import {
 import { assertServedBundle, createManifestFile, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
 import { startTracker } from './runner/tracker.mjs';
-import { closeNamePrompt, waitHostFileEnabled } from './room-page-steps.mjs';
+import { closeNamePrompt, setHostFile } from './room-page-steps.mjs';
 import { fileIdentity } from '../public/lib/file-identity.mjs';
 import {
   exitCode, grace, rc0, rc1, rc2, rc3, rc4, rc5, rc6, rc7, rc8,
@@ -373,14 +373,6 @@ async function main(runDir) {
     return value;
   }
 
-  async function setFileInput(page, filename) {
-    await waitHostFileEnabled(page.tab);
-    const { root } = await page.tab.send('DOM.getDocument', { depth: 0 });
-    const { nodeId } = await page.tab.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#host-file' });
-    if (!nodeId) throw new Error('host file input is missing');
-    await page.tab.send('DOM.setFileInputFiles', { nodeId, files: [filename] });
-  }
-
   async function closePage(page) {
     if (!page || page.closed) return;
     page.closed = true;
@@ -431,7 +423,7 @@ async function main(runDir) {
     console.log(`name prompt v2: ${JSON.stringify(await closeNamePrompt(v2.tab))}`);
     await waitUntil('viewer pages', async () => ({ host: await read(host, 'join'), v1: await read(v1, 'join'), v2: await read(v2, 'join') }), (value) => value.v1.present && value.v2.present && hostInRoster(value.v1) && hostInRoster(value.v2), ROOM_WAIT_MS);
     const beforeCounters = await getJson(F_ORIGIN, '/harness/counters');
-    await setFileInput(host, REFUSED);
+    await setHostFile(host.tab, REFUSED);
     const refused = await waitUntil('refused fixture', async () => ({ host: await read(host, 'RC2'), v1: await read(v1, 'RC2'), v2: await read(v2, 'RC2') }), (value) => value.host.hostFile?.state === 'refused' && value.v1.hostPreparing?.state === 'choosing' && value.v2.hostPreparing?.state === 'choosing', 15_000);
     const afterCounters = await getJson(F_ORIGIN, '/harness/counters');
     manifest.counters = afterCounters.counters ?? afterCounters;
@@ -443,7 +435,7 @@ async function main(runDir) {
     };
     record(evaluate(rc2, rc2Reading));
 
-    await setFileInput(host, TITLE_A);
+    await setHostFile(host.tab, TITLE_A);
     const titleAReady = await waitUntil('title A', async () => ({ host: await read(host, 'RC3'), v1: await read(v1, 'RC3'), v2: await read(v2, 'RC3') }), (value) => value.host.hostFile?.state === 'ready' && [value.host, value.v1, value.v2].every((entry) => entry.title?.title === fixtures.a.identity), HOST_WAIT_MS);
     const stablePolls = [];
     const stableStart = Date.now();
@@ -534,7 +526,7 @@ async function main(runDir) {
     host2 = await openPage('host2', `${F_ORIGIN}/room.html?room=${room}&role=host&tab=host2`);
     await waitUntil('returning host', async () => ({ host: await read(host2, 'RC7-choosing'), v1: await read(v1, 'RC7-choosing'), v2: await read(v2, 'RC7-choosing') }), (value) => value.host.present && value.host.hostFile?.state === 'awaiting-file'
       && value.v1.hostPreparing?.state === 'choosing' && value.v2.hostPreparing?.state === 'choosing', ROOM_WAIT_MS);
-    await setFileInput(host2, TITLE_B);
+    await setHostFile(host2.tab, TITLE_B);
     const bMark = { v1: null, v2: null };
     const bReady = await waitUntil('title B', async () => {
       const pre = { v1: v1.frames.length, v2: v2.frames.length };

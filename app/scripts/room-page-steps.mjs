@@ -46,15 +46,11 @@ export async function closeNamePrompt(tab) {
   return { shown: true, closed: await waitForPresence(tab, '#name-prompt', false) };
 }
 
-/**
- * Waits until the host's file input takes a pick. The input carries the disabled flag while the
- * source is not choosable, and a pick set on it then is dropped with nothing to say so
- * (design.md D15, F10): every driver that sets files over CDP calls this first. A page that was
- * only just told to navigate reads as "not yet", as in `closeNamePrompt`.
- */
-export async function waitHostFileEnabled(tab, timeoutMs = CHOOSABLE_WAIT_MS) {
+// Waits until the host's file input takes a pick. A page that was only just told to navigate
+// reads as "not yet", as in `closeNamePrompt`.
+async function waitHostFileEnabled(tab) {
   const expression = `document.querySelector('#host-file')?.disabled === false`;
-  const deadline = Date.now() + timeoutMs;
+  const deadline = Date.now() + CHOOSABLE_WAIT_MS;
   for (;;) {
     let enabled = false;
     try { enabled = await tab.evaluate(expression); } catch { /* the page is going away: not yet */ }
@@ -62,6 +58,19 @@ export async function waitHostFileEnabled(tab, timeoutMs = CHOOSABLE_WAIT_MS) {
     if (Date.now() >= deadline) throw new Error('host file never became choosable');
     await sleep(CHOOSABLE_POLL_MS);
   }
+}
+
+/**
+ * Sets `filename` on the host's file input over CDP, once the input takes a pick. The input
+ * carries the disabled flag while the source is not choosable, and a pick set on it then is
+ * dropped with nothing to say so (design.md D15, F10), so every driver picks through this.
+ */
+export async function setHostFile(tab, filename) {
+  await waitHostFileEnabled(tab);
+  const { root } = await tab.send('DOM.getDocument', { depth: 0 });
+  const { nodeId } = await tab.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#host-file' });
+  if (!nodeId) throw new Error('host file input is missing');
+  await tab.send('DOM.setFileInputFiles', { nodeId, files: [filename] });
 }
 
 /**

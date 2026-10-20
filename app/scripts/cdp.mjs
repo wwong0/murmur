@@ -185,23 +185,34 @@ export async function waitBarRevealed(tab) {
 }
 
 /**
- * A trusted mouse click at the centre of `selector`, scrolled into view first. The pointer moves
- * there before the box is read, as a person's does; only a target inside `#control-bar` then
- * waits for the reveal, because a pointer over anything else never unfades the bar.
+ * Scrolls `selector` into view and moves the pointer to its centre, as a person's does before a
+ * click; only a target inside `#control-bar` then waits for the reveal, because a pointer over
+ * anything else never unfades the bar. False when the element is not on the page. The caller
+ * reads the box it clicks afterwards.
  */
-export async function clickElement(tab, selector) {
-  const read = (scroll) => tab.evaluate(`(() => {
+export async function pointAt(tab, selector) {
+  const provisional = await tab.evaluate(`(() => {
     const element = document.querySelector(${JSON.stringify(selector)});
     if (!element) return null;
-    if (${scroll}) element.scrollIntoView({ block: 'center' });
+    element.scrollIntoView({ block: 'center' });
     const rect = element.getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, inBar: element.closest('#control-bar') !== null };
   })()`);
-  const provisional = await read(true);
-  if (!provisional) throw new Error(`${selector} is not on the page`);
+  if (!provisional) return false;
   await tab.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: provisional.x, y: provisional.y });
   if (provisional.inBar) await waitBarRevealed(tab);
-  const box = await read(false);
+  return true;
+}
+
+/** A trusted mouse click at the centre of `selector`, after `pointAt`. */
+export async function clickElement(tab, selector) {
+  if (!await pointAt(tab, selector)) throw new Error(`${selector} is not on the page`);
+  const box = await tab.evaluate(`(() => {
+    const element = document.querySelector(${JSON.stringify(selector)});
+    if (!element) return null;
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  })()`);
   if (!box) throw new Error(`${selector} is not on the page`);
   for (const type of ['mousePressed', 'mouseReleased']) {
     await tab.send('Input.dispatchMouseEvent', { type, x: box.x, y: box.y, button: 'left', clickCount: 1 });

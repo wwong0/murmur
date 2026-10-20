@@ -13,7 +13,7 @@ import { createResultLog } from './browser-result-log.mjs';
 import { assertServedBundle, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
 import { classifyEndPause, endPauseSettled } from './room-screens-steps.mjs';
-import { closeNamePrompt, toggleControlMode, waitHostFileEnabled } from './room-page-steps.mjs';
+import { closeNamePrompt, setHostFile, toggleControlMode } from './room-page-steps.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -243,18 +243,10 @@ async function setPlaying(wanted) {
   return (await waitRoomStates((states) => states.every(({ state, video }) => state?.playing === wanted && video?.paused === !wanted))).ok;
 }
 
-async function setFileInput(filename) {
-  await waitHostFileEnabled(fileHost);
-  const { root } = await fileHost.send('DOM.getDocument', { depth: 0 });
-  const { nodeId } = await fileHost.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#host-file' });
-  if (!nodeId) throw new Error('host file input is missing');
-  await fileHost.send('DOM.setFileInputFiles', { nodeId, files: [filename] });
-}
-
 // Keyed on the inspect count, so a second file is not judged by the first file's refusal.
 async function prepareFile(filename) {
   const inspected = await read(fileHost, 'window.__app.hostFile()?.workerCalls?.inspect ?? 0');
-  await setFileInput(filename);
+  await setHostFile(fileHost, filename);
   return (await until(fileHost, 'window.__app.hostFile()', (snapshot) => snapshot?.workerCalls?.inspect > inspected && ['refused', 'ready', 'failed'].includes(snapshot?.state), 60_000)).value;
 }
 

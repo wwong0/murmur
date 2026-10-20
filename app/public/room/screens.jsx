@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { createRoot } from 'react-dom/client';
-import { createPortal, flushSync } from 'react-dom';
+import { flushSync } from 'react-dom';
 import { Collapsible } from '@base-ui/react/collapsible';
 import { Dialog } from '@base-ui/react/dialog';
 import { Popover } from '@base-ui/react/popover';
@@ -9,6 +9,7 @@ import { ChartNoAxesColumn, ChevronDown, FileVideo, Link, Settings, TriangleAler
 import { fileCard } from '../lib/host-file-card.mjs';
 import { namePromptDue } from '../lib/name-prompt.mjs';
 import { PlayerBar, PlayerTop } from './player-bar.jsx';
+import { inPlayer } from './in-player.js';
 import { EndedCard, ReconnectPill, ViewerWait } from './player-states.jsx';
 import { Button, DialogPanel, IconButton, PopoverPanel, SegmentedControl, TextField } from './ui.jsx';
 import { useView } from './use-view.js';
@@ -20,9 +21,10 @@ const HINT_VISIBLE_MS = 5_000;
 const HINT_FADE_MS = 400;
 const HEADER_CHIPS = 4;
 const PINNED_SLACK_PX = 24;
-const CHOOSE_NOTE = 'MP4 from your computer. It stays on your device.';
-const PREPARING_NOTE = 'Your friends will see the video when this finishes.';
-const FAILED_NOTE = 'Choose it again, or pick another file. The details are in Stats.';
+const CARD_ICONS = {
+  warn: { Icon: TriangleAlert, className: 'file-icon file-icon-warn' },
+  video: { Icon: FileVideo, className: 'file-icon' },
+};
 const KEYFRAME_HINT = 'Skipping may land a little early in this file';
 const CONTROL_MODES = [
   { value: 'open', label: 'Everyone', 'data-mode': 'open' },
@@ -274,17 +276,11 @@ function HostFileControls({ view, actions }) {
   const hostFile = useView(view, (snapshot) => snapshot.hostFile);
   const hostStatus = useView(view, (snapshot) => snapshot.hostStatus);
   const input = useRef(null);
-  const player = document.getElementById('player');
-  if (!player) return null;
   const help = hostFile.help;
-  const card = fileCard(hostFile.state);
-  const preparing = hostFile.state === 'preparing';
-  const refused = hostFile.state === 'refused';
-  const failed = hostFile.state === 'failed';
-  const percent = Math.min(100, Math.floor((hostStatus.fraction ?? 0) * 100));
-  const note = failed ? FAILED_NOTE : refused || preparing ? null : CHOOSE_NOTE;
-  return createPortal(<>
-    <div className="file-state" data-kind={refused || failed || preparing ? 'status' : 'choosing'} hidden={hostFile.inputHidden && !help}>
+  const card = fileCard(hostFile.state, hostStatus.fraction);
+  const icon = CARD_ICONS[card.icon];
+  return inPlayer(<>
+    <div className="file-state" data-kind={card.kind} hidden={hostFile.inputHidden && !help}>
       <div className="file-card">
         <input
           ref={input}
@@ -297,22 +293,19 @@ function HostFileControls({ view, actions }) {
           onChange={(event) => actions.chooseHostFile(event.target.files?.[0])}
         />
         <div className="file-body">
-          {preparing ? null : refused || failed
-            ? <TriangleAlert className="file-icon file-icon-warn" size={72} strokeWidth={1.5} aria-hidden="true" />
-            : <FileVideo className="file-icon" size={72} strokeWidth={1.5} aria-hidden="true" />}
-          <h2 className="file-title tabular">{preparing ? `${card.title} · ${percent}%` : card.title}</h2>
-          {preparing ? <div
+          {icon ? <icon.Icon className={icon.className} size={72} strokeWidth={1.5} aria-hidden="true" /> : null}
+          <h2 className="file-title tabular">{card.title}</h2>
+          {card.percent === null ? null : <div
             className="file-progress"
             role="progressbar"
             aria-label="Preparing"
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-valuenow={percent}
-            style={{ '--fraction': percent / 100 }}
-          ><div className="file-progress-fill" /></div> : null}
+            aria-valuenow={card.percent}
+            style={{ '--fraction': card.percent / 100 }}
+          ><div className="file-progress-fill" /></div>}
           <div id="file-reason">{help?.reason ?? ''}</div>
-          {note ? <p className="file-note">{note}</p> : null}
-          {preparing ? <p className="file-note">{PREPARING_NOTE}</p> : null}
+          {card.note ? <p className="file-note">{card.note}</p> : null}
           {help?.command ? <>
             <div className="file-codebox">
               <code id="file-command">{help.command}</code>
@@ -325,14 +318,14 @@ function HostFileControls({ view, actions }) {
             size="lg"
             className="file-button"
             data-testid="host-file-button"
-            disabled={!(card.enabled && hostFile.choosable)}
+            disabled={!hostFile.choosable}
             onClick={() => input.current?.click()}
           >{card.button}</Button>}
         </div>
       </div>
     </div>
     <KeyframeHint shown={Boolean(hostFile.notice)} />
-  </>, player);
+  </>);
 }
 
 // Mounted always: closed it is `hidden` and every readout stays current by `textContent`
