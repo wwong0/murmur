@@ -49,14 +49,14 @@ function paintRange(range) {
   range.style.setProperty('--fraction', String(fraction));
 }
 
-// Focusable, so keyboard focus opens the tooltip as hover does. It carries `hidden` while idle
-// and no display of its own. The `title` stays: drivers read it (sync-dot.mjs).
+// Focusable, so keyboard focus opens the tooltip as hover does. It carries `hidden` only while no
+// title is loaded, and no display of its own. The `title` stays: drivers read it (sync-dot.mjs).
 function SyncDot({ view, container }) {
   const bar = useView(view, (snapshot) => snapshot.bar);
   const { state, title } = bar.syncDot;
-  const lines = syncWords({ state, estimateMs: bar.syncEstimateMs });
+  const lines = syncWords({ state, estimateMs: bar.syncEstimateMs, playing: bar.syncPlaying });
   return <Tooltip.Root disabled={lines.length === 0}>
-    <Tooltip.Trigger render={<span id="sync-dot" role="img" aria-label="Sync status" tabIndex={0} data-state={state} title={title} hidden={state === 'idle'} />} />
+    <Tooltip.Trigger render={<span id="sync-dot" role="img" aria-label="Sync status" tabIndex={0} data-state={state} title={title} hidden={!bar.syncShown} />} />
     <Tooltip.Portal container={container}>
       <Tooltip.Positioner className="popover-positioner" side="bottom" align="end" sideOffset={8}>
         <Tooltip.Popup className="tooltip">
@@ -68,16 +68,18 @@ function SyncDot({ view, container }) {
 }
 
 // The tooltip portals into the player, not body: a body popup is hidden behind a fullscreen
-// player. `#title-name`'s text is exactly the name or nothing: N1 reads it.
-export function PlayerTop({ view, children }) {
+// player. `#title-name`'s text is exactly the name or nothing: N1 reads it. `chips` and
+// `settings` are theatre's, and `settings` goes last, after the dot.
+export function PlayerTop({ view, chips, settings }) {
   const title = useView(view, (snapshot) => snapshot.title);
   const player = document.getElementById('player');
   if (!player) return null;
   return createPortal(<div className="player-top">
     <div id="title-name">{title.name ?? ''}</div>
     <div className="player-top-end">
-      {children}
+      {chips}
       <SyncDot view={view} container={player} />
+      {settings}
     </div>
   </div>, player);
 }

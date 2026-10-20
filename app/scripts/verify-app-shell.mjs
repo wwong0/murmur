@@ -186,6 +186,14 @@ async function userGestureEvaluate(expression) {
   return response.result?.value;
 }
 
+// A held room shows #play in the bar's one slot and keeps #pause enabled under it for drivers
+// (design.md D8), so a pointer cannot reach it there; D18 moves that press (post-result, P2-R10).
+async function pressPause() {
+  if (await read(tab, `document.querySelector('#pause')?.hidden === true`) !== true) return clickWhenEnabled('#pause');
+  await userGestureEvaluate(`document.querySelector('#pause').click()`);
+  return { ok: true, value: true };
+}
+
 async function recordIdentity(label, step) {
   if (timeoutRow(label, step)) return;
   try {
@@ -237,7 +245,7 @@ async function runS2() {
   // read once #pause is enabled: before that the room may not have created its state.
   const pauseEnabled = await until(tab, `document.querySelector('#pause')?.disabled === false`, Boolean);
   const beforePause = pauseEnabled.ok ? await read(tab, `window.__app.playbackState()?.version ?? null`) : null;
-  const pauseReady = pauseEnabled.ok ? await clickWhenEnabled('#pause') : pauseEnabled;
+  const pauseReady = pauseEnabled.ok ? await pressPause() : pauseEnabled;
   let pauseStep = pauseReady;
   if (pauseReady.ok) {
     const landed = await until(tab, `window.__app.playbackState()`, (state) => state?.playing === false

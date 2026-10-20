@@ -182,6 +182,11 @@ const INITIAL_VIEW = {
   ended: false,
   hostFile: { status: 'off', inputHidden: true, help: null, notice: null, state: 'off', choosable: false },
   hostStatus: { state: 'unknown', fraction: null, received: 0, lastAtMs: null, disbelieved: 0 },
+  // Whether this page's own source reports `hostStatus`: the host's file card shows it, and the
+  // viewer's waiting card must not.
+  hostSide: false,
+  // 'reconnecting' only while a lost connection is being retried (design.md D13, D16).
+  connection: 'connecting',
   title: { name: null },
   overlay: { clock: '', drift: '', bytes: '', controller: '' },
   overlayVisible: false,
@@ -193,6 +198,8 @@ const INITIAL_VIEW = {
     time: '0:00 / 0:00',
     syncDot: { state: 'idle', title: 'no figure' },
     syncEstimateMs: null,
+    syncShown: false,
+    syncPlaying: false,
   },
   // Which of `#play`/`#pause` the bar shows (design.md D8); both stay mounted either way.
   playSlot: 'play',
@@ -548,6 +555,8 @@ function paintHostStatus() {
   const own = isHostSide();
   const status = hostStatusNow();
   const counts = hostStatusBook.counts();
+  // Before `hostStatus`: a host's first `choosing` must never render as a viewer's card.
+  view.set('hostSide', own);
   view.set('hostStatus', {
     state: status.state,
     fraction: status.fraction,
@@ -593,7 +602,10 @@ client.onEvent('status', ({ connected, superseded }) => {
   setStatus(connected ? `connected (room "${room}", tab "${tabId}", role "${client.role}")` : 'disconnected');
   addNotice(connected ? 'connected' : 'disconnected');
   if (connected && connectionLost) addActivity({ kind: 'reconnected' });
-  if (!connected && everConnected && !connectionLost && !superseded && !terminal) addActivity({ kind: 'reconnecting' });
+  const retrying = !connected && everConnected && !superseded && !terminal;
+  if (retrying && !connectionLost) addActivity({ kind: 'reconnecting' });
+  // A close that will not be retried leaves the value alone, so a dead page never says it is trying.
+  if (connected || retrying) view.set('connection', connected ? 'connected' : 'reconnecting');
   connectionLost = everConnected && !connected;
   everConnected = everConnected || connected;
 });
@@ -964,6 +976,10 @@ function renderBar() {
     syncDot: syncDot({ playing, mode: controllerState.mode, estimateMs: controllerState.estimateMs }),
     // Beside `syncDot`, whose two fields `sync-dot.mjs` holds: the tooltip's figure needs the number.
     syncEstimateMs: Number.isFinite(controllerState.estimateMs) ? controllerState.estimateMs : null,
+    // The dot shows whenever a title is loaded, so an idle one can say why it has no figure
+    // (design.md D10); `syncPlaying` picks which words.
+    syncShown: Number.isFinite(durationMs),
+    syncPlaying: playing,
   });
 }
 

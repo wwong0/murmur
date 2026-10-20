@@ -58,6 +58,7 @@ let profile = null;
 let browser = null;
 let host = null;
 let builds = {};
+let hostWidth = null;
 let runnerFailure = null;
 let cleanupFailure = null;
 
@@ -225,8 +226,11 @@ async function openRoom() {
   if (!bundle.matches || !bundle.pageIdInServed) throw new Error('the served room bundle does not match public/room.bundle.js');
   builds = { page: built.value, bundle };
   if (!await roomReady(host)) throw new Error('the host page did not render the room');
+  // Below the 768px breakpoint #theatre is not drawn, so a narrow window is the runner's fault, not a row's.
+  hostWidth = await read(host, 'window.innerWidth');
+  if (!(hostWidth >= 768)) throw new Error(`the host tab opened ${hostWidth}px wide, under the 768px desktop layout`);
   console.log(`chrome: ${chromeVersion} · ${CHROME}`);
-  console.log(`build: ${built.value}`);
+  console.log(`build: ${built.value} · host tab ${hostWidth}px wide`);
 }
 
 async function runRow(label, body) {
@@ -461,6 +465,43 @@ async function playUntilFaded() {
 
 const restPaused = () => setPlaying(false).catch(() => false);
 
+// A native range is moved by its value setter and an input and change event, as a drag leaves it.
+async function setRange(tab, selector, value) {
+  return read(tab, `(() => {
+    const element = document.querySelector(${JSON.stringify(selector)});
+    if (!element) return null;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setter.call(element, String(${JSON.stringify(value)}));
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+    return Number(element.value);
+  })()`);
+}
+
+const SEEK_LOADED = "Number(document.querySelector('#seek')?.max) > 0";
+const SYNC_DOT = `(() => {
+  const dot = document.querySelector('#sync-dot');
+  if (!dot) return null;
+  const r = dot.getBoundingClientRect();
+  return { hidden: dot.hidden, width: r.width, height: r.height, state: dot.getAttribute('data-state'), title: dot.getAttribute('title') };
+})()`;
+
+// Paused with a title loaded the dot is shown, idle and without a figure; RS-C4 reads the
+// playing side. A missing element or a zero box is a failed row, never a read that passes.
+async function rowSyncDotShowsIdle() {
+  if (!await roomReady(host)) return { exercised: false, detail: 'the host did not render the room' };
+  if (!await setPlaying(false)) return { exercised: false, detail: 'the room would not pause' };
+  const loaded = await until(host, SEEK_LOADED, Boolean);
+  if (!loaded.ok) return { exercised: false, detail: 'the title did not load: #seek.max stayed 0' };
+  const idle = await until(host, SYNC_DOT, (value) => value?.state === 'idle', CLOSE_MS);
+  const dot = idle.value;
+  return {
+    exercised: true,
+    ok: dot !== null && dot.hidden === false && dot.width > 0 && dot.height > 0 && dot.state === 'idle' && dot.title === 'no figure',
+    detail: { box: dot === null ? null : { width: dot.width, height: dot.height }, hidden: dot?.hidden ?? null, state: dot?.state ?? null, title: dot?.title ?? null },
+  };
+}
+
 async function rowFadedBoxMisses() {
   const failure = await playUntilFaded();
   if (failure) return { exercised: false, detail: failure };
@@ -592,6 +633,53 @@ async function rowTheatreIsRemembered() {
   }
 }
 
+// A `display: none` element has no client rects, so "mounted" and "displayed" read apart: theatre
+// must close the header and the Stats row without unmounting them. `#settings` is one element
+// that moves, so its count is read too.
+const THEATRE_SURFACE = `(() => {
+  const state = (selector) => {
+    const element = document.querySelector(selector);
+    return { mounted: element !== null, displayed: element !== null && element.getClientRects().length > 0 };
+  };
+  const settings = [...document.querySelectorAll('#settings')];
+  return {
+    header: state('.room-header'),
+    stats: state('#stats'),
+    settings: settings.length,
+    settingsInPlayer: settings.length === 1 ? document.getElementById('player').contains(settings[0]) : null,
+  };
+})()`;
+const closedButMounted = (part) => part?.mounted === true && part.displayed === false;
+const displayedAndMounted = (part) => part?.mounted === true && part.displayed === true;
+
+async function rowTheatreHidesChrome() {
+  if (!await roomReady(host)) return { exercised: false, detail: 'the host did not render the room' };
+  if (!await setPlaying(false)) return { exercised: false, detail: 'the room would not pause' };
+  try {
+    await clickElement(host, '#theatre');
+    const on = await until(host, THEATRE, (value) => value === 'true', CLOSE_MS);
+    if (!on.ok) return { exercised: false, detail: { theatre: on.value } };
+    const inTheatre = await read(host, THEATRE_SURFACE);
+    await clickElement(host, '#settings');
+    const opened = await until(host, present('#control-mode'), Boolean, REVEAL_WAIT_MS);
+    await pressKey(host, 'Escape');
+    const closed = await until(host, present('#control-mode'), (value) => value === false, CLOSE_MS);
+    await clickElement(host, '#theatre');
+    const off = await until(host, THEATRE, (value) => value === null, CLOSE_MS);
+    const after = await read(host, THEATRE_SURFACE);
+    return {
+      exercised: true,
+      ok: closedButMounted(inTheatre?.header) && closedButMounted(inTheatre?.stats)
+        && inTheatre.settings === 1 && inTheatre.settingsInPlayer === true && opened.ok && closed.ok
+        && off.ok && displayedAndMounted(after?.header) && displayedAndMounted(after?.stats) && after.settings === 1 && after.settingsInPlayer === false,
+      detail: { inTheatre, controlModeOpened: opened.ok, controlModeClosedByEscape: closed.ok, theatreOff: off.ok, after },
+    };
+  } finally {
+    if (await read(host, present('#control-mode'))) await pressKey(host, 'Escape').catch(() => {});
+    if ((await read(host, THEATRE)) !== null) await clickElement(host, '#theatre').catch(() => {});
+  }
+}
+
 async function readBarAt(viewport) {
   const { width, height, scale, mobile } = viewport;
   await host.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile });
@@ -632,19 +720,73 @@ async function rowBarIsFlushAndOneRow() {
   };
 }
 
+// The title's end as S does it (RS-E1): seek close to the end, press play, and the room pauses
+// there. The centred button and `#time` both follow the replicated state, so both are waited for.
+const SEEK_RANGE = "(() => { const seek = document.querySelector('#seek'); return seek ? { max: Number(seek.max), disabled: seek.disabled } : null; })()";
+const END_STATE = `({ time: document.querySelector('#time')?.textContent ?? null, again: ${present('[data-testid="watch-again"]')} })`;
+const WATCH_AGAIN = '[data-testid="watch-again"]';
+const END_LEAD_MS = 3_000;
+const END_WAIT_MS = 20_000;
+const PRESS_WAIT_MS = 10_000;
+
+async function endTitle() {
+  const range = await until(host, SEEK_RANGE, (value) => value !== null && Number.isFinite(value.max) && value.max > 2 * END_LEAD_MS && value.disabled === false);
+  if (!range.ok) return { ok: false, detail: { range: range.value } };
+  // A seek inside the last operation's transition lead is refused; #back-10 is enabled once one is accepted.
+  const seekable = await until(host, "document.querySelector('#back-10')?.disabled === false", Boolean);
+  if (!seekable.ok) return { ok: false, detail: { range: range.value, seekable: false } };
+  const target = range.value.max - END_LEAD_MS;
+  await setRange(host, '#seek', target);
+  const sought = await until(host, PLAYBACK, (state) => state !== null && Math.abs(state.positionMs - target) <= 1);
+  const enabled = sought.ok && (await until(host, "document.querySelector('#play')?.disabled === false", Boolean)).ok;
+  if (!enabled) return { ok: false, detail: { range: range.value, sought: sought.ok, playEnabled: enabled } };
+  await clickElement(host, '#play');
+  const ended = await until(host, END_STATE, (value) => value?.time === 'Ended' && value.again === true, END_WAIT_MS);
+  return { ok: ended.ok, detail: { range: range.value, ended: ended.value } };
+}
+
+// One press of an ended title's button, and whether the room went back to the start. The page's
+// end is read as the press lands, not carried over from the wait before it.
+async function pressWatchAgain(selector) {
+  const [before, endState] = [await read(host, PLAYBACK), await read(host, END_STATE)];
+  await clickElement(host, selector);
+  const after = await until(host, PLAYBACK, (state) => before !== null && state !== null && state.positionMs === 0 && state.version > before.version, PRESS_WAIT_MS);
+  const ended = endState?.time === 'Ended' && endState.again === true;
+  return { ok: ended && after.ok, ended, versionBefore: before?.version ?? null, versionAfter: after.value?.version ?? null, positionMs: after.value?.positionMs ?? null };
+}
+
+async function rowWatchAgainSeeksToZero() {
+  if (!await roomReady(host)) return { exercised: false, detail: 'the host did not render the room' };
+  if (!await setPlaying(false)) return { exercised: false, detail: 'the room would not pause' };
+  try {
+    const firstEnd = await endTitle();
+    if (!firstEnd.ok) return { exercised: false, detail: { end: 'first', ...firstEnd.detail } };
+    const centred = await pressWatchAgain(WATCH_AGAIN);
+    const secondEnd = await endTitle();
+    if (!secondEnd.ok) return { exercised: false, detail: { end: 'second', centred, ...secondEnd.detail } };
+    const bar = await pressWatchAgain('#play');
+    return { exercised: true, ok: centred.ok && bar.ok, detail: { centred, bar } };
+  } finally {
+    await restPaused();
+  }
+}
+
 async function runRows() {
-  await runRow('RD-N1 a plain invite shows the name prompt and joins the room behind it', rowInviteJoinsBehindPrompt);
+  await runRow('RD-N1a plain invite shows the name prompt and joins the room behind it', rowInviteJoinsBehindPrompt);
   await runRow('RD-N2 the prompt closes on Escape and stays closed after a reload', rowEscapeClosesAndReloadStaysClosed);
   await runRow('RD-N3 a role and tab URL shows no prompt', rowRoleAndTabShowNoPrompt);
   await runRow('RD-N4 a front-page host and a front-page join each show the name prompt', rowFrontHostAndJoinShowPrompt);
   await runRow('RD-N5 the name and message inputs send nothing', rowInputsSendNothing);
   await runRow('RD-M1 the settings menu changes the control mode for the host and is disabled for a viewer', rowSettingsMenuControlMode);
+  await runRow('RD-D1 the sync dot shows while paused, in its idle state', rowSyncDotShowsIdle);
   await runRow("RD-B1 a faded control's box read before the reveal misses, and the shipped click lands", rowFadedBoxMisses);
   await runRow('RD-B2 a click outside the bar while faded does not wait', rowOutsideClickDoesNotWait);
   await runRow('RD-B3 a first touch on a faded bar only reveals it', rowFirstTouchOnlyReveals);
   await runRow('RD-T1 theatre mode issues no operation and keeps the media element', rowTheatreKeepsMedia);
   await runRow('RD-T2 theatre mode is remembered for the tab', rowTheatreIsRemembered);
+  await runRow('RD-T3 theatre hides the header and the Stats row, and settings opens from the player', rowTheatreHidesChrome);
   await runRow('RD-L1 the bar is flush with the player and stays one row', rowBarIsFlushAndOneRow);
+  await runRow('RD-W1 both Watch again buttons seek to 0', rowWatchAgainSeeksToZero);
 }
 
 async function main() {
@@ -674,7 +816,7 @@ try {
   try {
     fs.writeFileSync(path.join(runDir, 'report.json'), `${JSON.stringify({
       startedAt: startedAt.toISOString(), finishedAt: new Date().toISOString(), chrome: { version: chromeVersion, path: CHROME },
-      builds, server: serverSettings, rows, runnerFailure, cleanupFailure,
+      builds, hostWidth, server: serverSettings, rows, runnerFailure, cleanupFailure,
     }, null, 2)}\n`);
   } catch (error) {
     if (!runnerFailure) { runnerFailure = error?.message ?? String(error); process.exitCode = 2; }

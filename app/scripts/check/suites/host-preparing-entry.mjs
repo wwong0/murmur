@@ -211,6 +211,7 @@ export default async function hostPreparingEntrySuite() {
     assertEqual(choosing.hostStatus.state, 'choosing', 'viewer believes the host is choosing');
     for (const id of ['play', 'back-10', 'forward-10']) assertEqual(choosing.controls[id].disabled, true, `${id} is disabled while choosing`);
     assertEqual(choosing.bar.preparing, true, 'bar records choosing as blocked');
+    assertEqual(choosing.bar.syncShown, false, 'the sync dot is not shown while the host chooses');
     assertEqual(page.count('load'), 0, 'choosing host does not load media');
     page.deliver({ type: 'host-status', from: 'h', payload: { state: 'preparing', fraction: 0.4 } });
     page.tick();
@@ -220,6 +221,7 @@ export default async function hostPreparingEntrySuite() {
     assertEqual(preparing.hostStatus.received, 2, 'viewer counts the choosing and preparing reports');
     for (const id of ['play', 'back-10', 'forward-10']) assertEqual(preparing.controls[id].disabled, true, `${id} is disabled while preparing`);
     assertEqual(preparing.bar.preparing, true, 'bar records preparing');
+    assertEqual(preparing.bar.syncShown, false, 'the sync dot is not shown while the host prepares');
 
     page.deliver({ type: 'host-status', from: 'h', payload: { state: 'ready' } });
     page.tick();
@@ -238,6 +240,7 @@ export default async function hostPreparingEntrySuite() {
     assertEqual(preparing.hostStatus.state, 'choosing', 'file host is choosing before a choice');
     for (const id of ['play', 'back-10', 'forward-10']) assertEqual(preparing.controls[id].disabled, true, `${id} is disabled for a preparing file host`);
     assertEqual(preparing.bar.preparing, true, 'file host bar records preparing');
+    assertEqual(preparing.bar.syncShown, false, 'the file host\'s sync dot is not shown before a title loads');
   });
 
   // 12a D1 F1: the source ignores a pick while it prepares, so the page must not store that pick's name.

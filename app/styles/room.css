@@ -20,6 +20,7 @@
     --radius-control: 12px;
     --radius-inner: 8px;
     --ink: #ffffff;
+    --ink-soft: #d4d4d8;
     --secondary: #a1a1aa;
     --placeholder: #8a8a94;
     --disabled-ink: #7a7a84;
@@ -30,15 +31,18 @@
     --warning: #ff6b5a;
     --sync-ok: #3ddc84;
     --sync-correcting: #f5b544;
+    --dot-idle: var(--secondary);
     --hairline: rgba(255, 255, 255, 0.08);
     --hairline-strong: rgba(255, 255, 255, 0.16);
     --hairline-hover: rgba(255, 255, 255, 0.28);
+    --dash: rgba(255, 255, 255, 0.24);
     --wash: rgba(255, 255, 255, 0.07);
     --wash-strong: rgba(255, 255, 255, 0.12);
+    --text-shade: 0 1px 2px rgba(0, 0, 0, 0.6), 0 2px 16px rgba(0, 0, 0, 0.5);
     --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
     --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     --font-mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, Menlo, monospace;
-    --header-h: 52px;
+    --header-h: 64px;
     --room-top: calc(var(--header-h) + 1rem);
     accent-color: var(--accent);
     scrollbar-width: thin;
@@ -101,6 +105,9 @@
      a grid row stretched by a short page would leave black under the video, and the bar,
      pinned to this box's bottom, would sit below the picture. */
   #player {
+    --strip-pad-top: 1.25rem;
+    --strip-pad-x: 1.5rem;
+    --strip-row: 2.75rem;
     grid-area: player;
     align-self: start;
     position: relative;
@@ -110,11 +117,24 @@
     background: #000;
   }
   #player:fullscreen { border-radius: 0; }
-  #player video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; }
+  #player video { display: block; width: 100%; aspect-ratio: 16 / 9; align-self: start; background: #000; }
 
-  /* The title, the chips (theatre only) and the dot, over the video. Pointer-transparent
-     except the dot, so the strip never takes a click from the video. The gradient is the only
-     shading, and it is drawn only while the strip has something to read. */
+  /* While a card has the player, the card sizes it: the video and the card share one grid cell, so
+     the player is the taller of the 16:9 picture and the card, and a card that does not fit at
+     16:9 grows the player instead of running under the bar. With no card the player is the
+     video's box, and a ready title is 16:9 again. The `:not([hidden])` keeps the display off the
+     front route's closed player; the one `minmax(0, 1fr)` column keeps a nowrap command from
+     widening the player past its column. */
+  #player:not([hidden]):has(.file-state:not([hidden]), .wait-layer) { display: grid; grid-template-columns: minmax(0, 1fr); }
+  #player > video, .file-state, .wait-layer { grid-area: 1 / 1; }
+  /* The host's card replaces the bar (images 05 to 07); every control stays mounted, and
+     visibility keeps its box so a driver's read of it still has a size. */
+  #player:has(.file-state:not([hidden])) .player-bar { visibility: hidden; }
+
+  /* The title, the chips and the settings button (theatre only) and the dot, over the video.
+     Pointer-transparent except the dot and the button, so the strip never takes a click from the
+     video. The gradient is the only shading, and it is drawn only while the strip has something
+     to read. */
   .player-top {
     position: absolute;
     top: 0;
@@ -125,7 +145,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    padding: 1.25rem 1.5rem 2.75rem;
+    padding: var(--strip-pad-top) var(--strip-pad-x) 2.75rem;
     pointer-events: none;
   }
   .player-top:has(#title-name:not(:empty), #sync-dot:not([hidden]), .participants-chips) {
@@ -135,18 +155,20 @@
     flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
-    font-size: clamp(1.125rem, 1.5vw + 0.5rem, 1.75rem);
-    font-weight: 600;
+    font-size: clamp(1.125rem, 1.5vw + 0.5rem, 2rem);
+    font-weight: 700;
     line-height: 1.25;
     text-overflow: ellipsis;
     white-space: nowrap;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 2px 16px rgba(0, 0, 0, 0.5);
+    text-shadow: var(--text-shade);
   }
   .player-top-end { display: flex; flex: none; align-items: center; gap: 0.75rem; }
   .player-top .participants-chips { margin-left: 0; }
+  .player-top #settings { pointer-events: auto; }
 
-  /* No display here: the dot is closed with [hidden] while idle. The transparent border is the
-     hit area; the background is clipped to the 14px dot inside it. */
+  /* No display here: the dot is closed with [hidden] until a title is loaded. The transparent
+     border is the hit area; the background is clipped to the 14px dot inside it. Idle is the
+     base colour, so a state this sheet does not know reads as claiming nothing, never green. */
   #sync-dot {
     flex: none;
     box-sizing: border-box;
@@ -154,7 +176,7 @@
     height: 1.625rem;
     border: 0.375rem solid transparent;
     border-radius: 50%;
-    background-color: var(--secondary);
+    background-color: var(--dot-idle);
     background-clip: padding-box;
     pointer-events: auto;
   }
@@ -171,6 +193,7 @@
   .player-bar {
     --bar-btn: 40px;
     --bar-slide: 24px;
+    --bar-gap: clamp(0.25rem, 3.125vw - 1.25rem, 1.75rem);
     position: absolute;
     left: 0;
     right: 0;
@@ -191,20 +214,24 @@
     pointer-events: none;
   }
   .bar-row { display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: 0.5rem; }
-  .bar-group { display: flex; flex-wrap: nowrap; align-items: center; min-width: 0; gap: 0.25rem; }
+  /* The gap follows the viewport, because the player is a share of it: image 02's spacing at a
+     wide page, and the old tight pack where the player is narrow enough to need every pixel. */
+  .bar-group { display: flex; flex-wrap: nowrap; align-items: center; min-width: 0; gap: var(--bar-gap); }
   #control-bar .icon-btn { flex: none; width: var(--bar-btn); height: var(--bar-btn); }
   #theatre[aria-pressed="true"] { color: var(--accent); }
   #time {
     flex: none;
-    margin-left: 0.5rem;
+    margin-left: 0.25rem;
     color: var(--ink);
     font-size: 1rem;
+    font-weight: 500;
     line-height: 1.25;
     white-space: nowrap;
   }
 
   /* The back and forward arrows carry their "10" as generated content: it adds no text node, so
-     the button's textContent stays the engine's text alone. */
+     the button's textContent stays the engine's text alone. Each arrowhead sits on one side
+     (back on the left, forward on the right), so the numeral steps down and away from it. */
   .skip-10 { position: relative; display: inline-flex; }
   .skip-10::after {
     content: '10';
@@ -213,13 +240,15 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding-top: 1px;
-    font-size: 0.625rem;
-    font-weight: 700;
+    padding-top: 2px;
+    font-size: 0.75rem;
+    font-weight: 600;
     line-height: 1;
     letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
   }
+  #back-10 .skip-10::after { padding-left: 2px; }
+  #forward-10 .skip-10::after { padding-right: 2px; }
 
   /* Native ranges: the track is thin, and the played part and the thumb are the accent. Only the
      seek line sets a display, and it is never closed; #volume sets none, because narrow pages
@@ -262,33 +291,28 @@
   .range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.6), 0 0 0 4px var(--accent); }
   .range:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.6), 0 0 0 4px var(--accent); }
 
-  /* The host's file card: the player's whole surface while there is nothing to play. No display
-     on .file-state: it is closed with [hidden]. The card's bottom padding is as deep as the bar
-     over it, so no content sits under the controls. `margin: auto` on the body centres it and,
-     unlike justify-content, still scrolls from the top when it is taller than the card. */
-  .file-state { position: absolute; inset: 0; background: var(--panel); }
+  /* The host's file card: the player's whole surface while there is nothing to play, and a grid
+     item in the player's one cell, so its height can set the player's (above). It sets a display,
+     so it carries its own [hidden] rule. The bar is not drawn over it, so its padding is the
+     dashed frame's clearance alone. `margin: auto` on the body centres it and, unlike
+     justify-content, still starts from the top when it is taller than the card. */
+  .file-state { position: relative; display: flex; min-width: 0; background: var(--panel); }
+  .file-state[hidden] { display: none; }
   .file-state[data-kind="choosing"]::before {
     content: '';
     position: absolute;
     inset: 1rem;
-    border: 1px dashed var(--hairline-strong);
+    border: 2px dashed var(--dash);
     border-radius: var(--radius-control);
     pointer-events: none;
   }
-  .file-card {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    padding: 1.5rem 1.5rem 5.5rem;
-  }
+  .file-card { display: flex; flex: 1 1 auto; min-width: 0; padding: 2rem 1.5rem; }
   .file-body {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 0.75rem;
-    width: min(32rem, 100%);
+    width: min(48rem, 100%);
     margin: auto;
     text-align: center;
   }
@@ -296,13 +320,13 @@
   .file-icon-warn { color: var(--warning); }
   .file-title {
     margin: 0;
-    font-size: 1.5rem;
-    font-weight: 700;
+    font-size: 1.75rem;
+    font-weight: 600;
     line-height: 1.25;
     letter-spacing: -0.01em;
     text-wrap: balance;
   }
-  .file-note, #file-reason { margin: 0; color: var(--secondary); font-size: 1rem; line-height: 1.5; text-wrap: pretty; }
+  .file-note, #file-reason { margin: 0; color: var(--secondary); font-size: 1.0625rem; line-height: 1.5; text-wrap: pretty; }
   #file-reason:empty { display: none; }
   .file-progress { width: min(24rem, 100%); height: 0.375rem; overflow: hidden; border-radius: 999px; background: var(--wash-strong); }
   .file-progress-fill {
@@ -313,7 +337,7 @@
     transform-origin: left;
     transition: transform 200ms var(--ease-out);
   }
-  .file-button { min-width: 11rem; margin-top: 0.75rem; padding: 0 1.75rem; }
+  .file-button { min-width: 14.375rem; margin-top: 0.75rem; padding: 0 2.5rem; }
   .file-codebox {
     display: flex;
     align-items: center;
@@ -325,26 +349,125 @@
     background: var(--page);
     text-align: left;
   }
-  #file-command { flex: 1 1 auto; min-width: 0; font-family: var(--font-mono); font-size: 0.8125rem; line-height: 1.5; overflow-wrap: anywhere; }
+  /* One line where it fits, cut with an ellipsis where it does not; the full command stays in the
+     DOM, and the phone wraps it (below), because a clipped command is not one to copy by eye. */
+  #file-command {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--ink-soft);
+    font-family: var(--font-mono);
+    font-size: 0.9375rem;
+    font-weight: 400;
+    line-height: 1.5;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .file-codebox .btn { flex: none; height: 2.25rem; padding: 0 0.875rem; }
-  #file-note { color: var(--secondary); font-size: 0.8125rem; }
-  /* Over the host's playing video, with the bar: it fades when the bar does, and takes no click. */
+  #file-note { color: var(--secondary); font-size: 0.9375rem; }
+  /* Over the host's playing video, in the title's strip under the name, and it takes no click.
+     The strip's own variables place it, so it follows the title at every width. The component
+     sets `data-phase="fading"` when its visible time is up and unmounts it once the fade has
+     run; the global reduced-motion rule shortens the transition to nothing, so there it is
+     just gone. */
   .file-hint {
     position: absolute;
-    left: 50%;
-    bottom: 6rem;
+    top: calc(var(--strip-pad-top) + var(--strip-row));
+    left: var(--strip-pad-x);
+    right: var(--strip-pad-x);
     z-index: 1;
-    width: max-content;
-    max-width: calc(100% - 2rem);
-    transform: translateX(-50%);
-    text-align: center;
-    font-size: 0.875rem;
+    color: var(--secondary);
+    font-size: 0.8125rem;
     line-height: 1.25rem;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 2px 16px rgba(0, 0, 0, 0.5);
+    text-shadow: var(--text-shade);
     pointer-events: none;
-    transition: opacity 200ms var(--ease-out);
+    opacity: 1;
+    transition: opacity 400ms var(--ease-out);
   }
-  .file-hint[data-faded="true"] { opacity: 0; }
+  .file-hint[data-phase="fading"] { opacity: 0; }
+
+  /* The viewer's waiting card and the title's end are each one layer: the whole picture,
+     positioned with no z-index, so the strip and the bar (both 1) stay over it, and it takes no
+     pointer event. The wait card is a grid item in the player's cell, so a card taller than 16:9
+     grows the player; the end is over a playing title and never does. The bottom padding is as
+     deep as the bar, so no word sits under the controls. Each is mounted only while it applies,
+     so none is ever closed with [hidden]. */
+  .wait-layer, .ended-layer {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    padding: 1.5rem 1.5rem 5.5rem;
+    pointer-events: none;
+    animation: layer-in 240ms var(--ease-out) both;
+  }
+  .ended-layer { position: absolute; inset: 0; }
+  @keyframes layer-in { from { opacity: 0; } }
+  .wait-layer { background: var(--panel); }
+  .wait-body, .ended-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: min(32rem, 100%);
+    margin: auto;
+    text-align: center;
+  }
+  .wait-body { gap: 0.75rem; }
+  .wait-title { margin: 0; font-size: 1.75rem; font-weight: 600; line-height: 1.25; letter-spacing: -0.01em; text-wrap: balance; }
+  .wait-note { margin: 0; color: var(--secondary); font-size: 1.0625rem; line-height: 1.5; }
+  .wait-dots { display: flex; gap: 0.75rem; margin-bottom: 0.5rem; }
+  .wait-dots span {
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: wait-pulse 1.2s ease-in-out infinite both;
+  }
+  .wait-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .wait-dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes wait-pulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+  }
+  /* The global reduced-motion rule shortens a duration but would leave an infinite loop running. */
+  @media (prefers-reduced-motion: reduce) { .wait-dots span { animation: none; } }
+
+  .ended-layer { background: rgba(0, 0, 0, 0.55); }
+  .ended-body { gap: 1.25rem; }
+  .ended-title {
+    margin: 0;
+    font-size: clamp(2rem, 5vw, 3.75rem);
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    text-shadow: var(--text-shade);
+  }
+  .ended-button { min-width: 12rem; padding: 0 2rem; pointer-events: auto; }
+
+  /* The pill sits at the top centre, below the title's row when there is a title, so a long name
+     never runs under it. The amber is the sync dot's own. */
+  .reconnect-pill {
+    position: absolute;
+    top: 1rem;
+    left: 50%;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.625rem;
+    translate: -50% 0;
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--hairline-strong);
+    border-radius: 999px;
+    background: rgba(20, 20, 24, 0.88);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    line-height: 1.25rem;
+    white-space: nowrap;
+    pointer-events: none;
+    animation: layer-in 200ms var(--ease-out) both;
+  }
+  #player:has(#title-name:not(:empty)) .reconnect-pill { top: 4rem; }
+  .reconnect-dot { flex: none; width: 0.625rem; height: 0.625rem; border-radius: 50%; background: var(--sync-correcting); }
 
   .room-actions {
     grid-area: actions;
@@ -355,8 +478,10 @@
     gap: 0.75rem;
     margin-top: 0.75rem;
   }
-  .room-actions .btn { height: 3.5rem; padding: 0 1.5rem; font-size: 1rem; }
-  #stats[aria-expanded="true"] { color: var(--accent); }
+  .room-actions .btn { height: 3.5rem; padding: 0 1.5rem; font-size: 1.125rem; }
+  /* The open panel's button keeps its ink label and takes a 1.5px accent edge: the border's
+     1px and a half pixel of inset ring, so the box does not move when it toggles. */
+  #stats[aria-expanded="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 0.5px var(--accent); }
   #invite { min-width: 13.5rem; margin-left: auto; text-decoration: none; }
 
   /* No display here either: the panel is closed with [hidden], and #overlay inside it keeps
@@ -369,16 +494,18 @@
     padding: 1rem 1.125rem;
     border-radius: var(--radius);
     background: var(--panel);
+    color: var(--ink-soft);
     font-family: var(--font-mono);
-    font-size: 0.8125rem;
+    font-size: 0.9375rem;
+    font-weight: 400;
     line-height: 1.65;
     overflow-wrap: anywhere;
   }
   .stats-body { display: flex; flex-direction: column; gap: 0.5rem; }
   .stats-body :is(#host-file-status, #keyframe-notice, #host-preparing):empty { display: none; }
   .stats-caption { margin: 0.5rem 0 0; font: inherit; font-weight: 500; color: var(--secondary); }
-  #clock-line, #drift-line, #bytes-line, #controller-line, #status-line { color: var(--ink); }
-  #keyframe-notice { color: var(--warning); }
+  #clock-line, #drift-line, #bytes-line, #controller-line, #status-line { color: var(--ink-soft); }
+  #keyframe-notice { color: var(--secondary); }
   #host-file-status, #host-preparing { color: var(--secondary); }
   #roster, #notices { list-style: none; margin: 0; padding: 0; color: var(--secondary); }
   #notices { max-height: 220px; overflow-y: auto; }
@@ -450,7 +577,7 @@
     line-height: 1;
     font-variant-numeric: tabular-nums;
   }
-  .member-chip-sm { width: 2rem; height: 2rem; font-size: 0.875rem; }
+  .member-chip-sm { width: 2.5rem; height: 2.5rem; font-size: 1rem; }
   .member-chip-tone-host { background: var(--chip-host); }
   .member-chip-tone-1 { background: var(--chip-1); }
   .member-chip-tone-2 { background: var(--chip-2); }
@@ -468,11 +595,11 @@
     overflow: hidden;
   }
   .participants-trigger[data-panel-open] .participants-chips { display: none; }
-  .participants-chip-slot { position: relative; display: inline-flex; margin-left: -0.5rem; }
+  .participants-chip-slot { position: relative; display: inline-flex; margin-left: -0.375rem; }
   .participants-chip-slot:first-child { margin-left: 0; }
   .participants-chips .member-chip { box-shadow: 0 0 0 2px var(--panel); }
   .participants-chips .member-chip-host { box-shadow: 0 0 0 2px var(--ink); }
-  .member-chip-more { margin-left: -0.5rem; background: var(--wash-strong); color: var(--secondary); }
+  .member-chip-more { margin-left: -0.375rem; background: var(--wash-strong); color: var(--secondary); }
 
   .participants-list {
     list-style: none;
@@ -486,12 +613,13 @@
   .participant-label { min-width: 0; overflow: hidden; font-size: 1.0625rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
   .host-tag {
     flex: none;
-    padding: 0 0.5rem;
+    padding: 0 0.625rem;
     border-radius: 999px;
-    background: var(--popover);
-    color: var(--secondary);
-    font-size: 0.75rem;
-    line-height: 1.375rem;
+    background: var(--wash-strong);
+    color: var(--ink-soft);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    line-height: 1.75rem;
   }
 
   .room-activity { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 1.25rem 1rem; }
@@ -501,36 +629,67 @@
   .room-compose { flex: none; padding: 0.75rem; border-top: 1px solid var(--hairline); }
   .room-compose .field { height: 2.75rem; padding: 0 1.125rem; border-radius: 999px; background: transparent; }
 
-  /* Narrow: one column, as image 10. The header, the video edge to edge with its one-row bar, the
-     Stats row, the Stats panel, then the column, with no horizontal overflow. `align-content:
-     start` stops a short page stretching the auto rows, which would pull #player taller than
-     its video. The slider and the theatre button are not displayed; the slider stays mounted. */
+  /* Narrow: one column, as image 10. The header, the video flush under it and edge to edge with
+     its one-row bar, the Stats row, the Stats panel, then the column, with no horizontal
+     overflow. `align-content: start` stops a short page stretching the auto rows, which would
+     pull #player taller than its video. The slider and the theatre button are not displayed; the
+     slider stays mounted. */
   @media (max-width: 767.98px) {
     .layout {
+      --room-top: var(--header-h);
       grid-template-columns: minmax(0, 1fr);
       grid-template-rows: var(--room-top) auto auto auto auto;
       grid-template-areas: "header" "player" "actions" "stats" "column";
       align-content: start;
     }
-    #player { margin-inline: -1rem; border-radius: 0; }
-    .player-top { padding: 1rem 1rem 2.5rem; }
+    #player {
+      --strip-pad-top: 1rem;
+      --strip-pad-x: 1rem;
+      --strip-row: 1.75rem;
+      margin-inline: -1rem;
+      border-radius: 0;
+    }
+    .player-top { padding-bottom: 2.5rem; }
     .player-bar { padding-inline: 1rem; }
     #volume, #theatre { display: none; }
-    #time { margin-left: 0.25rem; font-size: 0.8125rem; }
-    .file-card { padding: 1rem 1rem 5rem; }
+    #time { font-size: 0.8125rem; }
+    .room-actions .btn { font-size: 1rem; }
+    .file-card { padding: 1.75rem 1.5rem; }
+    .wait-layer, .ended-layer { padding: 1rem 1rem 5.5rem; }
     .file-icon { display: none; }
-    .file-title { font-size: 1.25rem; }
+    .file-title, .wait-title { font-size: 1.5rem; }
+    #file-command { overflow-wrap: anywhere; white-space: normal; }
+    /* The end is over a 16:9 picture: the title steps down, the button is the medium one, and the
+       layer is centred in what is left under the strip and above the bar. With the pill up it
+       starts below it and lays its two parts in a row, which is all that fits. The keyframe hint
+       gives way to both: there is nowhere left for it. */
+    .ended-layer { padding-top: 2.75rem; }
+    .ended-body { gap: 0.5rem; }
+    .ended-title { font-size: 2rem; }
+    .ended-button { height: 2.5rem; min-width: 0; padding: 0 1.25rem; font-size: 0.9375rem; }
+    .ended-button svg { width: 1.25rem; height: 1.25rem; }
+    #player:has(.reconnect-pill) .ended-layer { padding-top: 3.75rem; }
+    #player:has(.reconnect-pill):has(#title-name:not(:empty)) .ended-layer { padding-top: 5.5rem; }
+    #player:has(.reconnect-pill) .ended-body { flex-direction: row; gap: 1rem; }
+    #player[data-ended] .file-hint, #player:has(.reconnect-pill) .file-hint { display: none; }
+    #player:has(#title-name:not(:empty)) .reconnect-pill { top: 3rem; }
     .room-column { position: static; height: 24rem; max-height: none; margin: 0.75rem -1rem 0; border-radius: 0; }
   }
 
-  /* Theatre: the right column goes and the player takes the page, capped so the whole picture
-     fits under the header. Nothing is re-created or moved; the media element is the same one. */
+  /* Theatre: the right column, the header, the Stats row and the Stats panel are not displayed
+     (they stay mounted, and come back as they were), and the player takes the page, capped so the
+     whole picture fits. `--room-top` is then only the least gap above the player, and the first and
+     last rows share what is left, so the picture sits centred as image 04 draws it. Nothing is
+     re-created or moved; the media element is the same one. */
   @media (min-width: 768px) {
     .layout[data-theatre] {
+      --room-top: 1rem;
+      grid-template-rows: minmax(var(--room-top), 1fr) auto auto auto minmax(1rem, 1fr);
+      padding-bottom: 0;
       grid-template-columns: minmax(0, 1fr);
       grid-template-areas: "header" "player" "actions" "stats" ".";
     }
-    .layout[data-theatre] .room-column { display: none; }
+    .layout[data-theatre] :is(.room-column, .room-header, .room-actions, .stats-panel) { display: none; }
     .layout[data-theatre] #player {
       justify-self: center;
       width: min(100%, calc((100vh - var(--room-top) - 1rem) * 16 / 9));
@@ -575,16 +734,16 @@
       border: 0;
       border-radius: var(--radius-control);
       font: inherit;
-      font-size: 0.875rem;
-      font-weight: 600;
+      font-size: 0.9375rem;
+      font-weight: 700;
       line-height: 1.25;
       cursor: pointer;
       transition: background-color 160ms var(--ease-out), color 160ms var(--ease-out), transform 160ms var(--ease-out);
       -webkit-tap-highlight-color: transparent;
     }
     .btn[hidden], .icon-btn[hidden] { display: none; }
-    .btn-lg { height: 3rem; padding: 0 1.25rem; font-size: 1rem; }
-    .btn-xl { height: 3.875rem; padding: 0 1.5rem; font-size: 1.125rem; }
+    .btn-lg { height: 3rem; padding: 0 1.25rem; font-size: 1.125rem; }
+    .btn-xl { height: 3.875rem; padding: 0 1.5rem; font-size: 1.25rem; }
     .btn-primary { background: var(--accent); color: var(--on-accent); }
     .btn-primary:not(:disabled):hover { background: var(--accent-hover); }
     .btn-primary:not(:disabled):active { background: var(--accent-pressed); transform: scale(0.985); }
@@ -595,8 +754,10 @@
     .btn-ghost:not(:disabled):hover { background: var(--wash); color: var(--ink); }
     .btn-ghost:not(:disabled):active { background: var(--wash-strong); color: var(--ink); }
     .btn:disabled { cursor: not-allowed; color: var(--disabled-ink); }
-    .btn-primary:disabled, .btn-secondary:disabled { background: var(--popover); }
-    .btn-secondary:disabled { border-color: var(--hairline); }
+    .btn-secondary:disabled { background: var(--popover); border-color: var(--hairline); }
+    /* A disabled primary stays the accent, dimmed, so the same button reads the same whoever may
+       press it. The fill is opaque, so the label keeps its contrast over any frame behind it. */
+    .btn-primary:disabled { background: color-mix(in srgb, var(--accent) 40%, var(--panel)); color: var(--ink-soft); }
 
     .icon-btn {
       display: inline-flex;

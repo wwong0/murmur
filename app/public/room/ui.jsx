@@ -10,7 +10,7 @@ const BUTTON_VARIANT = { primary: 'btn-primary', secondary: 'btn-secondary', gho
 const BUTTON_SIZE = { md: undefined, lg: 'btn-lg', xl: 'btn-xl' };
 const ICON_BUTTON_SIZE = { md: undefined, sm: 'icon-btn-sm', bar: undefined };
 // `bar` is the player bar's: a larger icon in the same hit area as `md`.
-const ICON_PIXELS = { md: 20, sm: 16, bar: 26 };
+const ICON_PIXELS = { md: 20, sm: 16, bar: 30 };
 const FIELD_SIZE = { md: undefined, lg: 'field-lg', xl: 'field-xl' };
 
 export function VisuallyHidden({ as: Tag = 'span', className, ...rest }) {
@@ -38,10 +38,10 @@ export function Card({ className, ...rest }) {
   return <div className={clsx('card', className)} {...rest} />;
 }
 
-// The popup is portalled to body, so it floats over the page and pushes nothing, and its
-// content exists only while open.
-export function PopoverPanel({ className, children, ...positioning }) {
-  return <Popover.Portal>
+// The popup is portalled to body unless `container` names another element, so it floats over
+// the page and pushes nothing, and its content exists only while open.
+export function PopoverPanel({ className, children, container, ...positioning }) {
+  return <Popover.Portal container={container}>
     <Popover.Positioner className="popover-positioner" sideOffset={8} {...positioning}>
       <Popover.Popup className={clsx('popover', className)}>{children}</Popover.Popup>
     </Popover.Positioner>

@@ -9,12 +9,15 @@ import { ChartNoAxesColumn, ChevronDown, FileVideo, Link, Settings, TriangleAler
 import { fileCard } from '../lib/host-file-card.mjs';
 import { namePromptDue } from '../lib/name-prompt.mjs';
 import { PlayerBar, PlayerTop } from './player-bar.jsx';
+import { EndedCard, ReconnectPill, ViewerWait } from './player-states.jsx';
 import { Button, DialogPanel, IconButton, PopoverPanel, SegmentedControl, TextField } from './ui.jsx';
 import { useView } from './use-view.js';
 
 const NAME_PROMPTED_KEY = 'watchalong.name-prompted';
 const THEATRE_KEY = 'watchalong.theatre';
 const COPIED_MS = 2_000;
+const HINT_VISIBLE_MS = 5_000;
+const HINT_FADE_MS = 400;
 const HEADER_CHIPS = 4;
 const PINNED_SLACK_PX = 24;
 const CHOOSE_NOTE = 'MP4 from your computer. It stays on your device.';
@@ -131,13 +134,16 @@ function EndedMarker({ view }) {
 }
 
 // The popup mounts only while open. The group is the engine's `control-mode` entry: a viewer
-// sees it disabled with the current mode pressed (design.md D11).
-function SettingsMenu({ view, actions }) {
+// sees it disabled with the current mode pressed (design.md D11). It is mounted in the header, or
+// in theatre in the player's top group, never both: the document has one `#settings`. In the
+// player the popup portals into the player, as the dot's tooltip does, so a fullscreen player
+// does not hide it.
+function SettingsMenu({ view, actions, inPlayer = false }) {
   const mode = useView(view, (snapshot) => snapshot.controlMode);
   const disabled = useView(view, (snapshot) => snapshot.controls['control-mode'].disabled);
   return <Popover.Root>
     <Popover.Trigger id="settings" render={<IconButton icon={Settings} label="Settings" aria-label="Settings" className="icon-btn-chip" />} />
-    <PopoverPanel align="end">
+    <PopoverPanel align="end" container={inPlayer ? document.getElementById('player') : undefined}>
       <div id="control-mode-label" className="popover-label">Who can control</div>
       <SegmentedControl
         id="control-mode"
@@ -151,10 +157,11 @@ function SettingsMenu({ view, actions }) {
   </Popover.Root>;
 }
 
-function RoomHeader({ view, actions }) {
+// Theatre does not display the header (room.css), so the settings button is the player's then.
+function RoomHeader({ view, actions, theatre }) {
   return <header className="room-header">
-    <span className="text-[1.75rem] font-bold leading-none tracking-[-0.03em]" data-testid="wordmark">Uni<span className="text-accent">sono</span></span>
-    <SettingsMenu view={view} actions={actions} />
+    <span className="text-[2rem] font-bold leading-none tracking-[-0.03em]" data-testid="wordmark">Uni<span className="text-accent">sono</span></span>
+    {theatre ? null : <SettingsMenu view={view} actions={actions} />}
   </header>;
 }
 
@@ -175,6 +182,21 @@ function writeTheatre(on) {
   } catch {
     // Nothing to do: the toggle already took effect on the page.
   }
+}
+
+// Theatre's layout applies from this width (room.css); below it the header keeps the settings
+// button, so the button follows the same width, not the stored flag alone.
+const THEATRE_WIDTH = '(min-width: 768px)';
+
+function useWide() {
+  const [wide, setWide] = useState(() => matchMedia(THEATRE_WIDTH).matches);
+  useEffect(() => {
+    const query = matchMedia(THEATRE_WIDTH);
+    const update = () => setWide(query.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  return wide;
 }
 
 // The static .layout carries the flag for the stylesheet, as EndedMarker does for #player.
@@ -215,7 +237,7 @@ function RoomActions({ view, actions }) {
   };
   return <div className="room-actions">
     <Button id="stats" onClick={actions.stats} aria-expanded={overlayVisible} aria-controls="stats-panel">
-      <ChartNoAxesColumn size={20} strokeWidth={2} aria-hidden="true" />
+      <ChartNoAxesColumn size={22} strokeWidth={4} aria-hidden="true" />
       <span>Stats</span>
     </Button>
     <a id="invite" href={invite.href} className="btn btn-primary" onClick={copy}>
@@ -225,6 +247,27 @@ function RoomActions({ view, actions }) {
   </div>;
 }
 
+// Shown for a title's first seconds and then gone: the timers start when `shown` turns true, a
+// repaint with it still true leaves them alone, and a title that loads again starts them again.
+// The fade is the stylesheet's, so reduced motion drops it there; this only unmounts after it.
+function KeyframeHint({ shown }) {
+  const [phase, setPhase] = useState(shown ? 'visible' : 'gone');
+  useEffect(() => {
+    if (!shown) {
+      setPhase('gone');
+      return undefined;
+    }
+    setPhase('visible');
+    const fade = setTimeout(() => setPhase('fading'), HINT_VISIBLE_MS);
+    const gone = setTimeout(() => setPhase('gone'), HINT_VISIBLE_MS + HINT_FADE_MS);
+    return () => {
+      clearTimeout(fade);
+      clearTimeout(gone);
+    };
+  }, [shown]);
+  return shown && phase !== 'gone' ? <div className="file-hint" data-phase={phase}>{KEYFRAME_HINT}</div> : null;
+}
+
 // The host's card over the video while there is nothing to play (design.md D15). #host-file is
 // the input drivers set files on, so it stays mounted and visually hidden, never `hidden`, and
 // carries the disabled flag itself: a CDP pick bypasses the button. The refusal's command keeps
@@ -232,7 +275,6 @@ function RoomActions({ view, actions }) {
 function HostFileControls({ view, actions }) {
   const hostFile = useView(view, (snapshot) => snapshot.hostFile);
   const hostStatus = useView(view, (snapshot) => snapshot.hostStatus);
-  const barFaded = useView(view, (snapshot) => snapshot.bar.faded);
   const input = useRef(null);
   const player = document.getElementById('player');
   if (!player) return null;
@@ -258,8 +300,8 @@ function HostFileControls({ view, actions }) {
         />
         <div className="file-body">
           {preparing ? null : refused || failed
-            ? <TriangleAlert className="file-icon file-icon-warn" size={48} strokeWidth={1.75} aria-hidden="true" />
-            : <FileVideo className="file-icon" size={48} strokeWidth={1.75} aria-hidden="true" />}
+            ? <TriangleAlert className="file-icon file-icon-warn" size={72} strokeWidth={1.5} aria-hidden="true" />
+            : <FileVideo className="file-icon" size={72} strokeWidth={1.5} aria-hidden="true" />}
           <h2 className="file-title tabular">{preparing ? `${card.title} · ${percent}%` : card.title}</h2>
           {preparing ? <div
             className="file-progress"
@@ -291,7 +333,7 @@ function HostFileControls({ view, actions }) {
         </div>
       </div>
     </div>
-    {hostFile.notice ? <div className="file-hint" data-faded={barFaded ? 'true' : 'false'}>{KEYFRAME_HINT}</div> : null}
+    <KeyframeHint shown={Boolean(hostFile.notice)} />
   </>, player);
 }
 
@@ -440,6 +482,7 @@ export function RoomScreens({ view, actions }) {
     if (route === 'front') sawFront.current = true;
   }, [route]);
   const [theatre, setTheatre] = useState(readTheatre);
+  const inTheatre = useWide() && theatre;
   const toggleTheatre = () => {
     writeTheatre(!theatre);
     setTheatre(!theatre);
@@ -454,10 +497,17 @@ export function RoomScreens({ view, actions }) {
     <PlayerVisibility route={route} />
     <EndedMarker view={view} />
     <TheatreMarker theatre={theatre} />
-    <RoomHeader view={view} actions={actions} />
+    <RoomHeader view={view} actions={actions} theatre={inTheatre} />
     <NamePrompt fromFront={sawFront.current} />
-    <PlayerTop view={view}>{theatre ? <TheatreChips view={view} /> : null}</PlayerTop>
+    <PlayerTop
+      view={view}
+      chips={inTheatre ? <TheatreChips view={view} /> : null}
+      settings={inTheatre ? <SettingsMenu view={view} actions={actions} inPlayer /> : null}
+    />
     <HostFileControls view={view} actions={actions} />
+    <ViewerWait view={view} />
+    <EndedCard view={view} actions={actions} />
+    <ReconnectPill view={view} />
     <PlayerBar view={view} actions={actions} theatre={theatre} onTheatre={toggleTheatre} />
     <RoomActions view={view} actions={actions} />
     <StatsPanel view={view} />

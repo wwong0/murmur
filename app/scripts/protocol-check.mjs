@@ -235,6 +235,8 @@ import fileHelpSuite from './check/suites/file-help.mjs';
 import syncDotSuite from './check/suites/sync-dot.mjs';
 import roomPeopleSuite from './check/suites/room-people.mjs';
 import roomActivityEntrySuite from './check/suites/room-activity-entry.mjs';
+import roomWaitingEntrySuite from './check/suites/room-waiting-entry.mjs';
+import viewerWaitCardSuite from './check/suites/viewer-wait-card.mjs';
 import namePromptSuite from './check/suites/name-prompt.mjs';
 import touchRevealSuite from './check/suites/touch-reveal.mjs';
 import syncWordsSuite from './check/suites/sync-words.mjs';
@@ -452,6 +454,8 @@ for (const suite of [
   syncDotSuite,
   roomPeopleSuite,
   roomActivityEntrySuite,
+  roomWaitingEntrySuite,
+  viewerWaitCardSuite,
   namePromptSuite,
   touchRevealSuite,
   syncWordsSuite,

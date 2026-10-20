@@ -24,10 +24,18 @@ export default async function syncWordsSuite() {
     assertEqual(syncWords({ state: 'correcting', estimateMs: 1 })[0], 'Catching up', 'correcting');
   });
 
-  await check('sync-words: idle and an unknown state give no lines, whatever the figure', async () => {
-    assertEqual(json(syncWords({ state: 'idle', estimateMs: 12 })), '[]', 'idle with a figure');
-    assertEqual(json(syncWords({ state: 'idle', estimateMs: null })), '[]', 'idle without one');
-    assertEqual(json(syncWords({ state: 'later', estimateMs: 12 })), '[]', 'a state this module does not know');
+  await check('sync-words: idle says why it has no figure, by whether the video plays, whatever the estimate', async () => {
+    const paused = json(['Paused', 'Measured while the video plays']);
+    const measuring = json(['Measuring', 'No figure yet']);
+    assertEqual(json(syncWords({ state: 'idle', estimateMs: null, playing: false })), paused, 'paused, no figure');
+    assertEqual(json(syncWords({ state: 'idle', estimateMs: 12, playing: false })), paused, 'paused, a stale figure');
+    assertEqual(json(syncWords({ state: 'idle', estimateMs: null, playing: true })), measuring, 'playing, no figure yet');
+    assertEqual(json(syncWords({ state: 'idle', estimateMs: 12, playing: true })), measuring, 'playing, a figure the dot did not take');
+    assertEqual(json(syncWords({ state: 'idle' })), paused, 'idle with no playing flag is not playing');
+  });
+
+  await check('sync-words: an unknown state and no argument give no lines', async () => {
+    assertEqual(json(syncWords({ state: 'later', estimateMs: 12, playing: true })), '[]', 'a state this module does not know');
     assertEqual(json(syncWords()), '[]', 'no argument');
   });
 }
