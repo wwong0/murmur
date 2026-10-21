@@ -27,7 +27,7 @@ function defaultNow() {
 /**
  * @param {{video?: object, timeline: object, clock: {read: Function}, log: {add: Function},
  *   requestFrame?: (cb: Function) => any, cancelFrame?: (handle: any) => void,
- *   now?: () => number, timeOriginMs?: number}} config
+ *   now?: () => number, timeOriginMs?: number, placement?: () => number|null}} config
  */
 export function createFrameSampler(config) {
   const {
@@ -39,6 +39,7 @@ export function createFrameSampler(config) {
     cancelFrame = (handle) => video.cancelVideoFrameCallback(handle),
     now = defaultNow,
     timeOriginMs = performance.timeOrigin,
+    placement = () => 0,
   } = config;
 
   let running = false;
@@ -74,6 +75,7 @@ export function createFrameSampler(config) {
         localNowMs: now(),
         clock,
         timeline,
+        placementMs: placement(),
       })
     );
   }

@@ -58,7 +58,7 @@ const KIND_FIELDS = Object.freeze({
   },
   'play-settled': { outcome: 'string', errorName: 'string', settledAtLocalMs: 'number', settledSharedMs: 'number' },
   frame: {
-    paused: 'boolean', callbackNowMs: 'number', localNowMs: 'number', timeOriginMs: 'number', mediaTimeMs: 'number',
+    paused: 'boolean', callbackNowMs: 'number', localNowMs: 'number', timeOriginMs: 'number', mediaTimeMs: 'number', placementMs: 'number',
     presentedFrames: 'number', presentationTimeMs: 'number', expectedDisplayTimeMs: 'number',
     processingDurationMs: 'number', commandedRate: 'number', width: 'number', height: 'number',
   },
@@ -175,7 +175,7 @@ const toMs = (seconds) => (Number.isFinite(seconds) ? seconds * 1000 : seconds);
  * D11's population cannot move (executor-spec.md R18).
  *
  * @param {{video?: object, telemetry: object, context?: () => object|null, now?: () => number,
- *   timeOriginMs?: number, paused?: () => boolean, commandedRate?: () => number,
+ *   timeOriginMs?: number, placement?: () => number|null, paused?: () => boolean, commandedRate?: () => number,
  *   requestFrame?: (cb: Function) => any, cancelFrame?: (handle: any) => void}} config
  */
 export function createFrameObserver(config) {
@@ -185,6 +185,7 @@ export function createFrameObserver(config) {
     context = () => null,
     now = defaultNow,
     timeOriginMs = performance.timeOrigin,
+    placement = () => 0,
     paused = () => video.paused,
     commandedRate = () => video.playbackRate,
     requestFrame = (callback) => video.requestVideoFrameCallback(callback),
@@ -210,6 +211,7 @@ export function createFrameObserver(config) {
     // derived from it.
     const wasPaused = paused();
     const rate = commandedRate();
+    const placementMs = placement();
     arm(mine);
     telemetry.record('frame', {
       paused: wasPaused,
@@ -218,7 +220,8 @@ export function createFrameObserver(config) {
       timeOriginMs,
       // The seconds-to-milliseconds conversion happens once, here, so every
       // consumer downstream reads one unit.
-      mediaTimeMs: toMs(metadata?.mediaTime),
+      mediaTimeMs: Number.isFinite(placementMs) ? toMs(metadata?.mediaTime) - placementMs : null,
+      placementMs,
       presentedFrames: metadata?.presentedFrames,
       presentationTimeMs: metadata?.presentationTime,
       expectedDisplayTimeMs: metadata?.expectedDisplayTime,

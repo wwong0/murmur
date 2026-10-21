@@ -10,6 +10,7 @@ import { distanceBehindRows } from './distance-behind.mjs';
 import { rosterEventReading } from './roster-event.mjs';
 import { aheadForGood, doubleStalls } from './ahead-for-good.mjs';
 import { riseRecovery } from './rise-recovery.mjs';
+import { settledDrift } from './settled-drift.mjs';
 import { removesMember } from '../harness/roster-kinds.mjs';
 
 export const PEER_FRACTION_ABS_MAX = 0.02;
@@ -48,6 +49,11 @@ export function computeHarnessFigureKinds(input = {}) {
       drift: byClient('records'), polls: { ...input.viewerPolls, host: input.hostPoll }, tags,
       fromMs: ahead.readySharedMs ?? -Infinity, toMs: ahead.endSharedMs ?? Infinity,
       aheadForGoodAtSharedMs: ahead.aheadForGoodAtSharedMs }) };
+  }
+  if (kinds.includes('settled-drift')) {
+    result.settledDrift = settledDrift({ tags: input.declaredClientTags ?? Object.keys(clients), window: input.window,
+      timebase: input.timebase, drift: byClient('records'), pagePolls: byClient('polls'), hostPoll: input.hostPoll,
+      gapMs: input.condition?.churn?.stall?.gapMs ?? 250 });
   }
   if (kinds.includes('distance-behind')) {
     // No recovered instant: a viewer with no drift stream is why, and is named.

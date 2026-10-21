@@ -128,6 +128,7 @@ export default async function driftControllerSuite() {
         localNowMs: displayLocalMs,
         clock,
         timeline,
+        placementMs: 0,
       }));
       localNowMs += 20;
     }

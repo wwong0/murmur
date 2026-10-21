@@ -2331,6 +2331,87 @@
         "recordAfterRiseMs": 75000,
         "riseOn": "first-fetcher-edge"
       }
+    },
+    "12c2-qual-healthy": {
+      "name": "shakedown/12c2-qual-healthy",
+      "delivery": "host",
+      "publishes": true,
+      "clients": 5,
+      "capacityMbps": 10,
+      "qdiscs": [
+        {
+          "container": "origin",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": {
+            "rate": "10mbit",
+            "burst": "32kbit",
+            "latency": "400ms"
+          }
+        },
+        {
+          "container": "client",
+          "network": "wa-media",
+          "interface": "<resolved at runtime>",
+          "direction": "egress",
+          "discipline": "tbf",
+          "order": 1,
+          "params": {
+            "rate": "10mbit",
+            "burst": "32kbit",
+            "latency": "400ms"
+          }
+        }
+      ],
+      "backgroundLoadMbps": null,
+      "runLengthMs": 360000,
+      "excludedPrefixMs": 180000,
+      "measureWindowMs": 180000,
+      "content": {
+        "dir": "/media",
+        "identity": "v1:083885c3b6233f68e794778b3a9dd7de1c13d1406c1158f05101646970925dba",
+        "targetSeconds": 2,
+        "hostDir": ".tmp/11a2-content/2s"
+      },
+      "bars": {
+        "recordCoverageMin": 0.95,
+        "droppedFrameFractionMax": 0.02,
+        "driftLogMissedMax": 0,
+        "responseCutShortMaxBytes": 1129000,
+        "responseSettleGapMs": 3000,
+        "conservationChannelBytes": 131071,
+        "conservationRelativeMax": 0.05,
+        "conservationDeliveryGapMs": 3000,
+        "steadyUtilisationMax": 0.9,
+        "steadyDownloadRatioMin": 0.95,
+        "steadyDownloadRatioMax": 1.25,
+        "steadyRealtimeMin": 0.98,
+        "steadyCapUsedMax": 0.9
+      },
+      "peerExchange": true,
+      "positionOffsetMsByClient": {
+        "c01": 0,
+        "c02": 0,
+        "c03": 0,
+        "c04": 0,
+        "c05": 0
+      },
+      "figureKinds": [
+        "byte",
+        "drift",
+        "ahead-for-good",
+        "settled-drift"
+      ],
+      "criterion": {
+        "statistic": "median",
+        "targetMs": 40
+      },
+      "excusals": {
+        "bytelessCancelledReceipt": true
+      }
     }
   },
   "hostorigin-nop2p": {
@@ -6859,6 +6940,87 @@
       },
       "recordAfterRiseMs": 120000,
       "riseOn": "first-fetcher-edge"
+    }
+  },
+  "12c2-healthy-2s": {
+    "name": "12c2-healthy-2s",
+    "delivery": "host",
+    "publishes": true,
+    "clients": 5,
+    "capacityMbps": 10,
+    "qdiscs": [
+      {
+        "container": "origin",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      },
+      {
+        "container": "client",
+        "network": "wa-media",
+        "interface": "<resolved at runtime>",
+        "direction": "egress",
+        "discipline": "tbf",
+        "order": 1,
+        "params": {
+          "rate": "10mbit",
+          "burst": "32kbit",
+          "latency": "400ms"
+        }
+      }
+    ],
+    "backgroundLoadMbps": null,
+    "runLengthMs": 360000,
+    "excludedPrefixMs": 180000,
+    "measureWindowMs": 180000,
+    "content": {
+      "dir": "/media",
+      "identity": "v1:083885c3b6233f68e794778b3a9dd7de1c13d1406c1158f05101646970925dba",
+      "targetSeconds": 2,
+      "hostDir": ".tmp/11a2-content/2s"
+    },
+    "bars": {
+      "recordCoverageMin": 0.95,
+      "droppedFrameFractionMax": 0.02,
+      "driftLogMissedMax": 0,
+      "responseCutShortMaxBytes": 1129000,
+      "responseSettleGapMs": 3000,
+      "conservationChannelBytes": 131071,
+      "conservationRelativeMax": 0.05,
+      "conservationDeliveryGapMs": 3000,
+      "steadyUtilisationMax": 0.9,
+      "steadyDownloadRatioMin": 0.95,
+      "steadyDownloadRatioMax": 1.25,
+      "steadyRealtimeMin": 0.98,
+      "steadyCapUsedMax": 0.9
+    },
+    "peerExchange": true,
+    "positionOffsetMsByClient": {
+      "c01": 0,
+      "c02": 0,
+      "c03": 0,
+      "c04": 0,
+      "c05": 0
+    },
+    "figureKinds": [
+      "byte",
+      "drift",
+      "ahead-for-good",
+      "settled-drift"
+    ],
+    "criterion": {
+      "statistic": "median",
+      "targetMs": 40
+    },
+    "excusals": {
+      "bytelessCancelledReceipt": true
     }
   }
 }

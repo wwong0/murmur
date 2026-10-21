@@ -29,7 +29,7 @@ import {
   chooseSegments,
   exitCode,
   F10_ROWS, f10Disabled, f10Enables, f10Prepares,
-  s0, s1, s2, s3, s4, s5, s6, s7a, s7f, s7b, s7c, s7d, s7e, s8, s9, s10, s11, s12, s13,
+  s0, s1, s2, s3, s4, s5, s6, s7a, s7g, s7f, s7b, s7c, s7d, s7e, s8, s9, s10, s11, s12, s13,
 } from './host-file-steps.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -599,6 +599,37 @@ async function runPass(options) {
         const after = await shown(mark, target - 1.5 * frame, target + 1.5 * frame);
         const seg = (index) => `/media/${segmentName(index)}`;
         return s7a({ position: fromSeconds, target, frame, afterWallTime: mark, frames: framesAfter(viewer, mark), longFile: choice.longFile, segment: choice.j, targetPath: seg(choice.j), previousPath: seg(choice.j - 1), requestsBefore, requestsAfter: linkOf(after)?.requestsByPath, element: after.element ?? null });
+      });
+      await step('S7g', 'two loads report one frame at one media time', async () => {
+        if (!passed(r2)) return s7g({ precondition: false });
+        await setPlaying(false);
+        const { mark } = await seekTo(3.0);
+        await shown(mark, 3.0 - 1.5 * frame, 3.0 + 1.5 * frame);
+        const v2 = await open('g2', 'viewer', room);
+        try {
+          const opens = (page) => page.tab.evaluate('window.__app?.playback?.().opens ?? 0').catch(() => 0);
+          await poll(async () => (await read(v2)).notices?.some((notice) => /playback opened at/.test(notice)) && (await opens(v2)) >= 1, (done) => done, 30_000);
+          // v2 shows the paused room's frame before the room plays, or there is no mid-title load to compare.
+          await until(v2, () => hasFrame(v2.frames, 3.0 - 1.5 * frame, 3.0 + 1.5 * frame), 30_000);
+          if (!hasFrame(v2.frames, 3.0 - 1.5 * frame, 3.0 + 1.5 * frame)) {
+            throw new Error(`v2 showed no frame within 1.5 frames of 3.0 s before play; its frames: ${JSON.stringify(v2.frames.slice(0, 6).map((f) => f.mediaTime))}`);
+          }
+          await setPlaying(true);
+          const reached = (page) => poll(() => page.tab.evaluate('window.__app.drift(0).records.some((record) => record.mediaMs >= 5600)').catch(() => false), (done) => done, 30_000);
+          await reached(viewer);
+          await reached(v2);
+          await setPlaying(false);
+          const reading = async (page) => ({
+            records: await page.tab.evaluate('window.__app.drift(0).records.map((record) => ({ mediaMs: record.mediaMs }))'),
+            placement: await page.tab.evaluate('window.__app.placement?.() ?? null'),
+            opens: await opens(page),
+            notices: (await read(page)).notices ?? [],
+          });
+          return s7g({ frame, viewer: await reading(viewer), v2: await reading(v2) });
+        } finally {
+          await v2.tab.send('Page.close').catch(() => {});
+          await poll(async () => (await cdpHttp(chromePort, '/json/list')).some((target) => target.id === v2.tab.targetId), (open) => !open, 10_000);
+        }
       });
       await step('S7f', "seek to a segment's first presented frame", async () => {
         if (!passed(r2) || !choice) return s7f({ precondition: false });

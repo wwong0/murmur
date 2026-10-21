@@ -79,6 +79,7 @@ export function plant({
       localNowMs: displayLocalMs - DEFAULT_CALLBACK_LEAD_MS,
       clock,
       timeline,
+      placementMs: 0,
     }));
     frameIndex += 1;
     if (frameIndex % pollEvery === 0) history.push(controller.poll());
@@ -130,6 +131,7 @@ export function recordRig({ settings = {}, offsetMs = 0, halfWidthMs = 4 } = {})
       localNowMs: displayLocalMs - DEFAULT_CALLBACK_LEAD_MS,
       clock,
       timeline,
+      placementMs: 0,
     });
     log.add(outcome);
     localNowMs += 20;

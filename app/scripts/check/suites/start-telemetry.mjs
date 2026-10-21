@@ -118,7 +118,7 @@ export default async function startTelemetrySuite() {
     // R6: the pair differs in exactly the two fields under test.
     assertEqual(json(Object.keys(complete).filter((key) => json(complete[key]) !== json(broken[key]))), json(['presentationTime', 'processingDuration']), 'the fixture pair differs in two keys');
     const fields = (source) => ({
-      paused: false, callbackNowMs: 4000, localNowMs: 4001, timeOriginMs: 1_756_000_000_000, commandedRate: 1,
+      paused: false, callbackNowMs: 4000, localNowMs: 4001, timeOriginMs: 1_756_000_000_000, commandedRate: 1, placementMs: 0,
       mediaTimeMs: Number.isFinite(source.mediaTime) ? source.mediaTime * 1000 : source.mediaTime,
       presentedFrames: source.presentedFrames, presentationTimeMs: source.presentationTime,
       expectedDisplayTimeMs: source.expectedDisplayTime,

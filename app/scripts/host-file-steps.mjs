@@ -306,6 +306,68 @@ export function s7f(reading) {
   return verdict(reasons.length ? 'fail' : 'pass', reading, reasons.length ? reasons : ['the seek loaded the target segment and showed its first presented frame']);
 }
 
+const OPENING = /playback opened at (\d+(?:\.\d+)?)s/;
+const S7G_LOWER_MS = 4000;
+const S7G_UPPER_MS = 5600;
+const S7G_MIN_RECORDS = 12;
+const S7G_GRID_TOLERANCE_MS = 1;
+
+function openingSeconds(notices) {
+  for (const notice of notices) {
+    const match = OPENING.exec(notice);
+    if (match) return Number(match[1]);
+  }
+  return null;
+}
+
+function gridReading(records, frameMs) {
+  const inRange = records.map((record) => record?.mediaMs).filter((ms) => finite(ms) && ms >= S7G_LOWER_MS && ms <= S7G_UPPER_MS);
+  const read = inRange.map((mediaMs) => {
+    const k = Math.round(mediaMs / frameMs);
+    return { k, mediaMs, off: Math.abs(mediaMs - k * frameMs) };
+  });
+  return { read, maxOff: read.reduce((most, entry) => Math.max(most, entry.off), 0) };
+}
+
+export function s7g(reading) {
+  const early = precondition(reading);
+  if (early) return early;
+  const pages = { viewer: reading.viewer, v2: reading.v2 };
+  if (!finitePositive(reading.frame) || !Object.values(pages).every((page) => object(page) && Array.isArray(page.records) && noticesShape(page.notices))) return missing(reading);
+  const viewerOpening = openingSeconds(pages.viewer.notices);
+  const v2Opening = openingSeconds(pages.v2.notices);
+  if (viewerOpening !== 0 || pages.viewer.opens !== 1 || v2Opening === null || v2Opening < 2) {
+    const quoted = (page) => JSON.stringify(page.notices.slice(-6));
+    return missing(reading, `the loads did not open at 0 and mid-title: viewer opens ${pages.viewer.opens}, opening ${viewerOpening}, notices ${quoted(pages.viewer)}; v2 opening ${v2Opening}, notices ${quoted(pages.v2)}`);
+  }
+  const frameMs = reading.frame * 1000;
+  const grid = { viewer: gridReading(pages.viewer.records, frameMs), v2: gridReading(pages.v2.records, frameMs) };
+  const reasons = [];
+  for (const [name, one] of Object.entries(grid)) {
+    if (one.read.length < S7G_MIN_RECORDS) reasons.push(`${name} has ${one.read.length} records between ${S7G_LOWER_MS} and ${S7G_UPPER_MS} ms, fewer than ${S7G_MIN_RECORDS}`);
+    const off = one.read.filter((entry) => entry.off > S7G_GRID_TOLERANCE_MS);
+    if (off.length > 0) {
+      reasons.push(`${name} has ${off.length} record(s) off the frame grid by more than ${S7G_GRID_TOLERANCE_MS} ms, the first three: ${off.slice(0, 3).map((entry) => `${entry.mediaMs} ms (off ${entry.off.toFixed(3)})`).join(', ')}`);
+    }
+  }
+  const viewerKs = new Set(grid.viewer.read.map((entry) => entry.k));
+  const common = [...new Set(grid.v2.read.map((entry) => entry.k))].filter((k) => viewerKs.has(k)).sort((a, b) => a - b);
+  const k = common.includes(125) ? 125 : common[0] ?? null;
+  const at = (one) => one.read.find((entry) => entry.k === k)?.mediaMs ?? null;
+  const frameMediaMs = k === null ? null : { viewer: at(grid.viewer), v2: at(grid.v2) };
+  if (k === null) reasons.push('the two pages share no frame in the range');
+  else if (Object.values(frameMediaMs).some((ms) => Math.abs(ms - k * frameMs) > S7G_GRID_TOLERANCE_MS)) reasons.push(`the common frame ${k} is not at ${k * frameMs} ms on both pages: ${JSON.stringify(frameMediaMs)}`);
+  const observed = {
+    maxOffMs: { viewer: grid.viewer.maxOff, v2: grid.v2.maxOff },
+    commonK: k,
+    commonFrameMediaMs: frameMediaMs,
+    placementMs: { viewer: pages.viewer.placement?.placementMs ?? null, v2: pages.v2.placement?.placementMs ?? null },
+    openingSeconds: { viewer: viewerOpening, v2: v2Opening },
+    records: { viewer: grid.viewer.read.length, v2: grid.v2.read.length },
+  };
+  return verdict(reasons.length ? 'fail' : 'pass', observed, reasons.length ? reasons : ['both loads report one frame at one media time']);
+}
+
 export function s7b(reading) {
   const early = precondition(reading);
   if (early) return early;

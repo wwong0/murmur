@@ -80,6 +80,7 @@ function derive(frame, { timeline = timelineAt(), clock = createFakeClock(), ...
       localNowMs: frame.localNowMs,
       clock,
       timeline,
+      placementMs: 0,
       ...rest,
     }),
   };
@@ -253,6 +254,7 @@ export default async function driftSuite() {
       localNowMs: fake.frames[0].nowLocalMs,
       clock: createFakeClock(),
       timeline: timelineAt(fake.epochMs),
+      placementMs: 0,
     });
     assertEqual(domainError.ok, false, `${fake.describe()}: an epoch-domain display timestamp produces no record`);
     assertEqual(domainError.reason, 'displayTimeForeign', 'and is refused as what it is');

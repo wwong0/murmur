@@ -12,6 +12,7 @@
 
 import Hls from 'hls.js';
 import { HlsJsP2PEngine } from 'p2p-media-loader-hlsjs';
+import { createPlacementTracker } from './fmp4-placement.mjs';
 
 const DEFAULT_SRC = '/media/master.m3u8';
 const HlsP2P = HlsJsP2PEngine.injectMixin(Hls);
@@ -43,6 +44,7 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientT
   const finished = new Map();
   let last = null;
   let hls = null;
+  const tracker = createPlacementTracker();
 
   function emitError(detail) {
     for (const fn of errorHandlers) {
@@ -65,11 +67,13 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientT
     const startPosition = Number.isFinite(startPositionMs) ? startPositionMs / 1000 : -1;
     finished.clear();
     last = null;
+    tracker.reset();
     if (hls) {
       hls.destroy();
       hls = null;
     }
     if (Hls.isSupported()) {
+      if (Number.isFinite(startPositionMs)) tracker.noteWrite(startPositionMs);
       // `startPosition` LAST. It is this call's argument, chosen by the load
       // rule; `hlsConfig` is construction-time config, and letting it silently
       // win would put playback somewhere no decision named.
@@ -85,8 +89,14 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientT
         } : {}),
       });
       hls = instance;
+      instance.on(Hls.Events.BUFFER_APPENDING, (_event, data) => {
+        if (hls !== instance) return;
+        tracker.onAppend({ data: data?.data, offset: data?.offset, playlistOffsetS: data?.frag?.playlistOffset, parent: data?.parent });
+      });
       instance.on(Hls.Events.FRAG_BUFFERED, (_event, data) => {
         if (hls !== instance) return;
+        const write = tracker.takePendingWrite();
+        if (write && video.paused) video.currentTime = write.elementSeconds;
         const frag = data?.frag;
         if (frag?.type !== 'main' || !Number.isFinite(frag.sn)
           || !Number.isFinite(frag.start) || !Number.isFinite(frag.end)) return;
@@ -133,6 +143,7 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientT
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       // A media fragment, not a seek — the position is part of the source the
       // element is given, the same way `startPosition` is for hls.js.
+      tracker.none();
       video.src = startPosition >= 0 ? `${src}#t=${startPosition}` : src;
     } else {
       emitError({ fatal: true, type: 'unsupported', details: 'neither hls.js nor native HLS is supported' });
@@ -151,12 +162,13 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientT
   function park(positionMs) {
     if (!video.paused) throw new Error('player.park requires a paused element');
     if (!Number.isFinite(positionMs) || positionMs < 0) throw new TypeError('player.park requires a non-negative position');
-    video.currentTime = positionMs / 1000;
+    video.currentTime = tracker.elementSeconds(positionMs);
   }
 
   return {
     load,
     park,
+    placement: () => tracker.snapshot(),
     destroy,
     finishedSegments() {
       if (!Hls.isSupported()) return null;

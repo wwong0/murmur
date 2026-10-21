@@ -54,10 +54,10 @@ const FIXTURE = Object.freeze({
 });
 const RECORD_CLOCK = { offsetMs: 500, halfWidthMs: 7, delayTermMs: 4, ageTermMs: 3, sampleCount: 8 };
 const EXPECTED_RECORDS = [
-  { seq: 1, epochMs: 1_700_000_000_700, mediaMs: 500, displaySharedMs: 1_700_000_001_400, scheduledMediaMs: 700, driftMs: -200, presentedFrames: 101, clock: RECORD_CLOCK },
-  { seq: 2, epochMs: 1_700_000_000_700, mediaMs: 625, displaySharedMs: 1_700_000_001_500, scheduledMediaMs: 800, driftMs: -175, presentedFrames: 102 },
-  { seq: 3, epochMs: 1_700_000_000_700, mediaMs: 750, displaySharedMs: 1_700_000_001_600, scheduledMediaMs: 900, driftMs: -150, presentedFrames: 103 },
-  { seq: 4, epochMs: 1_700_000_000_700, mediaMs: 875, displaySharedMs: 1_700_000_001_700, scheduledMediaMs: 1000, driftMs: -125, presentedFrames: 104 },
+  { seq: 1, epochMs: 1_700_000_000_700, mediaMs: 500, placementMs: 0, displaySharedMs: 1_700_000_001_400, scheduledMediaMs: 700, driftMs: -200, presentedFrames: 101, clock: RECORD_CLOCK },
+  { seq: 2, epochMs: 1_700_000_000_700, mediaMs: 625, placementMs: 0, displaySharedMs: 1_700_000_001_500, scheduledMediaMs: 800, driftMs: -175, presentedFrames: 102 },
+  { seq: 3, epochMs: 1_700_000_000_700, mediaMs: 750, placementMs: 0, displaySharedMs: 1_700_000_001_600, scheduledMediaMs: 900, driftMs: -150, presentedFrames: 103 },
+  { seq: 4, epochMs: 1_700_000_000_700, mediaMs: 875, placementMs: 0, displaySharedMs: 1_700_000_001_700, scheduledMediaMs: 1000, driftMs: -125, presentedFrames: 104 },
 ].map((record) => ({ ...record, clock: RECORD_CLOCK }));
 
 function runScriptedFrames(product, { startTiming }) {

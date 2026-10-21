@@ -433,6 +433,7 @@ export function decideFinalization({ evaluation, recomputed, figureKinds, failur
     ...(hasKinds && figureKinds.includes('roster-event') ? { writeRosterEvent: Array.isArray(recomputed?.rosterEvent) } : {}),
     ...(hasKinds && figureKinds.includes('distance-behind') ? { writeDistanceBehind: Boolean(recomputed?.distanceBehind) } : {}),
     ...(hasKinds && figureKinds.includes('rise-recovery') ? { writeRiseRecovery: Boolean(recomputed?.riseRecovery) } : {}),
+    ...(hasKinds && figureKinds.includes('settled-drift') ? { writeSettledDrift: Boolean(recomputed?.settledDrift) } : {}),
   };
   if (evaluation?.runRefused) return { status: 'refused', outcome: 'refused', exitCode: 1, ...writes, reason: 'run-refusal' };
   return { status: 'complete', outcome: 'pass', exitCode: 0, ...writes, reason: evaluation?.refused ? 'publication-refusal' : 'published' };
@@ -440,7 +441,7 @@ export function decideFinalization({ evaluation, recomputed, figureKinds, failur
 
 function clearPublishedOutputs(runDir) {
   for (const name of ['published-figures.json', 'bytes-by-client.csv', 'utilisation.csv', 'published-drift.json', 'drift-series.csv', 'drift.svg', 'published-behind.json',
-    'published-roster-event.json', 'published-distance-behind.json', 'published-rise-recovery.json']) {
+    'published-roster-event.json', 'published-distance-behind.json', 'published-rise-recovery.json', 'published-settled-drift.json']) {
     fs.rmSync(path.join(runDir, name), { force: true });
   }
 }
@@ -474,6 +475,7 @@ export function settleFinalization({ decision, manifestFile, runDir, recomputed,
     if (decision.writeRosterEvent) outputs.push(['published-roster-event.json', `${JSON.stringify(recomputed.rosterEvent, null, 2)}\n`]);
     if (decision.writeDistanceBehind) outputs.push(['published-distance-behind.json', `${JSON.stringify(recomputed.distanceBehind, null, 2)}\n`]);
     if (decision.writeRiseRecovery) outputs.push(['published-rise-recovery.json', `${JSON.stringify(recomputed.riseRecovery, null, 2)}\n`]);
+    if (decision.writeSettledDrift) outputs.push(['published-settled-drift.json', `${JSON.stringify(recomputed.settledDrift, null, 2)}\n`]);
     for (const [name, contents] of outputs) {
       const tempPath = path.join(runDir, `.${name}.${crypto.randomUUID()}.tmp`);
       temporary.push(tempPath);
@@ -487,6 +489,7 @@ export function settleFinalization({ decision, manifestFile, runDir, recomputed,
     if (decision.writeRosterEvent) figures.rosterEvent = recomputed.rosterEvent;
     if (decision.writeDistanceBehind) figures.distanceBehind = recomputed.distanceBehind;
     if (decision.writeRiseRecovery) figures.riseRecovery = recomputed.riseRecovery;
+    if (decision.writeSettledDrift) figures.settledDrift = recomputed.settledDrift;
     manifestFile.merge({
       status: decision.status,
       outcome: decision.outcome,

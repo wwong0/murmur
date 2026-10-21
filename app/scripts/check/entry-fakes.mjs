@@ -46,6 +46,7 @@ export function createPlayer({ video }) {
   harness().log('player-created');
   return {
     onError() {},
+    placement() { return { placementMs: 0, source: 'none', disagreements: 0, lastDisagreementMs: null }; },
     finishedSegments() { return harness().finished; },
     lastSegment() { return harness().last ?? null; },
     onFinished(fn) {

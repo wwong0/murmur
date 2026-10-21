@@ -35,6 +35,7 @@ export const REFUSAL_REASONS = Object.freeze([
   'displayTimeForeign',
   'noClock',
   'noEpoch',
+  'placementPending',
 ]);
 
 // The only way to build a refusal: an unlisted reason is `undefined` here and
@@ -61,9 +62,12 @@ const REFUSED = Object.freeze(
  *   clock: {read: (atMs: number) => object}, timeline: {mediaMsAt: Function, epochMsAt: Function},
  *   displayWindowMs?: number}} input
  */
-export function deriveDriftRecord({ metadata, timeOriginMs, localNowMs, clock, timeline, displayWindowMs = DISPLAY_WINDOW_MS }) {
+export function deriveDriftRecord({ metadata, timeOriginMs, localNowMs, clock, timeline, placementMs, displayWindowMs = DISPLAY_WINDOW_MS }) {
   const mediaTime = metadata ? metadata.mediaTime : undefined;
   if (!Number.isFinite(mediaTime)) return REFUSED.mediaTimeNotFinite;
+  // Element time is not media time until the load's placement is known. This
+  // counter reads zero in the product: no frame precedes the first append.
+  if (!Number.isFinite(placementMs)) return REFUSED.placementPending;
 
   const expectedDisplayTime = metadata.expectedDisplayTime;
   if (!Number.isFinite(expectedDisplayTime) || !Number.isFinite(timeOriginMs)) return REFUSED.displayTimeNotFinite;
@@ -88,7 +92,7 @@ export function deriveDriftRecord({ metadata, timeOriginMs, localNowMs, clock, t
   const epochMs = timeline.epochMsAt(displaySharedMs);
   if (scheduledMediaMs === null || !Number.isFinite(epochMs)) return REFUSED.noEpoch;
 
-  const mediaMs = mediaTime * 1000;
+  const mediaMs = mediaTime * 1000 - placementMs;
   return {
     ok: true,
     record: {
@@ -96,6 +100,7 @@ export function deriveDriftRecord({ metadata, timeOriginMs, localNowMs, clock, t
       // epochs is meaningless, and D1's remaining hole makes that reachable.
       epochMs,
       mediaMs,
+      placementMs,
       displaySharedMs,
       // The timeline's answer, not the arithmetic behind it — change 5 replaces
       // the implementation without touching the record.

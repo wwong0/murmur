@@ -238,6 +238,7 @@ export function runMechanismCase(config, { createController = createDriftControl
       localNowMs: spec.timeOriginMs + elapsedMs,
       clock,
       timeline,
+      placementMs: 0,
     });
     if (!outcome.ok) counters.recordsRefused += 1;
     const record = log.add(outcome);

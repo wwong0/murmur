@@ -175,7 +175,7 @@ const url = `${wsScheme}//${window.location.host}/ws`;
 // ---------------------------------------------------------------------------
 
 const video = document.getElementById('video');
-let elementPositionMs = null;
+let elementMediaMs = null;
 
 const INITIAL_VIEW = {
   status: 'unknown',
@@ -348,7 +348,7 @@ function urgentRequestFor(path) {
       control: controlInForce().control,
       state: viewState(),
       sharedMs: nowSharedMs,
-      elementMs: elementPositionMs,
+      elementMs: elementMediaMs,
     });
     const nearMs = (engineWindows.windows?.highDemandTimeWindow
       ?? PRODUCT_ENGINE_WINDOWS.highDemandTimeWindow) * 1000;
@@ -806,7 +806,7 @@ function updateHeldAhead() {
     control: controlInForce().control,
     state,
     sharedMs,
-    elementMs: elementPositionMs,
+    elementMs: elementMediaMs,
   });
   const ownHeldAhead = Number.isFinite(ownPosition)
     ? heldAheadMs({ positionMs: ownPosition, segments })
@@ -887,12 +887,12 @@ function updateUrgentContext() {
   const nowSharedMs = clockSync.sharedNow();
   const roomMediaMs = Number.isFinite(nowSharedMs) ? timeline.mediaMsAt(nowSharedMs) : null;
   if (!Number.isFinite(roomMediaMs)) return;
-  if (elementPositionMs !== null) elementPositionMs = video.currentTime * 1000;
+  if (elementMediaMs !== null) elementMediaMs = mediaFromElementMs(video.currentTime * 1000);
   const ownMediaMs = ownPositionMs({
     control: controlInForce().control,
     state: viewState(),
     sharedMs: nowSharedMs,
-    elementMs: elementPositionMs,
+    elementMs: elementMediaMs,
   });
   const current = acquisition.state?.current;
   const held = current?.held === true;
@@ -921,6 +921,21 @@ function controlsReady(kind) {
 // The title's end, as the playlist gives it; null until the last segment is known.
 function titleEndMs() {
   return player.lastSegment()?.mediaEndMs ?? null;
+}
+
+// Where the load's media time sits on the element's timeline, in ms; null while unknown.
+function placementMs() {
+  return player.placement().placementMs;
+}
+
+function mediaFromElementMs(ms) {
+  const p = placementMs();
+  return Number.isFinite(p) && Number.isFinite(ms) ? ms - p : null;
+}
+
+function mediaDurationS() {
+  const p = placementMs();
+  return Number.isFinite(p) && Number.isFinite(video.duration) ? video.duration - p / 1000 : NaN;
 }
 
 function titleEnded() {
@@ -1102,14 +1117,14 @@ renderMute();
 const driftLog = createDriftLog();
 // The video element carries its own `requestVideoFrameCallback`; the sampler's
 // default binding calls it on the element it was handed.
-const sampler = createFrameSampler({ video, timeline, clock: clockSync, log: driftLog });
+const sampler = createFrameSampler({ video, timeline, clock: clockSync, log: driftLog, placement: placementMs });
 
 // A second observer on the same frames, never stopped, so the frame the park
 // presented is identifiable too. It holds no log and no timeline: the product
 // sampler above is untouched, and the two streams join offline on
 // `presentedFrames` (executor-spec.md §11.1).
 const frameObserver = startTiming
-  ? createFrameObserver({ video, telemetry, context: telemetryContext, now: pageNow })
+  ? createFrameObserver({ video, telemetry, context: telemetryContext, now: pageNow, placement: placementMs })
   : null;
 frameObserver?.start();
 
@@ -1225,7 +1240,7 @@ for (const type of ['canplay', 'canplaythrough', 'seeked']) {
 for (const type of ['timeupdate', 'seeking']) {
   video.addEventListener(type, () => runTickSteps([
     ['element-position', () => {
-      elementPositionMs = video.currentTime * 1000;
+      elementMediaMs = mediaFromElementMs(video.currentTime * 1000);
       updateUrgentContext();
     }],
   ], reportStep));
@@ -1350,7 +1365,7 @@ function execute(result) {
       readiness = { attemptId: action.attemptId, needsSeeked: action.kind === 'park', prerequisiteSeen: false };
       recordAction(action, { startAtSharedMs: result.startAtSharedMs, seamEpochMs: epochMs }, () => {
         if (action.kind === 'load') {
-          elementPositionMs = null;
+          elementMediaMs = null;
           const p2p = roomHasPeerExchange && client.role !== 'host'
             ? {
                 core: peerEngineConfig({
@@ -1504,7 +1519,7 @@ function tickPlayback() {
     ['title-end', () => {
       const state = acquisition.state;
       // D7, joint D1 F1: the element's own end, or it parks short of it and never ends.
-      const durationMs = endPauseMs(titleEndMs(), video.duration);
+      const durationMs = endPauseMs(titleEndMs(), mediaDurationS());
       const instant = endInstant(state, durationMs);
       const nowSharedMs = clockSync.sharedNow();
       if (instant === null || !Number.isFinite(nowSharedMs) || nowSharedMs < instant
@@ -1569,6 +1584,7 @@ window.__app = {
   // `start.state()`, so a key of the same name there would be silently
   // overwritten by this one rather than colliding visibly.
   controller: controllerView,
+  placement: () => player.placement(),
   // Measurement instrumentation, inert without `startTiming=1` (§11.2).
   startTiming: (afterSeq = 0) => startTimingWithOffset(afterSeq),
   pitch: () => treatment.pitch(),
@@ -1602,6 +1618,7 @@ window.__app = {
     ...start.state(),
     lastSkipAtSharedMs,
     lastSkipAbandonedMs,
+    placementMs: placementMs(),
     callbacks: sampler.callbacks,
     sampling: sampler.running,
     seams: controller.seams,

@@ -102,6 +102,7 @@ export default async function positionOffsetSuite() {
       timeOriginMs: fake.timeOriginMs,
       localNowMs: frame.nowLocalMs,
       clock: createFakeClock(),
+      placementMs: 0,
     };
     const viewRecord = deriveDriftRecord({ ...input, timeline: viewTimeline });
     const roomRecord = deriveDriftRecord({ ...input, timeline: roomTimeline });

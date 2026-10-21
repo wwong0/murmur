@@ -127,6 +127,9 @@ import riseRecoverySuite from './check/suites/rise-recovery.mjs';
 import leaveArmSuite from './check/suites/leave-arm.mjs';
 import leaveRecoveryReadingSuite from './check/suites/leave-recovery-reading.mjs';
 import leaveRecoveryConditionsSuite from './check/suites/leave-recovery-conditions.mjs';
+import settledDriftSuite from './check/suites/settled-drift.mjs';
+import timelineOffsetConditionsSuite from './check/suites/timeline-offset-conditions.mjs';
+import healthyRoomReadingSuite from './check/suites/healthy-room-reading.mjs';
 import echoDelaySuite from './check/suites/echo-delay.mjs';
 import harnessJoinOrderSuite from './check/suites/harness-join-order.mjs';
 import qualificationEarlySuite from './check/suites/qualification-early.mjs';
@@ -248,6 +251,10 @@ import viewerWaitCardSuite from './check/suites/viewer-wait-card.mjs';
 import namePromptSuite from './check/suites/name-prompt.mjs';
 import touchRevealSuite from './check/suites/touch-reveal.mjs';
 import syncWordsSuite from './check/suites/sync-words.mjs';
+import fmp4PlacementSuite from './check/suites/fmp4-placement.mjs';
+import driftPlacementSuite from './check/suites/drift-placement.mjs';
+import entryPlacementSuite from './check/suites/entry-placement.mjs';
+import hostFileS7gSuite from './check/suites/host-file-s7g.mjs';
 
 console.log(describeFixtures());
 
@@ -354,6 +361,9 @@ for (const suite of [
   leaveArmSuite,
   leaveRecoveryReadingSuite,
   leaveRecoveryConditionsSuite,
+  settledDriftSuite,
+  timelineOffsetConditionsSuite,
+  healthyRoomReadingSuite,
   echoDelaySuite,
   harnessJoinOrderSuite,
   qualificationEarlySuite,
@@ -475,6 +485,10 @@ for (const suite of [
   namePromptSuite,
   touchRevealSuite,
   syncWordsSuite,
+  fmp4PlacementSuite,
+  driftPlacementSuite,
+  entryPlacementSuite,
+  hostFileS7gSuite,
 ]) {
   await suite();
 }
