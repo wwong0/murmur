@@ -3,75 +3,10 @@
 // raised by a probe the round trip stayed flat through.
 
 import { assert, assertEqual, check } from '../harness.mjs';
-import { createFakeClock, createFakeLink } from '../fake-channel.mjs';
-import { createHostOrigin } from '../../../public/lib/host-origin.mjs';
+import { createFakeClock } from '../fake-channel.mjs';
 import { PROBE_AFTER_INTERVALS } from '../../../public/lib/host-pace.mjs';
 import { createWireMeter } from '../../../public/lib/wire-meter.mjs';
-import { encodeControl } from '../../../public/lib/segment-protocol.mjs';
-
-const BODY_BYTES = 400_000_000;
-
-async function flush(turns = 20) {
-  for (let i = 0; i < turns; i += 1) await Promise.resolve();
-}
-
-function handedOf(links) {
-  let total = 0;
-  for (const link of links) {
-    for (const entry of link.host.ledger) total += entry.bytes;
-    total -= link.host.bufferedAmount;
-  }
-  return total;
-}
-
-// A link below the channels, shared by them all: it carries at most `bytesPerMs` of
-// what they handed it and queues the rest, and whatever is queued delays every
-// channel's delivery, the echo's included. `counts: 'carried'` reads the wire after
-// the queue; `'handed'` reads it before, as `bytesSent` does over a kernel qdisc.
-function sharedQueue(clock, links, bytesPerMs, { counts = 'carried' } = {}) {
-  let carried = 0;
-  let atMs = clock.now();
-  const advance = () => {
-    const now = clock.now();
-    carried = Math.min(handedOf(links), carried + bytesPerMs * (now - atMs));
-    atMs = now;
-  };
-  for (const link of links) link.host.setBelowDelay(() => { advance(); return (handedOf(links) - carried) / bytesPerMs; });
-  return {
-    setRate(value) {
-      advance();
-      bytesPerMs = value;
-    },
-    read() {
-      advance();
-      return counts === 'carried' ? carried : handedOf(links);
-    },
-    queueMs() {
-      advance();
-      return (handedOf(links) - carried) / bytesPerMs;
-    },
-  };
-}
-
-async function host({ clock, drainBytesPerMs, fraction = 0.85, queueBytesPerMs = null, counts }) {
-  const bytes = new Uint8Array(BODY_BYTES);
-  const links = [0, 1, 2].map(() => createFakeLink({ clock, hostDrainBytesPerMs: drainBytesPerMs, viewerDrainBytesPerMs: 1_000_000 }));
-  const wire = queueBytesPerMs === null ? null : sharedQueue(clock, links, queueBytesPerMs, { counts });
-  const origin = createHostOrigin({ readSource: async () => ({ status: 200, bytes }), clock, pace: { fraction }, wire });
-  const detaches = links.map((link) => origin.attach(link.host));
-  links.forEach((link, index) => link.viewer.send(encodeControl({ t: 'req', id: index + 1, path: '/media/big.m4s', range: null })));
-  clock.advance(1);
-  await flush();
-  return {
-    origin,
-    links,
-    wire,
-    cleanup() {
-      detaches.forEach((detach) => detach());
-      links.forEach((link) => link.closeBoth());
-    },
-  };
-}
+import { host } from '../wire-queue.mjs';
 
 const near = (value, target, fraction) => Math.abs(value - target) <= fraction * target;
 const readings = (intervals) => intervals.map((interval) => interval.readingBytesPerSecond).filter((rate) => rate !== null);
@@ -264,7 +199,10 @@ export default async function wireEstimateSuite() {
       assertEqual(steady.intervals.at(-1).climbing, false, 'a probe met the link and the climb ended');
       const steadyProbes = steady.intervals.filter((interval) => interval.probe);
       const steadyGaps = steadyProbes.slice(1).map((probe, index) => probe.seq - steadyProbes[index].seq);
-      assert(steadyGaps.length >= 2 && steadyGaps.every((gap) => gap === PROBE_AFTER_INTERVALS + 1), `then a probe every ${PROBE_AFTER_INTERVALS + 1} intervals (${steadyGaps.join(', ')})`);
+      // A probe that raised restarts the climb: the next follows at 2; any other gap is the steady 11.
+      const wantedGaps = steadyProbes.slice(1).map((probe, index) => (steady.intervals.find((interval) => interval.seq === steadyProbes[index].seq + 1)?.raised ? 2 : PROBE_AFTER_INTERVALS + 1));
+      assert(steadyGaps.length >= 2 && steadyGaps.every((gap, index) => gap === wantedGaps[index]), `then a probe every ${PROBE_AFTER_INTERVALS + 1} intervals, 2 after a raise (${steadyGaps.join(', ')} for ${wantedGaps.join(', ')})`);
+      assert(steadyGaps.includes(PROBE_AFTER_INTERVALS + 1), 'and at least one gap is the steady one');
       assert(steady.intervals.filter((interval) => interval.probe).every((interval) => interval.probe === true), 'each probe interval is published as one');
       // Mutation probe, staged: host-origin.mjs's finishInterval with the raise call
       // removed. `npm run check` turned 'the estimate reached the link within 30 s'

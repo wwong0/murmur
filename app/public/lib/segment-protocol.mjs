@@ -7,7 +7,7 @@ export const BUFFER_FLOOR_BYTES = 65536;
 export const DRAIN_POLL_MS = 20;
 export const RATE_WINDOW_MS = 1000;
 
-const CONTROL_TYPES = new Set(['req', 'abort', 'head', 'end', 'err', 'echo']);
+const CONTROL_TYPES = new Set(['req', 'abort', 'head', 'end', 'err', 'echo', 'class']);
 const textEncoder = new TextEncoder();
 
 export function asBytes(value) {
@@ -350,6 +350,17 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
       if (payload.byteLength === 0 && bodies.has(id)) {
         if (sendControl({ t: 'end', id })) removeBody(id);
       }
+    },
+    // design.md D2: a body's class only rises; bytes already framed stay framed.
+    raise(id, cls) {
+      const body = bodies.get(id);
+      if (!body) return false;
+      if (cls === 'urgent') {
+        body.urgent = true;
+        body.near = false;
+      } else if (cls === 'near' && !body.urgent) body.near = true;
+      wake();
+      return true;
     },
     abort(id) {
       if (closed) return;

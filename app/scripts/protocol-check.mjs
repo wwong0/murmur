@@ -119,6 +119,14 @@ import sendArbiterSuite from './check/suites/send-arbiter.mjs';
 import urgentRequestSuite from './check/suites/urgent-request.mjs';
 import edgePositionSuite from './check/suites/edge-position.mjs';
 import wireEstimateSuite from './check/suites/wire-estimate.mjs';
+import climbRestartSuite from './check/suites/climb-restart.mjs';
+import classRiseSuite from './check/suites/class-rise.mjs';
+import classRiseEntrySuite from './check/suites/class-rise-entry.mjs';
+import intervalPaceSuite from './check/suites/interval-pace.mjs';
+import riseRecoverySuite from './check/suites/rise-recovery.mjs';
+import leaveArmSuite from './check/suites/leave-arm.mjs';
+import leaveRecoveryReadingSuite from './check/suites/leave-recovery-reading.mjs';
+import leaveRecoveryConditionsSuite from './check/suites/leave-recovery-conditions.mjs';
 import echoDelaySuite from './check/suites/echo-delay.mjs';
 import harnessJoinOrderSuite from './check/suites/harness-join-order.mjs';
 import qualificationEarlySuite from './check/suites/qualification-early.mjs';
@@ -338,6 +346,14 @@ for (const suite of [
   urgentRequestSuite,
   edgePositionSuite,
   wireEstimateSuite,
+  climbRestartSuite,
+  classRiseSuite,
+  classRiseEntrySuite,
+  intervalPaceSuite,
+  riseRecoverySuite,
+  leaveArmSuite,
+  leaveRecoveryReadingSuite,
+  leaveRecoveryConditionsSuite,
   echoDelaySuite,
   harnessJoinOrderSuite,
   qualificationEarlySuite,

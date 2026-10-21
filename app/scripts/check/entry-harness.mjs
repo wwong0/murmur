@@ -32,6 +32,7 @@ export const FAKED_SPECIFIERS = Object.freeze([
 const SPIES = Object.freeze({
   './lib/drift-controller.mjs': path.join(HERE, 'entry-controller-spy.mjs'),
   './lib/frame-sampler.mjs': path.join(HERE, 'entry-sampler-spy.mjs'),
+  './lib/host-link.mjs': path.join(HERE, 'entry-host-link-spy.mjs'),
 });
 
 /** Substitutes the entry's own imports only; `hits` lets a test prove all fired. */

@@ -9,6 +9,7 @@ import { computeNoP2pSteady } from './nop2p-steady.mjs';
 import { distanceBehindRows } from './distance-behind.mjs';
 import { rosterEventReading } from './roster-event.mjs';
 import { aheadForGood, doubleStalls } from './ahead-for-good.mjs';
+import { riseRecovery } from './rise-recovery.mjs';
 import { removesMember } from '../harness/roster-kinds.mjs';
 
 export const PEER_FRACTION_ABS_MAX = 0.02;
@@ -36,6 +37,7 @@ export function computeHarnessFigureKinds(input = {}) {
       content: input.content, pagePolls: byClient('polls'), starts: byClient('starts'), window: input.window,
       seek: input.seek, capacitySchedule: input.capacitySchedule });
   }
+  if (kinds.includes('rise-recovery')) result.riseRecovery = riseRecovery({ ...input, rosterReading: result.rosterEvent });
   if (kinds.includes('ahead-for-good')) {
     const tags = input.declaredClientTags ?? Object.keys(clients);
     const ahead = aheadForGood({ condition: input.condition, tags, window: input.window, event: null,

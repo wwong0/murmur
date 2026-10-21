@@ -23,6 +23,12 @@ export function harnessSharedMs(timebase, beforeMs, afterMs) {
   return (beforeMs + afterMs) / 2 + timebase.offsetMs;
 }
 
+/** A page's wall-clock reading on the shared clock, or `null` without both join offsets. */
+export function sharedWallMs(timebase, wallMs) {
+  if (!finite(timebase?.offsetMs) || !finite(timebase?.wallOffsetMs) || !finite(wallMs)) return null;
+  return wallMs - timebase.wallOffsetMs + timebase.offsetMs;
+}
+
 /** A page poll's own instant on the shared clock, by the page's clock offset. */
 export function pagePollSharedMs(poll) {
   return finite(poll?.atMs) && finite(poll?.clock?.offsetMs) ? poll.atMs + poll.clock.offsetMs : null;

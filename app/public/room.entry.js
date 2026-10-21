@@ -1519,6 +1519,7 @@ function tickPlayback() {
       if (issue('pause', { atSharedMs: endsAt })) gracePauses += 1;
     }],
     ['urgent-context', updateUrgentContext],
+    ['host-class', () => link?.reclassify?.()],
     ['held-ahead', updateHeldAhead],
     ['ahead-report', sendAheadReport],
     ['hold-resume', driveHoldResume],

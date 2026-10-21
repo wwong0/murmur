@@ -67,7 +67,8 @@ function coverage(spans, window) {
 
 function replay(intervals) {
   const estimate = createCapacityEstimate({});
-  const plan = createProbePlan({ after: PROBE_AFTER_INTERVALS, factor: PROBE_FACTOR, marginMs: ECHO_MARGIN_MS });
+  const restartOnRaise = intervals.every((record) => 'estimateBytesPerSecond' in record);
+  const plan = createProbePlan({ after: PROBE_AFTER_INTERVALS, factor: PROBE_FACTOR, marginMs: ECHO_MARGIN_MS, restartOnRaise });
   const steps = [];
   for (const record of intervals) {
     const inForce = estimate.read().bytesPerSecond;

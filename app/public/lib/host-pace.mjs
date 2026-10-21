@@ -51,6 +51,7 @@ export function createHostPace({ clock, wallNow, fraction, wire = null, queueCap
   let wireChain = null;
   let probing = false;
   let climbing = true;
+  let paceInForce = null;
   let intervalSeq = 0;
   let intervalsEvicted = 0;
   const intervalRing = [];
@@ -91,7 +92,9 @@ export function createHostPace({ clock, wallNow, fraction, wire = null, queueCap
     if (fraction === 'unpaced') return;
     const { bytesPerSecond } = capacityEstimate.read();
     const factor = probing ? PROBE_FACTOR : fraction;
-    sendPace.setRate(bytesPerSecond === null ? null : (factor * bytesPerSecond) / 1000, nowMs);
+    const rate = bytesPerSecond === null ? null : (factor * bytesPerSecond) / 1000;
+    sendPace.setRate(rate, nowMs);
+    paceInForce = rate === null ? null : rate * 1000;
   }
 
   // Unpaced and a few times a second, so the answer's delay is the queue below the host.
@@ -144,6 +147,7 @@ export function createHostPace({ clock, wallNow, fraction, wire = null, queueCap
     if (plan.raiseTo !== null) capacityEstimate.raise(plan.raiseTo);
     probing = fraction !== 'unpaced' && plan.probeNext;
     climbing = plan.climbing;
+    const paceBytesPerSecond = paceInForce;
     setPaceRate(clock.now());
     intervalSeq += 1;
     intervalRing.push({
@@ -169,6 +173,8 @@ export function createHostPace({ clock, wallNow, fraction, wire = null, queueCap
       readingBytesPerSecond: reading ? reading.wireBytes * 1000 / reading.durationMs : null,
       raised: plan.raiseTo !== null,
       climbing,
+      paceBytesPerSecond,
+      estimateBytesPerSecond: capacityEstimate.read().bytesPerSecond,
     });
     if (intervalRing.length > INTERVAL_RING_CAPACITY) {
       intervalRing.shift();

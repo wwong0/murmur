@@ -30,6 +30,12 @@ const RANGE_START = 100_000;
 const SEGMENT_NAME = 'seg-00010.m4s';
 const MEDIA_DIR = path.resolve(APP_DIR, process.env.APP_MEDIA_DIR ?? '../step0/content');
 const SEGMENT_PATH = path.join(MEDIA_DIR, SEGMENT_NAME);
+// Case g's own segment: the highest-numbered one, which the player never
+// reaches in a pass this short, so no player fetch can share its path.
+const MEDIA_SEGMENTS = (() => {
+  try { return fs.readdirSync(MEDIA_DIR).filter((name) => /^seg-\d+\.m4s$/.test(name)).sort(); } catch { return []; }
+})();
+const G_SEGMENT_NAME = MEDIA_SEGMENTS.at(-1) ?? null;
 const STARTED_AT = new Date();
 const ROOM = `7b-fetch-shim-${crypto.randomBytes(8).toString('hex')}`;
 const RUN_NAME = `7b-fetch-shim-${STARTED_AT.toISOString().replaceAll(':', '-')}`;
@@ -84,6 +90,7 @@ const children = [];
 const tabs = [];
 let server = null;
 let autoStartRefused = false;
+let caseGRefused = false;
 
 function recordFailure(error) {
   const text = error?.stack ?? error?.message ?? String(error);
@@ -365,6 +372,10 @@ async function runCase(page, entry, context) {
 }
 
 async function main() {
+  if (G_SEGMENT_NAME === null || G_SEGMENT_NAME === SEGMENT_NAME || MEDIA_SEGMENTS.length < 2) {
+    caseGRefused = true;
+    throw new Error(`refusing to run: case g needs a segment other than ${SEGMENT_NAME} in ${MEDIA_DIR}, found ${MEDIA_SEGMENTS.length} segment(s), highest ${G_SEGMENT_NAME}`);
+  }
   if (!fs.existsSync(SEGMENT_PATH)) throw new Error(`known-size segment is missing: ${SEGMENT_PATH}`);
   const bytes = fs.readFileSync(SEGMENT_PATH);
   const length = bytes.byteLength;
@@ -378,7 +389,7 @@ async function main() {
     openRange: sha256(bytes.subarray(RANGE_START)),
     closedRange: sha256(bytes.subarray(100, 200)),
   };
-  manifest.media = { path: SEGMENT_PATH, name: SEGMENT_NAME, length, sha256: hashes.whole };
+  manifest.media = { path: SEGMENT_PATH, name: SEGMENT_NAME, length, sha256: hashes.whole, caseG: { name: G_SEGMENT_NAME, path: `/media/${G_SEGMENT_NAME}` } };
   manifest.config = {
     origin: `http://127.0.0.1:${SERVER_PORT}`,
     linkDeadlineMs: LINK_DEADLINE_MS,
@@ -410,9 +421,10 @@ async function main() {
     const expectedHash = entry.key === 'a' || entry.key === 'd' || entry.key === 'e' || entry.key === 'f'
       ? hashes.whole
       : entry.key === 'b' ? hashes.openRange : hashes.closedRange;
+    const name = entry.key === 'g' ? G_SEGMENT_NAME : SEGMENT_NAME;
     await runCase(viewerPage, entry, {
-      absUrl: `${origin}/media/${SEGMENT_NAME}`,
-      path: `/media/${SEGMENT_NAME}`,
+      absUrl: `${origin}/media/${name}`,
+      path: `/media/${name}`,
       expectedHash,
       pendingDeadlineMs: PENDING_DEADLINE_MS,
       receiptDeadlineMs: RECEIPT_DEADLINE_MS,
@@ -454,5 +466,5 @@ try {
   manifestFile.write();
   console.log(`\n${manifest.outcome === 'pass' ? 'ALL PASS' : `${failures.length || manifest.failures.length} FAILURE(S)`}`);
   console.log(`evidence: ${RUN_DIR}`);
-  process.exitCode = autoStartRefused ? 2 : manifest.outcome === 'pass' ? 0 : 1;
+  process.exitCode = autoStartRefused || caseGRefused ? 2 : manifest.outcome === 'pass' ? 0 : 1;
 }

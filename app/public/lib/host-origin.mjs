@@ -164,6 +164,21 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
         }
         return;
       }
+      if (control.t === 'class') {
+        if (!uint32(control.id)) {
+          protocolErrors += 1;
+          return;
+        }
+        const cls = control.urgent === true ? 'urgent' : control.near === true ? 'near' : null;
+        const entry = active.get(control.id);
+        if (!cls || !entry) return;
+        if (cls === 'urgent') {
+          entry.urgent = true;
+          entry.near = false;
+        } else if (!entry.urgent) entry.near = true;
+        sender.raise(control.id, cls);
+        return;
+      }
       if (control.t !== 'req') return;
       if (!uint32(control.id) || active.has(control.id) || typeof control.path !== 'string' || !control.path.startsWith(MEDIA_PREFIX)) {
         protocolErrors += 1;

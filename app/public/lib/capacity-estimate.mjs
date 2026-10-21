@@ -77,8 +77,8 @@ export function createQueuedRun({ intervals = READING_INTERVALS, marginMs = 0, c
 // proved. A probe raises the estimate only when the bucket bound it and the round
 // trip stayed flat through its second half and the next interval's first. Until a
 // probe first meets a queue the host climbs: it probes after every pace-bound
-// interval rather than every `after`.
-export function createProbePlan({ after, climbAfter = 1, factor, marginMs }) {
+// interval rather than every `after`. The climb restarts at a probe that raised the estimate.
+export function createProbePlan({ after, climbAfter = 1, factor, marginMs, restartOnRaise = true }) {
   let run = 0;
   let climbing = true;
   let pending = null;
@@ -92,6 +92,7 @@ export function createProbePlan({ after, climbAfter = 1, factor, marginMs }) {
       else if (pending.reason === 'pace-bound' && flat(pending.tailQueueMs) && flat(interval.headQueueMs)
         && estimateBytesPerSecond !== null && pending.rate > estimateBytesPerSecond) {
         raiseTo = Math.min(pending.rate, factor * estimateBytesPerSecond);
+        if (restartOnRaise) climbing = true;
       }
       pending = null;
     }

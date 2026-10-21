@@ -91,6 +91,8 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
     } catch { return null; }
   }
 
+  const rankOf = (cls) => (cls === 'urgent' ? 2 : cls === 'near' ? 1 : 0);
+
   function keepPlaylist(path, chunks) {
     const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0));
     let offset = 0;
@@ -145,6 +147,7 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
       canceled,
       urgent: entry.urgent,
       near: entry.near,
+      rises: entry.rises.map((rise) => ({ ...rise })),
       source: 'host-link-receipt',
     };
     if (maxReceipts === 0) {
@@ -399,6 +402,8 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
         bodyBytes: 0,
         urgent,
         near,
+        rises: [],
+        classNow: requestClass,
         receiptDone: false,
         onHead: (head) => {
           entry.head = head;
@@ -437,6 +442,22 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
           }
         },
       };
+    },
+    // design.md D2: an unfinished request whose class has risen tells the host.
+    reclassify() {
+      if (state.state !== 'open' || !channel || channel.readyState !== 'open') return 0;
+      let sent = 0;
+      for (const [id, entry] of pending) {
+        const cls = requestClassFor(entry.path);
+        if (rankOf(cls) <= rankOf(entry.classNow)) continue;
+        try {
+          channel.send(encodeControl({ t: 'class', id, [cls]: true }));
+        } catch { return sent; }
+        entry.rises.push({ class: cls, atMs: wallNow() });
+        entry.classNow = cls;
+        sent += 1;
+      }
+      return sent;
     },
     close() {
       tearDown('absent');

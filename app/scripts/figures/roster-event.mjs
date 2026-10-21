@@ -1,5 +1,5 @@
 import { resyncAfter } from './behind.mjs';
-import { counterReading, harnessSharedMs, latestPagePoll, POLL_FRESH_MS, runwayMs, runwaySource } from './poll-coverage.mjs';
+import { counterReading, harnessSharedMs, latestPagePoll, POLL_FRESH_MS, runwayMs, runwaySource, sharedWallMs } from './poll-coverage.mjs';
 import { frameStalls } from './frame-stalls.mjs';
 import { viewerOrder, edgeRank } from '../../public/lib/edge-assignment.mjs';
 import { startResiduals } from './start-requalification.mjs';
@@ -36,11 +36,6 @@ function targetTag(event) {
 
 function othersFor(condition, target) {
   return tagsFor(condition).filter((tag) => tag !== target);
-}
-
-function sharedWallMs(timebase, wallMs) {
-  if (!finite(timebase?.offsetMs) || !finite(timebase?.wallOffsetMs) || !finite(wallMs)) return null;
-  return wallMs - timebase.wallOffsetMs + timebase.offsetMs;
 }
 
 function pollSharedMs(poll, timebase) {
@@ -425,7 +420,7 @@ function socketRow(condition, event, presence, polls, pagePolls, timebase) {
   });
 }
 
-/** Three-way leave-arm rule; comparand stall evidence is retained beside it. */
+/** Three-way leave-arm rule over the runs that show the leave; comparand stall evidence is retained beside it. */
 export function leaveArmReading({ runs = [], comparands = [] } = {}) {
   const exercised = [];
   for (const run of runs.slice(0, 5)) {
@@ -433,11 +428,14 @@ export function leaveArmReading({ runs = [], comparands = [] } = {}) {
     const k1 = rows.find((entry) => entry.row === 'K1');
     const k3 = rows.find((entry) => entry.row === 'K3');
     if (k3?.status === 'not-exercised') continue;
-    exercised.push({ k1: k1?.status ?? 'unreadable', k3: k3?.status ?? 'unreadable' });
+    const entry = { k1: k1?.status ?? 'unreadable', k3: k3?.status ?? 'unreadable' };
+    const reading = entry.k1 === 'missed' || entry.k3 === 'missed' ? 'failed'
+      : entry.k1 === 'met' && entry.k3 === 'met' ? 'shown' : 'unread';
+    exercised.push({ ...entry, reading });
   }
-  const failed = exercised.some((entry) => entry.k1 === 'missed' || entry.k3 === 'missed');
-  const status = failed ? 'fail' : exercised.length >= 3 ? 'pass' : 'not-established';
-  return { status, exercised, exercisedCount: exercised.length,
+  const count = (reading) => exercised.filter((entry) => entry.reading === reading).length;
+  const status = count('failed') ? 'fail' : count('shown') >= 3 ? 'pass' : 'not-established';
+  return { status, exercised, exercisedCount: exercised.length, shownCount: count('shown'), unread: count('unread'),
     comparandStalls: comparands.map((comparand) => ({ directory: comparand.directory ?? null,
       stalls: comparand.stalls ?? comparand.reading?.stallsByClient ?? null })) };
 }
