@@ -18,6 +18,7 @@ export const ERROR_CODES = Object.freeze({
   HOST_TAKEN: 'host-taken',
   TAB_TAKEN: 'tab-taken',
   UNKNOWN_RECIPIENT: 'unknown-recipient',
+  RATE_LIMITED: 'rate-limited',
 });
 
 /** Replaced membership close code (1b design.md D5). */
@@ -37,6 +38,8 @@ export const TYPE_JOIN = 'join';
 export const TYPE_LEAVE = 'leave';
 export const TYPE_ECHO = 'echo';
 export const TYPE_ECHO_REPLY = 'echo-reply';
+export const TYPE_NAME = 'name';
+export const TYPE_CHAT = 'chat';
 export const TYPE_JOINED = 'joined';
 export const TYPE_PRESENCE = 'presence';
 export const TYPE_ERROR = 'error';
@@ -68,14 +71,25 @@ export function buildClientEnvelope({ type, to, id, replyTo, payload }) {
 }
 
 /** Build join content; secret is the only reclaim field (1b D8/D10). */
-export function buildJoinEnvelope({ room, tabId, role, secret }) {
+export function buildJoinEnvelope({ room, tabId, role, secret, name }) {
   const body = { room, tabId, role };
   if (secret !== undefined) body.secret = secret;
+  if (typeof name === 'string' && name.length > 0) body.name = name;
   return buildClientEnvelope({
     type: TYPE_JOIN,
     to: ADDR_SERVER,
     payload: body,
   });
+}
+
+/** Build a name change for the server. */
+export function buildNameEnvelope({ id, name }) {
+  return buildClientEnvelope({ type: TYPE_NAME, to: ADDR_SERVER, id, payload: { name } });
+}
+
+/** Build a chat message for the room. */
+export function buildChatEnvelope({ id, text }) {
+  return buildClientEnvelope({ type: TYPE_CHAT, to: ADDR_ROOM, id, payload: { text } });
 }
 
 /** Build a correlated round-trip probe. */
@@ -276,7 +290,47 @@ export function makeEchoReply(routing) {
   return serverEnvelope(routing, TYPE_ECHO_REPLY, {});
 }
 
-// Browser-side body readers; the server's join reader is the exception (1b D7).
+// Body readers. The server reads only join, name and chat, each through one of these.
+
+export const NAME_MAX_CODE_POINTS = 32;
+export const CHAT_MAX_CODE_POINTS = 500;
+
+const FORBIDDEN_TEXT = /[\p{Cc}‪-‮⁦-⁩]/u;
+
+/** The one text rule for names and messages: the string, or null. Does not trim. */
+export function readMemberText(value, maxCodePoints) {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  if (FORBIDDEN_TEXT.test(value)) return null;
+  if ([...value].length > maxCodePoints) return null;
+  return value;
+}
+
+function readTrimmedName(value) {
+  return typeof value === 'string' ? readMemberText(value.trim(), NAME_MAX_CODE_POINTS) : null;
+}
+
+function isPlainObject(body) {
+  return body !== null && typeof body === 'object' && !Array.isArray(body)
+    && Object.getPrototypeOf(body) === Object.prototype;
+}
+
+/** Read a `name` body; other keys are ignored. */
+export function readNameRequest(env) {
+  const body = env.payload;
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return { ok: false };
+  const name = readTrimmedName(body.name);
+  return name === null ? { ok: false } : { ok: true, name };
+}
+
+/** Read a `chat` body: only `text`, untrimmed. */
+export function readChatMessage(env) {
+  const body = env.payload;
+  if (!isPlainObject(body)) return { ok: false };
+  const keys = Object.keys(body);
+  if (keys.length !== 1 || keys[0] !== 'text') return { ok: false };
+  const text = readMemberText(body.text, CHAT_MAX_CODE_POINTS);
+  return text === null ? { ok: false } : { ok: true, text };
+}
 
 /** Read and validate join content; an unmatched secret is an ordinary join (1b D9). */
 export function readJoinRequest(env) {
@@ -297,7 +351,11 @@ export function readJoinRequest(env) {
   if (b.secret !== undefined && (typeof b.secret !== 'string' || b.secret.length === 0)) {
     return { ok: false, reason: 'join "secret" must be a non-empty string when present' };
   }
-  return { ok: true, room: b.room, tabId: b.tabId, role: b.role, secret: b.secret };
+  const name = readTrimmedName(b.name);
+  return {
+    ok: true, room: b.room, tabId: b.tabId, role: b.role, secret: b.secret,
+    ...(name === null ? {} : { name }),
+  };
 }
 
 /** Read any envelope body on the browser side. */

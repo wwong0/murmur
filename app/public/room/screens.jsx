@@ -20,6 +20,9 @@ const COPIED_MS = 2_000;
 const HINT_VISIBLE_MS = 5_000;
 const HINT_FADE_MS = 400;
 const HEADER_CHIPS = 4;
+// UTF-16 units, never fewer than code points, so never looser than the server's caps.
+const NAME_MAX_LENGTH = 32;
+const MESSAGE_MAX_LENGTH = 500;
 const PINNED_SLACK_PX = 24;
 const CARD_ICONS = {
   warn: { Icon: TriangleAlert, className: 'file-icon file-icon-warn' },
@@ -63,24 +66,33 @@ function takeNamePrompt(fromFront) {
   }
 }
 
-// Calls no action and holds nothing up: the engine has joined behind it (design.md D19). Its
-// field keeps nothing. Focus is left alone on close, so a driver's next click lands as it
+// Holds nothing up: the engine has joined behind it (design.md D19), and closing it unanswered
+// leaves the member unnamed. Submitting hands the field to `setName`; the page keeps only the
+// name the roster returns. Focus is left alone on close, so a driver's next click lands as it
 // would have with no prompt. `fromFront` is read once, on mount: a host who pressed Host kept
-// this document, and its rig-style URL says nothing about how they got here.
-function NamePrompt({ fromFront }) {
+// this document, and its rig-style URL says nothing about how they got here. The member's own
+// participants entry asks for it again.
+function NamePrompt({ view, actions, fromFront }) {
   const [open, setOpen] = useState(false);
+  const field = useRef(null);
+  const request = useView(view, (snapshot) => snapshot.namePromptRequest);
+  const ownName = useView(view, (snapshot) => snapshot.ownName);
   useEffect(() => {
     if (takeNamePrompt(fromFront)) setOpen(true);
   }, []);
-  const close = (event) => {
+  useEffect(() => {
+    if (request > 0) setOpen(true);
+  }, [request]);
+  const submit = (event) => {
     event.preventDefault();
+    actions.setName(field.current?.value ?? '');
     setOpen(false);
   };
   return <Dialog.Root open={open} onOpenChange={setOpen}>
     <DialogPanel id="name-prompt" finalFocus={false}>
       <Dialog.Title className="dialog-title">Choose a name</Dialog.Title>
-      <form onSubmit={close}>
-        <TextField id="name-prompt-field" label="Your name" placeholder="Your name" size="lg" autoComplete="off" />
+      <form onSubmit={submit}>
+        <TextField ref={field} id="name-prompt-field" label="Your name" placeholder="Your name" size="lg" autoComplete="off" maxLength={NAME_MAX_LENGTH} defaultValue={ownName} />
         <Button type="submit" variant="primary" size="lg" className="mt-3 w-full">Join</Button>
       </form>
     </DialogPanel>
@@ -380,6 +392,15 @@ const TONE_CLASS = {
   5: 'member-chip-tone-5',
 };
 
+const CHAT_TONE_CLASS = {
+  host: 'chat-sender-tone-host',
+  1: 'chat-sender-tone-1',
+  2: 'chat-sender-tone-2',
+  3: 'chat-sender-tone-3',
+  4: 'chat-sender-tone-4',
+  5: 'chat-sender-tone-5',
+};
+
 // Initials only: the chip is a picture of the member, and the label beside it (or the header's
 // own text) is what a screen reader gets. The fill is the member's tone; the host's chip
 // also carries an ink ring.
@@ -400,15 +421,21 @@ function ParticipantsChips({ people }) {
   </span>;
 }
 
-function ParticipantsList({ people }) {
+// The member's own entry is a button that reopens the name prompt.
+function ParticipantsList({ people, selfClientId, onOwnEntry }) {
   return <ul className="participants-list">
-    {people.map((person) => (
-      <li key={person.clientId} className="participant">
+    {people.map((person) => {
+      const body = <>
         <MemberChip person={person} />
         <span className="participant-label">{person.label}</span>
+      </>;
+      return <li key={person.clientId} className="participant">
+        {person.clientId === selfClientId
+          ? <button type="button" className="participant-self" onClick={onOwnEntry}>{body}</button>
+          : body}
         {person.host ? <span className="host-tag">host</span> : null}
-      </li>
-    ))}
+      </li>;
+    })}
   </ul>;
 }
 
@@ -434,20 +461,41 @@ function ActivityLog({ view }) {
     pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight <= PINNED_SLACK_PX;
   };
   return <div ref={ref} className="room-activity" role="log" aria-label="Activity" onScroll={track}>
-    {activity.map((entry) => <p key={entry.id} className={clsx('activity-line', entry.warn && 'activity-warn')}>{entry.text}</p>)}
+    {activity.map((entry) => (entry.kind === 'chat'
+      ? <p key={entry.id} className="activity-line activity-chat">
+        <span className={clsx('chat-sender', CHAT_TONE_CLASS[entry.tone])}>{entry.label}</span>{' '}{entry.text}
+      </p>
+      : <p key={entry.id} className={clsx('activity-line', entry.warn && 'activity-warn')}>{entry.text}</p>))}
   </div>;
 }
 
-// In no form and with no handler: Enter does nothing, and the text stays where it was typed
-// (design.md D19).
-function MessageInput() {
-  return <TextField id="message-input" label="Message the room" placeholder="Message the room" autoComplete="off" />;
+// Enter sends. The field clears when its own message comes back relayed and still holds what
+// was sent; a refusal leaves the text where it was typed.
+function MessageInput({ view, actions }) {
+  const field = useRef(null);
+  const sent = useRef(null);
+  const outcome = useView(view, (snapshot) => snapshot.chatOutcome);
+  useEffect(() => {
+    const own = sent.current;
+    if (own === null || outcome.id !== own.id) return;
+    sent.current = null;
+    if (outcome.result === 'relayed' && field.current?.value === own.raw) field.current.value = '';
+  }, [outcome]);
+  const onKeyDown = (event) => {
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    const raw = event.currentTarget.value;
+    const id = actions.sendChat(raw);
+    sent.current = id === null ? null : { id, raw };
+  };
+  return <TextField ref={field} id="message-input" label="Message the room" placeholder="Message the room" autoComplete="off" maxLength={MESSAGE_MAX_LENGTH} onKeyDown={onKeyDown} />;
 }
 
 // The right column: the participants' disclosure, the activity region, then the message
 // input. The column's height and the activity region's scrolling are in room.css.
-function RoomColumn({ view }) {
+function RoomColumn({ view, actions }) {
   const people = useView(view, (snapshot) => snapshot.people);
+  const selfClientId = useView(view, (snapshot) => snapshot.selfClientId);
   return <aside className="room-column" aria-label="Room">
     <Collapsible.Root className="participants">
       <Collapsible.Trigger className="participants-trigger">
@@ -456,11 +504,11 @@ function RoomColumn({ view }) {
         <ChevronDown className="participants-chevron" size={20} strokeWidth={2} aria-hidden="true" />
       </Collapsible.Trigger>
       <Collapsible.Panel className="participants-panel">
-        <ParticipantsList people={people} />
+        <ParticipantsList people={people} selfClientId={selfClientId} onOwnEntry={actions.openNamePrompt} />
       </Collapsible.Panel>
     </Collapsible.Root>
     <ActivityLog view={view} />
-    <div className="room-compose"><MessageInput /></div>
+    <div className="room-compose"><MessageInput view={view} actions={actions} /></div>
   </aside>;
 }
 
@@ -489,7 +537,7 @@ export function RoomScreens({ view, actions }) {
     <EndedMarker view={view} />
     <TheatreMarker theatre={theatre} />
     <RoomHeader view={view} actions={actions} theatre={inTheatre} />
-    <NamePrompt fromFront={sawFront.current} />
+    <NamePrompt view={view} actions={actions} fromFront={sawFront.current} />
     <PlayerTop view={view} chips={inTheatre ? <TheatreChips view={view} /> : null} />
     <HostFileControls view={view} actions={actions} />
     <ViewerWait view={view} />
@@ -498,7 +546,7 @@ export function RoomScreens({ view, actions }) {
     <PlayerBar view={view} actions={actions} theatre={theatre} onTheatre={toggleTheatre} />
     <RoomActions view={view} actions={actions} />
     <StatsPanel view={view} />
-    <RoomColumn view={view} />
+    <RoomColumn view={view} actions={actions} />
   </>;
 }
 

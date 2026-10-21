@@ -1,4 +1,4 @@
-// Browser proof for the room design's inputs: the name prompt, the name and message inputs,
+// Browser proof for the room design's inputs: the name prompt,
 // the settings menu, and the player bar and theatre mode (change 12b, design.md D7, D11 and
 // D19). It owns one default-paused server.
 // Every row opens its own tabs, because the prompt's flag is per tab and a shared tab would
@@ -94,13 +94,11 @@ class BrowserConnection {
 }
 
 // What each row decides from what it read. A `null` read is "no value": it is never taken
-// for an absent prompt or a clean frame list.
+// for an absent prompt.
 const viewerCount = (roster) => (Array.isArray(roster) ? roster.filter((text) => text.includes(' · viewer · ')).length : 0);
 const absentThroughout = (samples) => samples.length >= MIN_SAMPLES && samples.every((value) => value === false);
-const carrying = (values, marker) => values.filter((value) => String(value).includes(marker)).length;
 const modeChanged = (before, after) => MODES.includes(before) && MODES.includes(after) && before !== after;
 const allDisabled = (items) => Array.isArray(items) && items.length > 0 && items.every((item) => item.disabled === true);
-const stayedOnPage = (before, after) => before !== null && after !== null && after.href === before.href && after.token === before.token;
 const sampleSummary = (samples) => ({
   samples: samples.length, present: samples.filter((value) => value === true).length, unread: samples.filter((value) => value === null).length,
 });
@@ -181,9 +179,7 @@ async function waitForTarget(targetId) {
   return found.value;
 }
 
-// The tab is created blank and navigated last, so `frames` (the array that receives every
-// websocket frame the page sends) is listening before the page's first frame, its join.
-async function openTab(url, label, { frames = null } = {}) {
+async function openTab(url, label) {
   const { targetId } = await browser.send('Target.createTarget', { url: 'about:blank', newWindow: true, width: 1100, height: 700 });
   const target = await waitForTarget(targetId);
   if (!target) throw new Error(`${label} target did not appear`);
@@ -191,10 +187,6 @@ async function openTab(url, label, { frames = null } = {}) {
   await tab.ready;
   await tab.send('Runtime.enable');
   await tab.send('Page.enable');
-  if (frames) {
-    await tab.send('Network.enable');
-    tab.on('Network.webSocketFrameSent', ({ response }) => frames.push(response.payloadData));
-  }
   await tab.send('Page.navigate', { url });
   return tab;
 }
@@ -203,8 +195,8 @@ async function closeTab(tab) {
   await browser.send('Target.closeTarget', { targetId: tab.targetId }).catch(() => {});
 }
 
-async function withTab(url, label, body, options) {
-  const tab = await openTab(url, label, options);
+async function withTab(url, label, body) {
+  const tab = await openTab(url, label);
   try { return await body(tab); } finally { await closeTab(tab); }
 }
 
@@ -318,48 +310,6 @@ async function rowFrontHostAndJoinShowPrompt() {
       };
     });
   });
-}
-
-const pageMark = (marker) => `(() => { window.__rdToken = ${JSON.stringify(marker)}; return { href: location.href, token: window.__rdToken }; })()`;
-const PAGE_NOW = '({ href: location.href, token: window.__rdToken ?? null })';
-const STORAGE_DUMP = 'JSON.stringify([Object.entries(sessionStorage), Object.entries(localStorage)])';
-
-async function closePrompt(tab) {
-  const closedByEnter = (await until(tab, present(PROMPT), (value) => value === false, CLOSE_MS)).ok;
-  if (closedByEnter) return { closedByEnter };
-  await pressKey(tab, 'Escape');
-  return { closedByEnter, closedByEscape: (await until(tab, present(PROMPT), (value) => value === false, CLOSE_MS)).ok };
-}
-
-async function rowInputsSendNothing() {
-  const marker = `rd-n5-${crypto.randomBytes(6).toString('hex')}`;
-  const frames = [];
-  const invite = await openTab(INVITE, 'N5/invite', { frames });
-  try {
-    const ready = await until(invite, present(PROMPT), Boolean);
-    if (!ready.ok) return { exercised: false, detail: 'the invite page did not render its prompt' };
-    const before = await read(invite, pageMark(marker));
-    const typed = { prompt: await typeInto(invite, `${PROMPT} input`, marker) };
-    await pressKey(invite, 'Enter');
-    const prompt = await closePrompt(invite);
-    typed.message = await typeInto(invite, '#message-input', marker);
-    await pressKey(invite, 'Enter');
-    const messageKept = await read(invite, `document.querySelector('#message-input')?.value === ${JSON.stringify(marker)}`);
-    await sleep(1_000);
-    const after = await read(invite, PAGE_NOW);
-    const storage = [await read(invite, STORAGE_DUMP)];
-    const hits = { frames: carrying(frames, marker), storage: storage.filter((text) => text?.includes(marker)).length };
-    const stayed = stayedOnPage(before, after);
-    // The join frame proves the capture works: an invite page that sent nothing was not watched.
-    const exercised = Object.values(typed).every((value) => value === true) && frames.length > 0 && storage.every((text) => text !== null);
-    return {
-      exercised,
-      ok: hits.frames === 0 && hits.storage === 0 && stayed,
-      detail: { typed, prompt, messageKept, framesSeen: frames.length, hits, stayedOnPage: stayed },
-    };
-  } finally {
-    await closeTab(invite);
-  }
 }
 
 async function rowSettingsMenuControlMode() {
@@ -779,7 +729,6 @@ async function runRows() {
   await runRow('RD-N2 the prompt closes on Escape and stays closed after a reload', rowEscapeClosesAndReloadStaysClosed);
   await runRow('RD-N3 a role and tab URL shows no prompt', rowRoleAndTabShowNoPrompt);
   await runRow('RD-N4 a front-page host and a front-page join each show the name prompt', rowFrontHostAndJoinShowPrompt);
-  await runRow('RD-N5 the name and message inputs send nothing', rowInputsSendNothing);
   await runRow('RD-M1 the settings menu changes the control mode for the host and is disabled for a viewer', rowSettingsMenuControlMode);
   await runRow('RD-D1 the sync dot shows while paused, in its idle state', rowSyncDotShowsIdle);
   await runRow("RD-B1 a faded control's box read before the reveal misses, and the shipped click lands", rowFadedBoxMisses);

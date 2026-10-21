@@ -12,7 +12,13 @@ export function mountScreens({ view, actions }) {
 }
 
 /** Subscribers are kept so a test can emit `joined` and deliver room envelopes. */
-export function createRoomClient() {
+export function createRoomClient(config) {
+  harness().clientConfig = config;
+  const sendId = (kind, value) => {
+    if (!harness().isJoined) return null;
+    harness().log(kind, value);
+    return `m-${harness().nextSendId++}`;
+  };
   const subscribe = (map, type, fn) => {
     if (!map.has(type)) map.set(type, []);
     map.get(type).push(fn);
@@ -23,6 +29,10 @@ export function createRoomClient() {
     get role() { return harness().role; },
     get roster() { return harness().roster; },
     get isJoined() { return harness().isJoined; },
+    get name() { return harness().name ?? null; },
+    // The id the real client would return; null before the join, as it does.
+    setName(name) { return sendId('set-name', name); },
+    sendChat(text) { return sendId('send-chat', text); },
     onEvent(type, fn) { return subscribe(harness().clientEvents, type, fn); },
     on(type, fn) { return subscribe(harness().clientHandlers, type, fn); },
     send(envelope) { harness().log('send', envelope); },

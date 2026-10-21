@@ -236,6 +236,8 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     roster: [],
     clientEvents: new Map(),
     clientHandlers: new Map(),
+    clientConfig: null,
+    nextSendId: 1,
     playing: false,
     pendingActions: [],
     acceptSkip: false,

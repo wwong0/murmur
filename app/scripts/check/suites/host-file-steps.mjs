@@ -142,10 +142,10 @@ export default async function hostFileStepsSuite() {
 
   const s7bGood = { target: 5, frame: 0.04, afterWallTime: 10, frames: [frame(4.94, 11)] };
   await verdictCases('S7b', s7b, s7bGood, [['frame', { ...clone(s7bGood), frames: [frame(4, 11)] }]]);
-  const s7cGood = { target: 5, duration: 6, frame: 0.04, afterWallTime: 10, frames: [frame(5, 11), frame(5.95, 12)], events: { ended: 1 } };
+  const s7cGood = { target: 5, duration: 6, frame: 0.04, afterWallTime: 10, frames: [frame(5, 11), frame(5.95, 12)], events: { ended: 1 }, element: { ended: true, currentTime: 6, duration: 6 } };
   await verdictCases('S7c', s7c, s7cGood, [
     ['frame', { ...clone(s7cGood), frames: [frame(4, 11), frame(5.95, 12)] }],
-    ['ended', { ...clone(s7cGood), events: { ended: 0 } }],
+    ['attribute false, one event', { ...clone(s7cGood), element: { ...s7cGood.element, ended: false }, events: { ended: 1 } }],
     ['duration', { ...clone(s7cGood), frames: [frame(5, 11), frame(5.8, 12)] }],
   ]);
   const s7eGood = { target: 8.08, offset: 0.08, frame: 0.04, afterWallTime: 10, frames: [frame(8.08, 11)], targetPath: '/media/seg-00002.m4s', previousPath: '/media/seg-00001.m4s', requestsBefore: {}, requestsAfter: { '/media/seg-00002.m4s': 1 } };
@@ -155,13 +155,20 @@ export default async function hostFileStepsSuite() {
     ['target', { ...clone(s7eGood), requestsAfter: {} }],
     ['previous', { ...clone(s7eGood), requestsAfter: { '/media/seg-00001.m4s': 1, '/media/seg-00002.m4s': 1 } }],
   ]);
-  const s7dGood = { target: 2, duration: 6, frame: 0.04, afterWallTime: 10, frames: [frame(2, 11), frame(5.95, 12)], events: { ended: 1 } };
+  const s7dGood = { target: 2, duration: 6, frame: 0.04, afterWallTime: 10, frames: [frame(2, 11), frame(5.95, 12)], events: { ended: 1 }, element: { ended: true, currentTime: 6, duration: 6 } };
   await verdictCases('S7d', s7d, s7dGood, [
     ['distance', { ...clone(s7dGood), target: 2.5, frames: [frame(2.5, 11), frame(5.95, 12)] }],
     ['frame', { ...clone(s7dGood), frames: [frame(1, 11), frame(5.95, 12)] }],
-    ['ended', { ...clone(s7dGood), events: { ended: 0 } }],
+    ['attribute false, one event', { ...clone(s7dGood), element: { ...s7dGood.element, ended: false }, events: { ended: 1 } }],
     ['duration', { ...clone(s7dGood), frames: [frame(2, 11), frame(5.8, 12)] }],
   ]);
+  for (const [name, fn, good] of [['S7c', s7c, s7cGood], ['S7d', s7d, s7dGood]]) {
+    await check(`host-file-steps: ${name} reads the element's ended attribute, not the ended event`, async () => {
+      assertEqual(fn({ ...clone(good), events: { ended: 0 } }).status, 'pass', `${name} attribute true, no event`);
+      const { element, ...withoutElement } = clone(good);
+      assertEqual(fn(withoutElement).status, 'evidence missing', `${name} element absent`);
+    });
+  }
   await check('host-file-steps: S7c without a reference duration is evidence missing, not a pass', async () => {
     assertEqual(s7c({ ...clone(s7cGood), duration: undefined }).status, 'evidence missing', 'an absent duration cannot pass');
   });

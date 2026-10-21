@@ -144,9 +144,10 @@ export class Peer {
    * `secret` is omitted unless the caller passes one, so a peer that means to
    * be a stranger looks like one on the wire.
    */
-  async join({ room, tabId, role, secret, v = PROTOCOL_VERSION }) {
+  async join({ room, tabId, role, secret, name, v = PROTOCOL_VERSION }) {
     const body = { room, tabId, role };
     if (secret !== undefined) body.secret = secret;
+    if (name !== undefined) body.name = name;
     this.send({ v, type: TYPE_JOIN, to: ADDR_SERVER, payload: body });
     const reply = await this.next((e) => e.type === TYPE_JOINED || e.type === TYPE_ERROR);
     if (reply.type === TYPE_JOINED) {

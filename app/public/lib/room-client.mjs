@@ -31,6 +31,8 @@ import {
   TYPE_ECHO,
   buildClientEnvelope,
   buildJoinEnvelope,
+  buildNameEnvelope,
+  buildChatEnvelope,
   readBody,
 } from './envelope.mjs';
 
@@ -69,6 +71,7 @@ const MAX_RETRY_BUDGET_MS = 60000;
  * @param {'host'|'viewer'} config.role
  * @param {Function} [config.WebSocketImpl] injected so the protocol check can drive this from Node
  * @param {boolean} [config.autoReconnect]  default true
+ * @param {string} [config.name]       the member's name; every join carries the current one
  */
 export function createRoomClient(config) {
   const {
@@ -78,6 +81,7 @@ export function createRoomClient(config) {
     role,
     WebSocketImpl = globalThis.WebSocket,
     autoReconnect = true,
+    name: configuredName,
   } = config;
 
   /** @type {Map<string, Set<Function>>} envelope type -> handlers */
@@ -129,7 +133,37 @@ export function createRoomClient(config) {
     closing: false,
     backoffMs: BACKOFF_START_MS,
     nextId: 0,
+    /** The current name, carried by every join; null when none. */
+    name: /** @type {string|null} */ (typeof configuredName === 'string' && configuredName.length > 0 ? configuredName : null),
+    /** The id of the latest `name` sent, so its refusal can be told from any other error. */
+    nameId: /** @type {string|null} */ (null),
   };
+
+  function ownRosterName() {
+    const mine = state.roster.find((m) => m.clientId === state.clientId);
+    return mine && typeof mine.name === 'string' ? mine.name : null;
+  }
+
+  function sendName() {
+    const id = `m-${state.nextId++}`;
+    state.nameId = id;
+    writeEnvelope(buildNameEnvelope({ id, name: state.name }));
+    return id;
+  }
+
+  /** Set the name: it rides the next join, and goes to the server now if joined. */
+  function setName(name) {
+    state.name = typeof name === 'string' && name.length > 0 ? name : null;
+    return state.joined && state.name !== null ? sendName() : null;
+  }
+
+  /** Send a chat message to the room; nothing is sent before the join. */
+  function sendChat(text) {
+    if (!state.joined) return null;
+    const id = `m-${state.nextId++}`;
+    writeEnvelope(buildChatEnvelope({ id, text }));
+    return id;
+  }
 
   function emitEvent(name, data) {
     const set = eventHandlers.get(name);
@@ -288,6 +322,12 @@ export function createRoomClient(config) {
       const roster = readBody(env).roster;
       if (Array.isArray(roster)) state.roster = roster;
     }
+    // A refused rename must not be replayed by the next join.
+    if (env.type === TYPE_ERROR && state.joined && env.from === ADDR_SERVER
+      && env.replyTo !== undefined && env.replyTo === state.nameId) {
+      state.nameId = null;
+      state.name = ownRosterName();
+    }
 
     // Subscribers run BEFORE the request promise resolves, deliberately. It
     // makes the "subscriber work does not enter the sample" guarantee
@@ -357,6 +397,9 @@ export function createRoomClient(config) {
       seq: body.seq,
       serverTime: body.serverTime,
     });
+
+    // A reclaim reads no name from the join, so a name the server does not hold is sent now.
+    if (state.name !== null && state.name !== ownRosterName()) sendName();
   }
 
   /**
@@ -443,7 +486,7 @@ export function createRoomClient(config) {
       //
       // `tabId` and `role` still go out, but on a reclaim the server reads
       // neither — only when this turns out to be a new membership after all.
-      writeEnvelope(buildJoinEnvelope({ room, tabId, role, secret: state.secret ?? undefined }));
+      writeEnvelope(buildJoinEnvelope({ room, tabId, role, secret: state.secret ?? undefined, name: state.name ?? undefined }));
     };
     const onMessage = (ev) => handleMessage(ev.data !== undefined ? ev.data : ev);
     const onClose = (ev) => {
@@ -508,6 +551,8 @@ export function createRoomClient(config) {
     send,
     request,
     echo,
+    setName,
+    sendChat,
 
     /** Subscribe to envelopes by `type`. */
     on(type, fn) {
@@ -537,6 +582,9 @@ export function createRoomClient(config) {
     },
     get roster() {
       return state.roster;
+    },
+    get name() {
+      return state.name;
     },
     get lastSeq() {
       return state.lastSeq;

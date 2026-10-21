@@ -255,6 +255,15 @@ import fmp4PlacementSuite from './check/suites/fmp4-placement.mjs';
 import driftPlacementSuite from './check/suites/drift-placement.mjs';
 import entryPlacementSuite from './check/suites/entry-placement.mjs';
 import hostFileS7gSuite from './check/suites/host-file-s7g.mjs';
+import memberTextSuite from './check/suites/member-text.mjs';
+import namesSuite from './check/suites/names.mjs';
+import chatSuite from './check/suites/chat.mjs';
+import chatRateSuite from './check/suites/chat-rate.mjs';
+import chatLogSuite from './check/suites/chat-log.mjs';
+import roomClientNamesSuite from './check/suites/room-client-names.mjs';
+import roomPeopleNamesSuite from './check/suites/room-people-names.mjs';
+import namesChatEntrySuite from './check/suites/names-chat-entry.mjs';
+import namesAndChatStepsSuite from './check/suites/names-and-chat-steps.mjs';
 
 console.log(describeFixtures());
 
@@ -489,6 +498,15 @@ for (const suite of [
   driftPlacementSuite,
   entryPlacementSuite,
   hostFileS7gSuite,
+  memberTextSuite,
+  namesSuite,
+  chatSuite,
+  chatRateSuite,
+  chatLogSuite,
+  roomClientNamesSuite,
+  roomPeopleNamesSuite,
+  namesChatEntrySuite,
+  namesAndChatStepsSuite,
 ]) {
   await suite();
 }

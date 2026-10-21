@@ -10,8 +10,9 @@
 
 import { createRoomClient } from './lib/room-client.mjs';
 import {
-  ADDR_SERVER, TYPE_AHEAD, TYPE_HOST_STATUS, buildAheadEnvelope, buildHostStatusEnvelope,
-  newReclaimSecret, readAheadReport, readBody, readHostStatus,
+  ADDR_SERVER, CHAT_MAX_CODE_POINTS, ERROR_CODES, NAME_MAX_CODE_POINTS, TYPE_AHEAD, TYPE_HOST_STATUS,
+  buildAheadEnvelope, buildHostStatusEnvelope, newReclaimSecret, readAheadReport, readBody,
+  readHostStatus, readMemberText,
 } from './lib/envelope.mjs';
 import { createPlayer } from './lib/player.mjs';
 import { createPeerBytes } from './lib/peer-bytes.mjs';
@@ -57,7 +58,7 @@ import { createPageView } from './lib/page-view.mjs';
 import { syncDot } from './lib/sync-dot.mjs';
 import { joinTarget, readRoute } from './lib/route.mjs';
 import { formatMediaTime } from './lib/media-time.mjs';
-import { activityText, labelMap, memberLabels } from './lib/room-people.mjs';
+import { activityText, chatLine, labelMap, memberLabels } from './lib/room-people.mjs';
 import { createHostAnswer } from './lib/host-answer.mjs';
 import { createHostStatusBook, ownHostStatus, statusDue, titleDue } from './lib/host-status.mjs';
 import { isValidHostName } from './lib/title-fields.mjs';
@@ -145,7 +146,14 @@ function sessionKey(key) {
 const PREPARED_NAME_KEY = 'watchalong.prepared-name';
 const playbackStore = sessionKey('watchalong.playback-state');
 const preparedName = sessionKey(PREPARED_NAME_KEY);
+const nameStore = sessionKey('watchalong.name');
 if (route !== 'room') playbackStore?.clear();
+
+// The name the server last accepted for this tab, or undefined; an invalid stored value is none.
+function storedName() {
+  const stored = nameStore?.get();
+  return typeof stored === 'string' ? readMemberText(stored, NAME_MAX_CODE_POINTS) ?? undefined : undefined;
+}
 
 // Start-timing instrumentation (executor-spec.md §11.2), off unless asked for.
 // `record` returns early when disabled, so every site below is unconditional
@@ -205,6 +213,10 @@ const INITIAL_VIEW = {
   playSlot: 'play',
   roster: [],
   people: [],
+  selfClientId: null,
+  ownName: '',
+  namePromptRequest: 0,
+  chatOutcome: { id: null, result: null },
   notices: [],
   activity: [],
   controlMode: 'open',
@@ -256,11 +268,41 @@ function addActivity(event, labels) {
   try {
     const text = activityText(event, labels ?? labelMap(view.get().people));
     if (text === null) return;
-    const entry = { id: activitySeq++, text, warn: event.kind === 'refused' };
+    const entry = { id: activitySeq++, text, warn: event.kind === 'refused' || event.kind === 'rate' };
     view.set('activity', [...view.get().activity, entry].slice(-ACTIVITY_CAP));
   } catch (error) {
     addSubscriberFailure('activity', error);
   }
+}
+
+function addChatLine(env) {
+  try {
+    const line = chatLine(env, view.get().people);
+    if (line === null) return;
+    view.set('activity', [...view.get().activity, { id: activitySeq++, ...line, warn: false }].slice(-ACTIVITY_CAP));
+  } catch (error) {
+    addSubscriberFailure('activity', error);
+  }
+}
+
+// This member's own name and chat sends, by id, so a refusal or a relay can be told from anyone's.
+const OWN_SENDS_KEPT = 32;
+const ownSends = new Map();
+
+function rememberSend(id, kind) {
+  if (id === null || id === undefined) return;
+  ownSends.set(id, kind);
+  if (ownSends.size > OWN_SENDS_KEPT) ownSends.delete(ownSends.keys().next().value);
+}
+
+// The own entry in the server's latest roster decides what the page shows and keeps as its name.
+function syncOwnMember(roster) {
+  const mine = (roster ?? []).find((member) => member?.clientId === client.clientId);
+  if (!mine) return;
+  view.set('selfClientId', mine.clientId);
+  view.set('ownName', typeof mine.name === 'string' ? mine.name : '');
+  if (typeof mine.name === 'string') nameStore?.set(mine.name);
+  else nameStore?.clear();
 }
 
 // What a person can DO about a refusal, where there is anything. Absence is the
@@ -417,7 +459,7 @@ function subscribe(map, method, type, listener) {
 
 function activateClient() {
   if (activeClient) return;
-  activeClient = createRoomClient({ url, room, tabId, role: role ?? 'viewer' });
+  activeClient = createRoomClient({ url, room, tabId, role: role ?? 'viewer', name: storedName() });
   for (const [type, entries] of eventSubscribers) {
     for (const entry of entries) entry.off = activeClient.onEvent(type, entry.listener);
   }
@@ -433,6 +475,9 @@ const client = {
   get lastSeq() { return activeClient?.lastSeq ?? null; },
   get isConnected() { return activeClient?.isConnected ?? false; },
   get isJoined() { return activeClient?.isJoined ?? false; },
+  get name() { return activeClient?.name ?? null; },
+  setName(name) { return activeClient ? activeClient.setName(name) : null; },
+  sendChat(text) { return activeClient ? activeClient.sendChat(text) : null; },
   onEvent(type, listener) { return subscribe(eventSubscribers, 'onEvent', type, listener); },
   on(type, listener) { return subscribe(envelopeSubscribers, 'on', type, listener); },
   send(envelope) {
@@ -626,6 +671,7 @@ client.onEvent('joined', (joined) => {
   }
   addNotice(`joined as ${joined.clientId} (${joined.role})`);
   renderRoster(joined.roster);
+  syncOwnMember(joined.roster);
   observeHostGrace();
   paintHostStatus();
   runTickSteps([['urgent-context', updateUrgentContext]], reportStep);
@@ -671,6 +717,10 @@ function notePresence(body, labelsBefore) {
   const clientId = body.member?.clientId;
   if (body.event === 'leave') addActivity({ kind: 'leave', clientId }, labelsBefore);
   if (body.event === 'join' && clientId !== client.clientId) addActivity({ kind: 'join', clientId });
+  if (body.event === 'name') {
+    const labelsAfter = labelMap(view.get().people);
+    addActivity({ kind: 'rename', before: labelsBefore.get(clientId), after: labelsAfter.get(clientId) });
+  }
 }
 
 client.on('presence', (env) => {
@@ -681,11 +731,31 @@ client.on('presence', (env) => {
   addNotice(`presence: ${body.event} — ${body.member?.tabId ?? body.member?.clientId}`);
   const labelsBefore = labelMap(view.get().people);
   renderRoster(body.roster);
+  if (env.from === ADDR_SERVER) syncOwnMember(body.roster);
   if (env.from === ADDR_SERVER) notePresence(body, labelsBefore);
   if (env.from === ADDR_SERVER) observeHostGrace();
   paintHostStatus();
   runTickSteps([['urgent-context', updateUrgentContext]], reportStep);
   schedulePollStart(0);
+});
+
+// A relayed chat message is a line in the activity list and never a notice. A body the reader
+// refuses is dropped: the server cannot send one, but the page does not rely on that.
+onEnvelope('chat', 'chat', (env) => {
+  addChatLine(env);
+  if (env.from === client.clientId && ownSends.get(env.id) === 'chat') {
+    view.set('chatOutcome', { id: env.id, result: 'relayed' });
+  }
+});
+
+// A refusal of this member's own send, told by the id it names. A rate refusal shows the
+// warning line; a refused chat tells the input to keep its text.
+onEnvelope('error', 'send refusal', (env) => {
+  if (env.from !== ADDR_SERVER || !ownSends.has(env.replyTo)) return;
+  const kind = ownSends.get(env.replyTo);
+  ownSends.delete(env.replyTo);
+  if (kind === 'chat') view.set('chatOutcome', { id: env.replyTo, result: 'refused' });
+  if (readBody(env)?.code === ERROR_CODES.RATE_LIMITED) addActivity({ kind: 'rate' });
 });
 
 // ---------------------------------------------------------------------------
@@ -1091,6 +1161,22 @@ const actions = {
     return playerElement?.requestFullscreen?.();
   },
   stats: () => view.set('overlayVisible', !view.get().overlayVisible),
+  // The server decides what a name is; the page only keeps what the roster hands back.
+  setName: (text) => {
+    const name = typeof text === 'string' ? readMemberText(text.trim(), NAME_MAX_CODE_POINTS) : null;
+    if (name === null) return null;
+    const id = client.setName(name);
+    rememberSend(id, 'name');
+    return id;
+  },
+  sendChat: (text) => {
+    const message = typeof text === 'string' ? readMemberText(text.trim(), CHAT_MAX_CODE_POINTS) : null;
+    if (message === null) return null;
+    const id = client.sendChat(message);
+    rememberSend(id, 'chat');
+    return id;
+  },
+  openNamePrompt: () => view.set('namePromptRequest', view.get().namePromptRequest + 1),
   pointerMove: () => {
     lastPointerMoveAt = pageNow();
     const bar = view.get().bar;

@@ -377,16 +377,27 @@ export function s7b(reading) {
   return verdict(reasons ? 'pass' : 'fail', reading, [reasons ? 'viewer showed the chosen segment last frame' : 'viewer did not show the chosen segment last frame']);
 }
 
+// S7c and S7d read the element's `ended` attribute; the `ended` event count stays in the
+// record as a diagnostic (change 12d D10).
+function endedElement(element) {
+  return object(element) && finite(element.currentTime) && finite(element.duration) && typeof element.ended === 'boolean';
+}
+
+function endedAtDuration(element, frame) {
+  const remaining = element.duration - element.currentTime;
+  return element.ended === true && remaining >= 0 && remaining <= frame;
+}
+
 export function s7c(reading) {
   const early = precondition(reading);
   if (early) return early;
   const values = framesOf(reading.frames);
-  if (!values || !finite(reading.target) || !finitePositive(reading.frame) || !finite(reading.afterWallTime) || !object(reading.events)
-    || !finitePositive(reading.duration) || !Number.isInteger(reading.events.ended)) return missing(reading);
+  if (!values || !finite(reading.target) || !finitePositive(reading.frame) || !finite(reading.afterWallTime) || !endedElement(reading.element)
+    || !finitePositive(reading.duration)) return missing(reading);
   const last = values.at(-1);
   const reasons = [];
   if (showsFrameAt(values, reading.target, reading.frame, reading.afterWallTime) !== true) reasons.push('viewer did not show the last segment first frame');
-  if (reading.events.ended !== 1) reasons.push('viewer did not report exactly one ended event');
+  if (!endedAtDuration(reading.element, reading.frame)) reasons.push('viewer element did not end at its duration');
   if (!finite(last.mediaTime) || last.mediaTime < reading.duration - 2 * reading.frame) reasons.push('last frame did not reach the reference duration');
   return verdict(reasons.length ? 'fail' : 'pass', reading, reasons.length ? reasons : ['viewer played the last segment to the end']);
 }
@@ -400,12 +411,12 @@ export function s7d(reading) {
   const early = precondition(reading);
   if (early) return early;
   const values = framesOf(reading.frames);
-  if (!values || !finite(reading.target) || !finitePositive(reading.frame) || !finite(reading.afterWallTime) || !object(reading.events)
-    || !finitePositive(reading.duration) || !Number.isInteger(reading.events.ended)) return missing(reading);
+  if (!values || !finite(reading.target) || !finitePositive(reading.frame) || !finite(reading.afterWallTime) || !endedElement(reading.element)
+    || !finitePositive(reading.duration)) return missing(reading);
   const reasons = [];
   if (reading.duration - reading.target < 4) reasons.push('the play was issued less than 4 s before the end');
   if (showsFrameAt(values, reading.target, reading.frame, reading.afterWallTime) !== true) reasons.push('viewer did not show the frame at the seek');
-  if (reading.events.ended !== 1) reasons.push('viewer did not report exactly one ended event');
+  if (!endedAtDuration(reading.element, reading.frame)) reasons.push('viewer element did not end at its duration');
   if (values.at(-1).mediaTime < reading.duration - 2 * reading.frame) reasons.push('last frame did not reach the reference duration');
   return verdict(reasons.length ? 'fail' : 'pass', reading, reasons.length ? reasons : ['viewer played from 4 s or more before the end to the end']);
 }

@@ -5,10 +5,9 @@
 //
 // THE INVARIANT THIS FILE IS BUILT ON: the server routes; it does not
 // interpret. It reads `type` only far enough to tell its own protocol messages
-// (join, leave, echo) from everything else. It reads message CONTENT for
-// `join` and for nothing else, and even then through a named accessor in
-// public/lib/envelope.mjs rather than a field access here — design.md I4
-// narrows D3's prose to exactly this, and this file is the narrower statement.
+// (join, leave, echo, name, chat) from everything else. It reads message CONTENT
+// for `join`, `name` and `chat` and for nothing else, each through a named
+// reader in public/lib/envelope.mjs rather than a field access here.
 //
 // The invariant is defended structurally, not by good intentions: every
 // envelope this file emits is constructed in envelope.mjs, and
@@ -35,10 +34,14 @@ import {
   TYPE_JOIN,
   TYPE_LEAVE,
   TYPE_ECHO,
+  TYPE_NAME,
+  TYPE_CHAT,
   SERVER_ONLY_TYPES,
   relayEnvelope,
   validateClientEnvelope,
   readJoinRequest,
+  readNameRequest,
+  readChatMessage,
   newReclaimSecret,
   makeJoined,
   makePresence,
@@ -65,6 +68,14 @@ const DEFAULT_MEDIA_DIR = path.resolve(APP_DIR, '..', 'step0', 'content');
 // design.md, "Challenged and left standing", before shortening it.
 const DEFAULT_LIVENESS_MS = 5000;
 const DEFAULT_HOST_GRACE_MS = 10_000;
+const DEFAULT_CHAT_BURST = 5;
+const DEFAULT_CHAT_REFILL_MS = 1000;
+
+function requirePositiveSafeInteger(value, setting) {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new TypeError(`${setting} must be a positive integer`);
+  }
+}
 
 function requireHostGraceMs(value) {
   if (!Number.isInteger(value) || value < 0 || value > 3_600_000) {
@@ -120,7 +131,9 @@ function serverNow() {
  * @property {string} tabId       client-chosen, stable across reconnects
  * @property {'host'|'viewer'} role
  * @property {number} joinedAt    room timebase
- * @property {string} secret      server-issued reclaim secret; see below
+ * @property {string|null} name   the member's chosen name
+ * @property {{tokens: number, atMs: number}} allowance  chat and name send allowance
+ * @property {string} secret     server-issued reclaim secret; see below
  * @property {import('ws').WebSocket} ws
  */
 
@@ -143,7 +156,9 @@ function newClientId() {
  * That is why `tabId` cannot be what proves a returning tab is itself.
  */
 function rosterEntry(member) {
-  return { clientId: member.clientId, tabId: member.tabId, role: member.role, joinedAt: member.joinedAt };
+  const entry = { clientId: member.clientId, tabId: member.tabId, role: member.role, joinedAt: member.joinedAt };
+  if (member.name !== null) entry.name = member.name;
+  return entry;
 }
 
 /** Roster in join order, so every member renders the same list in the same order. */
@@ -220,7 +235,7 @@ function msUntilNameReleased(member, livenessMs) {
  * short liveness interval and a temporary media root, in-process, without
  * spawning anything.
  *
- * @param {{port?: number, host?: string, mediaDir?: string, livenessMs?: number, quiet?: boolean, delivery?: 'host'|'http', iceServers?: object[], trackerUrl?: string|null, mediaSource?: 'dir'|'file', targetSegmentSeconds?: number, autoStart?: boolean, hostGraceMs?: number}} [opts]
+ * @param {{port?: number, host?: string, mediaDir?: string, livenessMs?: number, quiet?: boolean, delivery?: 'host'|'http', iceServers?: object[], trackerUrl?: string|null, mediaSource?: 'dir'|'file', targetSegmentSeconds?: number, autoStart?: boolean, hostGraceMs?: number, chatBurst?: number, chatRefillMs?: number, logSink?: (line: string) => void}} [opts]
  */
 export function startRoomServer(opts = {}) {
   const host = opts.host ?? DEFAULT_HOST;
@@ -246,6 +261,10 @@ export function startRoomServer(opts = {}) {
     throw new TypeError('APP_MEDIA_SOURCE=file requires APP_DELIVERY=host; file delivery cannot use http');
   }
   requireHostGraceMs(hostGraceMs);
+  const chatBurst = opts.chatBurst ?? DEFAULT_CHAT_BURST;
+  const chatRefillMs = opts.chatRefillMs ?? DEFAULT_CHAT_REFILL_MS;
+  requirePositiveSafeInteger(chatBurst, 'APP_CHAT_BURST');
+  requirePositiveSafeInteger(chatRefillMs, 'APP_CHAT_REFILL_MS');
   try {
     targetMillis(targetSegmentSeconds);
   } catch (error) {
@@ -258,7 +277,8 @@ export function startRoomServer(opts = {}) {
   const iceServers = opts.iceServers ?? [];
   if (!Array.isArray(iceServers)) throw new TypeError('iceServers must be an array');
 
-  const log = quiet ? () => {} : (...args) => console.log('[room]', ...args);
+  const sink = opts.logSink ?? console.log;
+  const log = quiet ? () => {} : (...args) => sink(['[room]', ...args].join(' '));
   const counters = createCounters();
   const socketStates = new WeakMap();
   let nextSocketId = 1;
@@ -335,6 +355,26 @@ export function startRoomServer(opts = {}) {
 
   function refuse(ws, conn, recv, code, detail, extra = {}) {
     emit(ws, makeError(directedRouting(conn, recv), { code, detail, ...extra }));
+  }
+
+  /** A refusal that names the refused envelope's id, so the sender knows which send failed. */
+  function refuseReply(ws, conn, recv, env, code, detail) {
+    const extra = env.id === undefined ? {} : { replyTo: env.id };
+    emit(ws, makeError(directedRouting(conn, recv, extra), { code, detail }));
+  }
+
+  /** Token bucket on the membership, refilled when a send arrives; true when one was spent. */
+  function spendAllowance(member, recv) {
+    const a = member.allowance;
+    const gained = Math.floor((recv - a.atMs) / chatRefillMs);
+    if (gained > 0) {
+      a.tokens = Math.min(chatBurst, a.tokens + gained);
+      a.atMs += gained * chatRefillMs;
+    }
+    if (a.tokens >= chatBurst) a.atMs = recv;
+    if (a.tokens === 0) return false;
+    a.tokens -= 1;
+    return true;
   }
 
   // -------------------------------------------------------------------------
@@ -593,7 +633,11 @@ export function startRoomServer(opts = {}) {
       }
 
       if (conn.clientId === null) {
-        refuse(ws, conn, recv, ERROR_CODES.NOT_JOINED, `"${env.type}" arrived before join`);
+        if (env.type === TYPE_NAME || env.type === TYPE_CHAT) {
+          refuseReply(ws, conn, recv, env, ERROR_CODES.NOT_JOINED, `"${env.type}" arrived before join`);
+        } else {
+          refuse(ws, conn, recv, ERROR_CODES.NOT_JOINED, `"${env.type}" arrived before join`);
+        }
         return;
       }
 
@@ -621,6 +665,16 @@ export function startRoomServer(opts = {}) {
         return;
       }
 
+      if (env.type === TYPE_NAME) {
+        handleName(ws, room, conn, env, recv);
+        return;
+      }
+
+      if (env.type === TYPE_CHAT) {
+        handleChat(ws, room, conn, env, recv);
+        return;
+      }
+
       route(ws, room, conn, env, recv);
     });
 
@@ -633,6 +687,46 @@ export function startRoomServer(opts = {}) {
 
     ws.on('error', (err) => log(`socket error (${conn.clientId ?? 'unjoined'}): ${err.message}`));
   });
+
+  // Address, then shape, then rate: a refused shape spends nothing. Fixed detail
+  // text only — nothing the sender wrote is quoted or logged.
+  function handleName(ws, room, conn, env, recv) {
+    const member = room.members.get(conn.clientId);
+    if (env.to !== ADDR_SERVER) {
+      refuseReply(ws, conn, recv, env, ERROR_CODES.BAD_ENVELOPE, 'name must be addressed to "server"');
+      return;
+    }
+    const request = readNameRequest(env);
+    if (!request.ok) {
+      refuseReply(ws, conn, recv, env, ERROR_CODES.BAD_ENVELOPE,
+        'name must be 1 to 32 characters with no control or direction characters');
+      return;
+    }
+    if (!spendAllowance(member, recv)) {
+      refuseReply(ws, conn, recv, env, ERROR_CODES.RATE_LIMITED, 'sending too fast');
+      return;
+    }
+    member.name = request.name;
+    announce(room, 'name', member, recv);
+  }
+
+  function handleChat(ws, room, conn, env, recv) {
+    const member = room.members.get(conn.clientId);
+    if (env.to !== ADDR_ROOM) {
+      refuseReply(ws, conn, recv, env, ERROR_CODES.BAD_ENVELOPE, 'chat must be addressed to "room"');
+      return;
+    }
+    if (!readChatMessage(env).ok) {
+      refuseReply(ws, conn, recv, env, ERROR_CODES.BAD_ENVELOPE,
+        'chat must hold only text of 1 to 500 characters with no control or direction characters');
+      return;
+    }
+    if (!spendAllowance(member, recv)) {
+      refuseReply(ws, conn, recv, env, ERROR_CODES.RATE_LIMITED, 'sending too fast');
+      return;
+    }
+    route(ws, room, conn, env, recv);
+  }
 
   /**
    * Route an envelope the server does not understand and must not try to.
@@ -764,6 +858,9 @@ export function startRoomServer(opts = {}) {
       tabId: reclaimed ? reclaimed.tabId : request.tabId,
       role: reclaimed ? reclaimed.role : request.role,
       joinedAt: reclaimed ? reclaimed.joinedAt : recv,
+      // A reclaim keeps the held name and allowance and reads neither from the join.
+      name: reclaimed ? reclaimed.name : (request.name ?? null),
+      allowance: reclaimed ? reclaimed.allowance : { tokens: chatBurst, atMs: recv },
       secret,
       ws,
     };
@@ -920,7 +1017,7 @@ export function startRoomServer(opts = {}) {
     });
   });
 
-  return { httpServer, wss, rooms, close, ready, mediaDir, livenessMs, serverNow, counters };
+  return { httpServer, wss, rooms, close, ready, mediaDir, livenessMs, serverNow, counters, chatBurst, chatRefillMs };
 }
 
 /** The server's options as `npm start` and the origin container read them from the environment. */
@@ -939,7 +1036,15 @@ export function optionsFromEnv(env = process.env) {
   }
   const hostGraceMs = hostGraceText === undefined ? DEFAULT_HOST_GRACE_MS : Number(hostGraceText);
   requireHostGraceMs(hostGraceMs);
+  const digitsOnly = (name) => {
+    const text = env[name];
+    if (text === undefined) return undefined;
+    if (!/^\d+$/.test(text)) throw new TypeError(`${name} must contain decimal digits only`);
+    return Number(text);
+  };
   return {
+    chatBurst: digitsOnly('APP_CHAT_BURST'),
+    chatRefillMs: digitsOnly('APP_CHAT_REFILL_MS'),
     port: env.APP_PORT ? Number(env.APP_PORT) : undefined,
     mediaDir: env.APP_MEDIA_DIR,
     livenessMs: env.APP_LIVENESS_INTERVAL_MS ? Number(env.APP_LIVENESS_INTERVAL_MS) : undefined,

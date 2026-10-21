@@ -629,6 +629,15 @@
   .activity-line { margin: 0 0 1rem; text-align: center; color: var(--secondary); font-size: 0.9375rem; line-height: 1.5rem; overflow-wrap: anywhere; }
   .activity-line:last-child { margin-bottom: 0; }
   .activity-warn { color: var(--warning); }
+  .activity-chat { text-align: left; color: var(--ink-soft); overflow-wrap: anywhere; }
+  .chat-sender { font-weight: 600; color: var(--ink); }
+  .chat-sender-tone-host { color: var(--chip-host); }
+  .chat-sender-tone-1 { color: var(--chip-1); }
+  .chat-sender-tone-2 { color: var(--chip-2); }
+  .chat-sender-tone-3 { color: var(--chip-3); }
+  .chat-sender-tone-4 { color: var(--chip-4); }
+  .chat-sender-tone-5 { color: var(--chip-5); }
+  .participant-self { display: flex; flex: 0 1 auto; align-items: center; gap: 1rem; min-width: 0; margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
   .room-compose { flex: none; padding: 0.75rem; border-top: 1px solid var(--hairline); }
   .room-compose .field { height: 2.75rem; padding: 0 1.125rem; border-radius: 999px; background: transparent; }
 
