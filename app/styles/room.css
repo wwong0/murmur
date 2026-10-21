@@ -739,7 +739,7 @@
     min-height: 82dvh;
     padding: 4.5rem 0 2rem;
   }
-  .front-headline { margin: 0; font-size: clamp(3.2rem, 6vw, 6rem); font-weight: 700; line-height: 0.95; letter-spacing: -0.04em; color: var(--ink); }
+  .front-headline { margin: 0; max-width: 30rem; text-align: center; font-size: clamp(3.2rem, 6vw, 6rem); font-weight: 700; line-height: 0.95; letter-spacing: -0.04em; color: var(--ink); }
   .front-lede { margin: 1.25rem 0 2rem; max-width: 30rem; font-size: clamp(1.08rem, 1.5vw, 1.3rem); color: var(--secondary); }
   .front-actions { display: flex; flex-direction: column; gap: 0.875rem; max-width: 30rem; }
 
