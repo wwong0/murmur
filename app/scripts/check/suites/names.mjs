@@ -49,7 +49,7 @@ export default async function namesSuite() {
     assertEqual(j1.type, TYPE_JOINED, 'a long name is admitted');
     assert(!('name' in entryOf(j1.payload.roster, j1.payload.clientId)), 'and carries no name');
     const bidi = await peer('bidi');
-    const j2 = await bidi.join({ room, tabId: 'bidi', role: 'viewer', name: 'ab‮cd' });
+    const j2 = await bidi.join({ room, tabId: 'bidi', role: 'viewer', name: 'ab\u202Ecd' });
     assertEqual(j2.type, TYPE_JOINED, 'a direction override is admitted');
     assert(!('name' in entryOf(j2.payload.roster, j2.payload.clientId)), 'and carries no name');
     const edge = await peer('edge');

@@ -302,12 +302,14 @@ async function runRows() {
     return { exercised: true, ok: joined.ok && roster.ok && joined.value.room === new URL(invite).searchParams.get('room'), detail: { joined: joined.value, roster: roster.value } };
   });
 
+  // The host's create can land after the viewer's join, so a page may not hold the state yet
+  // when RS-F3 ends (change 12d d1-findings.md F1, post-result).
   await runRow(LABELS[3], async () => {
-    const states = await roomStates();
+    const held = await waitRoomStates((states) => states.every((snapshot) => snapshot?.state != null));
     await sleep(3_000);
     const after = await roomStates();
-    const ok = states.every(({ state }) => state !== null) && after.every(({ state, video }) => state?.playing === false && state.positionMs === 0 && state.held === false && video?.currentTime < 0.1 && video.paused);
-    return { exercised: states.every(({ state }) => state !== null), ok, detail: after };
+    const ok = held.ok && after.every(({ state, video }) => state?.playing === false && state.positionMs === 0 && state.held === false && video?.currentTime < 0.1 && video.paused);
+    return { exercised: held.ok, ok, detail: after };
   });
 
   await runRow(LABELS[4], async () => {

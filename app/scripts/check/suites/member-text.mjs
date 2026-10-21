@@ -43,8 +43,10 @@ export default async function memberTextSuite() {
     assertEqual(readNameRequest({ payload: { name: '  ' } }).ok, false, 'white space alone refused as a rename');
   });
 
-  await check('member text: control and direction characters are refused', async () => {
-    const forbidden = { LF: '\n', TAB: '\t', DEL: '\u007f', NEL: '\u0085', LRE: '‪', RLO: '‮', LRI: '⁦', PDI: '⁩' };
+  await check('member text: control, direction and line and paragraph separator characters are refused', async () => {
+    const forbidden = {
+      LF: '\n', TAB: '\t', DEL: '\u007f', NEL: '\u0085', LRE: '\u202A', RLO: '\u202E', LRI: '\u2066', PDI: '\u2069', LS: '\u2028', PS: '\u2029',
+    };
     for (const [label, ch] of Object.entries(forbidden)) {
       assertEqual(readMemberText(`a${ch}b`, 32), null, `${label} refused`);
       assert(!('name' in nameOf(`a${ch}b`)), `${label} dropped from a join`);

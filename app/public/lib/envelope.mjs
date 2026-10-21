@@ -295,7 +295,7 @@ export function makeEchoReply(routing) {
 export const NAME_MAX_CODE_POINTS = 32;
 export const CHAT_MAX_CODE_POINTS = 500;
 
-const FORBIDDEN_TEXT = /[\p{Cc}‪-‮⁦-⁩]/u;
+const FORBIDDEN_TEXT = /[\p{Cc}\u2028\u2029\u202A-\u202E\u2066-\u2069]/u;
 
 /** The one text rule for names and messages: the string, or null. Does not trim. */
 export function readMemberText(value, maxCodePoints) {

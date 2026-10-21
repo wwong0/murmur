@@ -32,8 +32,9 @@ const ROWS = {
   },
   NC3: {
     label: 'NC3 a reload shows no prompt, keeps the stored name, and both lists show it',
-    keys: ['reloaded', 'promptSamplesShown', 'storagePresent', 'hostListHasName', 'viewerListHasName'],
-    exercised: (e) => e.reloaded === true,
+    // The name it looks for is NC2's rename, so no rename means nothing to keep (d1-findings F10, post-result).
+    keys: ['reloaded', 'renamed', 'promptSamplesShown', 'storagePresent', 'hostListHasName', 'viewerListHasName'],
+    exercised: (e) => e.reloaded === true && e.renamed === true,
     ok: (e) => e.promptSamplesShown === 0 && e.storagePresent === true && e.hostListHasName === true && e.viewerListHasName === true,
   },
   NC4: {

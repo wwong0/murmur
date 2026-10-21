@@ -138,10 +138,10 @@ export default async function namesChatEntrySuite() {
     assertEqual(early.screens().actions.setName('Ada'), null, 'a name before the join');
     const { page } = viewerPage(product.code);
     const { actions } = page.screens();
-    for (const text of ['', '   ', 'a\nb', 'x'.repeat(501), 'rtl‮', 7, undefined]) {
+    for (const text of ['', '   ', 'a\nb', 'x'.repeat(501), 'rtl\u202E', 7, undefined]) {
       assertEqual(actions.sendChat(text), null, `chat ${JSON.stringify(text)?.slice(0, 12)}`);
     }
-    for (const text of ['', '   ', 'x'.repeat(33), 'a\tb', 'rtl‮', 7, undefined]) {
+    for (const text of ['', '   ', 'x'.repeat(33), 'a\tb', 'rtl\u202E', 7, undefined]) {
       assertEqual(actions.setName(text), null, `name ${JSON.stringify(text)?.slice(0, 12)}`);
     }
     assertEqual(page.events.filter((e) => e.kind === 'send-chat' || e.kind === 'set-name').length, 0, 'nothing reached the client');

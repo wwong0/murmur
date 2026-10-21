@@ -275,6 +275,7 @@ async function rowReload() {
   const lists = await bothLists((labels) => hasName(labels));
   return {
     reloaded: reloaded.ok,
+    renamed: evidence.NC2?.renameAnswered === true,
     promptSamplesShown: samples.filter((value) => value === true).length,
     storagePresent: storagePresent === true,
     hostListHasName: hasName(lists.value[0]),
