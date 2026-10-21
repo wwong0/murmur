@@ -12,7 +12,7 @@ import { createRoomClient } from './lib/room-client.mjs';
 import {
   ADDR_SERVER, CHAT_MAX_CODE_POINTS, ERROR_CODES, NAME_MAX_CODE_POINTS, TYPE_AHEAD, TYPE_HOST_STATUS,
   buildAheadEnvelope, buildHostStatusEnvelope, newReclaimSecret, readAheadReport, readBody,
-  readHostStatus, readMemberText,
+  readHostStatus, readMemberText, readTrimmedText,
 } from './lib/envelope.mjs';
 import { createPlayer } from './lib/player.mjs';
 import { createPeerBytes } from './lib/peer-bytes.mjs';
@@ -152,7 +152,7 @@ if (route !== 'room') playbackStore?.clear();
 // The name the server last accepted for this tab, or undefined; an invalid stored value is none.
 function storedName() {
   const stored = nameStore?.get();
-  return typeof stored === 'string' ? readMemberText(stored, NAME_MAX_CODE_POINTS) ?? undefined : undefined;
+  return readMemberText(stored, NAME_MAX_CODE_POINTS) ?? undefined;
 }
 
 // Start-timing instrumentation (executor-spec.md §11.2), off unless asked for.
@@ -289,10 +289,15 @@ function addChatLine(env) {
 const OWN_SENDS_KEPT = 32;
 const ownSends = new Map();
 
-function rememberSend(id, kind) {
-  if (id === null || id === undefined) return;
+// Sends only text the rule accepts, trimmed; the server still decides. Returns the id, or null.
+function sendOwn(kind, text, maxCodePoints, send) {
+  const value = readTrimmedText(text, maxCodePoints);
+  if (value === null) return null;
+  const id = send(value);
+  if (id === null || id === undefined) return id;
   ownSends.set(id, kind);
   if (ownSends.size > OWN_SENDS_KEPT) ownSends.delete(ownSends.keys().next().value);
+  return id;
 }
 
 // The own entry in the server's latest roster decides what the page shows and keeps as its name.
@@ -1161,21 +1166,9 @@ const actions = {
     return playerElement?.requestFullscreen?.();
   },
   stats: () => view.set('overlayVisible', !view.get().overlayVisible),
-  // The server decides what a name is; the page only keeps what the roster hands back.
-  setName: (text) => {
-    const name = typeof text === 'string' ? readMemberText(text.trim(), NAME_MAX_CODE_POINTS) : null;
-    if (name === null) return null;
-    const id = client.setName(name);
-    rememberSend(id, 'name');
-    return id;
-  },
-  sendChat: (text) => {
-    const message = typeof text === 'string' ? readMemberText(text.trim(), CHAT_MAX_CODE_POINTS) : null;
-    if (message === null) return null;
-    const id = client.sendChat(message);
-    rememberSend(id, 'chat');
-    return id;
-  },
+  // The page keeps only the name the roster hands back.
+  setName: (text) => sendOwn('name', text, NAME_MAX_CODE_POINTS, (name) => client.setName(name)),
+  sendChat: (text) => sendOwn('chat', text, CHAT_MAX_CODE_POINTS, (message) => client.sendChat(message)),
   openNamePrompt: () => view.set('namePromptRequest', view.get().namePromptRequest + 1),
   pointerMove: () => {
     lastPointerMoveAt = pageNow();

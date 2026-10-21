@@ -296,7 +296,7 @@ const BOLD = "document.querySelectorAll('.room-activity b').length";
 const CHAT_LINES = "document.querySelectorAll('.room-activity .activity-chat').length";
 
 // Arrival is read as one more chat line on both pages, whatever it renders as, so a page that
-// turns the markup into an element reads FAIL, not unexercised (post-result, coordinator A).
+// turns the markup into an element reads FAIL, not unexercised (post-result, 12d tasks.md Q1).
 async function bothGrew(before) {
   const counts = async () => [await read(hostTab, CHAT_LINES), await read(viewerTab, CHAT_LINES)];
   return poll(counts, ([a, b]) => a === before[0] + 1 && b === before[1] + 1, SHORT_MS * 2);

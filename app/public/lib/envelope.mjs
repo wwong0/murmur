@@ -305,8 +305,9 @@ export function readMemberText(value, maxCodePoints) {
   return value;
 }
 
-function readTrimmedName(value) {
-  return typeof value === 'string' ? readMemberText(value.trim(), NAME_MAX_CODE_POINTS) : null;
+/** The text rule after trimming: the trimmed string, or null. */
+export function readTrimmedText(value, maxCodePoints) {
+  return typeof value === 'string' ? readMemberText(value.trim(), maxCodePoints) : null;
 }
 
 function isPlainObject(body) {
@@ -318,7 +319,7 @@ function isPlainObject(body) {
 export function readNameRequest(env) {
   const body = env.payload;
   if (body === null || typeof body !== 'object' || Array.isArray(body)) return { ok: false };
-  const name = readTrimmedName(body.name);
+  const name = readTrimmedText(body.name, NAME_MAX_CODE_POINTS);
   return name === null ? { ok: false } : { ok: true, name };
 }
 
@@ -351,7 +352,7 @@ export function readJoinRequest(env) {
   if (b.secret !== undefined && (typeof b.secret !== 'string' || b.secret.length === 0)) {
     return { ok: false, reason: 'join "secret" must be a non-empty string when present' };
   }
-  const name = readTrimmedName(b.name);
+  const name = readTrimmedText(b.name, NAME_MAX_CODE_POINTS);
   return {
     ok: true, room: b.room, tabId: b.tabId, role: b.role, secret: b.secret,
     ...(name === null ? {} : { name }),

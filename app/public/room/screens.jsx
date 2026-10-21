@@ -6,6 +6,8 @@ import { Collapsible } from '@base-ui/react/collapsible';
 import { Dialog } from '@base-ui/react/dialog';
 import { Popover } from '@base-ui/react/popover';
 import { ChartNoAxesColumn, ChevronDown, FileVideo, Link, Settings, TriangleAlert } from 'lucide-react';
+// The caps as `maxLength`: UTF-16 units are never fewer than code points, so never looser.
+import { CHAT_MAX_CODE_POINTS, NAME_MAX_CODE_POINTS } from '../lib/envelope.mjs';
 import { fileCard } from '../lib/host-file-card.mjs';
 import { namePromptDue } from '../lib/name-prompt.mjs';
 import { PlayerBar, PlayerTop } from './player-bar.jsx';
@@ -20,9 +22,6 @@ const COPIED_MS = 2_000;
 const HINT_VISIBLE_MS = 5_000;
 const HINT_FADE_MS = 400;
 const HEADER_CHIPS = 4;
-// UTF-16 units, never fewer than code points, so never looser than the server's caps.
-const NAME_MAX_LENGTH = 32;
-const MESSAGE_MAX_LENGTH = 500;
 const PINNED_SLACK_PX = 24;
 const CARD_ICONS = {
   warn: { Icon: TriangleAlert, className: 'file-icon file-icon-warn' },
@@ -92,7 +91,7 @@ function NamePrompt({ view, actions, fromFront }) {
     <DialogPanel id="name-prompt" finalFocus={false}>
       <Dialog.Title className="dialog-title">Choose a name</Dialog.Title>
       <form onSubmit={submit}>
-        <TextField ref={field} id="name-prompt-field" label="Your name" placeholder="Your name" size="lg" autoComplete="off" maxLength={NAME_MAX_LENGTH} defaultValue={ownName} />
+        <TextField ref={field} id="name-prompt-field" label="Your name" placeholder="Your name" size="lg" autoComplete="off" maxLength={NAME_MAX_CODE_POINTS} defaultValue={ownName} />
         <Button type="submit" variant="primary" size="lg" className="mt-3 w-full">Join</Button>
       </form>
     </DialogPanel>
@@ -488,7 +487,7 @@ function MessageInput({ view, actions }) {
     const id = actions.sendChat(raw);
     sent.current = id === null ? null : { id, raw };
   };
-  return <TextField ref={field} id="message-input" label="Message the room" placeholder="Message the room" autoComplete="off" maxLength={MESSAGE_MAX_LENGTH} onKeyDown={onKeyDown} />;
+  return <TextField ref={field} id="message-input" label="Message the room" placeholder="Message the room" autoComplete="off" maxLength={CHAT_MAX_CODE_POINTS} onKeyDown={onKeyDown} />;
 }
 
 // The right column: the participants' disclosure, the activity region, then the message
