@@ -448,7 +448,8 @@ async function rowSyncDotShowsIdle() {
   return withTab(`${ORIGIN}/room.html?room=${ROOM}&role=viewer&tab=rd-d1`, 'D1/viewer', async () => {
     const joined = await until(host, "document.querySelectorAll('#roster li').length", (count) => count === 2, 15_000);
     const members = joined.value;
-    const idle = await until(host, SYNC_DOT, (value) => value?.state === 'idle', CLOSE_MS);
+    // The page shows the dot on its next tick after the roster changes, so wait for it.
+    const idle = await until(host, SYNC_DOT, (value) => value?.state === 'idle' && value.hidden === false, CLOSE_MS);
     const dot = idle.value;
     return {
       exercised: true,

@@ -530,6 +530,7 @@ async function main(runDir) {
       && value.v1.hostPreparing?.state === 'choosing' && value.v2.hostPreparing?.state === 'choosing', ROOM_WAIT_MS);
     await setHostFile(host2.tab, TITLE_B);
     const bMark = { v1: null, v2: null };
+    // A viewer adopts title B a step before it loads it, so wait for the swarm id too (12e F2).
     const bReady = await waitUntil('title B', async () => {
       const pre = { v1: v1.frames.length, v2: v2.frames.length };
       const value = { host: await read(host2, 'RC7'), v1: await read(v1, 'RC7'), v2: await read(v2, 'RC7') };
@@ -539,7 +540,7 @@ async function main(runDir) {
         bMark.v2 = pre.v2;
       }
       return value;
-    }, (value) => [value.host, value.v1, value.v2].every((entry) => entry.hostFile?.state === 'ready' || entry.title?.title === fixtures.b.identity) && value.v1.title?.title === fixtures.b.identity && value.v2.title?.title === fixtures.b.identity, HOST_WAIT_MS);
+    }, (value) => [value.host, value.v1, value.v2].every((entry) => entry.hostFile?.state === 'ready' || entry.title?.title === fixtures.b.identity) && [value.v1, value.v2].every((entry) => entry.title?.title === fixtures.b.identity && typeof entry.swarmId === 'string'), HOST_WAIT_MS);
     for (const page of [v1, v2]) page.peerAfterSeq = bReady[page.tag].peerBytes?.latestSeq ?? 0;
     await sleep(500);
     await read(v1, 'B-load-mark');
