@@ -213,6 +213,25 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
   const fetches = [];
   const intervals = [];
   const documentListeners = new Map();
+  const windowListeners = new Map();
+  const playerListeners = new Map();
+  const player = {
+    id: 'player',
+    requested: 0,
+    requestFullscreen() {
+      this.requested += 1;
+      return Promise.resolve();
+    },
+    addEventListener(type, fn) {
+      if (!playerListeners.has(type)) playerListeners.set(type, []);
+      playerListeners.get(type).push(fn);
+    },
+    removeEventListener(type, fn) {
+      const listeners = playerListeners.get(type) ?? [];
+      const index = listeners.indexOf(fn);
+      if (index >= 0) listeners.splice(index, 1);
+    },
+  };
   const location = {
     search,
     protocol: 'http:',
@@ -272,15 +291,24 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     setTimeout: () => 0,
     clearTimeout() {},
     document: {
+      fullscreenElement: null,
       getElementById(id) {
         if (id === 'video') return video;
+        if (id === 'player') return player;
         throw new Error(`the engine read #${id}`);
+      },
+      exitFullscreen() {
+        this.fullscreenElement = null;
       },
       createElement: () => { throw new Error('the engine created an element'); },
       addEventListener(type, fn) {
         if (!documentListeners.has(type)) documentListeners.set(type, []);
         documentListeners.get(type).push(fn);
       },
+    },
+    addEventListener(type, fn) {
+      if (!windowListeners.has(type)) windowListeners.set(type, []);
+      windowListeners.get(type).push(fn);
     },
   };
   context.location.origin = 'http://127.0.0.1:8100';
@@ -300,6 +328,8 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     control,
     history,
     location,
+    document: context.document,
+    player,
     fetches,
     app: context.__app,
     xhr() {
@@ -328,6 +358,16 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     },
     /** Pin `performance.now()`, for a test whose expected values are arithmetic on it. */
     setNow(ms) { pinnedNowMs = ms; },
+    fireDocument(type, event = {}) {
+      const fired = { ...event, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+      for (const fn of documentListeners.get(type) ?? []) fn(fired);
+      return fired;
+    },
+    fireWindow(type, event = {}) {
+      const fired = { ...event, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+      for (const fn of windowListeners.get(type) ?? []) fn(fired);
+      return fired;
+    },
     settled() { return new Promise((resolve) => setImmediate(resolve)); },
     kinds: () => events.map((event) => event.kind),
     count: (kind) => events.filter((event) => event.kind === kind).length,

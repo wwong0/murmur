@@ -34,7 +34,11 @@ const TEXTS = { hello: `${MARK}-hello`, hi: `${MARK}-hi`, markup: `<b>${MARK}</b
 const PROMPT = '#name-prompt';
 const LINES = "[...document.querySelectorAll('.room-activity p')].map((p) => p.textContent)";
 const LABELS = "[...document.querySelectorAll('.participants-list .participant-label')].map((s) => s.textContent)";
-const LIST_SHOWN = "(document.querySelector('.participants-list')?.getClientRects().length ?? 0) > 0";
+// The panel grows from no height over 200 ms with its overflow hidden, and the list has client
+// rects from the first frame, so "shown" also waits for the panel to be open and still. A click
+// on the own entry before then lands on whatever is under the clipped list.
+const LIST_SHOWN = "(() => { const panel = document.querySelector('.participants-panel'); return (document.querySelector('.participants-list')?.getClientRects().length ?? 0) > 0 && panel !== null && panel.hasAttribute('data-open') && !panel.hasAttribute('data-starting-style') && !panel.hasAttribute('data-ending-style') && panel.getAnimations().length === 0; })()";
+const PANEL_OPEN = "document.querySelector('.participants-panel')?.hasAttribute('data-open') === true";
 const KEYS = { Enter: { code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' } };
 
 const log = createResultLog({ approvedStems: [] });
@@ -177,17 +181,25 @@ async function openTab(url, label) {
 
 const closeTab = (tab) => browser.send('Target.closeTarget', { targetId: tab.targetId }).catch(() => {});
 
+const FIELD_READY = "(() => { const field = document.querySelector('#name-prompt-field'); return field !== null && !field.disabled && document.activeElement === field; })()";
+const SELF_HIT = "(() => { const self = document.querySelector('.participant-self'); if (!self) return false; const r = self.getBoundingClientRect(); return self.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)); })()";
+const PROMPT_STATE = "(() => { const field = document.querySelector('#name-prompt-field'); const active = document.activeElement; return { present: document.querySelector('#name-prompt') !== null, field: field !== null, fieldEnabled: field !== null && !field.disabled, activeIsField: field !== null && active === field, activeTag: active?.tagName ?? null, activeInPrompt: Boolean(document.querySelector('#name-prompt')?.contains(active)) }; })()";
+
+// The prompt is answerable once its field is enabled and focused; a type into a field that is
+// still opening lands nowhere (12d d1-findings F10). The answer names the step that missed,
+// never the name.
 async function answerPrompt(tab, name) {
-  const shown = await until(tab, present(PROMPT), Boolean);
-  if (!shown.ok) return false;
-  if (await typeInto(tab, `${PROMPT} input`, name) !== true) return false;
+  if (!(await until(tab, present(PROMPT), Boolean)).ok) return { answered: false, missed: 'shown' };
+  if (!(await until(tab, FIELD_READY, Boolean, SHORT_MS)).ok) return { answered: false, missed: 'shown' };
+  if (await typeInto(tab, `${PROMPT} input`, name) !== true) return { answered: false, missed: 'typed' };
   await pressEnter(tab);
-  return (await until(tab, present(PROMPT), (value) => value === false, SHORT_MS)).ok;
+  const closed = (await until(tab, present(PROMPT), (value) => value === false, SHORT_MS)).ok;
+  return { answered: closed, missed: closed ? null : 'closed' };
 }
 
 async function labelsOf(tab) {
   if (!await read(tab, LIST_SHOWN)) {
-    await clickElement(tab, '.participants-trigger');
+    if (!await read(tab, PANEL_OPEN)) await clickElement(tab, '.participants-trigger');
     await until(tab, LIST_SHOWN, Boolean, SHORT_MS);
   }
   return (await read(tab, LABELS)) ?? [];
@@ -235,18 +247,20 @@ async function rowPrompts() {
   const front = await until(hostTab, present('#host'), Boolean);
   if (!front.ok) throw new Error('the front page did not render');
   await clickElement(hostTab, '#host');
-  const hostAnswered = await answerPrompt(hostTab, NAMES.host);
+  const hostPrompt = await answerPrompt(hostTab, NAMES.host);
   const invite = await until(hostTab, "document.querySelector('#invite')?.href ?? null", (value) => typeof value === 'string' && value.length > 0);
   if (!invite.ok) throw new Error('the host page showed no invite');
   viewerTab = await openTab(invite.value, 'viewer');
-  const viewerAnswered = await answerPrompt(viewerTab, NAMES.viewer);
+  const viewerPrompt = await answerPrompt(viewerTab, NAMES.viewer);
   await pageBuild(hostTab);
   await pageBuild(viewerTab);
   const lists = await bothLists((labels) => marked(labels) === 2);
   const roster = (await read(hostTab, "[...document.querySelectorAll('#roster li')].map((li) => li.textContent)")) ?? [];
   return {
-    hostAnswered,
-    viewerAnswered,
+    hostAnswered: hostPrompt.answered,
+    hostPromptMissed: hostPrompt.missed,
+    viewerAnswered: viewerPrompt.answered,
+    viewerPromptMissed: viewerPrompt.missed,
     hostListNames: marked(lists.value[0]),
     viewerListNames: marked(lists.value[1]),
     rosterRows: roster.length,
@@ -257,12 +271,15 @@ async function rowPrompts() {
 
 async function rowRename() {
   await labelsOf(viewerTab);
+  const selfHit = await read(viewerTab, SELF_HIT);
   await clickElement(viewerTab, '.participant-self');
-  const renameAnswered = await answerPrompt(viewerTab, NAMES.renamed);
+  const rename = await answerPrompt(viewerTab, NAMES.renamed);
+  // Which part of "shown" missed: the prompt, or its field's focus. Booleans and a tag only.
+  const promptState = rename.answered ? null : await read(viewerTab, PROMPT_STATE);
   const renamed = (lines) => lines.filter((line) => line.includes(' is now ') && line.includes(NAMES.renamed)).length;
   const seen = await poll(async () => [renamed(await linesOf(hostTab)), renamed(await linesOf(viewerTab))], ([a, b]) => a > 0 && b > 0, SHORT_MS * 2);
   await sleep(500);
-  return { renameAnswered, hostRenameLines: renamed(await linesOf(hostTab)), viewerRenameLines: renamed(await linesOf(viewerTab)), settled: seen.ok };
+  return { renameAnswered: rename.answered, renameMissed: rename.missed, selfHit, promptState, hostRenameLines: renamed(await linesOf(hostTab)), viewerRenameLines: renamed(await linesOf(viewerTab)), settled: seen.ok };
 }
 
 async function rowReload() {

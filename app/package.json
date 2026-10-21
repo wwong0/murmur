@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node server/room-server.mjs",
     "dev": "node scripts/dev.mjs",
+    "dev:file": "node scripts/dev.mjs --file",
     "build": "node scripts/check-structure.mjs && node scripts/build.mjs",
     "check": "node scripts/check-structure.mjs && node scripts/protocol-check.mjs",
     "ratios": "node scripts/check-structure.mjs --ratios",

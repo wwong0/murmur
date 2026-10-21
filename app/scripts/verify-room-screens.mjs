@@ -357,8 +357,8 @@ async function runRows() {
     const paused = await read(host, "document.querySelector('#sync-dot')?.dataset.state === 'idle'");
     const clicked = await clickWhenEnabled(host, '#play');
     await sleep(5_000);
-    const dot = await read(host, "({ state: document.querySelector('#sync-dot')?.dataset.state, title: document.querySelector('#sync-dot')?.title ?? '' })");
-    return { exercised: paused, ok: paused && clicked && ['in-sync', 'correcting'].includes(dot.state) && dot.title.endsWith(' ms'), detail: dot };
+    const dot = await read(host, "({ state: document.querySelector('#sync-dot')?.dataset.state, figure: document.querySelector('#sync-dot')?.getAttribute('data-figure') ?? '' })");
+    return { exercised: paused, ok: paused && clicked && ['in-sync', 'correcting'].includes(dot.state) && dot.figure.endsWith(' ms'), detail: dot };
   });
 
   // Joint D1 F4: a real pointer drag. Each move fires `input`; the release fires `change`.

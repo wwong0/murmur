@@ -244,3 +244,20 @@ export async function attach(port, url, { label = null, exclude = null } = {}) {
   }
   throw new Error(`window for ${label ?? url} never appeared`);
 }
+
+/**
+ * Accept every leave warning `tab` shows from now on, and count them. A playing host page asks
+ * before it unloads (12e design.md D13), and Chrome holds a reload or a navigation on that
+ * question until it is answered; a driver whose step reloads such a page installs this first.
+ * Other dialogs are left alone. `stop()` removes the listener; `count` stays readable.
+ */
+export async function acceptLeaveDialogs(tab) {
+  let count = 0;
+  const stop = tab.on('Page.javascriptDialogOpening', ({ type }) => {
+    if (type !== 'beforeunload') return undefined;
+    count += 1;
+    return tab.send('Page.handleJavaScriptDialog', { accept: true });
+  });
+  await tab.send('Page.enable');
+  return { get count() { return count; }, stop };
+}

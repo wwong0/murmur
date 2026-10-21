@@ -111,17 +111,17 @@ try {
   const refusedAttempt = refusal.value?.starts?.at(-1)?.attemptId ?? null;
   const refusedStarts = refusal.value?.starts?.length ?? 0;
 
-  // A trusted click through the input pipeline, on a non-control element: the header's wordmark.
+  // A trusted click through the input pipeline, on a non-control element: the header's own
+  // background at its centre. The wordmark is a link to the front page (12e D13).
   const box = await tab.evaluate(`(() => {
-    const wordmark = document.querySelector('[data-testid="wordmark"]');
-    if (!wordmark) return null;
-    const r = wordmark.getBoundingClientRect();
+    const header = document.querySelector('.room-header');
+    if (!header) return null;
+    const r = header.getBoundingClientRect();
     const x = r.left + r.width / 2;
     const y = r.top + r.height / 2;
-    const hit = document.elementFromPoint(x, y);
-    return { x, y, onWordmark: hit !== null && wordmark.contains(hit) };
+    return { x, y, onHeader: document.elementFromPoint(x, y) === header };
   })()`);
-  if (!box?.onWordmark) throw new Error('click point is not on the wordmark');
+  if (!box?.onHeader) throw new Error('click point is not on the header itself');
   for (const type of ['mousePressed', 'mouseReleased']) {
     await tab.send('Input.dispatchMouseEvent', { type, x: box.x, y: box.y, button: 'left', clickCount: 1 });
   }

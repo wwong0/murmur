@@ -6,7 +6,7 @@ export default async function syncDotSuite() {
   await check('D1 sync-dot: a settled finite estimate is in sync and offers its figure', async () => {
     const dot = syncDot({ playing: true, mode: 'settled', estimateMs: 12 });
     assertEqual(dot.state, 'in-sync', 'settled state');
-    assert(dot.title.includes('12'), 'settled title carries 12 ms');
+    assert(dot.figure.includes('12'), 'settled figure carries 12 ms');
   });
 
   await check('D2 sync-dot: correction state is correcting', async () => {
@@ -27,7 +27,7 @@ export default async function syncDotSuite() {
 
   await check('D5 sync-dot: a non-finite estimate is idle', async () => {
     assertEqual(syncDot({ playing: true, mode: 'settled', estimateMs: Number.NaN }).state, 'idle', 'missing estimate');
-    assertEqual(syncDot({ playing: true, mode: 'settled', estimateMs: 12 }).title, '+12.0 ms', 'finite title');
+    assertEqual(syncDot({ playing: true, mode: 'settled', estimateMs: 12 }).figure, '+12.0 ms', 'finite figure');
   });
 
   const product = await bundleProductEntry();

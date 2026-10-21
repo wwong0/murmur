@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocket as CdpWebSocket } from 'ws';
 
 import {
-  attach, cdpHttp, CHROME, clickElement, disposeChrome, FLAGS, rewriteWebSocketDebuggerUrl, sleep, Tab,
+  acceptLeaveDialogs, attach, cdpHttp, CHROME, clickElement, disposeChrome, FLAGS, rewriteWebSocketDebuggerUrl, sleep, Tab,
 } from './cdp.mjs';
 import { assertServedBundle, createManifestFile, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
@@ -395,6 +395,7 @@ async function main(runDir) {
     browser = new BrowserConnection(version.webSocketDebuggerUrl);
     const tab = await attach(chromePort, 'about:blank', { label: 'host' });
     host = await setupTab(tab, 'host');
+    await acceptLeaveDialogs(host.tab);
     await navigate(host, `${F_ORIGIN}/room.html?room=${room}&role=host&tab=host`);
   }
 
@@ -524,6 +525,7 @@ async function main(runDir) {
     }));
 
     host2 = await openPage('host2', `${F_ORIGIN}/room.html?room=${room}&role=host&tab=host2`);
+    await acceptLeaveDialogs(host2.tab);
     await waitUntil('returning host', async () => ({ host: await read(host2, 'RC7-choosing'), v1: await read(v1, 'RC7-choosing'), v2: await read(v2, 'RC7-choosing') }), (value) => value.host.present && value.host.hostFile?.state === 'awaiting-file'
       && value.v1.hostPreparing?.state === 'choosing' && value.v2.hostPreparing?.state === 'choosing', ROOM_WAIT_MS);
     await setHostFile(host2.tab, TITLE_B);

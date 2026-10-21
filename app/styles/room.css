@@ -1,6 +1,17 @@
 @tailwind components;
 @tailwind utilities;
 
+  /* Served from this origin, never a font service (12e design.md D3); the system stack stands
+     in until it loads. */
+  @font-face {
+    font-family: "Instrument Sans";
+    src: url("/fonts/InstrumentSans[wdth,wght].woff2") format("woff2");
+    font-weight: 400 700;
+    font-stretch: 75% 100%;
+    font-style: normal;
+    font-display: swap;
+  }
+
   :root {
     color-scheme: dark;
     --page: #0b0b0d;
@@ -41,7 +52,7 @@
     --wash-strong: rgba(255, 255, 255, 0.12);
     --text-shade: 0 1px 2px rgba(0, 0, 0, 0.6), 0 2px 16px rgba(0, 0, 0, 0.5);
     --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-    --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     --font-mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, Menlo, monospace;
     --header-h: 64px;
     --room-top: calc(var(--header-h) + 1rem);
@@ -50,6 +61,9 @@
     scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
   }
   * { box-sizing: border-box; }
+  /* The scrollbar's room is kept whether or not the page overflows, so opening Stats does not
+     narrow the grid (12e design.md D12). */
+  html { scrollbar-gutter: stable; }
   html, body {
     margin: 0;
     padding: 0;
@@ -100,6 +114,9 @@
     padding-inline: 1rem;
     border-bottom: 1px solid var(--hairline);
   }
+
+  /* The name, plain white, and the way back to the front page (12e design.md D2, D13). */
+  .wordmark { font-size: 2rem; font-weight: 700; line-height: 1; letter-spacing: -0.03em; color: var(--ink); text-decoration: none; border-radius: var(--radius-inner); }
 
   /* No display here: the front route closes #player with [hidden], and a display would
      override the user-agent rule that hides it. `align-self: start` keeps this box the video's:
@@ -709,16 +726,92 @@
     }
   }
 
-  /* The 1rem is .layout's bottom padding: the front fills the viewport without scrolling. It
-     spans every row, so none of the room's areas place it. */
-  .front {
-    grid-column: 1 / -1;
-    grid-row: 1 / -1;
-    display: flex;
+  /* The front page (12e design.md D1, D6): it spans every row of .layout, and the page scrolls.
+     The hero is the first screen: 82vh, so the features start just under the fold. */
+  .front { grid-column: 1 / -1; grid-row: 1 / -1; }
+  .front-wrap { max-width: 1120px; margin: 0 auto; padding: 0 1rem; }
+  .front-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    gap: 3.5rem;
     align-items: center;
-    min-height: calc(100vh - 1rem);
-    min-height: calc(100dvh - 1rem);
+    min-height: 82vh;
+    min-height: 82dvh;
+    padding: 4.5rem 0 2rem;
   }
+  .front-headline { margin: 0; font-size: clamp(3.2rem, 6vw, 6rem); font-weight: 700; line-height: 0.95; letter-spacing: -0.04em; color: var(--ink); }
+  .front-lede { margin: 1.25rem 0 2rem; max-width: 30rem; font-size: clamp(1.08rem, 1.5vw, 1.3rem); color: var(--secondary); }
+  .front-actions { display: flex; flex-direction: column; gap: 0.875rem; max-width: 30rem; }
+
+  /* The room, drawn: a player with its bar and dot, and the column as blank bars. */
+  .front-room {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 34%;
+    gap: 0.625rem;
+    padding: 0.75rem;
+    border-radius: 18px;
+    background: var(--panel);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--hairline);
+  }
+  .front-room-video {
+    position: relative;
+    overflow: hidden;
+    aspect-ratio: 16 / 9;
+    border-radius: 10px;
+    background: radial-gradient(120% 90% at 70% 30%, color-mix(in srgb, var(--accent) 34%, var(--page)) 0%, color-mix(in srgb, var(--accent) 14%, var(--page)) 40%, var(--page) 75%);
+  }
+  .front-room-video::after { content: ''; position: absolute; inset: 60% 0 0; background: linear-gradient(transparent, rgba(0, 0, 0, 0.65)); }
+  .front-room-dot { position: absolute; z-index: 1; top: 10px; right: 10px; width: 9px; height: 9px; border-radius: 50%; background: var(--sync-ok); }
+  .front-room-track { position: absolute; z-index: 1; left: 12px; right: 12px; bottom: 26px; height: 3px; border-radius: 3px; background: rgba(255, 255, 255, 0.25); }
+  .front-room-track span { display: block; width: 42%; height: 100%; border-radius: 3px; background: var(--accent); }
+  .front-room-controls { position: absolute; z-index: 1; left: 12px; bottom: 9px; display: flex; gap: 8px; }
+  .front-room-controls i { width: 10px; height: 10px; border-radius: 2px; background: rgba(255, 255, 255, 0.85); }
+  .front-room-column { display: flex; flex-direction: column; gap: 7px; padding: 4px; }
+  .front-room-chips, .front-step-chips { display: flex; }
+  .front-chip { display: block; width: 18px; height: 18px; border-radius: 50%; }
+  .front-room-chips { gap: 4px; }
+  .front-line { display: block; height: 7px; border-radius: 4px; background: var(--wash-strong); }
+  .front-line-centre { width: 60%; align-self: center; background: var(--wash); }
+  .front-line-short { width: 70%; }
+  .front-line-mid { width: 85%; }
+  .front-room-input { display: block; height: 20px; margin-top: auto; border: 1px solid var(--hairline-strong); border-radius: 7px; }
+
+  .front-leads, .front-supports { display: grid; grid-template-columns: 1fr 1fr; gap: 3.5rem; }
+  .front-leads { margin-top: 3.5rem; padding-top: 2.5rem; border-top: 1px solid var(--hairline); }
+  .front-supports { margin-top: 2.5rem; }
+  .front-leads h2 { margin: 0 0 0.75rem; font-size: clamp(1.6rem, 2.6vw, 2.2rem); line-height: 1.1; letter-spacing: -0.02em; }
+  .front-supports h3 { margin: 0 0 0.25rem; font-size: 1.12rem; }
+  .front-leads p, .front-supports p { margin: 0; font-size: 1.05rem; color: var(--secondary); }
+
+  .front-steps { margin-top: 7rem; }
+  .front-eyebrow { margin: 0 0 1.25rem; font-size: 0.85rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--secondary); }
+  .front-steps ol { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; margin: 0; padding: 0; list-style: none; }
+  .front-steps li { padding: 1.25rem; border-radius: var(--radius); background: var(--panel); }
+  .front-steps h3 { margin: 0 0 0.25rem; font-size: 1.2rem; }
+  .front-steps p { margin: 0; color: var(--secondary); }
+  .front-step-picture { display: grid; place-items: center; height: 120px; margin-bottom: 1.125rem; border-radius: 10px; background: var(--page); box-shadow: inset 0 0 0 1px var(--hairline); }
+  .front-step-file { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; background: var(--popover); }
+  .front-step-file-icon { position: relative; display: block; width: 22px; height: 28px; border-radius: 3px; background: var(--popover-hover); }
+  .front-step-file-icon::after { content: ''; position: absolute; left: 7px; top: 9px; border-left: 8px solid var(--accent); border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+  .front-step-file-name { width: 4.5rem; }
+  .front-step-link { padding: 10px 14px; border-radius: 999px; background: var(--popover); font-size: 0.9rem; font-weight: 600; color: var(--ink); }
+  .front-step-play { display: flex; align-items: center; gap: 14px; }
+  .front-step-play-button { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--accent); }
+  .front-step-play-button::after { content: ''; margin-left: 4px; border-left: 14px solid var(--on-accent); border-top: 9px solid transparent; border-bottom: 9px solid transparent; }
+  .front-step-chips .front-chip { width: 26px; height: 26px; margin-left: -6px; box-shadow: 0 0 0 2px var(--page); }
+
+  .front-footer { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-top: 7rem; padding: 1.75rem 0 2.5rem; border-top: 1px solid var(--hairline); font-size: 0.95rem; color: var(--secondary); }
+  .front-footer-name { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.01em; color: var(--ink); }
+
+  @media (max-width: 767.98px) {
+    .front-wrap { padding: 0 0.25rem; }
+    .front-hero { grid-template-columns: minmax(0, 1fr); gap: 2.5rem; min-height: 0; padding-top: 3.5rem; }
+    .front-room { grid-template-columns: minmax(0, 1fr); }
+    .front-room-column { display: none; }
+    .front-leads, .front-supports, .front-steps ol { grid-template-columns: minmax(0, 1fr); gap: 2rem; }
+    .front-steps ol { gap: 1.25rem; }
+  }
+
   .or-divider {
     display: flex;
     align-items: center;

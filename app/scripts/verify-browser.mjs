@@ -60,7 +60,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep, disposeChrome, pointAt } from './cdp.mjs';
+import { CHROME, FLAGS, attach as attachTo, cdpHttp as cdpHttpOn, sleep, disposeChrome, pointAt, acceptLeaveDialogs } from './cdp.mjs';
 import { evaluateRun, reportLines } from './browser-check-list.mjs';
 import { createResultLog } from './browser-result-log.mjs';
 import { assertServedBundle, prepareRunDirectory } from './runner/core.mjs';
@@ -1907,6 +1907,7 @@ try {
   await cdpHttp(`/json/close/${a.targetId}`);
   await sleep(1500);
   const a3 = await attach('A3/host', URL_A);
+  await acceptLeaveDialogs(a3);
   await sleep(4000);
   const pv3 = await v.evaluate(PROBE);
   const pa5 = await a3.evaluate(PROBE);
@@ -2017,6 +2018,7 @@ try {
 
   console.log('\n--- 9.1: a page with no room creates one, and invites ---');
   const n = await attach('N/creator', `${ORIGIN}/room.html`);
+  await acceptLeaveDialogs(n);
   // D4: a room-less page makes no room until Host is pressed; the front page mounts after attach.
   await pollUntil(() => n.evaluate(`document.querySelector('#host') !== null`), (present) => present === true, { everyMs: 250, deadlineAt: Date.now() + 15_000 });
   await clickElement(n, '#host');

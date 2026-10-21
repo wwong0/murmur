@@ -10,9 +10,11 @@ import { ChartNoAxesColumn, ChevronDown, FileVideo, Link, Settings, TriangleAler
 import { CHAT_MAX_CODE_POINTS, NAME_MAX_CODE_POINTS } from '../lib/envelope.mjs';
 import { fileCard } from '../lib/host-file-card.mjs';
 import { namePromptDue } from '../lib/name-prompt.mjs';
+import { flipKeyframes } from '../lib/theatre-flip.mjs';
 import { PlayerBar, PlayerTop } from './player-bar.jsx';
 import { inPlayer } from './in-player.js';
 import { EndedCard, ReconnectPill, ViewerWait } from './player-states.jsx';
+import { Front } from './front.jsx';
 import { Button, DialogPanel, IconButton, PopoverPanel, SegmentedControl, TextField } from './ui.jsx';
 import { useView } from './use-view.js';
 
@@ -98,35 +100,6 @@ function NamePrompt({ view, actions, fromFront }) {
   </Dialog.Root>;
 }
 
-function Front({ view, actions }) {
-  const input = useRef(null);
-  const joinError = useView(view, (snapshot) => snapshot.joinError);
-  const join = () => actions.join(input.current?.value ?? '');
-  return <div className="front" id="front">
-    <div className="mx-auto flex w-full max-w-[34rem] flex-col">
-      <h1 className="m-0 text-center text-[4.5rem] font-bold leading-none tracking-[-0.03em] text-ink">Uni<span className="text-accent">sono</span></h1>
-      <p className="mb-9 mt-4 text-center text-[1.75rem] text-secondary">Watch together, in sync.</p>
-      <Button id="host" variant="primary" size="xl" className="w-full" onClick={actions.host}>Host a room</Button>
-      <div className="or-divider my-6">or</div>
-      <div className="flex gap-5">
-        <TextField
-          ref={input}
-          id="join-input"
-          label="Invite link"
-          placeholder="Paste an invite link"
-          size="xl"
-          autoComplete="off"
-          className="min-w-0 flex-1"
-          aria-invalid={joinError ? 'true' : undefined}
-          aria-describedby="join-error"
-        />
-        <Button id="join" size="xl" className="min-w-[8rem] shrink-0" onClick={join}>Join</Button>
-      </div>
-      <div id="join-error" aria-live="polite" className="mt-3 min-h-5 text-sm text-warning">{joinError}</div>
-    </div>
-  </div>;
-}
-
 function PlayerVisibility({ route }) {
   useLayoutEffect(() => {
     const player = document.getElementById('player');
@@ -171,7 +144,7 @@ function SettingsMenu({ view, actions }) {
 // is reached by leaving theatre (owner, 8.5, design.md D9).
 function RoomHeader({ view, actions, theatre }) {
   return <header className="room-header">
-    <span className="text-[2rem] font-bold leading-none tracking-[-0.03em]" data-testid="wordmark">Uni<span className="text-accent">sono</span></span>
+    <a href="/" className="wordmark" data-testid="wordmark">Murmur</a>
     {theatre ? null : <SettingsMenu view={view} actions={actions} />}
   </header>;
 }
@@ -211,14 +184,26 @@ function useWide() {
 }
 
 // The static .layout carries the flag for the stylesheet, as EndedMarker does for #player.
-// Theatre moves no element: the media element is the same one it was.
+// Theatre moves no element: the media element is the same one it was. A change after mount
+// plays #player from its old box to its new one; a remembered theatre does not animate in on
+// load (12e design.md D11).
 function TheatreMarker({ theatre }) {
+  const mounted = useRef(false);
   useLayoutEffect(() => {
     const layout = document.querySelector('.layout');
     if (!layout) return undefined;
+    const player = document.getElementById('player');
+    const before = mounted.current && player ? player.getBoundingClientRect() : null;
     if (theatre) layout.dataset.theatre = 'true';
-    return () => { delete layout.dataset.theatre; };
+    else delete layout.dataset.theatre;
+    mounted.current = true;
+    const keyframes = before ? flipKeyframes(before, player.getBoundingClientRect()) : null;
+    if (keyframes && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      player.animate(keyframes, { duration: 250, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+    }
+    return undefined;
   }, [theatre]);
+  useLayoutEffect(() => () => { delete document.querySelector('.layout')?.dataset.theatre; }, []);
   return null;
 }
 
@@ -520,7 +505,8 @@ export function RoomScreens({ view, actions }) {
     if (route === 'front') sawFront.current = true;
   }, [route]);
   const [theatre, setTheatre] = useState(readTheatre);
-  const inTheatre = useWide() && theatre;
+  const wide = useWide();
+  const inTheatre = wide && theatre;
   const toggleTheatre = () => {
     writeTheatre(!theatre);
     setTheatre(!theatre);
@@ -542,7 +528,7 @@ export function RoomScreens({ view, actions }) {
     <ViewerWait view={view} />
     <EndedCard view={view} actions={actions} />
     <ReconnectPill view={view} />
-    <PlayerBar view={view} actions={actions} theatre={theatre} onTheatre={toggleTheatre} />
+    <PlayerBar view={view} actions={actions} theatre={theatre} theatreShown={wide} onTheatre={toggleTheatre} />
     <RoomActions view={view} actions={actions} />
     <StatsPanel view={view} />
     <RoomColumn view={view} actions={actions} />

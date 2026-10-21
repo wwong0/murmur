@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 
-import { cdpHttp, CHROME, clickElement, disposeChrome, FLAGS, rewriteWebSocketDebuggerUrl, sleep, Tab, waitBarRevealed } from './cdp.mjs';
+import { acceptLeaveDialogs, cdpHttp, CHROME, clickElement, disposeChrome, FLAGS, rewriteWebSocketDebuggerUrl, sleep, Tab, waitBarRevealed } from './cdp.mjs';
 import { createResultLog } from './browser-result-log.mjs';
 import { assertServedBundle, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
@@ -212,6 +212,7 @@ async function roomReady(tab) {
 
 async function openRoom() {
   host = await openTab(`${ORIGIN}/room.html?room=${ROOM}&role=host&tab=rd-host`, 'host');
+  await acceptLeaveDialogs(host);
   const built = await until(host, 'window.__app?.buildId ?? null', (value) => typeof value === 'string');
   if (!built.ok) throw new Error('the host page did not publish window.__app');
   const bundle = await assertServedBundle({ origin: ORIGIN, bundlePath: BUNDLE_PATH, pageBuildId: built.value });
@@ -433,7 +434,7 @@ const SYNC_DOT = `(() => {
   const dot = document.querySelector('#sync-dot');
   if (!dot) return null;
   const r = dot.getBoundingClientRect();
-  return { hidden: dot.hidden, width: r.width, height: r.height, state: dot.getAttribute('data-state'), title: dot.getAttribute('title') };
+  return { hidden: dot.hidden, width: r.width, height: r.height, state: dot.getAttribute('data-state'), figure: dot.getAttribute('data-figure') };
 })()`;
 
 // Paused with a title loaded the dot is shown, idle and without a figure; RS-C4 reads the
@@ -443,13 +444,18 @@ async function rowSyncDotShowsIdle() {
   if (!await setPlaying(false)) return { exercised: false, detail: 'the room would not pause' };
   const loaded = await until(host, SEEK_LOADED, Boolean);
   if (!loaded.ok) return { exercised: false, detail: 'the title did not load: #seek.max stayed 0' };
-  const idle = await until(host, SYNC_DOT, (value) => value?.state === 'idle', CLOSE_MS);
-  const dot = idle.value;
-  return {
-    exercised: true,
-    ok: dot !== null && dot.hidden === false && dot.width > 0 && dot.height > 0 && dot.state === 'idle' && dot.title === 'no figure',
-    detail: { box: dot === null ? null : { width: dot.width, height: dot.height }, hidden: dot?.hidden ?? null, state: dot?.state ?? null, title: dot?.title ?? null },
-  };
+  // The dot is hidden while the room holds one member (12e design.md D9), so a viewer joins.
+  return withTab(`${ORIGIN}/room.html?room=${ROOM}&role=viewer&tab=rd-d1`, 'D1/viewer', async () => {
+    const joined = await until(host, "document.querySelectorAll('#roster li').length", (count) => count === 2, 15_000);
+    const members = joined.value;
+    const idle = await until(host, SYNC_DOT, (value) => value?.state === 'idle', CLOSE_MS);
+    const dot = idle.value;
+    return {
+      exercised: true,
+      ok: dot !== null && dot.hidden === false && dot.width > 0 && dot.height > 0 && dot.state === 'idle' && dot.figure === 'no figure',
+      detail: { box: dot === null ? null : { width: dot.width, height: dot.height }, hidden: dot?.hidden ?? null, state: dot?.state ?? null, figure: dot?.figure ?? null, members },
+    };
+  });
 }
 
 async function rowFadedBoxMisses() {
@@ -541,16 +547,24 @@ async function rowFirstTouchOnlyReveals() {
   }
 }
 
+// The player animates its theatre move (12e design.md D11) and #theatre moves with it, so each
+// toggle waits for the move to end before the next read or click.
+const PLAYER_STILL = "document.getElementById('player').getAnimations().length === 0";
+async function toggleTheatre(tab, wanted) {
+  await clickElement(tab, '#theatre');
+  const flipped = await until(tab, THEATRE, wanted, CLOSE_MS);
+  await until(tab, PLAYER_STILL, Boolean, CLOSE_MS);
+  return flipped;
+}
+
 async function rowTheatreKeepsMedia() {
   if (!await roomReady(host)) return { exercised: false, detail: 'the host did not render the room' };
   if (!await setPlaying(false)) return { exercised: false, detail: 'the room would not pause' };
   const mark = `rd-t1-${crypto.randomBytes(6).toString('hex')}`;
   await read(host, `document.querySelector('video').__rdMark = ${JSON.stringify(mark)}`);
   const before = await read(host, PLAYBACK);
-  await clickElement(host, '#theatre');
-  const on = await until(host, THEATRE, (value) => value === 'true', CLOSE_MS);
-  await clickElement(host, '#theatre');
-  const off = await until(host, THEATRE, (value) => value === null, CLOSE_MS);
+  const on = await toggleTheatre(host, (value) => value === 'true');
+  const off = await toggleTheatre(host, (value) => value === null);
   const kept = await read(host, `({ mark: document.querySelector('video').__rdMark ?? null, same: document.querySelector('video') === document.getElementById('video'), videos: document.querySelectorAll('video').length })`);
   const after = await read(host, PLAYBACK);
   return {
@@ -563,15 +577,13 @@ async function rowTheatreKeepsMedia() {
 async function rowTheatreIsRemembered() {
   if (!await roomReady(host)) return { exercised: false, detail: 'the host did not render the room' };
   try {
-    await clickElement(host, '#theatre');
-    const on = await until(host, THEATRE, (value) => value === 'true', CLOSE_MS);
+    const on = await toggleTheatre(host, (value) => value === 'true');
     const stored = await read(host, THEATRE_STORED);
     await read(host, 'window.__rdLoaded = true');
     await host.send('Page.reload');
     const reloaded = await until(host, `window.__rdLoaded === undefined && ${present('#message-input')}`, Boolean);
     const afterReload = reloaded.ok ? await until(host, THEATRE, (value) => value === 'true', CLOSE_MS) : { ok: false, value: null };
-    await clickElement(host, '#theatre');
-    const off = await until(host, THEATRE, (value) => value === null, CLOSE_MS);
+    const off = await toggleTheatre(host, (value) => value === null);
     const storedAfterOff = await read(host, THEATRE_STORED);
     return {
       exercised: on.ok && reloaded.ok,
@@ -579,7 +591,7 @@ async function rowTheatreIsRemembered() {
       detail: { onAfterToggle: on.ok, stored, reloaded: reloaded.ok, onAfterReload: afterReload.ok, offAfterToggle: off.ok, storedAfterOff },
     };
   } finally {
-    if ((await read(host, THEATRE)) !== null) await clickElement(host, '#theatre').catch(() => {});
+    if ((await read(host, THEATRE)) !== null) await toggleTheatre(host, (value) => value === null).catch(() => {});
   }
 }
 
@@ -607,12 +619,10 @@ async function rowTheatreHidesChrome() {
   if (!await roomReady(host)) return { exercised: false, detail: 'the host did not render the room' };
   if (!await setPlaying(false)) return { exercised: false, detail: 'the room would not pause' };
   try {
-    await clickElement(host, '#theatre');
-    const on = await until(host, THEATRE, (value) => value === 'true', CLOSE_MS);
+    const on = await toggleTheatre(host, (value) => value === 'true');
     if (!on.ok) return { exercised: false, detail: { theatre: on.value } };
     const inTheatre = await read(host, THEATRE_SURFACE);
-    await clickElement(host, '#theatre');
-    const off = await until(host, THEATRE, (value) => value === null, CLOSE_MS);
+    const off = await toggleTheatre(host, (value) => value === null);
     const after = await read(host, THEATRE_SURFACE);
     const reachable = off.ok && after?.settings === 1;
     if (reachable) await clickElement(host, '#settings');
@@ -629,7 +639,7 @@ async function rowTheatreHidesChrome() {
     };
   } finally {
     if (await read(host, present('#control-mode'))) await pressKey(host, 'Escape').catch(() => {});
-    if ((await read(host, THEATRE)) !== null) await clickElement(host, '#theatre').catch(() => {});
+    if ((await read(host, THEATRE)) !== null) await toggleTheatre(host, (value) => value === null).catch(() => {});
   }
 }
 

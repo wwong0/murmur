@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-import { attach, cdpHttp, CHROME, disposeChrome, FLAGS, sleep } from './cdp.mjs';
+import { acceptLeaveDialogs, attach, cdpHttp, CHROME, disposeChrome, FLAGS, sleep } from './cdp.mjs';
 import { assertServedBundle, createManifestFile, createNdjson, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
 import { readSourceIndex } from '../public/lib/remux-index.mjs';
@@ -335,6 +335,7 @@ async function runPass(options) {
     let holder = null;
     try {
       host = await open('host', 'host', `r${crypto.randomBytes(6).toString('hex')}`);
+      await acceptLeaveDialogs(host.tab);
       const pageBuildId = (await settled(host)).buildId ?? null;
       manifest.build = { pageBuildId, room: await assertServedBundle({ origin: ORIGIN, bundlePath: HOST_BUNDLE, pageBuildId }) };
       manifest.heldLock = { key: F10_KEY, lockName: lockName(F10_KEY) };
@@ -443,6 +444,7 @@ async function runPass(options) {
       const viewer = await open('viewer', 'viewer', room);
       await until(viewer, () => true, 20_000);
       const host = await open('host', 'host', room, HARNESS_SEEK);
+      await acceptLeaveDialogs(host.tab);
       const hostStart = await settled(host);
       const pageBuildId = hostStart.buildId ?? null;
       const roomBundle = await assertServedBundle({ origin: ORIGIN, bundlePath: HOST_BUNDLE, pageBuildId });

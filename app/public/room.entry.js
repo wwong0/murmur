@@ -56,6 +56,7 @@ import { CHOOSABLE_STATES, createHostFileSource, hostFileSnapshot } from './lib/
 import { keyframeNotice, refusalHelp } from './lib/file-help.mjs';
 import { createPageView } from './lib/page-view.mjs';
 import { syncDot } from './lib/sync-dot.mjs';
+import { leaveWarns } from './lib/leave-warning.mjs';
 import { joinTarget, readRoute } from './lib/route.mjs';
 import { formatMediaTime } from './lib/media-time.mjs';
 import { activityText, chatLine, labelMap, memberLabels } from './lib/room-people.mjs';
@@ -198,6 +199,7 @@ const INITIAL_VIEW = {
   title: { name: null },
   overlay: { clock: '', drift: '', bytes: '', controller: '' },
   overlayVisible: false,
+  fullscreen: false,
   bar: {
     faded: false,
     positionMs: 0,
@@ -234,6 +236,9 @@ const INITIAL_VIEW = {
 };
 const view = createPageView(INITIAL_VIEW, {
   onError: (error, key) => console.error('[app] view subscriber failed', key, error),
+});
+document.addEventListener('fullscreenchange', () => {
+  view.set('fullscreen', document.fullscreenElement != null);
 });
 let noticeSeq = 0;
 
@@ -855,6 +860,13 @@ const acquisition = createPlaybackAcquisition({
   report: (where, error) => addNotice(`playback state ${where} failed: ${error?.message ?? error}`, { warn: true }),
 });
 
+window.addEventListener('beforeunload', (event) => {
+  if (leaveWarns({ role: client.role, playing: acquisition.state?.current.playing === true })) {
+    event.preventDefault();
+    event.returnValue = '';
+  }
+});
+
 // T7/T8 (design.md D5, D3): the viewer's held-ahead, the reports the host has
 // seen, and the resume rule's own ring. Kept beside `acquisition`, not inside
 // it — held-ahead and the resume rule are both pure modules of their own.
@@ -1066,9 +1078,9 @@ function renderBar() {
     syncDot: syncDot({ playing, mode: controllerState.mode, estimateMs: controllerState.estimateMs }),
     // Beside `syncDot`, whose two fields `sync-dot.mjs` holds: the tooltip's figure needs the number.
     syncEstimateMs: Number.isFinite(controllerState.estimateMs) ? controllerState.estimateMs : null,
-    // The dot shows whenever a title is loaded, so an idle one can say why it has no figure
-    // (design.md D10); `syncPlaying` picks which words.
-    syncShown: Number.isFinite(durationMs),
+    // The dot shows once a title is loaded and someone else is in the room, so an idle one can
+    // say why it has no figure (11b design.md D10; 12e D9); `syncPlaying` picks which words.
+    syncShown: Number.isFinite(durationMs) && client.roster.length > 1,
     syncPlaying: playing,
   });
 }
@@ -1145,6 +1157,7 @@ const actions = {
   pause: () => issue('pause'),
   back10: () => seekBy(-10_000),
   forward10: () => seekBy(10_000),
+  seekBy: (deltaMs) => seekBy(deltaMs),
   controlMode: () => {
     const state = acquisition.state;
     if (state) issue('control-mode', { controlMode: state.controlMode === 'host' ? 'open' : 'host' });
@@ -1162,8 +1175,8 @@ const actions = {
     if (Number.isFinite(next)) video.volume = Math.max(0, Math.min(1, next));
   },
   fullscreen: () => {
-    const playerElement = document.getElementById('player');
-    return playerElement?.requestFullscreen?.();
+    if (document.fullscreenElement) return document.exitFullscreen?.();
+    return document.getElementById('player')?.requestFullscreen?.();
   },
   stats: () => view.set('overlayVisible', !view.get().overlayVisible),
   // The page keeps only the name the roster hands back.

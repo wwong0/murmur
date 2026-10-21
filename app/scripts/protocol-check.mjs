@@ -187,6 +187,7 @@ import pausedSeekSuite from './check/suites/paused-seek.mjs';
 import titleEndSuite from './check/suites/title-end.mjs';
 import hostGraceSuite from './check/suites/host-grace.mjs';
 import seekScrubSuite from './check/suites/seek-scrub.mjs';
+import playerKeysSuite from './check/suites/player-keys.mjs';
 import routeSuite from './check/suites/route.mjs';
 import roomRoleStatusSuite from './check/suites/room-role-status.mjs';
 import driftSuite from './check/suites/drift.mjs';
@@ -213,6 +214,10 @@ import d8ProductIntegrationSuite from './check/suites/d8-product-integration.mjs
 import playbackTreatmentSuite from './check/suites/playback-treatment.mjs';
 import playbackTreatmentEntrySuite from './check/suites/playback-treatment-entry.mjs';
 import roomControlsEntrySuite from './check/suites/room-controls-entry.mjs';
+import roomPlayerEntrySuite from './check/suites/room-player-entry.mjs';
+import leaveWarningSuite from './check/suites/leave-warning.mjs';
+import theatreFlipSuite from './check/suites/theatre-flip.mjs';
+import fontSuite from './check/suites/font.mjs';
 import hostEntrySuite from './check/suites/host-entry.mjs';
 import hostAnswerSuite from './check/suites/host-answer.mjs';
 import runnerCoreSuite from './check/suites/runner-core.mjs';
@@ -430,6 +435,7 @@ for (const suite of [
   titleEndSuite,
   hostGraceSuite,
   seekScrubSuite,
+  playerKeysSuite,
   routeSuite,
   roomRoleStatusSuite,
   driftSuite,
@@ -456,6 +462,10 @@ for (const suite of [
   playbackTreatmentSuite,
   playbackTreatmentEntrySuite,
   roomControlsEntrySuite,
+  roomPlayerEntrySuite,
+  leaveWarningSuite,
+  theatreFlipSuite,
+  fontSuite,
   hostEntrySuite,
   hostAnswerSuite,
   runnerCoreSuite,

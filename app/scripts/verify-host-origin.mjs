@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { attach, cdpHttp, CHROME, disposeChrome, FLAGS, sleep } from './cdp.mjs';
+import { acceptLeaveDialogs, attach, cdpHttp, CHROME, disposeChrome, FLAGS, sleep } from './cdp.mjs';
 import { assertServedBundle, createManifestFile, prepareRunDirectory } from './runner/core.mjs';
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
 import { requireAutoStart, requireDelivery } from './delivery-pin.mjs';
@@ -317,6 +317,7 @@ async function main() {
   console.log('autoStart: on');
 
   const hostPage = await launchPage('host', `${origin}/room.html?room=${ROOM}&role=host&tab=host`);
+  await acceptLeaveDialogs(hostPage.tab);
   const viewerSuffix = CASE === 'relay' ? '&iceTransportPolicy=relay' : '';
   const viewerPage = await launchPage('viewer', `${origin}/room.html?room=${ROOM}&role=viewer&tab=viewer${viewerSuffix}`);
   const host = await seamOf(hostPage);

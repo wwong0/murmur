@@ -36,6 +36,7 @@ const __dirname = path.dirname(__filename);
 const APP_DIR = path.resolve(__dirname, '..');
 const TRACKER_PORT = 8101;
 const APP_TRACKER_URL = `ws://127.0.0.1:${TRACKER_PORT}`;
+const FILE_MODE = process.argv.includes('--file');
 
 let buildContexts = [];
 let roomServer = null;
@@ -86,7 +87,11 @@ async function main() {
   tracker = trackerState.child;
   await requireTrackerStarted(trackerState);
 
-  roomServer = startRoomServer(optionsFromEnv({ ...process.env, APP_TRACKER_URL }));
+  const serverEnv = FILE_MODE
+    ? { ...process.env, APP_TRACKER_URL, APP_MEDIA_SOURCE: 'file', APP_DELIVERY: 'host' }
+    : { ...process.env, APP_TRACKER_URL };
+  if (FILE_MODE) console.log('[dev] file mode: APP_MEDIA_SOURCE=file, APP_DELIVERY=host');
+  roomServer = startRoomServer(optionsFromEnv(serverEnv));
   if (process.env.APP_SOCKET_CONTROL_PORT) {
     socketControl = startSocketControl({ roomServer, port: Number(process.env.APP_SOCKET_CONTROL_PORT), host: '127.0.0.1' });
   }

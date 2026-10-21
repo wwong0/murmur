@@ -1,8 +1,9 @@
 import { useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Tooltip } from '@base-ui/react/tooltip';
-import { Maximize, Pause, Play, RectangleHorizontal, RotateCcw, RotateCw, Volume2, VolumeX } from 'lucide-react';
+import { Maximize, Minimize, Pause, Play, RectangleHorizontal, RotateCcw, RotateCw, Volume2, VolumeX } from 'lucide-react';
 import { createSeekScrub } from '../lib/seek-scrub.mjs';
+import { playerKey } from '../lib/player-keys.mjs';
 import { syncWords } from '../lib/sync-words.mjs';
 import { swallowTouch } from '../lib/touch-reveal.mjs';
 import { inPlayer } from './in-player.js';
@@ -51,13 +52,13 @@ function paintRange(range) {
 }
 
 // Focusable, so keyboard focus opens the tooltip as hover does. It carries `hidden` only while no
-// title is loaded, and no display of its own. The `title` stays: drivers read it (sync-dot.mjs).
+// title is loaded, and no display of its own.
 function SyncDot({ view, container }) {
   const bar = useView(view, (snapshot) => snapshot.bar);
-  const { state, title } = bar.syncDot;
+  const { state, figure } = bar.syncDot;
   const lines = syncWords({ state, estimateMs: bar.syncEstimateMs, playing: bar.syncPlaying });
   return <Tooltip.Root disabled={lines.length === 0}>
-    <Tooltip.Trigger render={<span id="sync-dot" role="img" aria-label="Sync status" tabIndex={0} data-state={state} title={title} hidden={!bar.syncShown} />} />
+    <Tooltip.Trigger render={<span id="sync-dot" role="img" aria-label="Sync status" tabIndex={0} data-state={state} data-figure={figure} hidden={!bar.syncShown} />} />
     <Tooltip.Portal container={container}>
       <Tooltip.Positioner className="popover-positioner" side="bottom" align="end" sideOffset={8}>
         <Tooltip.Popup className="tooltip">
@@ -66,6 +67,66 @@ function SyncDot({ view, container }) {
       </Tooltip.Positioner>
     </Tooltip.Portal>
   </Tooltip.Root>;
+}
+
+// The `focus` playerKey reads (12e design.md D10). An open popup is a dialog or menu role, not
+// `[data-open]`: Base UI also marks an expanded participants list and a showing tooltip with it.
+function eventFocus(target) {
+  if (document.querySelector('[role="dialog"], [role="menu"]')) return 'dialog';
+  const element = target?.closest?.('input, textarea, select, button, [contenteditable]') ?? target;
+  const tag = element?.tagName?.toLowerCase();
+  if (element?.isContentEditable || tag === 'textarea' || tag === 'select'
+    || (tag === 'input' && !['range', 'button', 'checkbox'].includes(element.type))) return 'text';
+  if (tag === 'input' && element.type === 'range') return 'range';
+  if (tag === 'button' || element?.getAttribute?.('role') === 'button') return 'button';
+  return 'none';
+}
+
+function togglePlayback(view, actions) {
+  const { playSlot, controls } = view.get();
+  if (controls[playSlot]?.disabled === false) actions[playSlot]?.();
+}
+
+function usePlayerKeys({ view, actions, theatreShown, onTheatre, volumeRef }) {
+  useLayoutEffect(() => {
+    const keydown = (event) => {
+      const result = playerKey({
+        key: event.key,
+        repeat: event.repeat === true,
+        ctrlKey: event.ctrlKey === true,
+        altKey: event.altKey === true,
+        metaKey: event.metaKey === true,
+        focus: eventFocus(event.target ?? document.activeElement),
+      });
+      if (!result) return;
+      if (result.prevent) event.preventDefault();
+      if (!result.action) return;
+      const { controls } = view.get();
+      if (result.action === 'toggle-play') return togglePlayback(view, actions);
+      if (['back-10', 'forward-10', 'back-5', 'forward-5'].includes(result.action)) {
+        if (controls['back-10']?.disabled === false) {
+          const deltaMs = { 'back-10': -10_000, 'forward-10': 10_000, 'back-5': -5_000, 'forward-5': 5_000 }[result.action];
+          actions.seekBy?.(deltaMs);
+        }
+        return;
+      }
+      if (result.action === 'mute') return actions.mute?.();
+      if (result.action === 'volume-up' || result.action === 'volume-down') {
+        const range = volumeRef.current;
+        if (!range) return;
+        const delta = result.action === 'volume-up' ? 0.05 : -0.05;
+        const value = Math.max(0, Math.min(1, Number(range.value) + delta));
+        range.value = String(value);
+        actions.volume?.(value);
+        paintRange(range);
+        return;
+      }
+      if (result.action === 'fullscreen') return actions.fullscreen?.();
+      if (result.action === 'theatre' && theatreShown) return onTheatre?.();
+    };
+    document.addEventListener('keydown', keydown);
+    return () => document.removeEventListener('keydown', keydown);
+  }, [actions, onTheatre, theatreShown, view, volumeRef]);
 }
 
 // The tooltip portals into the player, not body: a body popup is hidden behind a fullscreen
@@ -84,7 +145,7 @@ export function PlayerTop({ view, chips }) {
   </div>, player);
 }
 
-export function PlayerBar({ view, actions, theatre, onTheatre }) {
+export function PlayerBar({ view, actions, theatre, theatreShown, onTheatre }) {
   const ref = useRef(null);
   const seekRef = useRef(null);
   const volumeRef = useRef(null);
@@ -92,6 +153,8 @@ export function PlayerBar({ view, actions, theatre, onTheatre }) {
   const scrub = useRef(null);
   if (!scrub.current) scrub.current = createSeekScrub({ seek: (positionMs) => actions.seek(positionMs) });
   const bar = useView(view, (snapshot) => snapshot.bar);
+  const fullscreen = useView(view, (snapshot) => snapshot.fullscreen);
+  usePlayerKeys({ view, actions, theatreShown, onTheatre, volumeRef });
   useLayoutEffect(() => {
     const element = ref.current;
     if (element) element.dataset.faded = bar.faded ? 'true' : 'false';
@@ -101,7 +164,7 @@ export function PlayerBar({ view, actions, theatre, onTheatre }) {
     if (seek) {
       seek.disabled = bar.durationMs === null || bar.preparing;
       seek.max = String(bar.durationMs ?? 0);
-      if (!scrub.current.holds()) seek.value = String(bar.positionMs);
+      if (!scrub.current.holds(bar.positionMs, performance.now())) seek.value = String(bar.positionMs);
       paintRange(seek);
     }
     if (timeRef.current) timeRef.current.textContent = bar.time;
@@ -112,7 +175,7 @@ export function PlayerBar({ view, actions, theatre, onTheatre }) {
   useLayoutEffect(() => {
     const seek = seekRef.current;
     if (!seek) return undefined;
-    const commit = () => scrub.current.commit(Number(seek.value));
+    const commit = () => scrub.current.commit(Number(seek.value), performance.now());
     const release = () => scrub.current.release();
     seek.addEventListener('change', commit);
     seek.addEventListener('pointerup', release);
@@ -129,6 +192,33 @@ export function PlayerBar({ view, actions, theatre, onTheatre }) {
     player.addEventListener('pointermove', actions.pointerMove);
     return () => player.removeEventListener('pointermove', actions.pointerMove);
   }, [actions]);
+  useLayoutEffect(() => {
+    const video = document.getElementById('video');
+    if (!video) return undefined;
+    let pointerType = null;
+    const down = (event) => { pointerType = event.pointerType; };
+    const click = (event) => {
+      if (event.target !== video) return;
+      if (pointerType === 'touch') actions.pointerMove?.();
+      else if (pointerType === 'mouse' || pointerType === 'pen') togglePlayback(view, actions);
+      pointerType = null;
+    };
+    video.addEventListener('pointerdown', down);
+    video.addEventListener('click', click);
+    return () => {
+      video.removeEventListener('pointerdown', down);
+      video.removeEventListener('click', click);
+    };
+  }, [actions, view]);
+  useLayoutEffect(() => {
+    const player = document.getElementById('player');
+    if (!player) return undefined;
+    const contextmenu = (event) => {
+      if (view.get().bar.durationMs !== null) event.preventDefault();
+    };
+    player.addEventListener('contextmenu', contextmenu);
+    return () => player.removeEventListener('contextmenu', contextmenu);
+  }, [view]);
   // Capture phase, on the bar, so the swallowed tap's click never reaches the control under it.
   // The flag is rewritten by every pointerdown: a tap that never produced a click cannot make a
   // later mouse click vanish.
@@ -173,7 +263,7 @@ export function PlayerBar({ view, actions, theatre, onTheatre }) {
       </div>
       <div className="bar-group">
         <IconButton id="theatre" icon={RectangleHorizontal} size="bar" label="theatre" aria-pressed={theatre} onClick={onTheatre} />
-        <IconButton id="fullscreen" icon={Maximize} size="bar" label="fullscreen" onClick={actions.fullscreen} />
+        <IconButton id="fullscreen" icon={fullscreen ? Minimize : Maximize} size="bar" label={fullscreen ? 'exit fullscreen' : 'fullscreen'} onClick={actions.fullscreen} />
       </div>
     </div>
   </div>);

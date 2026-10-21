@@ -92,6 +92,7 @@ const MIME = {
   '.json': 'application/json',
   '.css': 'text/css',
   '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
 };
 
 // ---------------------------------------------------------------------------
