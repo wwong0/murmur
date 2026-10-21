@@ -1,3 +1,4 @@
+import { runBuildIds } from '../harness/build-identity.mjs';
 import { leaveArmReading } from './roster-event.mjs';
 
 export const COMPARAND_CONDITION = '12c1-drop-comparand-2s';
@@ -19,9 +20,8 @@ const inSet = (entry) => (entry?.condition === COMPARAND_CONDITION || entry?.con
   && entry.publishes !== false;
 
 function runBuildId(identities) {
-  const ids = new Set(identities.filter(Boolean).flatMap((identity) => [identity.host, identity.disk,
-    ...Object.values(identity.viewers ?? {})]));
-  return ids.size === 1 ? [...ids][0] : ids.size === 0 ? null : `mixed:${[...ids].sort().join(',')}`;
+  const ids = runBuildIds(identities);
+  return ids.length === 1 ? ids[0] : ids.length === 0 ? null : `mixed:${ids.sort().join(',')}`;
 }
 
 function buildIdentity(runs) {

@@ -1,3 +1,5 @@
+import { runBuildIds } from '../harness/build-identity.mjs';
+
 export const MEASURED_CONDITION = '12c2-healthy-2s';
 export const ATTEMPTS_MAX = 2;
 const NOT_RUN = /^(refused|aborted|failed|not-)/;
@@ -18,11 +20,6 @@ export function placementReading(polls) {
   const nonzero = values.filter((value) => Number.isFinite(value) && value !== 0).length;
   return { polls: values.length, zero, nonzero, pending: values.length - zero - nonzero,
     zeroThroughout: values.length > 0 && zero > 0 && nonzero === 0 };
-}
-
-function runBuildIds(identities) {
-  return [...new Set(identities.filter(Boolean).flatMap((identity) => [identity.host, identity.disk,
-    ...Object.values(identity.viewers ?? {})]))];
 }
 
 /** The fields on which a run's identity differs from `build.json`. */

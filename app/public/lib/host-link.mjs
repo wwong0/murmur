@@ -443,7 +443,7 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
         },
       };
     },
-    // design.md D2: an unfinished request whose class has risen tells the host.
+    // 12c-1 design.md D2: an unfinished request whose class has risen tells the host.
     reclassify() {
       if (state.state !== 'open' || !channel || channel.readyState !== 'open') return 0;
       let sent = 0;

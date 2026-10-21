@@ -5,6 +5,7 @@ import {
   asBytes,
   createChannelSender,
   parseControl,
+  raiseClass,
   sliceForRange,
   FIRST_BYTE_BUDGET_MS,
 } from './segment-protocol.mjs';
@@ -172,10 +173,7 @@ export function createHostOrigin({ readSource, clock, settings = {}, wallNow = (
         const cls = control.urgent === true ? 'urgent' : control.near === true ? 'near' : null;
         const entry = active.get(control.id);
         if (!cls || !entry) return;
-        if (cls === 'urgent') {
-          entry.urgent = true;
-          entry.near = false;
-        } else if (!entry.urgent) entry.near = true;
+        raiseClass(entry, cls);
         sender.raise(control.id, cls);
         return;
       }

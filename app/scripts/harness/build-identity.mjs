@@ -56,6 +56,17 @@ export function buildIdentityFromRun(runDir) {
   return identity ?? null;
 }
 
+/** A run directory's identities as a reader takes them: the start record, then the latest. */
+export function runIdentities(runDir) {
+  return [readJson(path.join(runDir, 'build-ids-start.json')), buildIdentityFromRun(runDir)];
+}
+
+/** Every distinct build id the identities name — host, disk and each viewer — in first-seen order. */
+export function runBuildIds(identities) {
+  return [...new Set(identities.filter(Boolean).flatMap((identity) => [identity.host, identity.disk,
+    ...Object.values(identity.viewers ?? {})]))];
+}
+
 export function buildRefusalDetails(identity) {
   if (!identity) return [];
   const details = [];

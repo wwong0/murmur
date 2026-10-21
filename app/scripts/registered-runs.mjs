@@ -63,6 +63,22 @@ export function recomputeRegisteredRun(entry, options) {
   }
 }
 
+// A change's run-set reading: read every registered run, refuse a matching run
+// directory the registry does not list, and write the reading once.
+export function writeRunSetReading({ registry, output, runDirectory, readRun, read, summary = () => '' }) {
+  const registryPath = appPath(argument('registry', process.argv) ?? registry);
+  const outputPath = appPath(argument('out', process.argv) ?? output);
+  const entries = registryEntries(registryPath);
+  const registered = new Set(entries.map((entry) => entry.directory));
+  const unregisteredDirectories = fs.readdirSync(RESULTS_DIR).filter((name) => runDirectory.test(name) && !registered.has(name));
+  const reading = read({ runs: entries.map(readRun), unregisteredDirectories,
+    generatedFrom: path.relative(APP_DIR, registryPath).split(path.sep).join('/') });
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, `${JSON.stringify(reading, null, 2)}\n`);
+  console.log(`${reading.status}${reading.reason ? `: ${reading.reason}` : summary(reading)} → ${outputPath}`);
+  if (reading.status !== 'read') process.exitCode = 1;
+}
+
 export function isMain(moduleUrl) {
   return Boolean(process.argv[1]) && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(moduleUrl));
 }
