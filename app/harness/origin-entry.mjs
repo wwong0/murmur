@@ -53,7 +53,7 @@ async function startServerRole(env) {
   const serverEnv = { ...env };
   if (trackerPort) serverEnv.APP_TRACKER_URL = `ws://${trackerHost}:${trackerPort}`;
   else delete serverEnv.APP_TRACKER_URL;
-  roomServer = startRoomServer({ ...optionsFromEnv(serverEnv), host: env.APP_HOST ?? '0.0.0.0' });
+  roomServer = startRoomServer({ ...optionsFromEnv(serverEnv), harnessCounters: true, host: env.APP_HOST ?? '0.0.0.0' });
   socketControl = startSocketControl({ roomServer, port: Number(env.APP_SOCKET_CONTROL_PORT ?? 8190), host: '127.0.0.1' });
   roomServer.ready.then((port) => console.log(`[origin] ready on ${port}`));
   return trackerState;
@@ -63,7 +63,7 @@ async function startHostPageRole(env) {
   const serverEnv = { ...env, APP_PORT: '8102', APP_HOST: '127.0.0.1', APP_DELIVERY: 'host' };
   delete serverEnv.APP_TRACKER_PORT;
   delete serverEnv.APP_TRACKER_URL;
-  roomServer = startRoomServer({ ...optionsFromEnv(serverEnv), host: '127.0.0.1', port: 8102 });
+  roomServer = startRoomServer({ ...optionsFromEnv(serverEnv), harnessCounters: true, host: '127.0.0.1', port: 8102 });
   proxy = createOriginProxy({ mediaTarget: 'http://127.0.0.1:8102', roomTarget: 'http://server-media:8100' });
   await new Promise((resolve) => proxy.listen(8100, '127.0.0.1', resolve));
   roomServer.ready.then((port) => console.log(`[origin] media instance ready on ${port}`));

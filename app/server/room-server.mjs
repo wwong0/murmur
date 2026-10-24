@@ -24,6 +24,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { classifyPath, countDelivered, createCounters } from './byte-accounting.mjs';
+import { createRelayCredentials } from './relay-credentials.mjs';
 
 import {
   PROTOCOL_VERSION,
@@ -46,7 +47,16 @@ import {
   makeEchoReply,
 } from '../public/lib/envelope.mjs';
 import { DEFAULT_TARGET_SEGMENT_SECONDS, targetMillis } from '../public/lib/remux-settings.mjs';
-import { admitMemberSend, allowanceFromEnv, allowanceRule, isMemberSend, newAllowance } from './member-sends.mjs';
+import {
+  admitMemberSend,
+  allowanceFromEnv,
+  allowanceRule,
+  envelopeRule as makeEnvelopeRule,
+  isMemberSend,
+  joinRule as makeJoinRule,
+  newAllowance,
+  spend,
+} from './member-sends.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -66,6 +76,33 @@ const DEFAULT_MEDIA_DIR = path.resolve(APP_DIR, '..', 'step0', 'content');
 // design.md, "Challenged and left standing", before shortening it.
 const DEFAULT_LIVENESS_MS = 5000;
 const DEFAULT_HOST_GRACE_MS = 10_000;
+const DEFAULT_FRAME_CAP_BYTES = 65_536;
+const DEFAULT_ENVELOPE_BURST = 472;
+const DEFAULT_ENVELOPE_REFILL_MS = 100;
+const DEFAULT_JOIN_BURST = 30;
+const DEFAULT_JOIN_REFILL_MS = 10_000;
+const DEFAULT_TURN_API_BASE = 'https://rtc.live.cloudflare.com/v1';
+const DEFAULT_TURN_TTL_S = 43_200;
+const DEFAULT_TURN_REUSE_MS = 60_000;
+
+function requireFrameCapBytes(value) {
+  if (!Number.isSafeInteger(value) || value < 1024) {
+    throw new TypeError('APP_FRAME_CAP_BYTES must be an integer of at least 1024');
+  }
+}
+
+function requireSendBufferBytes(value) {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new TypeError('sendBufferBytes must be a positive integer');
+  }
+}
+
+function decimalEnv(env, name) {
+  const text = env[name];
+  if (text === undefined) return undefined;
+  if (!/^\d+$/.test(text)) throw new TypeError(`${name} must contain decimal digits only`);
+  return Number(text);
+}
 
 function requireHostGraceMs(value) {
   if (!Number.isInteger(value) || value < 0 || value > 3_600_000) {
@@ -79,6 +116,51 @@ function normalizeTrackerUrl(value) {
     throw new TypeError('trackerUrl must be a ws:// or wss:// URL');
   }
   return value;
+}
+
+function normalizeAllowedOrigin(value, setting = 'allowedOrigin') {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') throw new TypeError(`${setting} must be an origin URL`);
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new TypeError(`${setting} must be an origin URL`);
+  }
+  if (parsed.origin !== value) throw new TypeError(`${setting} must equal URL.origin`);
+  return value;
+}
+
+function normalizeTurnApiBase(value, setting = 'turnApiBase') {
+  if (typeof value !== 'string') throw new TypeError(`${setting} must be an http: or https: URL`);
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new TypeError(`${setting} must be an http: or https: URL`);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new TypeError(`${setting} must be an http: or https: URL`);
+  }
+  return value.replace(/\/$/, '');
+}
+
+function requireTurnString(value, name) {
+  if (value !== undefined && value !== null && (typeof value !== 'string' || value.length === 0)) {
+    throw new TypeError(`${name} must be a non-empty string`);
+  }
+}
+
+function requireTurnTtlS(value, setting = 'turnTtlS') {
+  if (!Number.isSafeInteger(value) || value < 60 || value > 172_800) {
+    throw new TypeError(`${setting} must be an integer from 60 through 172800`);
+  }
+}
+
+function requireTurnReuseMs(value, ttlS, setting = 'turnReuseMs') {
+  if (!Number.isSafeInteger(value) || value < 1 || value >= ttlS * 1000) {
+    throw new TypeError(`${setting} must be positive and less than turnTtlS * 1000`);
+  }
 }
 
 const MIME = {
@@ -226,7 +308,7 @@ function msUntilNameReleased(member, livenessMs) {
  * short liveness interval and a temporary media root, in-process, without
  * spawning anything.
  *
- * @param {{port?: number, host?: string, mediaDir?: string, livenessMs?: number, quiet?: boolean, delivery?: 'host'|'http', iceServers?: object[], trackerUrl?: string|null, mediaSource?: 'dir'|'file', targetSegmentSeconds?: number, autoStart?: boolean, hostGraceMs?: number, chatBurst?: number, chatRefillMs?: number, logSink?: (line: string) => void}} [opts]
+ * @param {{port?: number, host?: string, mediaDir?: string, livenessMs?: number, quiet?: boolean, delivery?: 'host'|'http', iceServers?: object[], trackerUrl?: string|null, mediaSource?: 'dir'|'file', targetSegmentSeconds?: number, autoStart?: boolean, hostGraceMs?: number, chatBurst?: number, chatRefillMs?: number, envelopeBurst?: number, envelopeRefillMs?: number, joinBurst?: number, joinRefillMs?: number, frameCapBytes?: number, sendBufferBytes?: number, trustedProxy?: boolean, harnessCounters?: boolean, allowedOrigin?: string|null, turnKeyId?: string, turnApiToken?: string, turnApiBase?: string, turnTtlS?: number, turnReuseMs?: number, turnTimeoutMs?: number, fetch?: typeof fetch, now?: () => number, logSink?: (line: string) => void}} [opts]
  */
 export function startRoomServer(opts = {}) {
   const host = opts.host ?? DEFAULT_HOST;
@@ -242,6 +324,27 @@ export function startRoomServer(opts = {}) {
     : opts.targetSegmentSeconds;
   const autoStart = opts.autoStart ?? false;
   const hostGraceMs = opts.hostGraceMs ?? DEFAULT_HOST_GRACE_MS;
+  const harnessCounters = opts.harnessCounters ?? false;
+  const frameCapBytes = opts.frameCapBytes ?? DEFAULT_FRAME_CAP_BYTES;
+  const sendBufferBytes = opts.sendBufferBytes ?? frameCapBytes * 16;
+  const trustedProxy = opts.trustedProxy ?? false;
+  const allowedOrigin = normalizeAllowedOrigin(opts.allowedOrigin);
+  const turnKeyId = opts.turnKeyId;
+  const turnApiToken = opts.turnApiToken;
+  requireTurnString(turnKeyId, 'turnKeyId');
+  requireTurnString(turnApiToken, 'turnApiToken');
+  if ((turnKeyId === undefined) !== (turnApiToken === undefined)) {
+    throw new TypeError('turnKeyId and turnApiToken must be configured together');
+  }
+  const turnApiBase = normalizeTurnApiBase(opts.turnApiBase ?? DEFAULT_TURN_API_BASE);
+  const turnTtlS = opts.turnTtlS ?? DEFAULT_TURN_TTL_S;
+  const turnReuseMs = opts.turnReuseMs ?? DEFAULT_TURN_REUSE_MS;
+  const turnTimeoutMs = opts.turnTimeoutMs ?? 5000;
+  requireTurnTtlS(turnTtlS);
+  requireTurnReuseMs(turnReuseMs, turnTtlS);
+  if (!Number.isSafeInteger(turnTimeoutMs) || turnTimeoutMs < 1) {
+    throw new TypeError('turnTimeoutMs must be a positive integer');
+  }
   if (delivery !== 'host' && delivery !== 'http') {
     throw new TypeError(`delivery must be "host" or "http", got ${JSON.stringify(delivery)}`);
   }
@@ -253,6 +356,11 @@ export function startRoomServer(opts = {}) {
   }
   requireHostGraceMs(hostGraceMs);
   const sendRule = allowanceRule(opts.chatBurst, opts.chatRefillMs);
+  const envelopeRule = makeEnvelopeRule(opts.envelopeBurst ?? DEFAULT_ENVELOPE_BURST, opts.envelopeRefillMs ?? DEFAULT_ENVELOPE_REFILL_MS);
+  const joinRule = makeJoinRule(opts.joinBurst ?? DEFAULT_JOIN_BURST, opts.joinRefillMs ?? DEFAULT_JOIN_REFILL_MS);
+  requireFrameCapBytes(frameCapBytes);
+  requireSendBufferBytes(sendBufferBytes);
+  if (typeof trustedProxy !== 'boolean') throw new TypeError('trustedProxy must be boolean');
   try {
     targetMillis(targetSegmentSeconds);
   } catch (error) {
@@ -265,9 +373,38 @@ export function startRoomServer(opts = {}) {
   const iceServers = opts.iceServers ?? [];
   if (!Array.isArray(iceServers)) throw new TypeError('iceServers must be an array');
 
+  const trackerOrigin = trackerUrl === null ? null : new URL(trackerUrl).origin;
+  const contentSecurityPolicy = [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "font-src 'self'",
+    "img-src 'self' data: blob:",
+    "media-src 'self' blob:",
+    "worker-src 'self' blob:",
+    `connect-src 'self' data: blob:${trackerOrigin ? ` ${trackerOrigin}` : ''}`,
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join('; ');
+
   const sink = opts.logSink ?? console.log;
   const log = quiet ? () => {} : (...args) => sink(['[room]', ...args].join(' '));
-  const counters = createCounters();
+  const relay = turnApiToken === undefined
+    ? null
+    : createRelayCredentials({
+        keyId: turnKeyId,
+        token: turnApiToken,
+        apiBase: turnApiBase,
+        ttlS: turnTtlS,
+        reuseMs: turnReuseMs,
+        timeoutMs: turnTimeoutMs,
+        fetch: opts.fetch,
+        now: opts.now,
+        log,
+      });
+  const counters = harnessCounters ? createCounters() : null;
   const socketStates = new WeakMap();
   let nextSocketId = 1;
 
@@ -284,6 +421,7 @@ export function startRoomServer(opts = {}) {
 
   /** @type {Map<string, Room>} */
   const rooms = new Map();
+  const joinBuckets = new Map();
 
   function getOrCreateRoom(name) {
     let room = rooms.get(name);
@@ -316,6 +454,11 @@ export function startRoomServer(opts = {}) {
     env.ts.send = serverNow();
     try {
       ws.send(JSON.stringify(env));
+      if (ws.bufferedAmount > sendBufferBytes) {
+        log(`connection over its send buffer, terminated (${ws._connState?.clientId ?? 'unjoined'})`);
+        ws.terminate();
+        return false;
+      }
       return true;
     } catch (err) {
       log(`send failed: ${err.message}`);
@@ -374,12 +517,14 @@ export function startRoomServer(opts = {}) {
             writableFinished: res.writableFinished,
           })
         : { delivered: 0, waste: 0, aborted: !res.writableFinished };
-      counters.record({
-        ...ctx,
-        ...result,
-        socketBytesAtEnd: ctx.socket ? ctx.socket.bytesWritten : ctx.socketBytesAtStart,
-      });
-      if (!ctx.socket) counters.incrementResponsesWithNoSocket();
+      if (counters) {
+        counters.record({
+          ...ctx,
+          ...result,
+          socketBytesAtEnd: ctx.socket ? ctx.socket.bytesWritten : ctx.socketBytesAtStart,
+        });
+        if (!ctx.socket) counters.incrementResponsesWithNoSocket();
+      }
     });
   }
 
@@ -479,7 +624,10 @@ export function startRoomServer(opts = {}) {
     return candidate;
   }
 
-  const httpServer = http.createServer((req, res) => {
+  const httpServer = http.createServer(async (req, res) => {
+    res.setHeader('Content-Security-Policy', contentSecurityPolicy);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
     // The RAW request target, split at the query string and otherwise
     // untouched. Deliberately NOT `new URL()`: the WHATWG parser resolves dot
     // segments, including percent-encoded ones, so the guard below would never
@@ -491,7 +639,7 @@ export function startRoomServer(opts = {}) {
     // header so media URLs stay identical for every peer.
     const clientTag = typeof req.headers['x-app-tab'] === 'string' ? req.headers['x-app-tab'] : null;
 
-    if (req.method === 'GET' && pathname === '/harness/counters') {
+    if (harnessCounters && req.method === 'GET' && pathname === '/harness/counters') {
       counters.incrementSnapshotRequests();
       const body = JSON.stringify({
         atMs: Date.now(),
@@ -506,8 +654,15 @@ export function startRoomServer(opts = {}) {
     }
 
     if (req.method === 'GET' && pathname === '/app-settings') {
-      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-      res.end(JSON.stringify({ delivery, iceServers, trackerUrl, mediaSource, targetSegmentSeconds, autoStart, hostGraceMs }));
+      try {
+        const servedIceServers = relay ? await relay.iceServers(iceServers) : iceServers;
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ delivery, iceServers: servedIceServers, trackerUrl, mediaSource, targetSegmentSeconds, autoStart, hostGraceMs }));
+      } catch (error) {
+        log(`app-settings response failed: ${error?.name ?? 'Error'}`);
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ delivery, iceServers: relay ? [] : iceServers, trackerUrl, mediaSource, targetSegmentSeconds, autoStart, hostGraceMs }));
+      }
       return;
     }
 
@@ -540,18 +695,39 @@ export function startRoomServer(opts = {}) {
   // Websocket
   // -------------------------------------------------------------------------
 
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: frameCapBytes });
+
+  function connectionAddress(req) {
+    const socketAddress = req.socket.remoteAddress ?? '';
+    if (!trustedProxy) return socketAddress;
+    const forwarded = req.headers['x-forwarded-for'];
+    const forwardedText = Array.isArray(forwarded) ? forwarded.join(',') : forwarded;
+    if (typeof forwardedText !== 'string' || forwardedText.trim() === '') return socketAddress;
+    return forwardedText.split(',').at(-1).trim() || socketAddress;
+  }
 
   httpServer.on('upgrade', (req, socket, head) => {
-    const { pathname } = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
-    if (pathname !== '/ws') {
+    try {
+      const rawTarget = typeof req.url === 'string' ? req.url : '';
+      const queryAt = rawTarget.indexOf('?');
+      const pathname = queryAt === -1 ? rawTarget : rawTarget.slice(0, queryAt);
+      if (pathname !== '/ws') {
+        socket.destroy();
+        return;
+      }
+      const origin = req.headers.origin;
+      if (allowedOrigin !== null && origin !== undefined && origin !== allowedOrigin) {
+        socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+    } catch {
       socket.destroy();
-      return;
     }
-    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   });
 
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, req) => {
     /**
      * Per-connection state. Identity is server-assigned and lives only here,
      * which is what makes it unspoofable: there is no field on the wire in
@@ -567,6 +743,8 @@ export function startRoomServer(opts = {}) {
       roomName: /** @type {string|null} */ (null),
       tabId: /** @type {string|null} */ (null),
       role: /** @type {'host'|'viewer'|null} */ (null),
+      address: connectionAddress(req),
+      envelopes: newAllowance(envelopeRule, serverNow()),
       superseded: false,
       missedPings: 0,
       awaitingPong: false,
@@ -582,10 +760,16 @@ export function startRoomServer(opts = {}) {
     });
 
     ws.on('message', (data) => {
+      if (conn.superseded) return;
       // Receive time first, before parsing, for the same reason the client
       // stamps t4 before JSON.parse: anything between arrival and the stamp
       // is measured as network delay by whoever consumes the sample.
       const recv = serverNow();
+
+      if (!spend(conn.envelopes, envelopeRule, recv)) {
+        refuse(ws, conn, recv, ERROR_CODES.RATE_LIMITED, 'sending too fast');
+        return;
+      }
 
       let env;
       try {
@@ -784,6 +968,17 @@ export function startRoomServer(opts = {}) {
         refuse(ws, conn, recv, ERROR_CODES.HOST_TAKEN, `room "${room.name}" already has a host`);
         return;
       }
+
+      let joinAllowance = joinBuckets.get(conn.address);
+      if (!joinAllowance) {
+        joinAllowance = newAllowance(joinRule, recv);
+        joinBuckets.set(conn.address, joinAllowance);
+      }
+      if (!spend(joinAllowance, joinRule, recv)) {
+        refuse(ws, conn, recv, ERROR_CODES.RATE_LIMITED, 'too many new memberships from this address');
+        reapIfEmpty(room);
+        return;
+      }
     }
 
     const clientId = newClientId();
@@ -793,6 +988,7 @@ export function startRoomServer(opts = {}) {
     // replaced connection that rejoins presents a secret for a member that no
     // longer exists and is refused.
     const secret = newReclaimSecret();
+    if (reclaimed) conn.envelopes = reclaimed.envelopes;
     const member = {
       clientId,
       // A reclaim restores the MEMBERSHIP's label, join time and role (1b
@@ -804,6 +1000,7 @@ export function startRoomServer(opts = {}) {
       // A reclaim keeps the held name and allowance and reads neither from the join.
       name: reclaimed ? reclaimed.name : (request.name ?? null),
       allowance: reclaimed ? reclaimed.allowance : newAllowance(sendRule, recv),
+      envelopes: reclaimed ? reclaimed.envelopes : conn.envelopes,
       secret,
       ws,
     };
@@ -903,6 +1100,11 @@ export function startRoomServer(opts = {}) {
   // peer's media source with it.
   // -------------------------------------------------------------------------
   const livenessTimer = setInterval(() => {
+    const now = serverNow();
+    for (const [address, allowance] of joinBuckets) {
+      const gained = Math.floor((now - allowance.atMs) / joinRule.refillMs);
+      if (allowance.tokens + Math.max(0, gained) >= joinRule.burst) joinBuckets.delete(address);
+    }
     for (const ws of wss.clients) {
       const conn = ws._connState;
       if (!conn) continue;
@@ -960,7 +1162,30 @@ export function startRoomServer(opts = {}) {
     });
   });
 
-  return { httpServer, wss, rooms, close, ready, mediaDir, livenessMs, serverNow, counters, chatBurst: sendRule.burst, chatRefillMs: sendRule.refillMs };
+  return {
+    httpServer,
+    wss,
+    rooms,
+    close,
+    ready,
+    mediaDir,
+    livenessMs,
+    serverNow,
+    counters,
+    chatBurst: sendRule.burst,
+    chatRefillMs: sendRule.refillMs,
+    envelopeBurst: envelopeRule.burst,
+    envelopeRefillMs: envelopeRule.refillMs,
+    joinBurst: joinRule.burst,
+    joinRefillMs: joinRule.refillMs,
+    frameCapBytes,
+    sendBufferBytes,
+    trustedProxy,
+    allowedOrigin,
+    turnApiBase,
+    turnTtlS,
+    turnReuseMs,
+  };
 }
 
 /** The server's options as `npm start` and the origin container read them from the environment. */
@@ -979,18 +1204,56 @@ export function optionsFromEnv(env = process.env) {
   }
   const hostGraceMs = hostGraceText === undefined ? DEFAULT_HOST_GRACE_MS : Number(hostGraceText);
   requireHostGraceMs(hostGraceMs);
+  const frameCapBytes = decimalEnv(env, 'APP_FRAME_CAP_BYTES');
+  const trustedProxyText = env.APP_TRUSTED_PROXY;
+  if (trustedProxyText !== undefined && trustedProxyText !== '1') {
+    throw new TypeError('APP_TRUSTED_PROXY must be 1 or unset');
+  }
+  const harnessCountersText = env.APP_HARNESS_COUNTERS;
+  if (harnessCountersText !== undefined && harnessCountersText !== '1') {
+    throw new TypeError('APP_HARNESS_COUNTERS must be 1 or unset');
+  }
+  const allowanceOptions = allowanceFromEnv(env);
+  allowanceRule(allowanceOptions.chatBurst, allowanceOptions.chatRefillMs);
+  makeEnvelopeRule(allowanceOptions.envelopeBurst, allowanceOptions.envelopeRefillMs);
+  makeJoinRule(allowanceOptions.joinBurst, allowanceOptions.joinRefillMs);
+  if (frameCapBytes !== undefined) requireFrameCapBytes(frameCapBytes);
+  const allowedOrigin = normalizeAllowedOrigin(env.APP_ALLOWED_ORIGIN, 'APP_ALLOWED_ORIGIN');
+  const turnKeyId = env.APP_TURN_KEY_ID;
+  const turnApiToken = env.APP_TURN_API_TOKEN;
+  requireTurnString(turnKeyId, 'APP_TURN_KEY_ID');
+  requireTurnString(turnApiToken, 'APP_TURN_API_TOKEN');
+  if ((turnKeyId === undefined) !== (turnApiToken === undefined)) {
+    throw new TypeError('APP_TURN_KEY_ID and APP_TURN_API_TOKEN must be configured together');
+  }
+  const turnApiBase = normalizeTurnApiBase(env.APP_TURN_API_BASE ?? DEFAULT_TURN_API_BASE, 'APP_TURN_API_BASE');
+  const turnTtlText = env.APP_TURN_TTL_S;
+  const turnTtlS = turnTtlText === undefined ? DEFAULT_TURN_TTL_S : decimalEnv(env, 'APP_TURN_TTL_S');
+  const turnReuseText = env.APP_TURN_REUSE_MS;
+  const turnReuseMs = turnReuseText === undefined ? DEFAULT_TURN_REUSE_MS : decimalEnv(env, 'APP_TURN_REUSE_MS');
+  requireTurnTtlS(turnTtlS, 'APP_TURN_TTL_S');
+  requireTurnReuseMs(turnReuseMs, turnTtlS, 'APP_TURN_REUSE_MS');
   return {
-    ...allowanceFromEnv(env),
+    ...allowanceOptions,
     port: env.APP_PORT ? Number(env.APP_PORT) : undefined,
     mediaDir: env.APP_MEDIA_DIR,
     livenessMs: env.APP_LIVENESS_INTERVAL_MS ? Number(env.APP_LIVENESS_INTERVAL_MS) : undefined,
     delivery: env.APP_DELIVERY,
     mediaSource: env.APP_MEDIA_SOURCE,
     targetSegmentSeconds: env.APP_SEGMENT_TARGET_S === undefined ? undefined : Number(env.APP_SEGMENT_TARGET_S),
+    frameCapBytes,
+    trustedProxy: trustedProxyText === '1',
     iceServers,
     trackerUrl: normalizeTrackerUrl(env.APP_TRACKER_URL),
+    allowedOrigin,
+    turnKeyId,
+    turnApiToken,
+    turnApiBase,
+    turnTtlS,
+    turnReuseMs,
     autoStart: autoStartText === '1',
     hostGraceMs,
+    harnessCounters: harnessCountersText === '1',
   };
 }
 

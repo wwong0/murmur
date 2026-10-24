@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 import { playerKey } from '../lib/player-keys.mjs';
+import { clickActs } from '../lib/player-click.mjs';
 
 // The player's own inputs (12e design.md D10): the keys, a click on the video and the context
 // menu. Each acts through the control's own action and enabled state, as the bar's button does.
@@ -19,7 +20,7 @@ function eventFocus(target) {
 
 function togglePlayback(view, actions) {
   const { playSlot, controls } = view.get();
-  if (controls[playSlot]?.disabled === false) actions[playSlot]();
+  if (clickActs(controls, playSlot)) actions[playSlot]();
 }
 
 // The four seeks share one enabled state: the entry gives back-10 and forward-10 the same rule.

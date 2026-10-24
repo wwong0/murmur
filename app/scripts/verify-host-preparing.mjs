@@ -207,7 +207,7 @@ async function startServer() {
   await portFree(SERVER_PORT).catch(() => { throw new Error(`refusing to run: port ${SERVER_PORT} is held`); });
   const env = { ...process.env };
   delete env.APP_AUTO_START;
-  Object.assign(env, { APP_PORT: String(SERVER_PORT), APP_MEDIA_SOURCE: 'file', APP_DELIVERY: 'host', APP_TRACKER_URL: '', APP_ICE_SERVERS: '[]', APP_SEGMENT_TARGET_S: '2' });
+  Object.assign(env, { APP_PORT: String(SERVER_PORT), APP_MEDIA_SOURCE: 'file', APP_DELIVERY: 'host', APP_TRACKER_URL: '', APP_ICE_SERVERS: '[]', APP_SEGMENT_TARGET_S: '2', APP_HARNESS_COUNTERS: '1' });
   server = spawn(process.execPath, [path.join(APP_DIR, 'server', 'room-server.mjs')], { cwd: APP_DIR, env, stdio: 'ignore' });
   const up = await poll(async () => {
     try { return (await fetch(`${ORIGIN}/room.html`, { cache: 'no-store' })).ok; } catch { return false; }

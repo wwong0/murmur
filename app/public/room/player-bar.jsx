@@ -74,9 +74,10 @@ function SyncDot({ view, container }) {
 // theatre's; the dot stays the last item, top-right.
 export function PlayerTop({ view, chips }) {
   const title = useView(view, (snapshot) => snapshot.title);
+  const faded = useView(view, (snapshot) => snapshot.bar.faded);
   const player = document.getElementById('player');
   if (!player) return null;
-  return createPortal(<div className="player-top">
+  return createPortal(<div className="player-top" data-faded={faded ? 'true' : 'false'}>
     <div id="title-name">{title.name ?? ''}</div>
     <div className="player-top-end">
       {chips}

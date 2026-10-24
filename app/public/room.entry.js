@@ -60,6 +60,11 @@ import { leaveWarns } from './lib/leave-warning.mjs';
 import { joinTarget, readRoute } from './lib/route.mjs';
 import { formatMediaTime } from './lib/media-time.mjs';
 import { activityText, chatLine, labelMap, memberLabels } from './lib/room-people.mjs';
+import { appendCapped } from './lib/capped-list.mjs';
+import { clickActs } from './lib/player-click.mjs';
+import { createStartWait, startWaitText } from './lib/start-wait.mjs';
+import { linkKind, linksText } from './lib/link-kinds.mjs';
+import { probeStorage } from './lib/storage-probe.mjs';
 import { createHostAnswer } from './lib/host-answer.mjs';
 import { createHostStatusBook, ownHostStatus, statusDue, titleDue } from './lib/host-status.mjs';
 import { isValidHostName } from './lib/title-fields.mjs';
@@ -197,7 +202,7 @@ const INITIAL_VIEW = {
   // 'reconnecting' only while a lost connection is being retried (design.md D13, D16).
   connection: 'connecting',
   title: { name: null },
-  overlay: { clock: '', drift: '', bytes: '', controller: '' },
+  overlay: { clock: '', drift: '', bytes: '', controller: '', startWait: '', links: '' },
   overlayVisible: false,
   fullscreen: false,
   bar: {
@@ -241,6 +246,14 @@ document.addEventListener('fullscreenchange', () => {
   view.set('fullscreen', document.fullscreenElement != null);
 });
 let noticeSeq = 0;
+const NOTICE_CAP = 100;
+const startWait = createStartWait();
+let startWaitAsked = false;
+let startWaitAfterSeq = null;
+let linkStatsInFlight = false;
+let lastLinkStatsAt = null;
+let reportStats = null;
+let linkCounts = { direct: 0, relayed: 0, pending: 0 };
 
 function renderMute() {
   const controls = view.get().controls;
@@ -248,11 +261,11 @@ function renderMute() {
 }
 
 function addNotice(text, { warn = false } = {}) {
-  view.set('notices', [...view.get().notices, {
+  view.set('notices', appendCapped(view.get().notices, {
     seq: noticeSeq++,
     text: `[${new Date().toLocaleTimeString()}] ${text}`,
     warn,
-  }]);
+  }, NOTICE_CAP));
 }
 
 function renderRoster(roster) {
@@ -386,8 +399,14 @@ async function installHostSide() {
     isActive: isHostSide,
     report: addSubscriberFailure,
   });
-  onEnvelope('host-link-offer', 'host-link offer', hostAnswer.answerOffer);
-  onEnvelope('host-link-ice', 'host-link ICE', hostAnswer.routeIce);
+  onEnvelope('host-link-offer', 'host-link offer', async (env) => {
+    await hostAnswer.answerOffer(env);
+    void refreshLinkKinds();
+  });
+  onEnvelope('host-link-ice', 'host-link ICE', async (env) => {
+    await hostAnswer.routeIce(env);
+    void refreshLinkKinds();
+  });
   hostSideInstalled = true;
 }
 
@@ -431,12 +450,14 @@ function installViewerLink() {
       if (snapshot.state !== lastState) {
         lastState = snapshot.state;
         addNotice(`host link: ${snapshot.state}`);
+        void refreshLinkKinds();
       }
       schedulePollStart(0);
     },
   });
   window.fetch = link.createShimFetch({ realFetch: nativeFetch, baseUrl: location.href });
   window.XMLHttpRequest = link.createShimXhr({ RealXHR: window.XMLHttpRequest, baseUrl: location.href });
+  void refreshLinkKinds();
 }
 
 // 11-2 D6: the host's own player reads the store. Imported here, as the host transport is.
@@ -446,6 +467,48 @@ async function installHostFileLink() {
   const link = createPreparedMediaLink({ read: (path) => hostFile.read(path) });
   window.fetch = createShimFetch({ link, realFetch: nativeFetch, baseUrl: location.href });
   window.XMLHttpRequest = createShimXhr({ link, RealXHR: window.XMLHttpRequest, baseUrl: location.href });
+}
+
+function openHostLinks() {
+  if (client.role === 'host') return hostAnswer?.peerConnections?.() ?? [];
+  if (link?.snapshot?.().state !== 'open') return [];
+  const peerConnection = link.peerConnection?.();
+  return peerConnection ? [peerConnection] : [];
+}
+
+function usableHostLink(peerConnection) {
+  return peerConnection && peerConnection.connectionState !== 'closed' && peerConnection.iceConnectionState !== 'closed';
+}
+
+async function refreshLinkKinds() {
+  if (linkStatsInFlight || typeof reportStats !== 'function') return;
+  linkStatsInFlight = true;
+  const peers = openHostLinks().filter(usableHostLink);
+  try {
+    const reports = await Promise.all(peers.map(async (peerConnection) => {
+      try {
+        return { peerConnection, report: reportStats(await peerConnection.getStats()) };
+      } catch {
+        return { peerConnection, report: null };
+      }
+    }));
+    const current = new Set(openHostLinks().filter(usableHostLink));
+    linkCounts = { direct: 0, relayed: 0, pending: 0 };
+    for (const { peerConnection, report } of reports) {
+      if (!current.has(peerConnection)) continue;
+      linkCounts[linkKind(report)] += 1;
+    }
+    view.set('overlay', { ...view.get().overlay, links: linksText(linkCounts) });
+  } finally {
+    linkStatsInFlight = false;
+  }
+}
+
+function tickLinkKinds() {
+  const nowMs = pageNow();
+  if (lastLinkStatsAt !== null && nowMs - lastLinkStatsAt < 2_000) return;
+  lastLinkStatsAt = nowMs;
+  void refreshLinkKinds();
 }
 
 // ---------------------------------------------------------------------------
@@ -644,6 +707,7 @@ async function loadHostTransport() {
     import('./lib/host-origin.mjs'),
   ]);
   createHostLink = linkModule.createHostLink;
+  reportStats = linkModule.reportStats;
   createHostOrigin = originModule.createHostOrigin;
 }
 
@@ -737,6 +801,7 @@ client.on('presence', (env) => {
   const body = readBody(env);
   // A member can relay an envelope typed `presence`; only the server's closes peers (7a d1-findings D1-1).
   if (env.from === ADDR_SERVER && isHostSide()) hostAnswer?.closeDeparted(body.roster);
+  if (env.from === ADDR_SERVER && isHostSide()) void refreshLinkKinds();
   if (env.from === ADDR_SERVER && body.event === 'join' && body.member?.clientId !== client.clientId) sendHostStatus(true);
   addNotice(`presence: ${body.event} — ${body.member?.tabId ?? body.member?.clientId}`);
   const labelsBefore = labelMap(view.get().people);
@@ -799,6 +864,20 @@ player.onFinished(() => runTickSteps([['finished-fragment', () => schedulePollSt
 // that read back false, and this is the one place that write happens. The
 // verifier opts in to the treatment's event history with treatmentEvidence=1.
 const pageNow = () => performance.timeOrigin + performance.now();
+
+function maybeAskStartWait() {
+  if (acquisition.state?.current.playing !== true) return;
+  if (startWait.asked(pageNow())) startWaitAsked = true;
+}
+
+function captureStartWaitFrame() {
+  if (!startWaitAsked || startWait.waitMs() !== null || startWaitAfterSeq === null) return;
+  const record = driftLog.read({ afterSeq: startWaitAfterSeq }).records[0];
+  if (!record) return;
+  startWait.framePresented(record.displaySharedMs - record.clock.offsetMs);
+  startWaitAfterSeq = null;
+}
+
 const treatment = initializePlaybackTreatment({
   video,
   opened: false,
@@ -1052,7 +1131,9 @@ function renderControls() {
   view.set('ended', ended);
   view.set('controls', controls);
   view.set('controlMode', state?.controlMode === 'host' ? 'host' : 'open');
-  view.set('playSlot', state?.current.playing === true ? 'pause' : 'play');
+  const playSlot = state?.current.playing === true ? 'pause' : 'play';
+  view.set('playSlot', playSlot);
+  if (video?.dataset) video.dataset.clickable = String(clickActs(controls, playSlot));
 }
 
 function renderBar() {
@@ -1099,6 +1180,9 @@ function discardStaleTitle() {
   player.destroy();
   peerEngine = null;
   start.unload();
+  startWait.reset();
+  startWaitAsked = false;
+  startWaitAfterSeq = null;
   loadedTitle = undefined;
   schedulePollStart(0);
 }
@@ -1412,6 +1496,9 @@ function play(action) {
       abandonedDriftMs: action.abandonedDriftMs,
     } : {}),
   });
+  if (startWaitAsked && startWait.waitMs() === null && startWaitAfterSeq === null) {
+    startWaitAfterSeq = driftLog.latestSeq;
+  }
   if (starts.length > STARTS_KEPT) starts.shift();
   sampler.start();
   let pending;
@@ -1522,6 +1609,7 @@ function hostWithholds() {
 
 function pollStart() {
   if (positionOffset.error !== null || engineWindows.error !== null || harnessSeekConfig.error !== null) return;
+  maybeAskStartWait();
   checkReady();
   const state = viewState();
   const nowSharedMs = clockSync.sharedNow();
@@ -1597,6 +1685,8 @@ function paintOverlay() {
     drift: lines.drift,
     bytes: lines.bytes,
     controller: lines.controller,
+    startWait: startWaitText(startWait.waitMs()),
+    links: linksText(linkCounts),
   });
 }
 
@@ -1605,6 +1695,8 @@ function paintOverlay() {
 function tickPlayback() {
   runTickSteps([
     ['acquisition', () => acquisition.poll()],
+    ['start-wait', maybeAskStartWait],
+    ['start-wait-frame', captureStartWaitFrame],
     ['title-discard', discardStaleTitle],
     ['title', maybeIssueTitle],
     ['playback-start', pollStart],
@@ -1627,6 +1719,7 @@ function tickPlayback() {
     }],
     ['urgent-context', updateUrgentContext],
     ['host-class', () => link?.reclassify?.()],
+    ['links', tickLinkKinds],
     ['held-ahead', updateHeldAhead],
     ['ahead-report', sendAheadReport],
     ['hold-resume', driveHoldResume],
@@ -1767,8 +1860,28 @@ async function startApp() {
         : typeof trackerUrl === 'string' ? 'on' : 'off';
     roomHasPeerExchange = delivery === 'host' && typeof trackerUrl === 'string';
     if (mediaSource === 'file' && role === 'host') {
-      const missing = !globalThis.navigator?.storage?.getDirectory ? 'navigator.storage.getDirectory'
-        : !globalThis.navigator?.locks ? 'navigator.locks' : typeof Worker !== 'function' ? 'Worker' : null;
+      const storageGetter = globalThis.navigator?.storage?.getDirectory;
+      if (typeof storageGetter !== 'function') {
+        hostFile = {
+          snapshot: () => hostFileSnapshot({ mediaSource, targetSegmentSeconds, state: 'failed', failure: 'navigator.storage.getDirectory' }),
+          read: async () => ({ status: 404, bytes: new Uint8Array() }),
+        };
+        view.set('hostFile', { status: 'failed: navigator.storage.getDirectory', inputHidden: true, state: 'failed', choosable: false });
+        return;
+      }
+      const storage = await probeStorage(() => {
+        return storageGetter.call(globalThis.navigator.storage);
+      });
+      if (!storage.ok) {
+        hostFile = {
+          snapshot: () => hostFileSnapshot({ mediaSource, targetSegmentSeconds, state: 'storage-refused', failure: storage.name }),
+          read: async () => ({ status: 404, bytes: new Uint8Array() }),
+        };
+        view.set('hostFile', { status: `storage-refused: ${storage.name}`, inputHidden: false, state: 'storage-refused', choosable: false });
+        client.connect();
+        return;
+      }
+      const missing = !globalThis.navigator?.locks ? 'navigator.locks' : typeof Worker !== 'function' ? 'Worker' : null;
       if (missing) {
         hostFile = {
           snapshot: () => hostFileSnapshot({ mediaSource, targetSegmentSeconds, state: 'failed', failure: missing }),

@@ -65,13 +65,13 @@ export const mediaDir = media;
 // The servers
 // ---------------------------------------------------------------------------
 
-export const server = startRoomServer({ port: 0, mediaDir, livenessMs: LIVENESS_MS, quiet: true });
+export const server = startRoomServer({ port: 0, mediaDir, livenessMs: LIVENESS_MS, quiet: true, harnessCounters: true, joinBurst: 1_000_000 });
 export const port = await server.ready;
 export const HTTP = `http://127.0.0.1:${port}`;
 export const WS = `ws://127.0.0.1:${port}/ws`;
 
-export const slowServer = startRoomServer({ port: 0, mediaDir, livenessMs: SLOW_LIVENESS_MS, quiet: true });
-export const frozenServer = startRoomServer({ port: 0, mediaDir, livenessMs: FROZEN_LIVENESS_MS, quiet: true });
+export const slowServer = startRoomServer({ port: 0, mediaDir, livenessMs: SLOW_LIVENESS_MS, quiet: true, harnessCounters: true, joinBurst: 1_000_000 });
+export const frozenServer = startRoomServer({ port: 0, mediaDir, livenessMs: FROZEN_LIVENESS_MS, quiet: true, harnessCounters: true, joinBurst: 1_000_000 });
 export const SLOW_WS = `ws://127.0.0.1:${await slowServer.ready}/ws`;
 export const FROZEN_WS = `ws://127.0.0.1:${await frozenServer.ready}/ws`;
 

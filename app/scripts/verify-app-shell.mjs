@@ -14,6 +14,7 @@ import { CHROME, FLAGS, attach, cdpHttp, clickElement, disposeChrome, sleep } fr
 import { createResultLog } from './browser-result-log.mjs';
 import { assertServedBundle, prepareRunDirectory } from './runner/core.mjs';
 import { requireAutoStart } from './delivery-pin.mjs';
+import { APP_KEYS, appKeysEqual } from './app-shell-keys.mjs';
 
 const PORT = 9226;
 const ORIGIN = 'http://127.0.0.1:8100';
@@ -23,15 +24,6 @@ const BUNDLE_PATH = path.join(APP_DIR, 'public', 'room.bundle.js');
 const STARTED_AT = new Date();
 const RUN_DIR = path.join(RESULTS_DIR, `11b-app-shell-${STARTED_AT.toISOString().replaceAll(':', '-')}`);
 const WAIT_MS = 15_000;
-const APP_KEYS = [
-  'buildId', 'room', 'tabId', 'control', 'clock', 'positionOffset', 'hostStats',
-  'harnessSeekError', 'engineWindows', 'headroom', 'hostPace', 'drift', 'summary',
-  'controller', 'startTiming', 'pitch', 'treatmentEvidence', 'delivery', 'hostLink',
-  'urgentContext', 'hostAsks', 'hostCounters', 'hostReceipts', 'peerExchange',
-  'urgentDelay', 'peerEngineConfig', 'peerBytes', 'heldAhead', 'resumes', 'playback',
-  'playbackState', 'timeline', 'hostFile', 'title', 'hostGrace',
-];
-
 const PRELOAD = `(() => {
   const probe = {
     assignments: 0,
@@ -86,11 +78,6 @@ const snapshotExpression = `(() => {
     videoConnected: probe?.video?.isConnected === true,
   };
 })()`;
-
-const appKeysEqual = (actual) => Array.isArray(actual)
-  && actual.length === APP_KEYS.length
-  && new Set(actual).size === actual.length
-  && APP_KEYS.every((key) => actual.includes(key));
 
 const log = createResultLog({ approvedStems: [] });
 let chrome = null;
@@ -208,7 +195,7 @@ async function runS1() {
   const assigned = await until(tab, snapshotExpression, (probe) => probe?.assignments >= 1);
   if (timeoutRow('S1 window.__app is assigned once', assigned)) {
     log.rowNotExercised('S1 the screens are empty when window.__app is assigned', assigned.reason);
-    log.rowNotExercised('S1 window.__app has its 35 keys in the first task after the bundle ran', assigned.reason);
+    log.rowNotExercised(`S1 window.__app has its ${APP_KEYS.length} keys in the first task after the bundle ran`, assigned.reason);
     log.rowNotExercised('S1 the screens are drawn in the first task after the bundle ran', assigned.reason);
     log.rowNotExercised('S1 the page\'s build id is the served bundle\'s', assigned.reason);
     return;
@@ -217,12 +204,12 @@ async function runS1() {
   row('S1 the screens are empty when window.__app is assigned', assigned.value.screensChildrenAtAssignment === 0, assigned.value);
 
   const firstTask = await until(tab, snapshotExpression, (probe) => Array.isArray(probe?.keys));
-  if (timeoutRow('S1 window.__app has its 35 keys in the first task after the bundle ran', firstTask)) {
+  if (timeoutRow(`S1 window.__app has its ${APP_KEYS.length} keys in the first task after the bundle ran`, firstTask)) {
     log.rowNotExercised('S1 the screens are drawn in the first task after the bundle ran', firstTask.reason);
     log.rowNotExercised('S1 the page\'s build id is the served bundle\'s', firstTask.reason);
     return;
   }
-  row('S1 window.__app has its 35 keys in the first task after the bundle ran', appKeysEqual(firstTask.value.keys), firstTask.value.keys);
+  row(`S1 window.__app has its ${APP_KEYS.length} keys in the first task after the bundle ran`, appKeysEqual(firstTask.value.keys), firstTask.value.keys);
   row('S1 the screens are drawn in the first task after the bundle ran', firstTask.value.screensChildren === 4, firstTask.value);
 
   try {

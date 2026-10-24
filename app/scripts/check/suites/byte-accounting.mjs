@@ -93,7 +93,7 @@ function clientInitBytes(snapshot, tag) {
 
 export default async function byteAccountingSuite() {
   const { root, media } = makeMediaRoot();
-  const server = startRoomServer({ port: 0, mediaDir: media, quiet: true });
+  const server = startRoomServer({ port: 0, mediaDir: media, quiet: true, harnessCounters: true });
   const port = await server.ready;
   const base = `http://127.0.0.1:${port}`;
   const tag = `tab-${crypto.randomUUID()}`;

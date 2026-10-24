@@ -401,7 +401,7 @@ async function main(runDir) {
 
   try {
     await startTrackerProcess();
-    serverF = await startServer('F', F_PORT, { APP_MEDIA_SOURCE: 'file', APP_DELIVERY: 'host', APP_AUTO_START: '1', APP_HOST_GRACE_MS: '3000', APP_SEGMENT_TARGET_S: '2', APP_ICE_SERVERS: '[]', APP_TRACKER_URL: TRACKER_URL });
+    serverF = await startServer('F', F_PORT, { APP_MEDIA_SOURCE: 'file', APP_DELIVERY: 'host', APP_AUTO_START: '1', APP_HOST_GRACE_MS: '3000', APP_SEGMENT_TARGET_S: '2', APP_ICE_SERVERS: '[]', APP_TRACKER_URL: TRACKER_URL, APP_HARNESS_COUNTERS: '1' });
     serverD = await startServer('D', D_PORT, { APP_DELIVERY: 'http' }, ['APP_AUTO_START', 'APP_MEDIA_SOURCE', 'APP_HOST_GRACE_MS']);
     const settingsF = await getJson(F_ORIGIN, '/app-settings');
     const settingsD = await getJson(D_ORIGIN, '/app-settings');

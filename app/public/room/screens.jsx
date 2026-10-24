@@ -278,16 +278,16 @@ function HostFileControls({ view, actions }) {
   return inPlayer(<>
     <div className="file-state" data-kind={card.kind} hidden={hostFile.inputHidden && !help}>
       <div className="file-card">
-        <input
-          ref={input}
-          type="file"
-          id="host-file"
-          className="sr-only"
-          tabIndex={-1}
-          aria-hidden="true"
-          disabled={!hostFile.choosable}
-          onChange={(event) => actions.chooseHostFile(event.target.files?.[0])}
-        />
+        {hostFile.state === 'storage-refused' ? null : <input
+            ref={input}
+            type="file"
+            id="host-file"
+            className="sr-only"
+            tabIndex={-1}
+            aria-hidden="true"
+            disabled={!hostFile.choosable}
+            onChange={(event) => actions.chooseHostFile(event.target.files?.[0])}
+          />}
         <div className="file-body">
           {icon ? <icon.Icon className={icon.className} size={72} strokeWidth={1.5} aria-hidden="true" /> : null}
           <h2 className="file-title tabular">{card.title}</h2>
@@ -341,6 +341,8 @@ function StatsPanel({ view }) {
         <OverlayLine view={view} id="drift-line" name="drift" />
         <OverlayLine view={view} id="bytes-line" name="bytes" />
         <OverlayLine view={view} id="controller-line" name="controller" />
+        <OverlayLine view={view} id="start-wait-line" name="startWait" />
+        <OverlayLine view={view} id="links-line" name="links" />
       </div>
       <div id="status-line">{status}</div>
       <div id="host-file-status">{hostFile.status}</div>

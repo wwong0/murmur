@@ -10,7 +10,7 @@ import { optionsFromEnv, startRoomServer } from '../../../server/room-server.mjs
 const APP_DIR = path.resolve(fileURLToPath(new URL('../../../', import.meta.url)));
 
 async function withServer(options, fn) {
-  const server = startRoomServer({ port: 0, mediaDir, quiet: true, ...options });
+  const server = startRoomServer({ port: 0, mediaDir, quiet: true, harnessCounters: true, ...options });
   try {
     const port = await server.ready;
     return await fn(server, `http://127.0.0.1:${port}`);

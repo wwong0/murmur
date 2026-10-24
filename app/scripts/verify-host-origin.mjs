@@ -105,6 +105,7 @@ async function startServer(origin, delivery, iceServers) {
       APP_AUTO_START: '1',
       APP_HOST_GRACE_MS: '30000',
       APP_ICE_SERVERS: JSON.stringify(iceServers),
+      APP_HARNESS_COUNTERS: '1',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

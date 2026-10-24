@@ -136,6 +136,8 @@
   }
   #player:fullscreen { border-radius: 0; }
   #player video { display: block; width: 100%; aspect-ratio: 16 / 9; align-self: start; background: #000; }
+  /* The entry sets data-clickable from the same rule the click uses (13 design.md D16). */
+  #player video[data-clickable="true"] { cursor: pointer; }
 
   /* While a card has the player, the card sizes it: the video and the card share one grid cell, so
      the player is the taller of the 16:9 picture and the card, and a card that does not fit at
@@ -154,6 +156,7 @@
      video. The gradient is the only shading, and it is drawn only while the strip has something
      to read. */
   .player-top {
+    --bar-slide: 24px;
     position: absolute;
     top: 0;
     left: 0;
@@ -165,7 +168,11 @@
     gap: 1rem;
     padding: var(--strip-pad-top) var(--strip-pad-x) 2.75rem;
     pointer-events: none;
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
   }
+  .player-top[data-faded="true"] { opacity: 0; transform: translateY(calc(-1 * var(--bar-slide))); pointer-events: none; }
   .player-top:has(#title-name:not(:empty), #sync-dot:not([hidden]), .participants-chips) {
     background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0));
   }

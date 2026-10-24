@@ -29,6 +29,7 @@ import { describeFixtures, disposeFixtures } from './check/fixtures.mjs';
 
 import mediaSuite from './check/suites/media.mjs';
 import byteAccountingSuite from './check/suites/byte-accounting.mjs';
+import harnessCountersSettingSuite from './check/suites/harness-counters-setting.mjs';
 import harnessFiguresSuite from './check/suites/harness-figures.mjs';
 import harnessQueueSuite from './check/suites/harness-queue.mjs';
 import harnessUdpLoadSuite from './check/suites/harness-udp-load.mjs';
@@ -264,6 +265,19 @@ import memberTextSuite from './check/suites/member-text.mjs';
 import namesSuite from './check/suites/names.mjs';
 import chatSuite from './check/suites/chat.mjs';
 import chatRateSuite from './check/suites/chat-rate.mjs';
+import envelopeAllowanceSuite from './check/suites/envelope-allowance.mjs';
+import frameCapSuite from './check/suites/frame-cap.mjs';
+import joinAllowanceSuite from './check/suites/join-allowance.mjs';
+import supersededSocketSuite from './check/suites/superseded-socket.mjs';
+import sendBufferSuite from './check/suites/send-buffer.mjs';
+import securityHeadersSuite from './check/suites/security-headers.mjs';
+import allowedOriginSuite from './check/suites/allowed-origin.mjs';
+import upgradeHostSuite from './check/suites/upgrade-host.mjs';
+import relayCredentialsSuite from './check/suites/relay-credentials.mjs';
+import startWaitSuite from './check/suites/start-wait.mjs';
+import linkKindsSuite from './check/suites/link-kinds.mjs';
+import pageHardeningSuite from './check/suites/page-hardening.mjs';
+import appShellKeysSuite from './check/suites/app-shell-keys.mjs';
 import chatLogSuite from './check/suites/chat-log.mjs';
 import roomClientNamesSuite from './check/suites/room-client-names.mjs';
 import roomPeopleNamesSuite from './check/suites/room-people-names.mjs';
@@ -277,6 +291,7 @@ console.log(describeFixtures());
 for (const suite of [
   mediaSuite,
   byteAccountingSuite,
+  harnessCountersSettingSuite,
   harnessFiguresSuite,
   harnessQueueSuite,
   harnessUdpLoadSuite,
@@ -512,6 +527,19 @@ for (const suite of [
   namesSuite,
   chatSuite,
   chatRateSuite,
+  envelopeAllowanceSuite,
+  frameCapSuite,
+  joinAllowanceSuite,
+  supersededSocketSuite,
+  sendBufferSuite,
+  securityHeadersSuite,
+  allowedOriginSuite,
+  upgradeHostSuite,
+  relayCredentialsSuite,
+  startWaitSuite,
+  linkKindsSuite,
+  pageHardeningSuite,
+  appShellKeysSuite,
   chatLogSuite,
   roomClientNamesSuite,
   roomPeopleNamesSuite,

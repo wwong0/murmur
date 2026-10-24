@@ -25,7 +25,7 @@ function rosterFrom(value) {
   return [];
 }
 
-function reportStats(stats) {
+export function reportStats(stats) {
   if (stats && typeof stats.then === 'function') return stats.then(reportStats);
   const values = [];
   if (stats && typeof stats.forEach === 'function') stats.forEach((value) => values.push(value));
@@ -375,6 +375,9 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
         latestSeq: latestReceiptSeq,
         missed: missedReceipts,
       };
+    },
+    peerConnection() {
+      return pc;
     },
     request({ path, range = null, handlers = {} }) {
       const onError = typeof handlers.onError === 'function' ? handlers.onError : () => {};

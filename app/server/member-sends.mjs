@@ -39,12 +39,22 @@ function requirePositiveSafeInteger(value, setting) {
 }
 
 /** The allowance settings, defaulted and validated; throws on a bad one. */
-export function allowanceRule(chatBurst, chatRefillMs) {
+export function allowanceRule(chatBurst, chatRefillMs, burstSetting = 'APP_CHAT_BURST', refillSetting = 'APP_CHAT_REFILL_MS') {
   const burst = chatBurst ?? DEFAULT_BURST;
   const refillMs = chatRefillMs ?? DEFAULT_REFILL_MS;
-  requirePositiveSafeInteger(burst, 'APP_CHAT_BURST');
-  requirePositiveSafeInteger(refillMs, 'APP_CHAT_REFILL_MS');
+  requirePositiveSafeInteger(burst, burstSetting);
+  requirePositiveSafeInteger(refillMs, refillSetting);
   return { burst, refillMs };
+}
+
+/** The protocol envelope bucket uses the same token rules as member sends. */
+export function envelopeRule(envelopeBurst, envelopeRefillMs) {
+  return allowanceRule(envelopeBurst, envelopeRefillMs, 'APP_ENVELOPE_BURST', 'APP_ENVELOPE_REFILL_MS');
+}
+
+/** The per-address membership bucket uses the same token rules as member sends. */
+export function joinRule(joinBurst, joinRefillMs) {
+  return allowanceRule(joinBurst, joinRefillMs, 'APP_JOIN_BURST', 'APP_JOIN_REFILL_MS');
 }
 
 /** `APP_CHAT_BURST` and `APP_CHAT_REFILL_MS` as `startRoomServer` options; unset is undefined. */
@@ -55,14 +65,21 @@ export function allowanceFromEnv(env) {
     if (!/^\d+$/.test(text)) throw new TypeError(`${name} must contain decimal digits only`);
     return Number(text);
   };
-  return { chatBurst: digitsOnly('APP_CHAT_BURST'), chatRefillMs: digitsOnly('APP_CHAT_REFILL_MS') };
+  return {
+    chatBurst: digitsOnly('APP_CHAT_BURST'),
+    chatRefillMs: digitsOnly('APP_CHAT_REFILL_MS'),
+    envelopeBurst: digitsOnly('APP_ENVELOPE_BURST'),
+    envelopeRefillMs: digitsOnly('APP_ENVELOPE_REFILL_MS'),
+    joinBurst: digitsOnly('APP_JOIN_BURST'),
+    joinRefillMs: digitsOnly('APP_JOIN_REFILL_MS'),
+  };
 }
 
 /** A new membership's allowance: a full burst. */
 export const newAllowance = (rule, now) => ({ tokens: rule.burst, atMs: now });
 
 // Token bucket, refilled when a send arrives; true when one was spent.
-function spend(allowance, rule, now) {
+export function spend(allowance, rule, now) {
   const gained = Math.floor((now - allowance.atMs) / rule.refillMs);
   if (gained > 0) {
     allowance.tokens = Math.min(rule.burst, allowance.tokens + gained);
