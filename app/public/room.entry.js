@@ -1624,21 +1624,20 @@ function evaluateFarSkip() {
     estimateMs: controllerState.estimateMs,
     eligible: playback.resolved === true && playback.playing === true,
   });
-  if (!decision.skip || !start.skip({ abandonedDriftMs: decision.abandonedDriftMs })) return;
+  if (decision.skip) skipToRoom(decision.abandonedDriftMs, `far skip: ${decision.abandonedDriftMs}ms drift`);
+}
+
+function skipToRoom(abandonedDriftMs, notice) {
+  if (!start.skip({ abandonedDriftMs })) return;
   lastSkipAtSharedMs = clockSync.sharedNow();
-  lastSkipAbandonedMs = decision.abandonedDriftMs;
-  addNotice(`far skip: ${decision.abandonedDriftMs}ms drift`);
+  lastSkipAbandonedMs = abandonedDriftMs;
+  addNotice(notice);
   pollStart();
 }
 
 function reenterStopped() {
   const playback = start.state();
-  if (playback.resolved !== true || playback.playing !== true || video.paused !== true) return;
-  if (!start.skip({ abandonedDriftMs: null })) return;
-  lastSkipAtSharedMs = clockSync.sharedNow();
-  lastSkipAbandonedMs = null;
-  addNotice('far skip: re-entry on return');
-  pollStart();
+  if (playback.resolved === true && playback.playing === true && video.paused === true) skipToRoom(null, 'far skip: re-entry on return');
 }
 
 function onVisibility() {

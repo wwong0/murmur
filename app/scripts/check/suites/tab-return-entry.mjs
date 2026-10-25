@@ -1,52 +1,10 @@
 // D2-D4 return wiring through the standard vm fakes and the real controller.
 
 import { check, assert, assertEqual } from '../harness.mjs';
-import { bundleProductEntry, runEntry } from '../entry-harness.mjs';
+import { bundleProductEntry } from '../entry-harness.mjs';
+import { TIME_ORIGIN_MS, playingPage as basePlayingPage, settleNamed } from '../far-skip-page.mjs';
 
-const TIME_ORIGIN_MS = 1_700_000_000_000;
-
-function playingPage(code) {
-  const page = runEntry(code, {
-    search: '?room=r&tab=t&startTiming=1',
-    settings: { delivery: 'http', iceServers: [] },
-  });
-  page.harness.clock = {
-    offsetMs: 0, halfWidthMs: 1, delayTermMs: 1, ageTermMs: 1, sampleCount: 8, counters: { reanchors: 0 },
-  };
-  page.resolveSole({ clientId: 'host-1', nowMs: TIME_ORIGIN_MS + 1000 });
-  page.act([{
-    kind: 'play', attemptId: 1, startAtSharedMs: TIME_ORIGIN_MS + 1400, latenessMs: 0,
-    positionMs: 100, scheduledPositionMs: 100, advanceMs: 0, seamEpochMs: TIME_ORIGIN_MS + 1300,
-  }], { resolved: true, attemptId: 1, startAtSharedMs: TIME_ORIGIN_MS + 1400 });
-  page.harness.playing = true;
-  return page;
-}
-
-function addFrames(page, driftMs, firstDisplayMs = 2000) {
-  for (let index = 0; index < 8; index += 1) {
-    const displayMs = firstDisplayMs + index;
-    page.setNow(displayMs);
-    page.control.deliverFrame({
-      expectedDisplayTime: displayMs,
-      mediaTime: (700 + index + driftMs) / 1000,
-      presentedFrames: index + 1,
-    });
-  }
-}
-
-function settleNamed(page, driftMs, untilMs) {
-  addFrames(page, driftMs, 1993);
-  page.setNow(2000);
-  page.tick();
-  addFrames(page, driftMs, untilMs - 8);
-  page.setNow(untilMs - 1);
-  page.harness.sharedNowMs = TIME_ORIGIN_MS + untilMs - 1;
-  page.tick();
-  addFrames(page, driftMs, untilMs - 7);
-  page.setNow(untilMs);
-  page.harness.sharedNowMs = TIME_ORIGIN_MS + untilMs;
-  page.tick();
-}
+const playingPage = (code) => basePlayingPage(code, { search: '?room=r&tab=t&startTiming=1' });
 
 function visibility(page, state) {
   page.document.visibilityState = state;
@@ -93,6 +51,8 @@ export default async function tabReturnEntrySuite() {
   await check('tab-return-entry R3: a paused room is not started by return', async () => {
     const page = playingPage(product.code);
     page.harness.acceptSkip = true;
+    // The entry's guard reads playing first and sees a paused room; the fake skip() reads it second and
+    // would accept, so dropping the guard re-parks (M2.2b). Reordering those reads makes this unfailable.
     let playingReads = 0;
     Object.defineProperty(page.harness, 'playing', {
       configurable: true,

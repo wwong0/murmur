@@ -68,8 +68,8 @@ export default async function mediaSessionEntrySuite() {
     page.screens().actions.pause = () => { actionCalls += 1; };
     session.handlers.pause();
     assertEqual(actionCalls, 0, 'disabled media pause does not call the bar action');
-    assertEqual(operation(page, 'pause').length, 0, 'unresolved pause control issues no operation');
-    assertEqual(page.count('pause'), 0, 'unresolved pause control does not call the element');
+    assertEqual(operation(page, 'pause').length, 0, 'disabled media pause issues no operation');
+    assertEqual(page.count('pause'), 0, 'disabled media pause leaves the element playing');
   });
 
   await check('media-session-entry: an enabled play handler issues the bar play operation', async () => {
