@@ -1,6 +1,7 @@
 import { assert, assertEqual, check, Peer, sleep } from '../harness.mjs';
 import { mediaDir } from '../fixtures.mjs';
 import { startRoomServer } from '../../../server/room-server.mjs';
+import { createKeyedAllowances } from '../../../server/member-sends.mjs';
 import { ERROR_CODES, TYPE_ERROR } from '../../../public/lib/envelope.mjs';
 
 async function withServer(options, fn) {
@@ -125,5 +126,18 @@ export default async function joinAllowanceSuite() {
       assert(error instanceof TypeError, `${JSON.stringify(bad)} is rejected`);
       assert(error.message.includes(bad.joinBurst !== undefined ? 'APP_JOIN_BURST' : 'APP_JOIN_REFILL_MS'), `${JSON.stringify(bad)} names its setting`);
     }
+  });
+
+  await check('join allowance: keyed allowances are separate and a sweep forgets only full ones', async () => {
+    const rule = { burst: 2, refillMs: 100 };
+    const keyed = createKeyedAllowances(rule);
+    assert(keyed.spend('a', 0) && keyed.spend('a', 0), 'a full burst for a new key');
+    assert(!keyed.spend('a', 0), 'past the burst is refused');
+    assert(keyed.spend('b', 0), 'another key has its own burst');
+    keyed.sweep(100);
+    assert(keyed.spend('a', 100), 'one token refilled');
+    assert(!keyed.spend('a', 100), 'the sweep kept the part-spent key, so no fresh burst');
+    keyed.sweep(1_000);
+    assert(keyed.spend('a', 1_000) && keyed.spend('a', 1_000) && !keyed.spend('a', 1_000), 'a refilled key starts again from one burst');
   });
 }

@@ -37,4 +37,19 @@ export default async function startWaitSuite() {
     try { wait.framePresented(999); } catch { threw = true; }
     assert(threw, 'a negative wait cannot be published');
   });
+
+  await check('start wait: the play sequence is held only between the ask and the first frame', async () => {
+    const wait = createStartWait();
+    assert(!wait.played(7), 'a play before the ask holds no sequence');
+    assertEqual(wait.awaitedAfterSeq(), null, 'nothing awaited before the ask');
+    wait.asked(1_000);
+    assert(wait.played(7), 'the first play after the ask holds its sequence');
+    assert(!wait.played(9), 'a later play keeps the first sequence');
+    assertEqual(wait.awaitedAfterSeq(), 7, 'the first frame is awaited after that sequence');
+    wait.framePresented(1_500);
+    assertEqual(wait.awaitedAfterSeq(), null, 'nothing awaited once the frame is in');
+    assert(!wait.played(11), 'a play after the figure holds no sequence');
+    wait.reset();
+    assertEqual(wait.awaitedAfterSeq(), null, 'reset forgets the sequence');
+  });
 }

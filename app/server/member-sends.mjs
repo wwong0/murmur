@@ -57,21 +57,23 @@ export function joinRule(joinBurst, joinRefillMs) {
   return allowanceRule(joinBurst, joinRefillMs, 'APP_JOIN_BURST', 'APP_JOIN_REFILL_MS');
 }
 
-/** `APP_CHAT_BURST` and `APP_CHAT_REFILL_MS` as `startRoomServer` options; unset is undefined. */
+/** A setting of decimal digits as a number; unset is undefined. */
+export function decimalSetting(env, name) {
+  const text = env[name];
+  if (text === undefined) return undefined;
+  if (!/^\d+$/.test(text)) throw new TypeError(`${name} must contain decimal digits only`);
+  return Number(text);
+}
+
+/** The three allowances' settings as `startRoomServer` options; unset is undefined. */
 export function allowanceFromEnv(env) {
-  const digitsOnly = (name) => {
-    const text = env[name];
-    if (text === undefined) return undefined;
-    if (!/^\d+$/.test(text)) throw new TypeError(`${name} must contain decimal digits only`);
-    return Number(text);
-  };
   return {
-    chatBurst: digitsOnly('APP_CHAT_BURST'),
-    chatRefillMs: digitsOnly('APP_CHAT_REFILL_MS'),
-    envelopeBurst: digitsOnly('APP_ENVELOPE_BURST'),
-    envelopeRefillMs: digitsOnly('APP_ENVELOPE_REFILL_MS'),
-    joinBurst: digitsOnly('APP_JOIN_BURST'),
-    joinRefillMs: digitsOnly('APP_JOIN_REFILL_MS'),
+    chatBurst: decimalSetting(env, 'APP_CHAT_BURST'),
+    chatRefillMs: decimalSetting(env, 'APP_CHAT_REFILL_MS'),
+    envelopeBurst: decimalSetting(env, 'APP_ENVELOPE_BURST'),
+    envelopeRefillMs: decimalSetting(env, 'APP_ENVELOPE_REFILL_MS'),
+    joinBurst: decimalSetting(env, 'APP_JOIN_BURST'),
+    joinRefillMs: decimalSetting(env, 'APP_JOIN_REFILL_MS'),
   };
 }
 
@@ -89,6 +91,29 @@ export function spend(allowance, rule, now) {
   if (allowance.tokens === 0) return false;
   allowance.tokens -= 1;
   return true;
+}
+
+// Tokens the bucket would hold at `now` if it were spent then.
+const tokensAt = (allowance, rule, now) => allowance.tokens + Math.max(0, Math.floor((now - allowance.atMs) / rule.refillMs));
+
+/** One allowance per key (13 D5: per client address), each from a full burst; `sweep` forgets full ones. */
+export function createKeyedAllowances(rule) {
+  const allowances = new Map();
+  return {
+    spend(key, now) {
+      let allowance = allowances.get(key);
+      if (!allowance) {
+        allowance = newAllowance(rule, now);
+        allowances.set(key, allowance);
+      }
+      return spend(allowance, rule, now);
+    },
+    sweep(now) {
+      for (const [key, allowance] of allowances) {
+        if (tokensAt(allowance, rule, now) >= rule.burst) allowances.delete(key);
+      }
+    },
+  };
 }
 
 /** Admit a joined member's `name` or `chat`: `{ ok: true, request }` or the refusal's code and detail. */

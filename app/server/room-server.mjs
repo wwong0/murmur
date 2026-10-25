@@ -24,7 +24,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { classifyPath, countDelivered, createCounters } from './byte-accounting.mjs';
-import { createRelayCredentials } from './relay-credentials.mjs';
+import { RELAY_ENV_NAMES, createRelayCredentials, relaySettings } from './relay-credentials.mjs';
 
 import {
   PROTOCOL_VERSION,
@@ -51,6 +51,8 @@ import {
   admitMemberSend,
   allowanceFromEnv,
   allowanceRule,
+  createKeyedAllowances,
+  decimalSetting,
   envelopeRule as makeEnvelopeRule,
   isMemberSend,
   joinRule as makeJoinRule,
@@ -81,9 +83,6 @@ const DEFAULT_ENVELOPE_BURST = 472;
 const DEFAULT_ENVELOPE_REFILL_MS = 100;
 const DEFAULT_JOIN_BURST = 30;
 const DEFAULT_JOIN_REFILL_MS = 10_000;
-const DEFAULT_TURN_API_BASE = 'https://rtc.live.cloudflare.com/v1';
-const DEFAULT_TURN_TTL_S = 43_200;
-const DEFAULT_TURN_REUSE_MS = 60_000;
 
 function requireFrameCapBytes(value) {
   if (!Number.isSafeInteger(value) || value < 1024) {
@@ -95,13 +94,6 @@ function requireSendBufferBytes(value) {
   if (!Number.isSafeInteger(value) || value < 1) {
     throw new TypeError('sendBufferBytes must be a positive integer');
   }
-}
-
-function decimalEnv(env, name) {
-  const text = env[name];
-  if (text === undefined) return undefined;
-  if (!/^\d+$/.test(text)) throw new TypeError(`${name} must contain decimal digits only`);
-  return Number(text);
 }
 
 function requireHostGraceMs(value) {
@@ -129,38 +121,6 @@ function normalizeAllowedOrigin(value, setting = 'allowedOrigin') {
   }
   if (parsed.origin !== value) throw new TypeError(`${setting} must equal URL.origin`);
   return value;
-}
-
-function normalizeTurnApiBase(value, setting = 'turnApiBase') {
-  if (typeof value !== 'string') throw new TypeError(`${setting} must be an http: or https: URL`);
-  let parsed;
-  try {
-    parsed = new URL(value);
-  } catch {
-    throw new TypeError(`${setting} must be an http: or https: URL`);
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new TypeError(`${setting} must be an http: or https: URL`);
-  }
-  return value.replace(/\/$/, '');
-}
-
-function requireTurnString(value, name) {
-  if (value !== undefined && value !== null && (typeof value !== 'string' || value.length === 0)) {
-    throw new TypeError(`${name} must be a non-empty string`);
-  }
-}
-
-function requireTurnTtlS(value, setting = 'turnTtlS') {
-  if (!Number.isSafeInteger(value) || value < 60 || value > 172_800) {
-    throw new TypeError(`${setting} must be an integer from 60 through 172800`);
-  }
-}
-
-function requireTurnReuseMs(value, ttlS, setting = 'turnReuseMs') {
-  if (!Number.isSafeInteger(value) || value < 1 || value >= ttlS * 1000) {
-    throw new TypeError(`${setting} must be positive and less than turnTtlS * 1000`);
-  }
 }
 
 const MIME = {
@@ -329,22 +289,14 @@ export function startRoomServer(opts = {}) {
   const sendBufferBytes = opts.sendBufferBytes ?? frameCapBytes * 16;
   const trustedProxy = opts.trustedProxy ?? false;
   const allowedOrigin = normalizeAllowedOrigin(opts.allowedOrigin);
-  const turnKeyId = opts.turnKeyId;
-  const turnApiToken = opts.turnApiToken;
-  requireTurnString(turnKeyId, 'turnKeyId');
-  requireTurnString(turnApiToken, 'turnApiToken');
-  if ((turnKeyId === undefined) !== (turnApiToken === undefined)) {
-    throw new TypeError('turnKeyId and turnApiToken must be configured together');
-  }
-  const turnApiBase = normalizeTurnApiBase(opts.turnApiBase ?? DEFAULT_TURN_API_BASE);
-  const turnTtlS = opts.turnTtlS ?? DEFAULT_TURN_TTL_S;
-  const turnReuseMs = opts.turnReuseMs ?? DEFAULT_TURN_REUSE_MS;
-  const turnTimeoutMs = opts.turnTimeoutMs ?? 5000;
-  requireTurnTtlS(turnTtlS);
-  requireTurnReuseMs(turnReuseMs, turnTtlS);
-  if (!Number.isSafeInteger(turnTimeoutMs) || turnTimeoutMs < 1) {
-    throw new TypeError('turnTimeoutMs must be a positive integer');
-  }
+  const relayConfig = relaySettings({
+    keyId: opts.turnKeyId,
+    token: opts.turnApiToken,
+    apiBase: opts.turnApiBase,
+    ttlS: opts.turnTtlS,
+    reuseMs: opts.turnReuseMs,
+    timeoutMs: opts.turnTimeoutMs,
+  });
   if (delivery !== 'host' && delivery !== 'http') {
     throw new TypeError(`delivery must be "host" or "http", got ${JSON.stringify(delivery)}`);
   }
@@ -391,19 +343,9 @@ export function startRoomServer(opts = {}) {
 
   const sink = opts.logSink ?? console.log;
   const log = quiet ? () => {} : (...args) => sink(['[room]', ...args].join(' '));
-  const relay = turnApiToken === undefined
+  const relay = relayConfig.token === undefined
     ? null
-    : createRelayCredentials({
-        keyId: turnKeyId,
-        token: turnApiToken,
-        apiBase: turnApiBase,
-        ttlS: turnTtlS,
-        reuseMs: turnReuseMs,
-        timeoutMs: turnTimeoutMs,
-        fetch: opts.fetch,
-        now: opts.now,
-        log,
-      });
+    : createRelayCredentials({ ...relayConfig, fetch: opts.fetch, now: opts.now, log });
   const counters = harnessCounters ? createCounters() : null;
   const socketStates = new WeakMap();
   let nextSocketId = 1;
@@ -421,7 +363,7 @@ export function startRoomServer(opts = {}) {
 
   /** @type {Map<string, Room>} */
   const rooms = new Map();
-  const joinBuckets = new Map();
+  const joinAllowances = createKeyedAllowances(joinRule);
 
   function getOrCreateRoom(name) {
     let room = rooms.get(name);
@@ -969,12 +911,7 @@ export function startRoomServer(opts = {}) {
         return;
       }
 
-      let joinAllowance = joinBuckets.get(conn.address);
-      if (!joinAllowance) {
-        joinAllowance = newAllowance(joinRule, recv);
-        joinBuckets.set(conn.address, joinAllowance);
-      }
-      if (!spend(joinAllowance, joinRule, recv)) {
+      if (!joinAllowances.spend(conn.address, recv)) {
         refuse(ws, conn, recv, ERROR_CODES.RATE_LIMITED, 'too many new memberships from this address');
         reapIfEmpty(room);
         return;
@@ -1100,11 +1037,7 @@ export function startRoomServer(opts = {}) {
   // peer's media source with it.
   // -------------------------------------------------------------------------
   const livenessTimer = setInterval(() => {
-    const now = serverNow();
-    for (const [address, allowance] of joinBuckets) {
-      const gained = Math.floor((now - allowance.atMs) / joinRule.refillMs);
-      if (allowance.tokens + Math.max(0, gained) >= joinRule.burst) joinBuckets.delete(address);
-    }
+    joinAllowances.sweep(serverNow());
     for (const ws of wss.clients) {
       const conn = ws._connState;
       if (!conn) continue;
@@ -1182,9 +1115,9 @@ export function startRoomServer(opts = {}) {
     sendBufferBytes,
     trustedProxy,
     allowedOrigin,
-    turnApiBase,
-    turnTtlS,
-    turnReuseMs,
+    turnApiBase: relayConfig.apiBase,
+    turnTtlS: relayConfig.ttlS,
+    turnReuseMs: relayConfig.reuseMs,
   };
 }
 
@@ -1204,7 +1137,7 @@ export function optionsFromEnv(env = process.env) {
   }
   const hostGraceMs = hostGraceText === undefined ? DEFAULT_HOST_GRACE_MS : Number(hostGraceText);
   requireHostGraceMs(hostGraceMs);
-  const frameCapBytes = decimalEnv(env, 'APP_FRAME_CAP_BYTES');
+  const frameCapBytes = decimalSetting(env, 'APP_FRAME_CAP_BYTES');
   const trustedProxyText = env.APP_TRUSTED_PROXY;
   if (trustedProxyText !== undefined && trustedProxyText !== '1') {
     throw new TypeError('APP_TRUSTED_PROXY must be 1 or unset');
@@ -1219,20 +1152,13 @@ export function optionsFromEnv(env = process.env) {
   makeJoinRule(allowanceOptions.joinBurst, allowanceOptions.joinRefillMs);
   if (frameCapBytes !== undefined) requireFrameCapBytes(frameCapBytes);
   const allowedOrigin = normalizeAllowedOrigin(env.APP_ALLOWED_ORIGIN, 'APP_ALLOWED_ORIGIN');
-  const turnKeyId = env.APP_TURN_KEY_ID;
-  const turnApiToken = env.APP_TURN_API_TOKEN;
-  requireTurnString(turnKeyId, 'APP_TURN_KEY_ID');
-  requireTurnString(turnApiToken, 'APP_TURN_API_TOKEN');
-  if ((turnKeyId === undefined) !== (turnApiToken === undefined)) {
-    throw new TypeError('APP_TURN_KEY_ID and APP_TURN_API_TOKEN must be configured together');
-  }
-  const turnApiBase = normalizeTurnApiBase(env.APP_TURN_API_BASE ?? DEFAULT_TURN_API_BASE, 'APP_TURN_API_BASE');
-  const turnTtlText = env.APP_TURN_TTL_S;
-  const turnTtlS = turnTtlText === undefined ? DEFAULT_TURN_TTL_S : decimalEnv(env, 'APP_TURN_TTL_S');
-  const turnReuseText = env.APP_TURN_REUSE_MS;
-  const turnReuseMs = turnReuseText === undefined ? DEFAULT_TURN_REUSE_MS : decimalEnv(env, 'APP_TURN_REUSE_MS');
-  requireTurnTtlS(turnTtlS, 'APP_TURN_TTL_S');
-  requireTurnReuseMs(turnReuseMs, turnTtlS, 'APP_TURN_REUSE_MS');
+  const relayConfig = relaySettings({
+    keyId: env.APP_TURN_KEY_ID,
+    token: env.APP_TURN_API_TOKEN,
+    apiBase: env.APP_TURN_API_BASE,
+    ttlS: decimalSetting(env, 'APP_TURN_TTL_S'),
+    reuseMs: decimalSetting(env, 'APP_TURN_REUSE_MS'),
+  }, RELAY_ENV_NAMES);
   return {
     ...allowanceOptions,
     port: env.APP_PORT ? Number(env.APP_PORT) : undefined,
@@ -1246,11 +1172,11 @@ export function optionsFromEnv(env = process.env) {
     iceServers,
     trackerUrl: normalizeTrackerUrl(env.APP_TRACKER_URL),
     allowedOrigin,
-    turnKeyId,
-    turnApiToken,
-    turnApiBase,
-    turnTtlS,
-    turnReuseMs,
+    turnKeyId: relayConfig.keyId,
+    turnApiToken: relayConfig.token,
+    turnApiBase: relayConfig.apiBase,
+    turnTtlS: relayConfig.ttlS,
+    turnReuseMs: relayConfig.reuseMs,
     autoStart: autoStartText === '1',
     hostGraceMs,
     harnessCounters: harnessCountersText === '1',

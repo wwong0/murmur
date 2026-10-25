@@ -9,8 +9,11 @@ export function startWaitText(waitMs) {
   return `start wait: ${Math.round(waitMs)} ms`;
 }
 
+// One start per title (13 design.md D17): asked, then the drift sequence at its play(), then the
+// first frame after that sequence. Each step is taken once until `reset`.
 export function createStartWait() {
   let askedAt = null;
+  let afterSeq = null;
   let frameAt = null;
 
   return {
@@ -20,16 +23,27 @@ export function createStartWait() {
       askedAt = atPageMs;
       return true;
     },
+    played(seq) {
+      if (askedAt === null || frameAt !== null || afterSeq !== null) return false;
+      afterSeq = seq;
+      return true;
+    },
+    // The drift sequence whose next record is the start's first frame, while one is awaited.
+    awaitedAfterSeq() {
+      return askedAt === null || frameAt !== null ? null : afterSeq;
+    },
     framePresented(atPageMs) {
       if (askedAt === null || frameAt !== null) return false;
       if (!Number.isFinite(atPageMs)) throw new TypeError('start wait frame instant must be finite');
       const waitMs = atPageMs - askedAt;
       if (waitMs < 0) throw new RangeError('start wait frame precedes asked instant');
       frameAt = atPageMs;
+      afterSeq = null;
       return true;
     },
     reset() {
       askedAt = null;
+      afterSeq = null;
       frameAt = null;
     },
     waitMs() {

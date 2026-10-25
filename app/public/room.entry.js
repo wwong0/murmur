@@ -63,7 +63,7 @@ import { activityText, chatLine, labelMap, memberLabels } from './lib/room-peopl
 import { appendCapped } from './lib/capped-list.mjs';
 import { clickActs } from './lib/player-click.mjs';
 import { createStartWait, startWaitText } from './lib/start-wait.mjs';
-import { linkKind, linksText } from './lib/link-kinds.mjs';
+import { createLinkKinds } from './lib/link-kinds.mjs';
 import { probeStorage } from './lib/storage-probe.mjs';
 import { createHostAnswer } from './lib/host-answer.mjs';
 import { createHostStatusBook, ownHostStatus, statusDue, titleDue } from './lib/host-status.mjs';
@@ -248,12 +248,12 @@ document.addEventListener('fullscreenchange', () => {
 let noticeSeq = 0;
 const NOTICE_CAP = 100;
 const startWait = createStartWait();
-let startWaitAsked = false;
-let startWaitAfterSeq = null;
-let linkStatsInFlight = false;
-let lastLinkStatsAt = null;
 let reportStats = null;
-let linkCounts = { direct: 0, relayed: 0, pending: 0 };
+const linkKinds = createLinkKinds({
+  links: openHostLinks,
+  readStats: () => reportStats,
+  onChange: (links) => view.set('overlay', { ...view.get().overlay, links }),
+});
 
 function renderMute() {
   const controls = view.get().controls;
@@ -401,11 +401,11 @@ async function installHostSide() {
   });
   onEnvelope('host-link-offer', 'host-link offer', async (env) => {
     await hostAnswer.answerOffer(env);
-    void refreshLinkKinds();
+    void linkKinds.refresh();
   });
   onEnvelope('host-link-ice', 'host-link ICE', async (env) => {
     await hostAnswer.routeIce(env);
-    void refreshLinkKinds();
+    void linkKinds.refresh();
   });
   hostSideInstalled = true;
 }
@@ -450,14 +450,14 @@ function installViewerLink() {
       if (snapshot.state !== lastState) {
         lastState = snapshot.state;
         addNotice(`host link: ${snapshot.state}`);
-        void refreshLinkKinds();
+        void linkKinds.refresh();
       }
       schedulePollStart(0);
     },
   });
   window.fetch = link.createShimFetch({ realFetch: nativeFetch, baseUrl: location.href });
   window.XMLHttpRequest = link.createShimXhr({ RealXHR: window.XMLHttpRequest, baseUrl: location.href });
-  void refreshLinkKinds();
+  void linkKinds.refresh();
 }
 
 // 11-2 D6: the host's own player reads the store. Imported here, as the host transport is.
@@ -474,41 +474,6 @@ function openHostLinks() {
   if (link?.snapshot?.().state !== 'open') return [];
   const peerConnection = link.peerConnection?.();
   return peerConnection ? [peerConnection] : [];
-}
-
-function usableHostLink(peerConnection) {
-  return peerConnection && peerConnection.connectionState !== 'closed' && peerConnection.iceConnectionState !== 'closed';
-}
-
-async function refreshLinkKinds() {
-  if (linkStatsInFlight || typeof reportStats !== 'function') return;
-  linkStatsInFlight = true;
-  const peers = openHostLinks().filter(usableHostLink);
-  try {
-    const reports = await Promise.all(peers.map(async (peerConnection) => {
-      try {
-        return { peerConnection, report: reportStats(await peerConnection.getStats()) };
-      } catch {
-        return { peerConnection, report: null };
-      }
-    }));
-    const current = new Set(openHostLinks().filter(usableHostLink));
-    linkCounts = { direct: 0, relayed: 0, pending: 0 };
-    for (const { peerConnection, report } of reports) {
-      if (!current.has(peerConnection)) continue;
-      linkCounts[linkKind(report)] += 1;
-    }
-    view.set('overlay', { ...view.get().overlay, links: linksText(linkCounts) });
-  } finally {
-    linkStatsInFlight = false;
-  }
-}
-
-function tickLinkKinds() {
-  const nowMs = pageNow();
-  if (lastLinkStatsAt !== null && nowMs - lastLinkStatsAt < 2_000) return;
-  lastLinkStatsAt = nowMs;
-  void refreshLinkKinds();
 }
 
 // ---------------------------------------------------------------------------
@@ -801,7 +766,7 @@ client.on('presence', (env) => {
   const body = readBody(env);
   // A member can relay an envelope typed `presence`; only the server's closes peers (7a d1-findings D1-1).
   if (env.from === ADDR_SERVER && isHostSide()) hostAnswer?.closeDeparted(body.roster);
-  if (env.from === ADDR_SERVER && isHostSide()) void refreshLinkKinds();
+  if (env.from === ADDR_SERVER && isHostSide()) void linkKinds.refresh();
   if (env.from === ADDR_SERVER && body.event === 'join' && body.member?.clientId !== client.clientId) sendHostStatus(true);
   addNotice(`presence: ${body.event} — ${body.member?.tabId ?? body.member?.clientId}`);
   const labelsBefore = labelMap(view.get().people);
@@ -867,15 +832,15 @@ const pageNow = () => performance.timeOrigin + performance.now();
 
 function maybeAskStartWait() {
   if (acquisition.state?.current.playing !== true) return;
-  if (startWait.asked(pageNow())) startWaitAsked = true;
+  startWait.asked(pageNow());
 }
 
 function captureStartWaitFrame() {
-  if (!startWaitAsked || startWait.waitMs() !== null || startWaitAfterSeq === null) return;
-  const record = driftLog.read({ afterSeq: startWaitAfterSeq }).records[0];
+  const afterSeq = startWait.awaitedAfterSeq();
+  if (afterSeq === null) return;
+  const record = driftLog.read({ afterSeq }).records[0];
   if (!record) return;
   startWait.framePresented(record.displaySharedMs - record.clock.offsetMs);
-  startWaitAfterSeq = null;
 }
 
 const treatment = initializePlaybackTreatment({
@@ -1181,8 +1146,6 @@ function discardStaleTitle() {
   peerEngine = null;
   start.unload();
   startWait.reset();
-  startWaitAsked = false;
-  startWaitAfterSeq = null;
   loadedTitle = undefined;
   schedulePollStart(0);
 }
@@ -1496,9 +1459,7 @@ function play(action) {
       abandonedDriftMs: action.abandonedDriftMs,
     } : {}),
   });
-  if (startWaitAsked && startWait.waitMs() === null && startWaitAfterSeq === null) {
-    startWaitAfterSeq = driftLog.latestSeq;
-  }
+  startWait.played(driftLog.latestSeq);
   if (starts.length > STARTS_KEPT) starts.shift();
   sampler.start();
   let pending;
@@ -1686,7 +1647,7 @@ function paintOverlay() {
     bytes: lines.bytes,
     controller: lines.controller,
     startWait: startWaitText(startWait.waitMs()),
-    links: linksText(linkCounts),
+    links: linkKinds.text(),
   });
 }
 
@@ -1719,7 +1680,7 @@ function tickPlayback() {
     }],
     ['urgent-context', updateUrgentContext],
     ['host-class', () => link?.reclassify?.()],
-    ['links', tickLinkKinds],
+    ['links', () => linkKinds.tick(pageNow())],
     ['held-ahead', updateHeldAhead],
     ['ahead-report', sendAheadReport],
     ['hold-resume', driveHoldResume],
@@ -1835,6 +1796,14 @@ window.__app = {
   }),
 };
 
+// A file host's page that cannot prepare: it reports `state` and serves nothing.
+function unpreparedHostFile(state, failure) {
+  return {
+    snapshot: () => hostFileSnapshot({ mediaSource, targetSegmentSeconds, state, failure }),
+    read: async () => ({ status: 404, bytes: new Uint8Array() }),
+  };
+}
+
 async function startApp() {
   try {
     // No fetch means no settings: the page does not guess a delivery (7a d1-findings D1-4).
@@ -1862,10 +1831,7 @@ async function startApp() {
     if (mediaSource === 'file' && role === 'host') {
       const storageGetter = globalThis.navigator?.storage?.getDirectory;
       if (typeof storageGetter !== 'function') {
-        hostFile = {
-          snapshot: () => hostFileSnapshot({ mediaSource, targetSegmentSeconds, state: 'failed', failure: 'navigator.storage.getDirectory' }),
-          read: async () => ({ status: 404, bytes: new Uint8Array() }),
-        };
+        hostFile = unpreparedHostFile('failed', 'navigator.storage.getDirectory');
         view.set('hostFile', { status: 'failed: navigator.storage.getDirectory', inputHidden: true, state: 'failed', choosable: false });
         return;
       }
@@ -1873,20 +1839,14 @@ async function startApp() {
         return storageGetter.call(globalThis.navigator.storage);
       });
       if (!storage.ok) {
-        hostFile = {
-          snapshot: () => hostFileSnapshot({ mediaSource, targetSegmentSeconds, state: 'storage-refused', failure: storage.name }),
-          read: async () => ({ status: 404, bytes: new Uint8Array() }),
-        };
+        hostFile = unpreparedHostFile('storage-refused', storage.name);
         view.set('hostFile', { status: `storage-refused: ${storage.name}`, inputHidden: false, state: 'storage-refused', choosable: false });
         client.connect();
         return;
       }
       const missing = !globalThis.navigator?.locks ? 'navigator.locks' : typeof Worker !== 'function' ? 'Worker' : null;
       if (missing) {
-        hostFile = {
-          snapshot: () => hostFileSnapshot({ mediaSource, targetSegmentSeconds, state: 'failed', failure: missing }),
-          read: async () => ({ status: 404, bytes: new Uint8Array() }),
-        };
+        hostFile = unpreparedHostFile('failed', missing);
         // Not choosable although `failed` is a choosable state: the chooser never opens on this
         // page, so an enabled input would take a pick and drop it (design.md D15).
         view.set('hostFile', { status: `failed: ${missing}`, inputHidden: true, state: 'failed', choosable: false });
