@@ -203,6 +203,8 @@ import playbackStartReparkSuite from './check/suites/playback-start-repark.mjs';
 import playbackStartCoverSuite from './check/suites/playback-start-cover.mjs';
 import farSkipSuite from './check/suites/far-skip.mjs';
 import farSkipEntrySuite from './check/suites/far-skip-entry.mjs';
+import tabReturnEntrySuite from './check/suites/tab-return-entry.mjs';
+import hiddenTabReadingsSuite from './check/suites/hidden-tab-readings.mjs';
 import tickStepsSuite from './check/suites/tick-steps.mjs';
 import settleWaitSuite from './check/suites/settle-wait.mjs';
 import startResidualSuite from './check/suites/start-residual.mjs';
@@ -215,6 +217,7 @@ import d8ProductIntegrationSuite from './check/suites/d8-product-integration.mjs
 import playbackTreatmentSuite from './check/suites/playback-treatment.mjs';
 import playbackTreatmentEntrySuite from './check/suites/playback-treatment-entry.mjs';
 import roomControlsEntrySuite from './check/suites/room-controls-entry.mjs';
+import mediaSessionEntrySuite from './check/suites/media-session-entry.mjs';
 import roomPlayerEntrySuite from './check/suites/room-player-entry.mjs';
 import leaveWarningSuite from './check/suites/leave-warning.mjs';
 import theatreFlipSuite from './check/suites/theatre-flip.mjs';
@@ -465,6 +468,8 @@ for (const suite of [
   playbackStartCoverSuite,
   farSkipSuite,
   farSkipEntrySuite,
+  tabReturnEntrySuite,
+  hiddenTabReadingsSuite,
   tickStepsSuite,
   settleWaitSuite,
   startResidualSuite,
@@ -477,6 +482,7 @@ for (const suite of [
   playbackTreatmentSuite,
   playbackTreatmentEntrySuite,
   roomControlsEntrySuite,
+  mediaSessionEntrySuite,
   roomPlayerEntrySuite,
   leaveWarningSuite,
   theatreFlipSuite,

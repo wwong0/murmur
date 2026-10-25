@@ -1251,6 +1251,18 @@ const actions = {
     }
   },
 };
+
+const mediaSession = globalThis.navigator?.mediaSession;
+if (typeof mediaSession?.setActionHandler === 'function') {
+  for (const kind of ['play', 'pause']) {
+    try {
+      mediaSession.setActionHandler(kind, () => {
+        if (view.get().controls[kind]?.disabled === false) actions[kind]();
+      });
+    } catch {}
+  }
+}
+
 renderMute();
 
 const driftLog = createDriftLog();
@@ -1619,6 +1631,28 @@ function evaluateFarSkip() {
   pollStart();
 }
 
+function reenterStopped() {
+  const playback = start.state();
+  if (playback.resolved !== true || playback.playing !== true || video.paused !== true) return;
+  if (!start.skip({ abandonedDriftMs: null })) return;
+  lastSkipAtSharedMs = clockSync.sharedNow();
+  lastSkipAbandonedMs = null;
+  addNotice('far skip: re-entry on return');
+  pollStart();
+}
+
+function onVisibility() {
+  if (document.visibilityState !== 'visible') {
+    farSkip.hidden();
+    return;
+  }
+  farSkip.returned();
+  reenterStopped();
+  tickPlayback();
+}
+
+document.addEventListener('visibilitychange', () => runTickSteps([['return', onVisibility]], reportStep));
+
 document.addEventListener('click', () => {
   start.click();
   pollStart();
@@ -1651,9 +1685,13 @@ function paintOverlay() {
   });
 }
 
+// Read by 13a's hidden-tab probe: a hidden page's timers slow, and this is how a run shows it.
+let ticks = 0;
+
 // Each step in its own try (D10): the controller's stale rule is what returns
 // the rate to 1.0 when frames stop, so a failing start must not skip it.
 function tickPlayback() {
+  ticks += 1;
   runTickSteps([
     ['acquisition', () => acquisition.poll()],
     ['start-wait', maybeAskStartWait],
@@ -1730,6 +1768,7 @@ window.__app = {
   // `start.state()`, so a key of the same name there would be silently
   // overwritten by this one rather than colliding visibly.
   controller: controllerView,
+  ticks: () => ticks,
   placement: () => player.placement(),
   // Measurement instrumentation, inert without `startTiming=1` (§11.2).
   startTiming: (afterSeq = 0) => startTimingWithOffset(afterSeq),

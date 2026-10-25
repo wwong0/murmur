@@ -9,9 +9,19 @@ export function createFarSkip({ dwellMs, repeatIntervalMs } = {}) {
 
   let namedSince = null;
   let lastSkipAt = null;
+  let waived = false;
 
   function state() {
-    return { namedSince, lastSkipAt };
+    return { namedSince, lastSkipAt, waived };
+  }
+
+  function returned() {
+    waived = true;
+    namedSince = null;
+  }
+
+  function hidden() {
+    waived = false;
   }
 
   function evaluate({ nowMs, named = false, estimateMs = null, eligible = false } = {}) {
@@ -21,12 +31,13 @@ export function createFarSkip({ dwellMs, repeatIntervalMs } = {}) {
     }
     if (namedSince === null) namedSince = nowMs;
     const dwellSatisfied = nowMs - namedSince >= dwellMs;
-    const repeatSatisfied = lastSkipAt === null || nowMs - lastSkipAt >= repeatIntervalMs;
+    const repeatSatisfied = lastSkipAt === null || nowMs - lastSkipAt >= repeatIntervalMs || waived;
     if (!dwellSatisfied || !repeatSatisfied) return { skip: false, abandonedDriftMs: null };
     lastSkipAt = nowMs;
     namedSince = null;
+    waived = false;
     return { skip: true, abandonedDriftMs: Number.isFinite(estimateMs) ? estimateMs : null };
   }
 
-  return { evaluate, state };
+  return { evaluate, state, returned, hidden };
 }

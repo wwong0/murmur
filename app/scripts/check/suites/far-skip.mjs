@@ -47,4 +47,56 @@ export default async function farSkipSuite() {
     assertEqual(run(g, 10_000, { eligible: false }).skip, false, 'ten seconds ineligible still has no skip');
     assertEqual(g.state().namedSince, null, 'ineligible evaluations leave no named dwell');
   });
+
+  await check('far-skip F5: a viewer back from a hidden page skips inside the interval', async () => {
+    const g = gate();
+    assertEqual(run(g, 0).skip, false, 'the first naming starts the dwell');
+    assertEqual(run(g, 2000).skip, true, 'the initial skip fires at 2000 ms');
+    g.returned();
+    assertEqual(g.state().waived, true, 'return grants a waiver');
+    assertEqual(run(g, 20_001).skip, false, 'the return starts a fresh dwell');
+    assertEqual(run(g, 22_000).skip, false, '2000 ms from the return is still short');
+    const skipped = run(g, 22_001);
+    assertEqual(skipped.skip, true, 'the waiver permits a skip inside the interval');
+    assertEqual(skipped.abandonedDriftMs, -25_000, 'the skip carries the estimate at its decision');
+  });
+
+  await check('far-skip F6: a return grants one skip, not one per poll', async () => {
+    const g = gate();
+    run(g, 0);
+    assertEqual(run(g, 2000).skip, true, 'the first skip fires at 2000 ms');
+    g.returned();
+    run(g, 20_001);
+    assertEqual(run(g, 22_000).skip, false, 'the return dwell is still short at 22000 ms');
+    assertEqual(run(g, 22_001).skip, true, 'the return waiver permits the second skip');
+    assertEqual(g.state().waived, false, 'the skip spends the waiver');
+    run(g, 22_002);
+    assertEqual(run(g, 30_000).skip, false, 'the spent waiver cannot fire another skip');
+    assertEqual(run(g, 82_000).skip, false, '59999 ms after the second naming is still barred');
+    assertEqual(run(g, 82_001).skip, true, 'the repeat interval permits the next skip');
+  });
+
+  await check('far-skip F7: a return still needs the dwell', async () => {
+    const g = gate();
+    run(g, 0);
+    assertEqual(run(g, 2000).skip, true, 'the initial skip fires at 2000 ms');
+    run(g, 20_000);
+    g.returned();
+    assertEqual(run(g, 22_100).skip, false, 'pre-return naming does not count toward the dwell');
+    assertEqual(run(g, 24_099).skip, false, '1999 ms of post-return naming is still short');
+    assertEqual(run(g, 24_100).skip, true, '2000 ms of post-return naming permits the skip');
+  });
+
+  await check('far-skip F8: an unspent waiver lapses when hidden', async () => {
+    const g = gate();
+    run(g, 0);
+    assertEqual(run(g, 2000).skip, true, 'the initial skip fires at 2000 ms');
+    g.returned();
+    assertEqual(g.state().waived, true, 'return grants a waiver');
+    g.hidden();
+    assertEqual(g.state().waived, false, 'hiding lapses the unspent waiver');
+    assertEqual(run(g, 12_000).skip, false, 'the second naming starts a dwell');
+    assertEqual(run(g, 14_001).skip, false, 'the interval still bars the skip');
+    assertEqual(run(g, 62_000).skip, true, 'the repeat interval permits the next skip');
+  });
 }
