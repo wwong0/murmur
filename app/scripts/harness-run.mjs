@@ -42,6 +42,14 @@ const DRAIN_INTERVAL_MS = 15_000;
 const ECHO_INTERVAL_MS = 250;
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
+export function retainedCapBytes(condition = {}) {
+  return condition.retainedBytesMax ?? MAX_RETAINED_BYTES;
+}
+
+export function retainedOverflow(retained, condition = {}) {
+  return retained > retainedCapBytes(condition);
+}
+
 // Bringing eleven containers up, building nothing, pulling nothing, and then
 // establishing the cadence takes minutes, and none of it is the run. The budget
 // is the run's length plus this allowance, so the deadline still catches a
@@ -58,6 +66,11 @@ function freeze(value) {
 }
 
 export function conditionValidationReason(condition = {}) {
+  if (Object.prototype.hasOwnProperty.call(condition, 'retainedBytesMax')
+    && (!Number.isSafeInteger(condition.retainedBytesMax)
+      || condition.retainedBytesMax < 209_715_200 || condition.retainedBytesMax > 4_294_967_296)) {
+    return 'retained-bytes-max-invalid';
+  }
   const peer = condition.peerExchange === true;
   if (peer && condition.delivery !== 'host') return 'peer-exchange-requires-host-delivery';
   if (peer && Object.prototype.hasOwnProperty.call(condition.bars ?? {}, 'peerFractionAbsMax')) {
@@ -719,7 +732,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
     const viewerIds = () => viewerOrder(latestRoster());
     const clientIds = () => Object.fromEntries(latestRoster().map((member) => [member.tabId, member.clientId]));
     const issueEventOptions = {
-      condition, topology, sessions, room, runDir: prepared.runDir, heldTag,
+      condition, topology, sessions, room, runDir: prepared.runDir, heldTag, manifestFile,
       activateHeldJoiner, stopSessionLoops, state: sessionState,
     };
     if (condition.rosterEvent && condition.rosterEvent.kind !== 'leave-first') await issueRosterEvent(issueEventOptions);
@@ -868,7 +881,9 @@ export async function runHarness({ conditionName, condition = conditionForName(c
   let evaluation;
   try {
     retained = retainedBytes(prepared.runDir);
-    if (retained > MAX_RETAINED_BYTES) throw new Error(`retained evidence exceeds ${MAX_RETAINED_BYTES} bytes`);
+    if (retainedOverflow(retained, condition)) {
+      throw new Error(`retained evidence exceeds ${retainedCapBytes(condition)} bytes`);
+    }
     // The recompute reads the manifest from disk; unwritten client fields would
     // make the stored report differ from any later recompute (6b design.md D6).
     manifestFile.write();

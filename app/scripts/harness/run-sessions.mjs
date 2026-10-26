@@ -1,6 +1,7 @@
 import { pollExpression } from './cdp-records.mjs';
 import { issueRosterEvent as issueRosterEventFromRunner, rosterEventTarget } from './roster-event.mjs';
 import { removesMember } from './roster-kinds.mjs';
+import { supplierReadingExpression, waitForSupplier } from './supplier-cut.mjs';
 
 // The loop dependencies are bound once per run; each call names only its session.
 export function createSessionLoops({ startLoop, loops, state, ndjson, arm, queuedDrain, controlEvidence, askEvidence,
@@ -94,14 +95,34 @@ export function edgeRosterEvent(options, issue = issueRosterEvent) {
 }
 
 export async function issueRosterEvent({ client = null, condition, topology, sessions, room, runDir, heldTag,
-  activateHeldJoiner, stopSessionLoops, state }) {
+  activateHeldJoiner, stopSessionLoops, state, manifestFile, segmentSeconds,
+  waitForSupplierImpl = waitForSupplier }) {
   const kind = condition.rosterEvent?.kind;
-  const targetTag = client ?? rosterEventTarget(condition, kind);
+  let targetTag = client ?? rosterEventTarget(condition, kind);
+  let selection = null;
+  if (kind === 'leave-supplier-silent') {
+    const seconds = segmentSeconds ?? manifestFile?.get?.().content?.segmentSeconds;
+    if (!Number.isFinite(seconds) || seconds <= 0) throw new Error('supplier cut needs segment seconds');
+    const viewers = sessions.filter((session) => session.active === true && session.role === 'viewer');
+    selection = await waitForSupplierImpl({
+      read: async () => Object.fromEntries(await Promise.all(viewers.map(async (session) => [
+        session.tag, await session.tab.evaluate(supplierReadingExpression(seconds)),
+      ]))),
+    });
+    targetTag = selection.victim;
+  }
   const target = sessions.find((session) => session.tag === targetTag);
-  if (!target) throw new Error(`roster event target is unavailable: ${targetTag}`);
+  if (!target && selection?.victim !== null) throw new Error(`roster event target is unavailable: ${targetTag}`);
+  if (!target && kind !== 'leave-supplier-silent') throw new Error(`roster event target is unavailable: ${targetTag}`);
+  if (!target) {
+    state.rosterEvent = await issueRosterEventFromRunner({ condition, topology, sessions, targetSession: null, room,
+      client: null, kind, runDir, selection });
+    return state.rosterEvent;
+  }
   target.expectedEvent = true;
   state.rosterEvent = await issueRosterEventFromRunner({ condition, topology, sessions, targetSession: target, room,
     client: targetTag, runDir,
+    ...(kind === 'leave-supplier-silent' ? { selection } : {}),
     activateJoin: targetTag === heldTag ? activateHeldJoiner : undefined,
     // Waited for: a call in flight when the browser exits never settles, and teardown awaits every loop.
     stopSession: ['leave-clean', 'leave-first'].includes(kind)

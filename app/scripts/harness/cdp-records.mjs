@@ -200,6 +200,7 @@ export function pollExpression() {
     const scalar = (({ starts, seams, ...rest }) => rest)(playback);
     return {
       atMs: performance.timeOrigin + performance.now(),
+      wallMs: Date.now(),
       clock: __app.clock(),
       controller: __app.controller(),
       playback: scalar,

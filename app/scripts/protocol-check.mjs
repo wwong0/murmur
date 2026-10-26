@@ -288,6 +288,18 @@ import roomClientNamesSuite from './check/suites/room-client-names.mjs';
 import roomPeopleNamesSuite from './check/suites/room-people-names.mjs';
 import namesChatEntrySuite from './check/suites/names-chat-entry.mjs';
 import namesAndChatStepsSuite from './check/suites/names-and-chat-steps.mjs';
+import measureStatsSuite from './check/suites/measure-stats.mjs';
+import measureLabDriftSuite from './check/suites/measure-lab-drift.mjs';
+import measureBytesSuite from './check/suites/measure-bytes.mjs';
+import measureLedgerSuite from './check/suites/measure-ledger.mjs';
+import measureGapCountSuite from './check/suites/measure-gap-count.mjs';
+import measureCommandSuite from './check/suites/measure-command.mjs';
+import measureLandingsSuite from './check/suites/measure-landings.mjs';
+import measureCatchUpSuite from './check/suites/measure-catch-up.mjs';
+import measureEventClocksSuite from './check/suites/measure-event-clocks.mjs';
+import retainedCapSuite from './check/suites/retained-cap.mjs';
+import supplierCutSuite from './check/suites/supplier-cut.mjs';
+import measureConditionsSuite from './check/suites/measure-conditions.mjs';
 
 console.log(describeFixtures());
 
@@ -555,6 +567,18 @@ for (const suite of [
   roomPeopleNamesSuite,
   namesChatEntrySuite,
   namesAndChatStepsSuite,
+  measureStatsSuite,
+  measureLabDriftSuite,
+  measureBytesSuite,
+  measureLedgerSuite,
+  measureGapCountSuite,
+  measureCommandSuite,
+  measureLandingsSuite,
+  measureCatchUpSuite,
+  measureEventClocksSuite,
+  retainedCapSuite,
+  supplierCutSuite,
+  measureConditionsSuite,
 ]) {
   await suite();
 }

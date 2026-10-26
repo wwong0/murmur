@@ -37,6 +37,7 @@ function evaluatePoll({ video = {}, stalls = null } = {}) {
   const context = {
     document: { querySelector: (selector) => (selector === 'video' ? video : null) },
     performance: { timeOrigin: 1_000_000, now: () => 5 },
+    Date: { now: () => 1_000_004 },
     window: { __harnessStalls: stalls },
     __app: {
       playback: () => ({ playing: true, callbacks: 7, starts: [{ at: 1 }], seams: [{ at: 2 }] }),
@@ -70,6 +71,8 @@ export default async function harnessPollShapeSuite() {
     assertEqual(value.playback.seams, undefined, 'seams is not carried in a 125ms poll');
     assertEqual(value.playback.callbacks, 7, 'the scalar fields are carried');
     assertEqual(value.clock.offsetMs, 3, 'the clock reading is carried');
-    assert(Number.isFinite(value.atMs), 'the poll carries a finite wall-clock stamp');
+    assertEqual(value.atMs, 1_000_005, 'the poll carries the page timebase stamp');
+    assertEqual(value.wallMs, 1_000_004, 'the poll carries the page wall-clock stamp');
+    assert(typeof value.atMs === 'number' && typeof value.wallMs === 'number', 'both poll clocks are numbers');
   });
 }

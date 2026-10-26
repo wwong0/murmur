@@ -1,0 +1,233 @@
+{
+  "reader": "lab-drift",
+  "version": 1,
+  "run": "9b-shakedown-13c-g-2026-10-26T15-06-31.580Z",
+  "timeBasis": "reconstructed-lab-time",
+  "timebaseCheck": {
+    "status": "failed",
+    "spreadMs": 0.60009765625,
+    "pages": {
+      "c01": {
+        "d": 9.5,
+        "first": 3.300048828125,
+        "last": 15.60009765625,
+        "movedMs": 12.300048828125,
+        "samples": 1989
+      },
+      "c02": {
+        "d": 9.5,
+        "first": 3.449951171875,
+        "last": 15.800048828125,
+        "movedMs": 12.35009765625,
+        "samples": 2156
+      },
+      "c03": {
+        "d": 9.39990234375,
+        "first": 3.3499755859375,
+        "last": 15.699951171875,
+        "movedMs": 12.3499755859375,
+        "samples": 2156
+      },
+      "c04": {
+        "d": 9.400146484375,
+        "first": 3.400146484375,
+        "last": 15.699951171875,
+        "movedMs": 12.2998046875,
+        "samples": 2156
+      },
+      "c05": {
+        "d": 9.5,
+        "first": 3.39990234375,
+        "last": 15.699951171875,
+        "movedMs": 12.300048828125,
+        "samples": 2155
+      },
+      "host": {
+        "d": 8.89990234375,
+        "first": 1.699951171875,
+        "last": 15.699951171875,
+        "movedMs": 14,
+        "samples": 1243
+      }
+    },
+    "missingViewer": [],
+    "maxMovedMs": 14
+  },
+  "window": {
+    "startMs": 1793027338872,
+    "endMs": 1793027517557,
+    "stepMs": 41.666666666666664,
+    "points": 4289
+  },
+  "pairs": [
+    {
+      "left": "c01",
+      "right": "c02",
+      "points": 2654,
+      "missing": 1635,
+      "epochMismatch": 0,
+      "absMedianMs": 0,
+      "absP99Ms": 0,
+      "signedMedianMs": 0,
+      "rawSignedMedianMs": -500,
+      "recordSignedMedianMs": -0.05224609375,
+      "hiddenClockMs": 0.05224609375,
+      "floorMs": 16.69999999999891,
+      "lowerMs": 0,
+      "upperMs": 16.69999999999891
+    },
+    {
+      "left": "c01",
+      "right": "c03",
+      "points": 2664,
+      "missing": 1625,
+      "epochMismatch": 0,
+      "absMedianMs": 41.66699999998673,
+      "absP99Ms": 416.66699999998673,
+      "signedMedianMs": 41.66699999998673,
+      "rawSignedMedianMs": 41.66699999998673,
+      "recordSignedMedianMs": 24.995125000015832,
+      "hiddenClockMs": 16.671875,
+      "floorMs": 16.69999999999891,
+      "lowerMs": 24.96699999998782,
+      "upperMs": 58.36699999998564
+    },
+    {
+      "left": "c01",
+      "right": "c04",
+      "points": 2663,
+      "missing": 1626,
+      "epochMismatch": 0,
+      "absMedianMs": 0,
+      "absP99Ms": 0,
+      "signedMedianMs": 0,
+      "rawSignedMedianMs": 0,
+      "recordSignedMedianMs": -0.02294921875,
+      "hiddenClockMs": 0.02294921875,
+      "floorMs": 16.69999999999891,
+      "lowerMs": 0,
+      "upperMs": 16.69999999999891
+    },
+    {
+      "left": "c01",
+      "right": "c05",
+      "points": 2664,
+      "missing": 1625,
+      "epochMismatch": 0,
+      "absMedianMs": 0,
+      "absP99Ms": 41.66700000001583,
+      "signedMedianMs": 0,
+      "rawSignedMedianMs": 0,
+      "recordSignedMedianMs": 12.391357421875,
+      "hiddenClockMs": -12.42724609375,
+      "floorMs": 16.69999999999891,
+      "lowerMs": 0,
+      "upperMs": 16.69999999999891
+    },
+    {
+      "left": "c02",
+      "right": "c03",
+      "points": 2655,
+      "missing": 1634,
+      "epochMismatch": 0,
+      "absMedianMs": 41.66699999998673,
+      "absP99Ms": 416.66699999998673,
+      "signedMedianMs": 41.66699999998673,
+      "rawSignedMedianMs": 541.6669999999867,
+      "recordSignedMedianMs": 25.071785156265832,
+      "hiddenClockMs": 16.59521484375,
+      "floorMs": 16.69999999999891,
+      "lowerMs": 24.96699999998782,
+      "upperMs": 58.36699999998564
+    },
+    {
+      "left": "c02",
+      "right": "c04",
+      "points": 2655,
+      "missing": 1634,
+      "epochMismatch": 0,
+      "absMedianMs": 0,
+      "absP99Ms": 2.9103830456733704e-11,
+      "signedMedianMs": 0,
+      "rawSignedMedianMs": 500,
+      "recordSignedMedianMs": 0.028076171875,
+      "hiddenClockMs": -0.03271484375,
+      "floorMs": 16.69999999999891,
+      "lowerMs": 0,
+      "upperMs": 16.69999999999891
+    },
+    {
+      "left": "c02",
+      "right": "c05",
+      "points": 2655,
+      "missing": 1634,
+      "epochMismatch": 0,
+      "absMedianMs": 0,
+      "absP99Ms": 41.66700000001583,
+      "signedMedianMs": 0,
+      "rawSignedMedianMs": 500,
+      "recordSignedMedianMs": 12.437744140625,
+      "hiddenClockMs": -12.499755859375,
+      "floorMs": 16.69999999999891,
+      "lowerMs": 0,
+      "upperMs": 16.69999999999891
+    },
+    {
+      "left": "c03",
+      "right": "c04",
+      "points": 2672,
+      "missing": 1617,
+      "epochMismatch": 0,
+      "absMedianMs": 41.66699999998673,
+      "absP99Ms": 416.66699999998673,
+      "signedMedianMs": -41.66699999998673,
+      "rawSignedMedianMs": -41.66699999998673,
+      "recordSignedMedianMs": -25.03174609375128,
+      "hiddenClockMs": -16.63623046875,
+      "floorMs": 16.69999999999891,
+      "lowerMs": 24.96699999998782,
+      "upperMs": 58.36699999998564
+    },
+    {
+      "left": "c03",
+      "right": "c05",
+      "points": 4182,
+      "missing": 107,
+      "epochMismatch": 0,
+      "absMedianMs": 41.66699999998673,
+      "absP99Ms": 458.33300000001327,
+      "signedMedianMs": -41.66699999998673,
+      "rawSignedMedianMs": -41.66699999998673,
+      "recordSignedMedianMs": -12.594734375015832,
+      "hiddenClockMs": -29.09228515625,
+      "floorMs": 16.69999999999891,
+      "lowerMs": 24.96699999998782,
+      "upperMs": 58.36699999998564
+    },
+    {
+      "left": "c04",
+      "right": "c05",
+      "points": 2672,
+      "missing": 1617,
+      "epochMismatch": 0,
+      "absMedianMs": 0,
+      "absP99Ms": 41.66700000001583,
+      "signedMedianMs": 0,
+      "rawSignedMedianMs": 0,
+      "recordSignedMedianMs": 12.41650390625,
+      "hiddenClockMs": -12.463134765625,
+      "floorMs": 16.69999999999891,
+      "lowerMs": 0,
+      "upperMs": 16.69999999999891
+    }
+  ],
+  "overall": {
+    "absMedianMs": 0,
+    "absP99Ms": 416.66699999998673,
+    "worstPair": "c01|c03"
+  },
+  "absMedianMs": 0,
+  "absP99Ms": 416.66699999998673,
+  "worstPair": "c01|c03",
+  "offsetSpreadMs": 12.4979248046875
+}

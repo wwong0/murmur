@@ -5,7 +5,7 @@ import { clientTags } from './arms.mjs';
 
 export function rosterEventTarget(condition = {}, kind = condition.rosterEvent?.kind) {
   if (kind === 'join') return condition.rosterEvent?.client ?? 'c05';
-  if (kind === 'leave-first') return null;
+  if (kind === 'leave-first' || kind === 'leave-supplier-silent') return null;
   return condition.rosterEvent?.client ?? 'c03';
 }
 
@@ -93,6 +93,7 @@ function eventRecord(state, presence) {
   const value = {
     kind: state.kind,
     client: state.client,
+    ...(state.kind === 'leave-supplier-silent' ? { victim: state.victim, selection: state.selection } : {}),
     tabId: state.tabId,
     clientId: targetClientId,
     at: state.at,
@@ -114,11 +115,20 @@ function eventRecord(state, presence) {
 export async function issueRosterEvent({ condition, topology, sessions, targetSession, room,
   activateJoin, stopSession, disposeSession, cutNetwork = setInterfaceDown, terminate = terminateSocket,
   client, kind = condition?.rosterEvent?.kind, at = condition?.rosterEvent?.at,
-  runDir, now = Date.now } = {}) {
-  if (!condition || !kind || !targetSession) throw new Error('roster event needs a condition, kind and target session');
+  runDir, selection = null, now = Date.now } = {}) {
+  if (!condition || !kind || (!targetSession && kind !== 'leave-supplier-silent')) {
+    throw new Error('roster event needs a condition, kind and target session');
+  }
+  if (kind === 'leave-supplier-silent' && !targetSession) {
+    const value = { kind, client: null, victim: null, reason: 'no-active-supplier', selection,
+      issuedAtHarnessMs: now(), observed: false };
+    if (runDir) writeJson(path.join(runDir, 'roster-event.json'), value);
+    return value;
+  }
   const state = {
     condition, kind, client: client ?? rosterEventTarget(condition, kind), tabId: targetSession.tag,
     clientId: latestMemberId(targetSession), at, issuedAtHarnessMs: now(), readBack: null,
+    ...(kind === 'leave-supplier-silent' ? { victim: client ?? targetSession.tag, selection } : {}),
   };
   if (kind === 'join') {
     if (typeof activateJoin !== 'function') throw new Error('join roster event needs an activation callback');
@@ -127,7 +137,7 @@ export async function issueRosterEvent({ condition, topology, sessions, targetSe
   } else if (kind === 'leave-clean' || kind === 'leave-first') {
     await stopSession?.(targetSession);
     state.readBack = await (disposeSession ?? targetSession.dispose)?.();
-  } else if (kind === 'leave-silent') {
+  } else if (kind === 'leave-silent' || kind === 'leave-supplier-silent') {
     state.readBack = await cutNetwork({ topology, tag: targetSession.tag });
   } else if (kind === 'drop-socket') {
     state.readBack = await terminate({ topology, room, tabId: targetSession.tag });
@@ -137,6 +147,7 @@ export async function issueRosterEvent({ condition, topology, sessions, targetSe
   if (runDir) writeJson(path.join(runDir, 'roster-event.json'), {
     kind: state.kind, client: state.client, tabId: state.tabId, clientId: state.clientId,
     at: state.at, issuedAtHarnessMs: state.issuedAtHarnessMs, readBack: state.readBack,
+    ...(state.kind === 'leave-supplier-silent' ? { victim: state.victim, selection: state.selection } : {}),
     presence: null, receipts: Object.fromEntries(othersFor(condition, state.client).map((tag) => [tag, null])), observed: false,
     ...(state.kind === 'drop-socket' ? { leave: null, rejoin: null } : {}),
   });
@@ -146,6 +157,10 @@ export async function issueRosterEvent({ condition, topology, sessions, targetSe
 /** Re-read the receipts after all CDP streams have been drained. */
 export function finalizeRosterEvent(state, sessions, runDir) {
   if (!state) return null;
+  if (state.kind === 'leave-supplier-silent' && state.victim === null) {
+    if (runDir) writeJson(path.join(runDir, 'roster-event.json'), state);
+    return state;
+  }
   const value = eventRecord(state, presenceMap(sessions));
   if (runDir) writeJson(path.join(runDir, 'roster-event.json'), value);
   return value;
