@@ -278,20 +278,6 @@ function eRecord(entries, runs) {
     label: shown ? 'host-copy gain shown in these trials' : 'host-copy gain not shown in these trials' };
 }
 
-function classify(entry) {
-  const condition = entry.condition ?? '';
-  if (condition === '13d-a-five') return 'A';
-  if (condition === '13d-a-ten') return 'A10';
-  if (condition.startsWith('13d-a2-')) return 'A2';
-  if (condition.startsWith('13d-b-')) return 'B';
-  if (condition.startsWith('13d-e-')) return 'E';
-  if (condition === '13d-l-loss5') return 'L';
-  if (condition === '13d-d-delay25') return 'D';
-  if (condition === '13d-j-join') return 'J-join';
-  if (condition === '13d-j-cut') return 'J-cut';
-  return null;
-}
-
 function countStatuses(records, selector) {
   const result = {};
   for (const record of records) {
@@ -354,35 +340,44 @@ function peaks(entries, runs) {
   });
 }
 
+function dRecord(entry, run) {
+  const record = readingRecord(entry, run);
+  record.reference = { multiplier: multiplierVerdict(record.figures, 1.5), peerFraction: peerVerdict(record.figures.peerFractionAggregate, 0.6),
+    median: driftCriterion(record.lab, 'absMedianMs', 40), p99: driftCriterion(record.lab, 'absP99Ms', 100) };
+  return record;
+}
+
+const named = (name) => (condition) => condition === name;
+const prefixed = (prefix) => (condition) => condition.startsWith(prefix);
+
+// One test per key, in the order `verdicts.json` publishes them; a scored entry belongs to the test its condition matches.
+function perRun(matches, build, counts) {
+  return (entries, runs) => summarize(entries.filter((entry) => entry.scored !== false && matches(entry.condition ?? ''))
+    .map((entry) => build(entry, runs[entry.directory] ?? {})), counts);
+}
+
+const TESTS = {
+  A: perRun(named('13d-a-five'), (entry, run) => aRecord(entry, run, 1.5), (record) => ({ ...record.criteria, pass: outcome(record.pass) })),
+  A10: perRun(named('13d-a-ten'), a10Record, (record) => ({ C2: record.reading.multiplier })),
+  A2: perRun(prefixed('13d-a2-'), readingRecord, () => ({})),
+  B: perRun(prefixed('13d-b-'), bRecord, (record) => record.criteria),
+  D: perRun(named('13d-d-delay25'), dRecord, () => ({})),
+  E: (entries, runs) => {
+    const e = eRecord(entries, runs);
+    return { ...e, ranges: numericRanges(e.pairs) };
+  },
+  L: perRun(named('13d-l-loss5'), lRecord,
+    (record) => ({ pass: record.verdict.status === 'undecidable' ? { status: 'undecidable' } : outcome(record.pass) })),
+  'J-join': perRun(named('13d-j-join'), joinRecord, (record) => ({ entryUnder2s: outcome(record.verdict.entryUnder2s),
+    firstFrameUnder2s: outcome(record.verdict.firstFrameUnder2s) })),
+  'J-cut': perRun(named('13d-j-cut'), cutRecord, (record) => ({ pass: outcome(record.pass) })),
+};
+
 export function nightVerdicts({ entries = [], runs = {} } = {}) {
   const base = entries.map((entry) => validRecord(entry, runs[entry.directory] ?? {}));
   const diagnostics = entries.filter((entry) => entry.scored === false).map((entry) => ({ directory: entry.directory ?? null, condition: entry.condition ?? null }));
-  const a = entries.filter((entry) => classify(entry) === 'A' && entry.scored !== false).map((entry) => aRecord(entry, runs[entry.directory] ?? {}, 1.5));
-  const a10 = entries.filter((entry) => classify(entry) === 'A10' && entry.scored !== false).map((entry) => a10Record(entry, runs[entry.directory] ?? {}));
-  const a2 = entries.filter((entry) => classify(entry) === 'A2' && entry.scored !== false).map((entry) => readingRecord(entry, runs[entry.directory] ?? {}));
-  const b = entries.filter((entry) => classify(entry) === 'B' && entry.scored !== false).map((entry) => bRecord(entry, runs[entry.directory] ?? {}));
-  const d = entries.filter((entry) => classify(entry) === 'D' && entry.scored !== false).map((entry) => readingRecord(entry, runs[entry.directory] ?? {}));
-  for (const record of d) record.reference = { multiplier: multiplierVerdict(record.figures, 1.5), peerFraction: peerVerdict(record.figures.peerFractionAggregate, 0.6),
-    median: driftCriterion(record.lab, 'absMedianMs', 40), p99: driftCriterion(record.lab, 'absP99Ms', 100) };
-  const l = entries.filter((entry) => classify(entry) === 'L' && entry.scored !== false).map((entry) => lRecord(entry, runs[entry.directory] ?? {}));
-  const joins = entries.filter((entry) => classify(entry) === 'J-join' && entry.scored !== false).map((entry) => joinRecord(entry, runs[entry.directory] ?? {}));
-  const cuts = entries.filter((entry) => classify(entry) === 'J-cut' && entry.scored !== false).map((entry) => cutRecord(entry, runs[entry.directory] ?? {}));
-  const e = eRecord(entries, runs);
-  const tests = {
-    A: summarize(a, (record) => ({ ...record.criteria, pass: outcome(record.pass) })),
-    A10: summarize(a10, (record) => ({ C2: record.reading.multiplier })),
-    A2: summarize(a2, () => ({})),
-    B: summarize(b, (record) => record.criteria),
-    D: summarize(d, () => ({})),
-    E: { ...e, ranges: numericRanges(e.pairs) },
-    L: summarize(l, (record) => ({ pass: record.verdict.status === 'undecidable' ? { status: 'undecidable' } : outcome(record.pass) })),
-    'J-join': summarize(joins, (record) => ({ entryUnder2s: outcome(record.verdict.entryUnder2s),
-      firstFrameUnder2s: outcome(record.verdict.firstFrameUnder2s) })),
-    'J-cut': summarize(cuts, (record) => ({ pass: outcome(record.pass) })),
-  };
+  const tests = Object.fromEntries(Object.entries(TESTS).map(([name, test]) => [name, test(entries, runs)]));
   return { version: 1, entries: base, diagnostics, validity: Object.fromEntries(base.map((record) => [record.directory, {
     valid: record.valid, reasons: record.reasons, playbackRefused: record.playbackRefused,
   }])), tests, peaks: peaks(entries, runs) };
 }
-
-export const measureNight = nightVerdicts;
