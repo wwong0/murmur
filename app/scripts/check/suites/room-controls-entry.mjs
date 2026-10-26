@@ -8,12 +8,12 @@ const ISSUING_BUTTONS = ['play', 'pause', 'back-10', 'forward-10', 'control-mode
 export default async function roomControlsEntrySuite() {
   const product = await bundleProductEntry();
 
-  await check('room-controls-entry: Host on a room-less page creates and rewrites a host room', async () => {
+  await check('room-controls-entry: Host on a room-less page creates a host room and pushes its URL', async () => {
     const page = runEntry(product.code, { search: '' });
     page.screens().actions.host();
     await page.settled();
-    assertEqual(page.history.replacements.length, 1, 'no-room search makes exactly one replaceState call');
-    const query = new URLSearchParams(page.history.replacements[0].url.slice(1));
+    assertEqual(page.history.pushes.length, 1, 'no-room search makes exactly one pushState call');
+    const query = new URLSearchParams(page.history.pushes[0].url.slice(1));
     assert(/^[0-9a-f]{32}$/.test(query.get('room')), 'generated room is 32 lowercase hex characters');
     assertEqual(query.get('role'), 'host', 'generated URL carries host role');
     assert(typeof query.get('tab') === 'string' && query.get('tab').length > 0, 'generated URL carries a tab');
@@ -22,7 +22,7 @@ export default async function roomControlsEntrySuite() {
 
   await check('room-controls-entry: an invited page keeps its room URL', async () => {
     const page = runEntry(product.code, { search: '?room=r&tab=t' });
-    assertEqual(page.history.replacements.length, 0, 'room search makes no replaceState call');
+    assertEqual(page.history.replacements.length + page.history.pushes.length, 0, 'room search writes no history entry');
     assertEqual(page.view().invite.href, 'http://127.0.0.1:8100/room.html?room=r', 'invite href omits role and tab');
   });
 

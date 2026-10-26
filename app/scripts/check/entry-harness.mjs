@@ -239,10 +239,15 @@ export function runEntry(code, { videoOptions = {}, search = '?room=r&tab=t', on
     href: 'http://127.0.0.1:8100/room.html',
     assignments: [],
     assign(url) { this.assignments.push(url); },
+    reloads: 0,
+    reload() { this.reloads += 1; },
   };
-  const history = { replacements: [], replaceState(state, title, url) {
-    this.replacements.push({ state, title, url });
-  } };
+  const history = {
+    replacements: [],
+    pushes: [],
+    replaceState(state, title, url) { this.replacements.push({ state, title, url }); },
+    pushState(state, title, url) { this.pushes.push({ state, title, url }); },
+  };
   const log = (kind, detail) => events.push({ kind, detail });
   const { video, control } = fakeVideo({ ...videoOptions, onEvent: log });
   const harness = {

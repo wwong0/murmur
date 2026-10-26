@@ -264,7 +264,8 @@ export default async function playbackStoreSuite() {
       return {
         getItem: (key) => values.get(key) ?? null,
         setItem: (key, value) => values.set(key, String(value)),
-        removeItem: (key) => { clears += 1; values.delete(key); },
+        // Counts this key only: the front page clears the prepared keys too (13b D1).
+        removeItem: (key) => { if (key === 'watchalong.playback-state') clears += 1; values.delete(key); },
         value: () => values.get('watchalong.playback-state') ?? null,
         clears: () => clears,
       };

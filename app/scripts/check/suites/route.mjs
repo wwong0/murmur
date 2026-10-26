@@ -26,7 +26,7 @@ export default async function routeSuite() {
     await page.settled();
     assertEqual(page.view().route, 'front', 'the initial route is front');
     assertEqual(page.app.room, null, 'the front page has no room');
-    assertEqual(page.history.replacements.length, 0, 'the front page does not rewrite its URL');
+    assertEqual(page.history.replacements.length + page.history.pushes.length, 0, 'the front page does not write its URL');
     assertEqual(page.count('connect'), 0, 'the front page does not connect');
     assertEqual(page.fetches.filter((resource) => resource === '/app-settings').length, 0, 'the front page does not start the app');
   });
@@ -37,12 +37,12 @@ export default async function routeSuite() {
     await page.settled();
     assertEqual(page.view().route, 'room', 'Host enters the room route');
     assert(typeof page.app.room === 'string' && page.app.room.length > 0, 'Host creates a room');
-    assertEqual(page.history.replacements.length, 1, 'Host rewrites the URL once');
+    assertEqual(page.history.pushes.length, 1, 'Host writes the URL once');
     assertEqual(page.count('connect'), 1, 'Host connects once');
     assertEqual(page.fetches.filter((resource) => resource === '/app-settings').length, 1, 'Host starts the app once');
     page.screens().actions.host();
     await page.settled();
-    assertEqual(page.history.replacements.length, 1, 'a second Host does nothing');
+    assertEqual(page.history.pushes.length, 1, 'a second Host does nothing');
     assertEqual(page.count('connect'), 1, 'a second Host does not connect again');
   });
 

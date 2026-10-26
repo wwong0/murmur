@@ -150,10 +150,16 @@ function sessionKey(key) {
 }
 
 const PREPARED_NAME_KEY = 'watchalong.prepared-name';
+const PREPARED_KEY_NAME = 'watchalong.prepared-key';
 const playbackStore = sessionKey('watchalong.playback-state');
 const preparedName = sessionKey(PREPARED_NAME_KEY);
 const nameStore = sessionKey('watchalong.name');
-if (route !== 'room') playbackStore?.clear();
+// 13b D1: the front page forgets the tab's prepared copy too, so a room hosted from it starts empty.
+if (route !== 'room') {
+  playbackStore?.clear();
+  sessionKey(PREPARED_KEY_NAME)?.clear();
+  preparedName?.clear();
+}
 
 // The name the server last accepted for this tab, or undefined; an invalid stored value is none.
 function storedName() {
@@ -569,7 +575,6 @@ let statusSends = 0;
 // Design D10: the bar fades after this long without a pointer move over #player.
 const FADE_AFTER_MS = 3000;
 let lastPointerMoveAt = null;
-const PREPARED_KEY_NAME = 'watchalong.prepared-key';
 const endLatch = createEndLatch();
 const graceLatch = createEndLatch();
 const titleLatch = createEndLatch();
@@ -911,6 +916,11 @@ window.addEventListener('beforeunload', (event) => {
   }
 });
 
+// 13b D2: Back from a hosted room reaches the front page's entry; reloading it leaves the room.
+window.addEventListener('popstate', () => {
+  if (readRoute(location.search).room !== room) location.reload();
+});
+
 // T7/T8 (design.md D5, D3): the viewer's held-ahead, the reports the host has
 // seen, and the resume rule's own ring. Kept beside `acquisition`, not inside
 // it — held-ahead and the resume rule are both pure modules of their own.
@@ -1181,7 +1191,7 @@ function hostRoom() {
   role = 'host';
   tabId = randomTabId();
   route = 'room';
-  history.replaceState(null, '', `?room=${room}&role=host&tab=${tabId}`);
+  history.pushState(null, '', `?room=${room}&role=host&tab=${tabId}`);
   view.set('route', route);
   view.set('invite', { href: `${location.origin}${location.pathname}?room=${encodeURIComponent(room)}`, text: 'invite link' });
   activateClient();

@@ -245,6 +245,7 @@ import hostGraceEntrySuite from './check/suites/host-grace-entry.mjs';
 import hostTitleGateSuite from './check/suites/host-title-gate.mjs';
 import titleGateSuite from './check/suites/title-gate.mjs';
 import titleEntrySuite from './check/suites/title-entry.mjs';
+import hostNewRoomSuite from './check/suites/host-new-room.mjs';
 import hostFileStepsSuite from './check/suites/host-file-steps.mjs';
 import roomContinuityStepsSuite from './check/suites/room-continuity-steps.mjs';
 import roomScreensStepsSuite from './check/suites/room-screens-steps.mjs';
@@ -510,6 +511,7 @@ for (const suite of [
   hostTitleGateSuite,
   titleGateSuite,
   titleEntrySuite,
+  hostNewRoomSuite,
   hostFileStepsSuite,
   roomContinuityStepsSuite,
   roomScreensStepsSuite,
