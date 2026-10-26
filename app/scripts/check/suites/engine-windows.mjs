@@ -225,6 +225,8 @@ export default async function engineWindowsSuite() {
     // 12c-1's copy 11a-2's arms (its executor spec T10).
     const registeredBy12c1 = (name) => name.startsWith('12c1-') || name.startsWith('shakedown/12c1-');
     const registeredBy12c2 = (name) => name.startsWith('12c2-') || name.startsWith('shakedown/12c2-');
+    // 13d's copy archived product arms and runs the product's windows.
+    const registeredBy13d = (name) => name.startsWith('13d-') || name.startsWith('shakedown/13d-');
     const supplied = [];
     const walk = (group, label) => {
       for (const [name, condition] of Object.entries(group)) {
@@ -232,7 +234,8 @@ export default async function engineWindowsSuite() {
         if (condition.peerExchange === true) {
           const declares = Object.prototype.hasOwnProperty.call(condition, 'engineWindows');
           if (productInputs.includes(`${label}${name}`) || registeredBy11a2(`${label}${name}`)
-            || registeredBy12c1(`${label}${name}`) || registeredBy12c2(`${label}${name}`)) { if (declares) supplied.push(`${label}${name}`); }
+            || registeredBy12c1(`${label}${name}`) || registeredBy12c2(`${label}${name}`)
+            || registeredBy13d(`${label}${name}`)) { if (declares) supplied.push(`${label}${name}`); }
           else if (!declares) undeclared.push(`${label}${name}`);
         } else if (condition.delivery === undefined && !('peerExchange' in condition)
           && Object.values(condition).every((value) => value && typeof value === 'object')) {

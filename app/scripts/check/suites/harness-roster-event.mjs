@@ -186,13 +186,20 @@ export default async function harnessRosterEventSuite() {
     const issued = E - 8_000;
     const stalled = denseFrames(E - 70_000, E + 60_000).filter((record) => record.displaySharedMs <= issued + 3_000 || record.displaySharedMs >= issued + 3_400)
       .map((record, index) => ({ ...record, seq: index + 1, presentedFrames: index + 1 }));
-    const read = (kind) => rowOf(rosterEventReading({ condition: leaveCondition(kind),
+    const readRows = (kind) => rosterEventReading({ condition: leaveCondition(kind),
       event: event(kind, 'c03', { issuedAtHarnessMs: issued - TIMEBASE.offsetMs }), presence: presence(kind, 'c03', { includeTarget: false }),
       drift: Object.fromEntries(TAGS.filter((tag) => tag !== 'c03').map((tag) => [tag, tag === 'c01' ? stalled : denseFrames(E - 70_000, E + 60_000)])),
       polls: { host: hostPolls(E - 70_000), ...Object.fromEntries(TAGS.filter((tag) => tag !== 'c03').map((tag) => [tag, runwayPolls(20_000, 0, E - 8_000, 137)])) },
-      segments: Object.fromEntries(TAGS.map((tag) => [tag, []])), timebase: TIMEBASE }), 'K1');
+      segments: Object.fromEntries(TAGS.map((tag) => [tag, []])), timebase: TIMEBASE });
+    const read = (kind) => rowOf(readRows(kind), 'K1');
     assertEqual(read('leave-silent').status, 'missed', 'a stall between the cut and the presence frame is after the event');
     assertEqual(read('leave-silent').intervals.c01.after.stalls[0].lengthMs, 400, 'and is published with its length');
+    const supplierRows = readRows('leave-supplier-silent');
+    assertEqual(rowOf(supplierRows, 'K1').status, 'missed', 'a supplier-silent leave uses the issue-time stall window');
+    assertEqual(rowOf(supplierRows, 'K1').intervals.c01.after.stalls[0].lengthMs, 400,
+      'a supplier-silent leave publishes the stall length');
+    assert(!supplierRows.some((entry) => entry.reason === 'roster-event-kind-unsupported:leave-supplier-silent'),
+      'a supplier-silent leave is a supported roster event kind');
     assertEqual(read('leave-clean').status, 'unreadable', 'the same stall before a clean leave is the before-window');
   });
 

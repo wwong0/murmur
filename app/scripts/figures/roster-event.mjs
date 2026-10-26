@@ -513,12 +513,15 @@ export function rosterEventReading({ condition = {}, event, presence, drift = {}
       toMs: ahead.endSharedMs ?? Infinity, aheadForGoodAtSharedMs: ahead.aheadForGoodAtSharedMs }) });
     return result;
   }
-  if (['leave-clean', 'leave-silent', 'leave-first', 'drop-socket'].includes(kind)) {
+  if (['leave-clean', 'leave-silent', 'leave-supplier-silent', 'leave-first', 'drop-socket'].includes(kind)) {
     // A silent leave is issued up to the liveness interval before the room sees it: its
     // windows turn on the issue and its after-window runs on past the presence frame.
-    const issuedTime = kind === 'leave-silent' ? harnessSharedMs(timebase, event.issuedAtHarnessMs, event.issuedAtHarnessMs) : eventTime;
+    const issuedTime = kind === 'leave-silent' || kind === 'leave-supplier-silent'
+      ? harnessSharedMs(timebase, event.issuedAtHarnessMs, event.issuedAtHarnessMs) : eventTime;
     if (!finite(issuedTime) || issuedTime > eventTime) return [row('event', 'evidence-failure', { reason: 'event-issue-time-invalid' })];
-    if (kind === 'leave-silent') result.push(k0Row(othersFor(condition, target), polls, issuedTime, condition, timebase));
+    if (kind === 'leave-silent' || kind === 'leave-supplier-silent') {
+      result.push(k0Row(othersFor(condition, target), polls, issuedTime, condition, timebase));
+    }
     result.push(stallRow(condition, kind, eventTime, drift, stream(polls, 'host') ?? [], target, issuedTime));
     if (kind === 'drop-socket') result.unshift(socketRow(condition, event, presence, polls, pagePolls, timebase));
     else {
