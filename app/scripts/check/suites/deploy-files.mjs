@@ -1,12 +1,12 @@
 import fs from 'node:fs';
 import http from 'node:http';
-import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
 import { assert, assertEqual, check, sleep } from '../harness.mjs';
 import { optionsFromEnv } from '../../../server/room-server.mjs';
+import { stopChild, unusedPort } from '../../runner/local-processes.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const DEPLOY_DIR = path.join(APP_DIR, 'deploy');
@@ -16,36 +16,18 @@ const ROOM_UNIT_PATH = path.join(DEPLOY_DIR, 'systemd', 'murmur-room.service');
 const TRACKER_UNIT_PATH = path.join(DEPLOY_DIR, 'systemd', 'murmur-tracker.service');
 const ENV_PATH = path.join(DEPLOY_DIR, 'room.env.template');
 
+const HOST = 'murmurwatch.duckdns.org';
+
 const ACTIVE = new Map([
   ['APP_PORT', '8100'],
   ['APP_MEDIA_SOURCE', 'file'],
   ['APP_DELIVERY', 'host'],
-  ['APP_TRACKER_URL', 'wss://murmurwatch.duckdns.org/tracker'],
-  ['APP_ALLOWED_ORIGIN', 'https://murmurwatch.duckdns.org'],
+  ['APP_TRACKER_URL', `wss://${HOST}/tracker`],
+  ['APP_ALLOWED_ORIGIN', `https://${HOST}`],
   ['APP_TRUSTED_PROXY', '1'],
   ['APP_TURN_KEY_ID', ''],
   ['APP_TURN_API_TOKEN', ''],
 ]);
-
-const COMMENTED = [
-  'APP_HARNESS_COUNTERS',
-  'APP_AUTO_START',
-  'APP_ICE_SERVERS',
-  'APP_MEDIA_DIR',
-  'APP_SEGMENT_TARGET_S',
-  'APP_LIVENESS_INTERVAL_MS',
-  'APP_HOST_GRACE_MS',
-  'APP_CHAT_BURST',
-  'APP_CHAT_REFILL_MS',
-  'APP_ENVELOPE_BURST',
-  'APP_ENVELOPE_REFILL_MS',
-  'APP_JOIN_BURST',
-  'APP_JOIN_REFILL_MS',
-  'APP_FRAME_CAP_BYTES',
-  'APP_TURN_API_BASE',
-  'APP_TURN_TTL_S',
-  'APP_TURN_REUSE_MS',
-];
 
 // An allowlist: a denylist of path variables misses aliases such as $document_uri (13-2 F2).
 const LOG_VARIABLES = new Set([
@@ -64,39 +46,17 @@ function read(file) {
 function parseTemplate(text) {
   const active = new Map();
   const commented = new Map();
-  for (const line of text.split(/\r?\n/)) {
-    const activeMatch = line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/);
-    const commentedMatch = line.match(/^#([A-Z][A-Z0-9_]*)=(.*)$/);
-    if (activeMatch) active.set(activeMatch[1], activeMatch[2]);
-    if (commentedMatch) commented.set(commentedMatch[1], commentedMatch[2]);
+  for (const [, hash, key, value] of text.matchAll(/^(#?)([A-Z][A-Z0-9_]*)=(.*?)\r?$/gm)) {
+    (hash ? commented : active).set(key, value);
   }
   return { active, commented };
 }
 
-function names(set) {
-  return [...set].sort();
-}
-
 function assertSameSet(actual, expected, label) {
-  const missing = names(new Set([...expected].filter((key) => !actual.has(key))));
-  const unknown = names(new Set([...actual].filter((key) => !expected.has(key))));
+  const missing = [...expected].filter((key) => !actual.has(key)).sort();
+  const unknown = [...actual].filter((key) => !expected.has(key)).sort();
   assert(missing.length === 0, `${label} missing ${missing.join(', ')}`);
   assert(unknown.length === 0, `${label} has unknown ${unknown.join(', ')}`);
-}
-
-function envObject(map) {
-  return Object.fromEntries(map);
-}
-
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const port = server.address().port;
-      server.close((error) => (error ? reject(error) : resolve(port)));
-    });
-  });
 }
 
 function statusAt(port) {
@@ -123,17 +83,14 @@ async function waitForStatus(port) {
   throw new Error(`tracker did not answer on port ${port} within 10 seconds`);
 }
 
-function childExit(child) {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
-  return new Promise((resolve) => child.once('exit', resolve));
-}
-
-async function stopChild(child) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  child.kill();
-  await Promise.race([childExit(child), sleep(1000)]);
-  if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-  await childExit(child);
+/** Starts the tracker with these arguments, reads its /stats status, and stops it. */
+async function statsStatus(args, port) {
+  const tracker = spawn(process.execPath, args, { cwd: APP_DIR, stdio: 'ignore' });
+  try {
+    return await waitForStatus(port);
+  } finally {
+    await stopChild(tracker);
+  }
 }
 
 export default async function deployFilesSuite() {
@@ -166,7 +123,7 @@ export default async function deployFilesSuite() {
     const { active } = parseTemplate(read(ENV_PATH));
     let failure;
     try {
-      optionsFromEnv(envObject(active));
+      optionsFromEnv(Object.fromEntries(active));
     } catch (error) {
       failure = error;
     }
@@ -178,15 +135,15 @@ export default async function deployFilesSuite() {
     const { active } = parseTemplate(read(ENV_PATH));
     active.set('APP_TURN_KEY_ID', 'fake-key-id');
     active.set('APP_TURN_API_TOKEN', 'fake-token');
-    const options = optionsFromEnv(envObject(active));
+    const options = optionsFromEnv(Object.fromEntries(active));
     assertEqual(options.mediaSource, 'file', 'media source');
     assertEqual(options.delivery, 'host', 'delivery');
     assertEqual(options.trustedProxy, true, 'trusted proxy');
     assertEqual(options.harnessCounters, false, 'harness counters');
     assertEqual(options.autoStart, false, 'auto start');
     assertEqual(options.port, 8100, 'port');
-    assertEqual(options.allowedOrigin, 'https://murmurwatch.duckdns.org', 'allowed origin');
-    assertEqual(options.trackerUrl, 'wss://murmurwatch.duckdns.org/tracker', 'tracker URL');
+    assertEqual(options.allowedOrigin, `https://${HOST}`, 'allowed origin');
+    assertEqual(options.trackerUrl, `wss://${HOST}/tracker`, 'tracker URL');
   });
 
   await check('6.5 deployment files agree', async () => {
@@ -241,24 +198,10 @@ export default async function deployFilesSuite() {
     const args = execLine.slice('ExecStart='.length).trim().split(/\s+/).slice(1);
     const portIndex = args.indexOf('--port');
     assert(portIndex >= 0 && args[portIndex + 1], 'tracker ExecStart has a port flag');
-    const port = await freePort();
-    const withPort = (base) => {
-      const copy = [...base];
-      copy[portIndex + 1] = String(port);
-      return copy;
-    };
-    let tracker;
-    let control;
-    try {
-      tracker = spawn(process.execPath, withPort(args), { cwd: APP_DIR, stdio: 'ignore' });
-      assertEqual(await waitForStatus(port), 404, 'tracker /stats with --no-stats');
-      await stopChild(tracker);
-      const controlArgs = withPort(args).filter((arg) => arg !== '--no-stats');
-      control = spawn(process.execPath, controlArgs, { cwd: APP_DIR, stdio: 'ignore' });
-      assertEqual(await waitForStatus(port), 200, 'tracker /stats without --no-stats');
-    } finally {
-      await stopChild(control);
-      await stopChild(tracker);
-    }
+    const port = await unusedPort();
+    args[portIndex + 1] = String(port);
+    assertEqual(await statsStatus(args, port), 404, 'tracker /stats with --no-stats');
+    const control = args.filter((arg) => arg !== '--no-stats');
+    assertEqual(await statsStatus(control, port), 200, 'tracker /stats without --no-stats');
   });
 }
