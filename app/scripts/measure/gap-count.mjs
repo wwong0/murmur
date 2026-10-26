@@ -1,6 +1,7 @@
 import { harnessSharedMs, pagePollSharedMs } from '../figures/poll-coverage.mjs';
 import { removesMember } from '../harness/roster-kinds.mjs';
 import { weightedPercentile } from './stats.mjs';
+import { frameGaps, labInstant } from './lab-position.mjs';
 
 const finite = (value) => Number.isFinite(value);
 const bins = ['[0,10)', '[10,20)', '[20,40)', '[40,100)', '[100,250)', '[250,1000)', '[1000,∞)'];
@@ -13,18 +14,6 @@ function binFor(value) {
   if (value < 250) return bins[4];
   if (value < 1000) return bins[5];
   return bins[6];
-}
-
-function labInstant(record) {
-  return finite(record?.displaySharedMs) && finite(record?.clock?.offsetMs)
-    ? record.displaySharedMs - record.clock.offsetMs : null;
-}
-
-// On the shared clock, the base the skip instants it is compared with are on.
-function frameGaps(records) {
-  const sorted = (records ?? []).map((record) => record?.displaySharedMs).filter(finite).sort((a, b) => a - b);
-  return sorted.slice(0, -1).map((at, index) => ({ startMs: at, gapMs: sorted[index + 1] - at }))
-    .filter((gap) => gap.gapMs > 250);
 }
 
 function pollEvents(polls) {
@@ -51,7 +40,7 @@ function inCauseWindow(eventAt, skipAt) {
   return finite(eventAt) && eventAt <= skipAt && eventAt >= skipAt - 10_000;
 }
 
-function causeFor({ skipAt, tag, starts, reparks, seekAt, joinAt, capacity, lossAt, staticLoss, gaps, stalls }) {
+function causeFor({ skipAt, starts, reparks, seekAt, joinAt, capacity, lossAt, staticLoss, gaps, stalls }) {
   if ([...starts, ...reparks].some((at) => inCauseWindow(at, skipAt))) return 'start';
   if (inCauseWindow(seekAt, skipAt)) return 'seek';
   if (inCauseWindow(joinAt, skipAt)) return 'join';
@@ -61,33 +50,33 @@ function causeFor({ skipAt, tag, starts, reparks, seekAt, joinAt, capacity, loss
   return 'unattributed';
 }
 
+// The events a viewer's skip may be attributed to, on the shared clock.
+function causesInReach(evidence, tag, polls, gaps) {
+  const applied = (change) => harnessSharedMs(evidence.timebase, change?.appliedAtMs, change?.appliedAtMs);
+  // The applied instants are the manifest's; the condition holds only the declaration.
+  const schedule = evidence.manifest?.capacitySchedule ?? {};
+  const drop = applied(schedule.drop);
+  const roster = evidence.rosterEvent;
+  return { starts: polls.starts, reparks: polls.reparks, stalls: polls.stalls, gaps,
+    seekAt: evidence.seek?.host?.atSharedMs,
+    joinAt: roster?.kind === 'join' && roster.client === tag ? roster.presence?.recvSharedMs : null,
+    capacity: { drop: finite(drop) ? drop : applied(evidence.manifest?.capacityStep), rise: applied(schedule.rise) },
+    lossAt: roster && removesMember(roster.kind) ? roster.presence?.recvSharedMs : null,
+    staticLoss: (evidence.condition?.qdiscs ?? []).some((qdisc) => qdisc?.params?.loss !== undefined) };
+}
+
 function farSkips(evidence, tag, polls, gaps) {
+  const causes = causesInReach(evidence, tag, polls, gaps);
   let previous = null;
   const result = [];
-  for (const { poll, atMs } of polls.values) {
+  for (const { poll } of polls.values) {
     const skips = poll?.playback?.skips;
     if (!Number.isSafeInteger(skips)) continue;
     if (previous !== null && skips > previous) {
       const skipAt = finite(poll.playback.lastSkipAtSharedMs) ? poll.playback.lastSkipAtSharedMs : null;
       const increment = skips - previous;
-      const condition = evidence.condition ?? {};
-      // The applied instants are the manifest's; the condition holds only the declaration.
-      const schedule = evidence.manifest?.capacitySchedule ?? {};
-      const drop = harnessSharedMs(evidence.timebase, schedule.drop?.appliedAtMs, schedule.drop?.appliedAtMs);
-      const rise = harnessSharedMs(evidence.timebase, schedule.rise?.appliedAtMs, schedule.rise?.appliedAtMs);
-      const step = evidence.manifest?.capacityStep;
-      const stepDrop = harnessSharedMs(evidence.timebase, step?.appliedAtMs, step?.appliedAtMs);
-      const roster = evidence.rosterEvent;
-      const joinAt = roster?.kind === 'join' && roster.client === tag ? roster.presence?.recvSharedMs : null;
-      const lossAt = roster && removesMember(roster.kind) ? roster.presence?.recvSharedMs : null;
-      const staticLoss = (condition.qdiscs ?? []).some((qdisc) => qdisc?.params?.loss !== undefined);
-      const starts = polls.starts;
-      const cause = causeFor({ skipAt, tag, starts, reparks: polls.reparks,
-        seekAt: evidence.seek?.host?.atSharedMs, joinAt,
-        capacity: { drop: finite(drop) ? drop : stepDrop, rise }, lossAt, staticLoss, gaps,
-        stalls: polls.stalls });
       result.push({ atSharedMs: skipAt, abandonedMs: poll.playback.lastSkipAbandonedMs ?? null,
-        increment, multiple: increment > 1, cause });
+        increment, multiple: increment > 1, cause: causeFor({ skipAt, ...causes }) });
     }
     if (previous === null || skips > previous) previous = skips;
   }

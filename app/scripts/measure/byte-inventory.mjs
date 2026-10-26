@@ -1,3 +1,5 @@
+import { labInstant } from './lab-position.mjs';
+
 const finite = (value) => Number.isFinite(value);
 const LIMIT_BYTES = 4_294_967_296;
 const segmentPattern = /seg-(\d+)\.m4s$/;
@@ -66,17 +68,13 @@ function storedSeries(completed, content) {
     .reduce((sum, entry) => sum + sizeOf(content, entry.index), 0) }));
 }
 
-function finalFlush(evidence, perViewer) {
+function finalFlush(evidence) {
   const window = evidence.manifest?.window;
   const recordingEnd = finite(window?.endMs) ? window.endMs + (evidence.manifest.recordingTailMs ?? 0) : null;
   const viewers = {};
   let unreadable = !finite(recordingEnd);
   for (const tag of evidence.tags) {
-    const lastDrift = (evidence.clients[tag]?.drift ?? []).map((record) => {
-      const L = finite(record?.displaySharedMs) && finite(record?.clock?.offsetMs)
-        ? record.displaySharedMs - record.clock.offsetMs : null;
-      return L;
-    }).filter(finite).at(-1);
+    const lastDrift = (evidence.clients[tag]?.drift ?? []).map(labInstant).filter(finite).at(-1);
     // Raw page and harness wall ms: the same lab base as `window.endMs` and `L` (design D3).
     const lastPoll = (evidence.clients[tag]?.polls ?? []).map((poll) => poll?.atMs).filter(finite).at(-1);
     const driftLogMissed = evidence.manifest?.clients?.[tag]?.driftLogMissed;
@@ -165,7 +163,6 @@ export function byteInventory(evidence) {
   const transport = evidence.originLink?.length >= 2
     ? evidence.originLink.at(-1).txBytes - evidence.originLink[0].txBytes : null;
   const watchedUnionBytes = [...unionWatched].reduce((sum, index) => sum + (sizeOf(content, index) ?? 0), 0);
-  const finalFlush = finalFlushReading(evidence, perViewer);
   return {
     reader: 'byte-inventory', version: 1, run,
     host: { mediaBytes: hostMediaBytes, transportBytes: transport, ...(transport === null ? { transportReason: 'origin-link-missing' } : {}) },
@@ -177,10 +174,6 @@ export function byteInventory(evidence) {
       receiptMismatches: { count: (evidence.tags.flatMap((tag) => evidence.clients[tag]?.receipts ?? [])
         .filter((receipt) => receipt?.finished === true && receipt.bodyBytes !== receipt.expectedBytes)).length, examples: receiptExamples },
     },
-    finalFlush,
+    finalFlush: finalFlush(evidence),
   };
-}
-
-function finalFlushReading(evidence, perViewer) {
-  return finalFlush(evidence, perViewer);
 }

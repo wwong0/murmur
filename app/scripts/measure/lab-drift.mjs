@@ -8,10 +8,10 @@ function refusal(run, reason, detail) {
   return { reader: 'lab-drift', version: 1, run, refused: true, reason, detail };
 }
 
-function timebasePage(polls, valueFields, wallField) {
+function timebasePage(polls, atField, wallField) {
   const values = (polls ?? []).map((poll) => ({
     wall: poll?.[wallField],
-    d: poll?.[valueFields[0]] - poll?.[valueFields[1]],
+    d: poll?.[atField] - poll?.[wallField],
   })).filter((entry) => finite(entry.wall) && finite(entry.d));
   if (!values.length) return null;
   const byWall = values.slice().sort((a, b) => a.wall - b.wall);
@@ -29,11 +29,11 @@ function timebaseCheck(evidence) {
   const pages = {};
   const missingViewer = [];
   for (const tag of evidence.tags) {
-    const page = timebasePage(evidence.clients[tag]?.polls, ['atMs', 'wallMs'], 'wallMs');
+    const page = timebasePage(evidence.clients[tag]?.polls, 'atMs', 'wallMs');
     pages[tag] = page;
     if (!page) missingViewer.push(tag);
   }
-  const host = timebasePage(evidence.hostPoll, ['pageMs', 'pageWallMs'], 'pageWallMs');
+  const host = timebasePage(evidence.hostPoll, 'pageMs', 'pageWallMs');
   pages.host = host;
   const values = Object.values(pages).filter(Boolean);
   const spreadMs = values.length ? Math.max(...values.map((page) => page.d)) - Math.min(...values.map((page) => page.d)) : null;

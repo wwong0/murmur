@@ -1,5 +1,6 @@
 import { landingSegments } from '../figures/landing.mjs';
 import { harnessSharedMs, runwayMs, sharedWallMs } from '../figures/poll-coverage.mjs';
+import { stallsBetween } from './lab-position.mjs';
 
 const finite = (value) => Number.isFinite(value);
 const metricNames = ['hostCopiesSum', 'peerShare30s', 'backAheadMs', 'stallTotalMs', 'waitMs'];
@@ -17,15 +18,6 @@ function allAttempts(evidence) {
 function allSegments(evidence) {
   return Object.values(evidence.clients ?? {}).flatMap((client) => client?.peerBytes ?? [])
     .filter((record) => record?.kind === 'segment');
-}
-function frameGaps(records) {
-  const values = (records ?? []).map((record) => record?.displaySharedMs).filter(finite).sort((a, b) => a - b);
-  return values.slice(0, -1).map((startMs, index) => ({ startMs, gapMs: values[index + 1] - startMs }))
-    .filter((gap) => gap.gapMs > 250);
-}
-function stallRow(evidence, tag, from, to) {
-  const stalls = frameGaps(evidence.clients?.[tag]?.drift).filter((gap) => gap.startMs >= from && gap.startMs <= to);
-  return { count: stalls.length, totalMs: stalls.reduce((sum, gap) => sum + gap.gapMs, 0) };
 }
 function firstStart(evidence) {
   const starts = (evidence.tags ?? []).flatMap((tag) => (evidence.clients?.[tag]?.polls ?? [])
@@ -99,7 +91,7 @@ function landingRow(evidence, kind, landingMs, positionMs, nextLandingMs) {
   const peerBytes30s = peerWindow.filter(({ record }) => record.source === 'p2p')
     .reduce((sum, entry) => sum + (Number(entry.record.bytes) || 0), 0);
   const denominator = hostBytes30s + peerBytes30s;
-  const stalls = Object.fromEntries((evidence.tags ?? []).map((tag) => [tag, stallRow(evidence, tag, landingMs, landingMs + 30_000)]));
+  const stalls = Object.fromEntries((evidence.tags ?? []).map((tag) => [tag, stallsBetween(evidence.clients?.[tag]?.drift, landingMs, landingMs + 30_000)]));
   const stallTotalMs = Object.values(stalls).reduce((sum, row) => sum + row.totalMs, 0);
   return { kind, instantSharedMs: landingMs, instantMs: landingMs, positionMs, segment: geometry.index,
     playlistOffsetMs: geometry.offsetMs, segmentsNeeded: geometry.segmentsNeeded, segments,

@@ -92,3 +92,9 @@ export function frameGaps(records) {
   return values.slice(0, -1).map((startMs, index) => ({ startMs, gapMs: values[index + 1] - startMs }))
     .filter((gap) => gap.gapMs > 250);
 }
+
+/** Frame gaps starting in [fromMs, toMs]: their count and total. */
+export function stallsBetween(records, fromMs, toMs) {
+  const gaps = frameGaps(records).filter((gap) => gap.startMs >= fromMs && gap.startMs <= toMs);
+  return { count: gaps.length, totalMs: gaps.reduce((sum, gap) => sum + gap.gapMs, 0) };
+}

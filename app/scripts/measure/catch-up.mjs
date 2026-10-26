@@ -1,5 +1,5 @@
 import { median } from './stats.mjs';
-import { frameGaps, gapToOthers, gridRows, holdFrom, labRecords } from './lab-position.mjs';
+import { gapToOthers, gridRows, holdFrom, labRecords, stallsBetween } from './lab-position.mjs';
 
 const finite = (value) => Number.isFinite(value);
 const EPSILON = 1e-6;
@@ -26,10 +26,6 @@ function rateFigure(values, t0, endMs) {
     if (deviation > EPSILON) offUnityMs += Math.max(0, Math.min(next, endMs) - values[index].atMs);
   }
   return { offUnityMs, maxDeviation, trace };
-}
-function stallFigure(evidence, tag, fromMs, toMs) {
-  const rows = frameGaps(evidence.clients?.[tag]?.drift).filter((gap) => gap.startMs >= fromMs && gap.startMs <= toMs);
-  return { count: rows.length, totalMs: rows.reduce((sum, row) => sum + row.gapMs, 0) };
 }
 function pairMovement(evidence, tags, fromMs, toMs) {
   const values = [];
@@ -71,15 +67,16 @@ export function catchUp(evidence) {
   const rate = rateFigure(polls, t0, observationEnd);
   const othersBefore = pairMovement(evidence, others, pause - 10_000, pause);
   const othersAfter = pairMovement(evidence, others, t0, Math.min(t0 + 10_000, observationEnd));
-  const gaps = stallFigure(evidence, tag, t0, observationEnd);
+  const gaps = stallsBetween(evidence.clients?.[tag]?.drift, t0, observationEnd);
+  const skipsDelta = pollDelta(polls, 'playback.skips');
   return { reader: 'catch-up', version: 1, run: evidence.run ?? null, disturbed: tag,
     measuredPauseMs: t0 - pause, t0, observationMs, observationEndMs: observationEnd,
     observationTruncated: observationEnd < requestedEnd, gapBeforeMs: median(before), gapAfterMs: largestAfter?.g ?? null,
     timeInto40Ms: finite(settled) ? settled - t0 : null,
     ...(finite(settled) ? {} : { timeInto40Reason: 'not-within-observation' }), rate,
-    skipsDelta: pollDelta(polls, 'playback.skips'), stallCountDelta: pollDelta(polls, 'stalls.count'),
+    skipsDelta, stallCountDelta: pollDelta(polls, 'stalls.count'),
     frameGaps: gaps.count, frameGapMs: gaps.totalMs, frameGapTotalMs: gaps.totalMs,
     othersMovedMs: { beforeMs: othersBefore, afterMs: othersAfter,
       differenceMs: finite(othersBefore) && finite(othersAfter) ? othersAfter - othersBefore : null },
-    resolvedBy: (pollDelta(polls, 'playback.skips') ?? 0) > 0 ? 'far-skip' : finite(settled) ? 'rate' : 'unresolved' };
+    resolvedBy: (skipsDelta ?? 0) > 0 ? 'far-skip' : finite(settled) ? 'rate' : 'unresolved' };
 }

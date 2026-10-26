@@ -1,5 +1,5 @@
 import { harnessSharedMs, pagePollSharedMs, sharedWallMs } from '../figures/poll-coverage.mjs';
-import { frameGaps, gapToOthers, gridRows, holdFrom, labRecords } from './lab-position.mjs';
+import { gapToOthers, gridRows, holdFrom, labRecords, stallsBetween } from './lab-position.mjs';
 
 const finite = (value) => Number.isFinite(value);
 
@@ -37,9 +37,8 @@ function pollStalls(evidence, tag, cutMs) {
   const rows = (evidence.clients?.[tag]?.polls ?? []).map((poll) => ({ poll, atMs: pagePollSharedMs(poll) ?? poll?.atMs }))
     .filter((row) => finite(row.atMs) && row.atMs >= cutMs && row.atMs <= cutMs + 60_000).sort((a, b) => a.atMs - b.atMs);
   const counts = rows.map((row) => row.poll?.stalls?.count).filter(Number.isSafeInteger);
-  return { count: frameGaps(evidence.clients?.[tag]?.drift).filter((gap) => gap.startMs >= cutMs && gap.startMs <= cutMs + 60_000).length,
-    totalMs: frameGaps(evidence.clients?.[tag]?.drift).filter((gap) => gap.startMs >= cutMs && gap.startMs <= cutMs + 60_000)
-      .reduce((sum, gap) => sum + gap.gapMs, 0), stallCountDelta: counts.length ? counts.at(-1) - counts[0] : null };
+  return { ...stallsBetween(evidence.clients?.[tag]?.drift, cutMs, cutMs + 60_000),
+    stallCountDelta: counts.length ? counts.at(-1) - counts[0] : null };
 }
 function supplierCut(evidence) {
   const event = evidence.rosterEvent;
@@ -47,10 +46,11 @@ function supplierCut(evidence) {
   if (event.victim === null || event.victim === undefined) return { section: 'unreadable', reason: 'no-active-supplier' };
   const cutMs = harnessSharedMs(evidence.timebase, event.issuedAtHarnessMs, event.issuedAtHarnessMs);
   const selection = event.selection ?? {};
+  if (!finite(cutMs)) return { section: 'unreadable', reason: 'cut-instant-unavailable', victim: event.victim, selection };
   const path = selection.segment?.path;
   const victimClient = evidence.clients?.[event.victim];
   const victimAttempts = (victimClient?.peerBytes ?? []).filter((record) => record.kind === 'attempt' && record.source === 'http' && record.path === path);
-  const victimVerified = finite(cutMs) && victimAttempts.some((record) => {
+  const victimVerified = victimAttempts.some((record) => {
     const start = sharedWallMs(evidence.timebase, record.startMs);
     const end = sharedWallMs(evidence.timebase, record.endMs);
     return finite(start) && start <= cutMs && (!finite(end) || end >= cutMs - 10_000);
@@ -67,7 +67,6 @@ function supplierCut(evidence) {
     return [tag, byIndex];
   }));
   const stalls = Object.fromEntries(remaining.map((tag) => [tag, pollStalls(evidence, tag, cutMs)]));
-  if (!finite(cutMs)) return { section: 'unreadable', reason: 'cut-instant-unavailable', victim: event.victim, selection };
   return { section: 'readable', victim: event.victim, selection, cutSharedMs: cutMs, victimVerified, replacement, stalls };
 }
 
