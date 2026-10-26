@@ -47,7 +47,15 @@ const COMMENTED = [
   'APP_TURN_REUSE_MS',
 ];
 
-const PATH_VARIABLE = /\$(?:request_uri|uri|args|query_string|http_referer)\b|\$request(?:\W|$)|\$arg_/;
+// An allowlist: a denylist of path variables misses aliases such as $document_uri (13-2 F2).
+const LOG_VARIABLES = new Set([
+  '$time_iso8601',
+  '$remote_addr',
+  '$request_method',
+  '$status',
+  '$body_bytes_sent',
+  '$request_time',
+]);
 
 function read(file) {
   return fs.readFileSync(file, 'utf8');
@@ -193,10 +201,11 @@ export default async function deployFilesSuite() {
     const host = new URL(active.get('APP_ALLOWED_ORIGIN')).hostname;
     const appPort = Number(active.get('APP_PORT'));
     const trackerPort = Number(trackerUnit.match(/--port\s+(\d+)/)[1]);
-    const proxyPorts = [...tls.matchAll(/proxy_pass\s+http:\/\/127\.0\.0\.1:(\d+);/g)].map((match) => Number(match[1]));
-    const trackerPortUses = proxyPorts.filter((port) => port === trackerPort).length;
-    const trackerLocation = tls.indexOf('location = /tracker');
-    const trackerProxy = tls.indexOf(`proxy_pass http://127.0.0.1:${trackerPort};`);
+    // Each location's text runs to the next location, so a proxy_pass is read where it sits.
+    const locationPorts = tls.split(/^\s*location\s+/m).slice(1).map((block) => {
+      const ports = [...block.matchAll(/proxy_pass\s+http:\/\/127\.0\.0\.1:(\d+);/g)].map((match) => Number(match[1]));
+      return [block.match(/^(?:=\s*)?(\S+)/)[1], ports];
+    });
     const certificateLines = tls.split(/\r?\n/).filter((line) => /^\s*ssl_certificate(?:_key)?\s/.test(line));
     assertEqual(nginxNames.length, 1, 'nginx application server name count');
     assertEqual(tlsNames.length, 1, 'TLS application server name count');
@@ -204,10 +213,11 @@ export default async function deployFilesSuite() {
     assertEqual(tlsNames[0], host, 'TLS server name');
     assert(certificateLines.length > 0, 'TLS certificate directives exist');
     assert(certificateLines.every((line) => line.includes(host)), 'TLS certificate paths name the host');
-    assert(proxyPorts.length > 0, 'proxy directives exist');
-    assert(proxyPorts.every((port) => port === appPort || port === trackerPort), 'proxy ports are declared service ports');
-    assertEqual(trackerPortUses, 1, 'tracker port location count');
-    assert(trackerProxy > trackerLocation, 'tracker port is used by /tracker');
+    assertEqual(
+      JSON.stringify(locationPorts),
+      JSON.stringify([['/ws', [appPort]], ['/tracker', [trackerPort]], ['/', [appPort]]]),
+      'each location proxies to its service port',
+    );
     assert(roomUnit.includes('EnvironmentFile=/etc/murmur/room.env'), 'room unit uses the room environment file');
   });
 
@@ -217,7 +227,10 @@ export default async function deployFilesSuite() {
     const accessLogs = [...text.matchAll(/^\s*access_log\s+[^;]+;/gm)].map((match) => match[0]);
     assert(logFormats.length > 0, 'the log-format probe saw no directive');
     assert(accessLogs.length > 0, 'the access-log probe saw no directive');
-    assert(logFormats.every((line) => !PATH_VARIABLE.test(line)), 'log formats contain no request path variable');
+    const variables = logFormats.flatMap((line) => line.match(/\$\w+/g) ?? []);
+    assert(variables.length > 0, 'the log-format probe saw no variable');
+    const unlisted = variables.filter((variable) => !LOG_VARIABLES.has(variable));
+    assert(unlisted.length === 0, `log formats use unlisted variables ${unlisted.join(', ')}`);
     assert(accessLogs.every((line) => /^\s*access_log\s+off;$/.test(line) || /\smurmur_nopath;$/.test(line)), 'access logs use only approved formats');
     assert(accessLogs.some((line) => /\smurmur_nopath;$/.test(line)), 'the nopath format is used');
   });
