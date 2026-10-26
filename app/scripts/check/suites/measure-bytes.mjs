@@ -31,6 +31,24 @@ export default async function measureBytesSuite() {
     assertEqual(result.finalFlush.status, 'met', 'flush at exactly one second is met');
   });
 
+  await check('measurement bytes: watched, prefetch left, stored, receipts and the flush bound', async () => {
+    // Sizes 100–400 over 1 s segments; c01 presents frames in segments 0 and 1 and completes 0–3.
+    const fixture = evidence();
+    fixture.clients.c01.drift = [100, 1_500].map((mediaMs) => ({ displaySharedMs: 100, mediaMs, clock: { offsetMs: 0 } }));
+    fixture.clients.c01.receipts = [{ finished: true, bodyBytes: 99, expectedBytes: 100 }, { finished: false, bodyBytes: 10, expectedBytes: 100 }];
+    const result = byteInventory(fixture);
+    assertEqual(result.viewers.c01.watchedBytes, 300, 'watched segments 0 and 1');
+    assertEqual(result.viewers.c01.prefetchLeftBytes, 700, 'segments 2 and 3 are prefetch left');
+    assertEqual(result.viewers.c01.storedBytes, 1_000, 'every completed segment is stored');
+    assertEqual(result.agreement.receiptMismatches.count, 1, 'a finished short receipt counts; a cancelled one does not');
+    const under = evidence({ giant: true });
+    under.content.segmentSizes = [4_294_967_295];
+    assertEqual(byteInventory(under).viewers.c01.peakStoredBytes, 4_294_967_295, 'one byte under the limit is a number');
+    const late = evidence();
+    for (const tag of ['c01', 'c02']) late.clients[tag].polls = [{ atMs: -1, clock: { offsetMs: 0 } }];
+    assertEqual(byteInventory(late).finalFlush.status, 'failed', 'a 1001 ms flush lag fails');
+  });
+
   await check('measurement bytes: missing streams and storage limit are explicit', async () => {
     assertEqual(byteInventory(evidence({ missing: true })).reason, 'stream-missing', 'missing peer stream refuses');
     const giant = byteInventory(evidence({ giant: true }));

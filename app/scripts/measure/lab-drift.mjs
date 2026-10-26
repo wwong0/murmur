@@ -1,15 +1,11 @@
 import { median, percentile } from './stats.mjs';
+import { gridInstants, labInstant, labRecords, positionAt } from './lab-position.mjs';
 
 const finite = (value) => Number.isFinite(value);
 const pairName = (left, right) => `${left}|${right}`;
 
 function refusal(run, reason, detail) {
   return { reader: 'lab-drift', version: 1, run, refused: true, reason, detail };
-}
-
-function labInstant(record) {
-  return finite(record?.displaySharedMs) && finite(record?.clock?.offsetMs)
-    ? record.displaySharedMs - record.clock.offsetMs : null;
 }
 
 function timebasePage(polls, valueFields, wallField) {
@@ -47,45 +43,24 @@ function timebaseCheck(evidence) {
   return { status, spreadMs, pages, missingViewer, maxMovedMs: moved };
 }
 
-function nearest(records, instant, halfStep) {
-  let best = null;
-  for (const record of records) {
-    const distance = Math.abs(record.L - instant);
-    if (!best || distance < best.distance) best = { record, distance };
-  }
-  return best && best.distance <= halfStep ? best.record : null;
-}
-
-function recordsFor(evidence, tag) {
-  return (evidence.clients[tag]?.drift ?? []).map((record) => ({ ...record, L: labInstant(record) }))
-    .filter((record) => finite(record.L)).sort((a, b) => a.L - b.L);
-}
-
 function pairReading(left, right, records, grid, offsets, status, cadence) {
   const values = [];
   let missing = 0;
   let epochMismatch = 0;
-  const step = grid.step;
   for (const instant of grid.instants) {
-    const a = nearest(records[left], instant, step / 2);
-    const b = nearest(records[right], instant, step / 2);
+    const a = positionAt(records[left], instant, grid.step);
+    const b = positionAt(records[right], instant, grid.step);
     if (!a || !b) {
       missing += 1;
       continue;
     }
     // The rig applies a declared offset by moving that viewer's epoch back by it.
-    if (a.epochMs + (offsets[left] ?? 0) !== b.epochMs + (offsets[right] ?? 0)) {
+    if (a.entry.record.epochMs + (offsets[left] ?? 0) !== b.entry.record.epochMs + (offsets[right] ?? 0)) {
       epochMismatch += 1;
       continue;
     }
-    const alignedLeft = a.mediaMs - (offsets[left] ?? 0);
-    const alignedRight = b.mediaMs - (offsets[right] ?? 0);
-    values.push({
-      g: alignedLeft - alignedRight,
-      raw: a.mediaMs - b.mediaMs,
-      record: a.driftMs - b.driftMs,
-      hidden: alignedLeft - alignedRight - (a.driftMs - b.driftMs),
-    });
+    const record = a.entry.record.driftMs - b.entry.record.driftMs;
+    values.push({ g: a.a - b.a, raw: a.mediaMs - b.mediaMs, record, hidden: a.a - b.a - record });
   }
   const abs = values.map((value) => Math.abs(value.g));
   const absMedianMs = median(abs);
@@ -93,7 +68,7 @@ function pairReading(left, right, records, grid, offsets, status, cadence) {
   const floorRight = cadence?.[right]?.presentIntervalMs;
   const floorMs = finite(floorLeft) && finite(floorRight)
     ? Math.max(floorLeft, floorRight) + (status === 'met' ? 2 : 0) : null;
-  return {
+  return { abs, reading: {
     left,
     right,
     points: values.length,
@@ -108,14 +83,12 @@ function pairReading(left, right, records, grid, offsets, status, cadence) {
     floorMs,
     lowerMs: finite(absMedianMs) && finite(floorMs) ? Math.max(0, absMedianMs - floorMs) : null,
     upperMs: finite(absMedianMs) && finite(floorMs) ? absMedianMs + floorMs : null,
-  };
+  } };
 }
 
 function gridFor(window, frameRate) {
   const step = 1000 / frameRate;
-  const instants = [];
-  for (let instant = window.startMs; instant < window.endMs; instant += step) instants.push(instant);
-  return { step, instants };
+  return { step, instants: gridInstants(window.startMs, window.endMs, step).filter((instant) => instant < window.endMs) };
 }
 
 export function labDrift(evidence) {
@@ -137,25 +110,20 @@ export function labDrift(evidence) {
   const frameRate = evidence.manifest?.content?.frameRate;
   if (!finite(frameRate) || frameRate <= 0) return refusal(run, 'frame-rate-unavailable');
   const check = timebaseCheck(evidence);
-  const records = Object.fromEntries(evidence.tags.map((tag) => [tag, recordsFor(evidence, tag)]));
+  const records = Object.fromEntries(evidence.tags.map((tag) => [tag, labRecords(evidence, tag)]));
   const offsets = evidence.condition?.positionOffsetMsByClient ?? {};
   const grid = gridFor(window, frameRate);
   const pairs = [];
   const pooled = [];
   for (let left = 0; left < evidence.tags.length; left += 1) {
     for (let right = left + 1; right < evidence.tags.length; right += 1) {
-      const pair = pairReading(evidence.tags[left], evidence.tags[right], records, grid, offsets, check.status, evidence.manifest?.cadence);
-      pairs.push(pair);
-      if (pair.points) pooled.push(...grid.instants.flatMap((instant) => {
-        const a = nearest(records[pair.left], instant, grid.step / 2);
-        const b = nearest(records[pair.right], instant, grid.step / 2);
-        if (!a || !b || a.epochMs + (offsets[pair.left] ?? 0) !== b.epochMs + (offsets[pair.right] ?? 0)) return [];
-        return [Math.abs((a.mediaMs - (offsets[pair.left] ?? 0)) - (b.mediaMs - (offsets[pair.right] ?? 0)))];
-      }));
+      const { abs, reading } = pairReading(evidence.tags[left], evidence.tags[right], records, grid, offsets, check.status, evidence.manifest?.cadence);
+      pairs.push(reading);
+      pooled.push(...abs);
     }
   }
   const worst = pairs.filter((pair) => finite(pair.absMedianMs)).sort((a, b) => b.absMedianMs - a.absMedianMs)[0] ?? null;
-  const medians = evidence.tags.map((tag) => median(records[tag].map((record) => record.clock?.offsetMs))).filter(finite);
+  const medians = evidence.tags.map((tag) => median(records[tag].map((entry) => entry.record.clock?.offsetMs))).filter(finite);
   const overall = { absMedianMs: median(pooled), absP99Ms: percentile(pooled, 0.99), worstPair: worst ? pairName(worst.left, worst.right) : null };
   return {
     reader: 'lab-drift',

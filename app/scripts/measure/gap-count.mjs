@@ -37,7 +37,8 @@ function pollEvents(polls) {
   let previousStalls = null;
   for (const entry of values) {
     const playback = entry.poll.playback ?? {};
-    if (finite(playback.startAtSharedMs)) starts.push(playback.startAtSharedMs);
+    // The first only: after a seek the page carries the seek's start here (13c `d1-findings.md` F5).
+    if (finite(playback.startAtSharedMs) && !starts.length) starts.push(playback.startAtSharedMs);
     if (Number.isSafeInteger(playback.reparks) && previousReparks !== null && playback.reparks > previousReparks) reparks.push(entry.atMs);
     if (Number.isSafeInteger(entry.poll.stalls?.count) && previousStalls !== null && entry.poll.stalls.count > previousStalls) stalls.push(entry.atMs);
     if (Number.isSafeInteger(playback.reparks)) previousReparks = playback.reparks;
@@ -70,7 +71,8 @@ function farSkips(evidence, tag, polls, gaps) {
       const skipAt = finite(poll.playback.lastSkipAtSharedMs) ? poll.playback.lastSkipAtSharedMs : null;
       const increment = skips - previous;
       const condition = evidence.condition ?? {};
-      const schedule = condition.capacitySchedule ?? evidence.manifest?.capacitySchedule ?? {};
+      // The applied instants are the manifest's; the condition holds only the declaration.
+      const schedule = evidence.manifest?.capacitySchedule ?? {};
       const drop = harnessSharedMs(evidence.timebase, schedule.drop?.appliedAtMs, schedule.drop?.appliedAtMs);
       const rise = harnessSharedMs(evidence.timebase, schedule.rise?.appliedAtMs, schedule.rise?.appliedAtMs);
       const step = evidence.manifest?.capacityStep;

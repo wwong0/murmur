@@ -34,6 +34,17 @@ export default async function measureLandingsSuite() {
     assertEqual(pair.pairs[0].start.difference.hostCopiesSum, 1, 'pair difference is product minus control');
   });
 
+  await check('measurement landings: a partial copy, a request before the landing and a null side', async () => {
+    // Segment 1 (200 bytes): a full copy ending before the landing at 1000, and a 100-byte partial after it.
+    const fixture = evidence();
+    fixture.clients.c01.peerBytes.push({ kind: 'attempt', source: 'http', path: '/media/seg-00001.m4s', bytes: 200, endMs: 500 },
+      { kind: 'attempt', source: 'http', path: '/media/seg-00001.m4s', bytes: 100, endMs: 1_500, end: 'abort' });
+    const result = landings(fixture);
+    assertEqual(result.start.segments[1].hostCopies, 1.5, 'a full copy before the landing and a 50% partial');
+    const pair = landingPairs([[result, { ...result, start: { ...result.start, waitMs: null } }]]);
+    assertEqual(pair.pairs[0].start.difference.waitMs, null, 'a null side has no difference');
+  });
+
   await check('measurement landings: control mismatch refuses', async () => {
     const fixture = evidence();
     fixture.assignmentControl.readings[0].byPage.c00.control = 'product';

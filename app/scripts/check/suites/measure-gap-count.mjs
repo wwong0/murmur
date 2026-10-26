@@ -21,6 +21,26 @@ export default async function measureGapCountSuite() {
     assertEqual(result.farSkips[0].cause, 'start', 'start wins skip attribution');
   });
 
+  await check('measurement gap count: seek, multiple, unattributed and capacity-drop causes', async () => {
+    const poll = (atMs, skips, playback = {}) => ({ atMs, clock: { offsetMs: 0 }, playback: { skips, ...playback } });
+    const result = gapCount({ run: 'causes', manifest: { capacitySchedule: { drop: { appliedAtMs: 200_000 } } },
+      // The condition declares the drop; only the manifest carries the instant it was applied.
+      condition: { capacitySchedule: { drop: { atMs: 1 } } }, timebase: { offsetMs: 1_000 }, tags: ['c01'],
+      seek: { host: { atSharedMs: 99_000 } }, clients: { c01: { drift: [], polls: [
+        poll(0, 0, { startAtSharedMs: 0 }),
+        poll(50_000, 1, { lastSkipAtSharedMs: 50_000 }),
+        // After the seek the page carries the seek's start; the skip is the seek's, not a start's.
+        poll(99_600, 1, { startAtSharedMs: 99_500 }),
+        poll(100_000, 3, { lastSkipAtSharedMs: 100_000 }),
+        poll(200_600, 4, { lastSkipAtSharedMs: 200_500 }),
+        poll(201_600, 5, { lastSkipAtSharedMs: 201_500 }),
+      ] } } }).viewers.c01.farSkips;
+    assertEqual(result.map((skip) => skip.cause).join(','), 'unattributed,seek,unattributed,capacity-drop',
+      'causes, with the drop at its applied instant on the shared clock');
+    assertEqual(result[1].increment, 2, 'two skips between polls are counted');
+    assertEqual(result[1].multiple, true, 'and flagged multiple');
+  });
+
   await check('measurement gap count: no-frame intervals do not become gap time', async () => {
     const result = gapCount({ run: 'empty-gap', manifest: {}, condition: {}, tags: ['c01'], clients: {
       c01: { drift: [record(0, 20), record(400, 20)], polls: [] },

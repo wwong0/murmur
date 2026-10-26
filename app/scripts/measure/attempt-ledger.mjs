@@ -1,3 +1,11 @@
+// The runner names a directory `<arm>-<condition>-<ISO stamp>` (`harness-run.mjs` `defaultRunDir`); the stamp
+// keeps `edge` from claiming `edge-drop`'s directories.
+function runDirectoryOf(name, slug) {
+  const at = name.indexOf(`${slug}-`);
+  return (at === 0 || (at > 0 && /^[0-9][0-9a-z]*-$/.test(name.slice(0, at))))
+    && /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}/.test(name.slice(at + slug.length + 1));
+}
+
 function timeoutFailure(value) {
   return (value?.failures ?? []).some((failure) => /deadline|timed? ?out/i.test(String(failure?.message ?? '')));
 }
@@ -31,9 +39,9 @@ export function attemptLedger({ registry, manifests = {}, finalizations = {}, re
     };
   });
   const registered = new Set(entries.map((entry) => entry.directory));
-  const prefixes = [...new Set(entries.map((entry) => String(entry.condition ?? '')
-    .replace(/^shakedown\//, 'shakedown-') + '-').filter((prefix) => prefix !== '-'))];
-  const unregistered = (resultNames ?? []).filter((name) => prefixes.some((prefix) => name.startsWith(prefix))
+  const slugs = [...new Set(entries.map((entry) => String(entry.condition ?? '').replaceAll('/', '-').replaceAll(':', '-'))
+    .filter(Boolean))];
+  const unregistered = (resultNames ?? []).filter((name) => slugs.some((slug) => runDirectoryOf(name, slug))
     && !registered.has(name)).map((name) => ({ directory: name, outcome: 'unregistered' }));
   return { entries, unregistered };
 }

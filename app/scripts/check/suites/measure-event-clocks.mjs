@@ -27,6 +27,18 @@ export default async function measureEventClocksSuite() {
     assertEqual(result.entryToInSyncMs, 2_300, 'entry to held sync');
   });
 
+  await check('measurement event clocks: a joiner two frames off at 24 fps never syncs', async () => {
+    const step = 1000 / 24;
+    const frames = Array.from({ length: 480 }, (_, k) => k);
+    const fixture = { run: 'join', tags: ['c01', 'c02'], manifest: { content: { frameRate: 24 }, window: { startMs: 0, endMs: 20_000 } },
+      rosterEvent: { kind: 'join', client: 'c01', presence: { recvSharedMs: 1_000 } },
+      clients: { c01: { drift: frames.filter((k) => k * step >= 1_200).map((k) => drift(k * step, (k - 2) * step)) },
+        c02: { drift: frames.map((k) => drift(k * step, k * step)) } } };
+    const result = eventClocks(fixture).join;
+    assertEqual(result.entryToInSyncMs, null, 'two frames (83.3 ms) off is never in sync');
+    assertEqual(result.reason, 'not-within-observation', 'and says why');
+  });
+
   await check('measurement event clocks: supplier replacement and unreadable cut', async () => {
     const result = eventClocks(cutEvidence()).supplierCut;
     assertEqual(result.victimVerified, true, 'victim evidence is rechecked');

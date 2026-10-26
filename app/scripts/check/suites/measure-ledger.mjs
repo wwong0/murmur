@@ -1,21 +1,29 @@
-import { assert, assertEqual, check } from '../harness.mjs';
+import { assertEqual, check } from '../harness.mjs';
 import { attemptLedger } from '../../measure/attempt-ledger.mjs';
+
+// Directory names as the runner writes them: `<arm>-<condition slug>-<ISO stamp>`.
+const at = (name, stamp = '2026-10-26T15-06-31.580Z') => `${name}-${stamp}`;
 
 export default async function measureLedgerSuite() {
   await check('measurement ledger: outcomes and omitted registered prefixes', async () => {
     const registry = { runs: [
-      { directory: '11a-ok-1', condition: '11a-ok' }, { directory: '11a-timeout-1', condition: '11a-timeout' },
-      { directory: '11a-abort-1', condition: '11a-abort' }, { directory: '11a-refuse-1', condition: '11a-refuse' },
-      { directory: 'shakedown-g-1', condition: 'shakedown/g' },
+      { directory: at('11a-ok'), condition: 'ok' }, { directory: at('11a-timeout'), condition: 'timeout' },
+      { directory: at('11a-abort'), condition: 'abort' }, { directory: at('11a-refuse'), condition: 'refuse' },
+      { directory: at('9b-shakedown-13c-g'), condition: 'shakedown/13c-g' }, { directory: at('9b-edge'), condition: 'edge' },
     ] };
     const manifests = {
-      '11a-ok-1': { status: 'complete' }, '11a-timeout-1': { status: 'aborted', failures: [{ message: 'deadline exceeded' }] },
-      '11a-abort-1': { status: 'aborted' }, '11a-refuse-1': { status: 'refused' }, 'shakedown-g-1': { status: 'complete' },
+      [at('11a-ok')]: { status: 'complete' }, [at('11a-timeout')]: { status: 'aborted', failures: [{ message: 'deadline exceeded' }] },
+      [at('11a-abort')]: { status: 'aborted' }, [at('11a-refuse')]: { status: 'refused' },
+      [at('9b-shakedown-13c-g')]: { status: 'complete' }, [at('9b-edge')]: { status: 'complete' },
     };
-    const finalizations = { 'shakedown-g-1': { reason: 'publication-refusal' } };
-    const result = attemptLedger({ registry, manifests, finalizations, resultNames: ['11a-ok-1', '11a-ok-extra-1', 'shakedown-g-1', 'shakedown-g-extra-1'] });
-    assertEqual(result.entries.map((entry) => entry.outcome).join(','), 'published,timed-out,aborted,refused,refused', 'all outcome classes are named');
-    assert(result.unregistered.some((entry) => entry.directory === '11a-ok-extra-1'), 'registered condition prefix finds omitted result');
-    assert(result.unregistered.some((entry) => entry.directory === 'shakedown-g-extra-1'), 'shakedown prefix is normalized');
+    const finalizations = { [at('9b-shakedown-13c-g')]: { reason: 'publication-refusal' } };
+    const omittedOk = at('11a-ok', '2026-10-26T16-00-00.000Z');
+    const omittedG = at('9b-shakedown-13c-g', '2026-10-26T14-00-00.000Z');
+    const result = attemptLedger({ registry, manifests, finalizations, resultNames: [
+      at('11a-ok'), omittedOk, at('9b-shakedown-13c-g'), omittedG,
+      at('9b-edge-drop'), at('9b-shakedown-13c-eleven'), '13c-readings-2026-10-26T15-40Z'] });
+    assertEqual(result.entries.map((entry) => entry.outcome).join(','), 'published,timed-out,aborted,refused,refused,published', 'all outcome classes are named');
+    assertEqual(result.unregistered.map((entry) => entry.directory).sort().join(','), [omittedOk, omittedG].sort().join(','),
+      'an arm-prefixed run of a registered condition is found; edge-drop is not edge, and other conditions are not claimed');
   });
 }

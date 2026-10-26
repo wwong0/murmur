@@ -1,18 +1,8 @@
 import { harnessSharedMs, pagePollSharedMs, sharedWallMs } from '../figures/poll-coverage.mjs';
-import { frameGaps, gridRows, labRecords } from './catch-up.mjs';
+import { frameGaps, gapToOthers, gridRows, holdFrom, labRecords } from './lab-position.mjs';
 
 const finite = (value) => Number.isFinite(value);
 
-function holdSync(rows, fromMs) {
-  if (!rows.length) return null;
-  const step = rows[0].step;
-  const expected = Math.floor(5_000 / step) + 1;
-  for (const candidate of rows.filter((row) => row.L >= fromMs)) {
-    const span = rows.filter((row) => row.L >= candidate.L && row.L <= candidate.L + 5_000);
-    if (span.length >= Math.ceil(expected * 0.9) && span.every((row) => Math.abs(row.g) <= 40)) return candidate.L;
-  }
-  return null;
-}
 function joinReading(evidence) {
   const event = evidence.rosterEvent;
   const tag = event?.client;
@@ -25,9 +15,7 @@ function joinReading(evidence) {
   const others = (evidence.tags ?? []).filter((other) => other !== tag);
   const base = gridRows(evidence, [tag, ...others], first.L, Math.max(first.L, ...others.flatMap((other) => labRecords(evidence, other).map((row) => row.L))));
   if (!base) return { section: 'unreadable', reason: 'frame-rate-unavailable', entrySharedMs: entry };
-  const rows = base.map((row) => ({ L: row.L, step: row.step,
-    g: row.matches[tag].a - medianOf(others.map((other) => row.matches[other].a)) }));
-  const sync = holdSync(rows, first.L);
+  const sync = holdFrom(gapToOthers(base, tag, others), first.L);
   if (!finite(sync)) return { section: 'readable', reason: 'not-within-observation', entrySharedMs: entry,
     firstFrameSharedMs: first.record.displaySharedMs, entryToFirstFrameMs: first.record.displaySharedMs - entry,
     firstFrameToInSyncMs: null, entryToInSyncMs: null };
@@ -36,12 +24,6 @@ function joinReading(evidence) {
   return { section: 'readable', entrySharedMs: entry, firstFrameSharedMs: first.record.displaySharedMs,
     inSyncLabMs: sync, entryToFirstFrameMs: first.record.displaySharedMs - entry,
     firstFrameToInSyncMs: sync - first.L, entryToInSyncMs: finite(offset) ? sync + offset - entry : null };
-}
-function medianOf(values) {
-  const sorted = values.filter(finite).sort((a, b) => a - b);
-  if (!sorted.length) return null;
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 function sourceFor(record, attempts, peerTags) {
   const kept = (record?.keptAttemptIds ?? []).map((id) => attempts.find((attempt) => attempt.attemptId === id)).filter(Boolean);
