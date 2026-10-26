@@ -278,6 +278,7 @@ import securityHeadersSuite from './check/suites/security-headers.mjs';
 import allowedOriginSuite from './check/suites/allowed-origin.mjs';
 import upgradeHostSuite from './check/suites/upgrade-host.mjs';
 import relayCredentialsSuite from './check/suites/relay-credentials.mjs';
+import deployFilesSuite from './check/suites/deploy-files.mjs';
 import startWaitSuite from './check/suites/start-wait.mjs';
 import linkKindsSuite from './check/suites/link-kinds.mjs';
 import pageHardeningSuite from './check/suites/page-hardening.mjs';
@@ -544,6 +545,7 @@ for (const suite of [
   allowedOriginSuite,
   upgradeHostSuite,
   relayCredentialsSuite,
+  deployFilesSuite,
   startWaitSuite,
   linkKindsSuite,
   pageHardeningSuite,

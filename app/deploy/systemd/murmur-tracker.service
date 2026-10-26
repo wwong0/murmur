@@ -1,0 +1,20 @@
+[Unit]
+Description=Murmur tracker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=murmur
+Group=murmur
+WorkingDirectory=/opt/murmur/app
+ExecStart=/usr/local/bin/node node_modules/bittorrent-tracker/bin/cmd.js --ws --no-stats --port 8101 --http-hostname 127.0.0.1 --quiet
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

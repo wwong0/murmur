@@ -1,0 +1,22 @@
+[Unit]
+Description=Murmur room server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=murmur
+Group=murmur
+WorkingDirectory=/opt/murmur/app
+EnvironmentFile=/etc/murmur/room.env
+ExecStart=/usr/local/bin/node server/room-server.mjs
+KillSignal=SIGINT
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
