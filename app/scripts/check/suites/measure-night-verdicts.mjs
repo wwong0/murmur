@@ -132,6 +132,35 @@ export default async function measureNightVerdictsSuite() {
     assertEqual(result.c02.flagged, false, 'one byte below one billion is not flagged');
   });
 
+  await check('measurement night summaries: reading multipliers, pass counts and refused peaks', async () => {
+    const steady = entry('a2-steady', '13d-a2-two');
+    const unsteady = entry('a2-unsteady', '13d-a2-two');
+    const a2Runs = { 'a2-steady': run({ refusalReport: { figures: figures({ hostUploadMultiplier: 1.01 }) } }),
+      'a2-unsteady': run({ refusalReport: { figures: figures({ steadyState: { steady: false, legs: { utilisation: { pass: false } } } }) } }) };
+    const a2 = nightVerdicts({ entries: [steady, unsteady], runs: a2Runs }).tests.A2.runs;
+    assertEqual(a2[0].reading.multiplier.status, 'reading', 'a steady reading-only multiplier is a reading');
+    assertEqual(a2[0].reading.multiplier.value, 1.01, 'and carries its value');
+    assertEqual(a2[1].reading.multiplier.status, 'no-multiplier', 'an unsteady one still has none');
+    const join = entry('join', '13d-j-join');
+    const cut = entry('cut', '13d-j-cut');
+    const tests = nightVerdicts({ entries: [entry('a10', '13d-a-ten'), entry('l', '13d-l-loss5'), join, cut], runs: {
+      ...maps([entry('a10', '13d-a-ten'), entry('l', '13d-l-loss5')]),
+      join: run({ readings: { ...run().readings, 'event-clocks': { join: { entryToInSyncMs: 3_000, firstFrameToInSyncMs: 10 } } } }),
+      cut: run({ readings: { ...run().readings, 'event-clocks': { supplierCut: { section: 'readable', victim: 'c02', victimVerified: true,
+        stalls: { c01: { count: 0, stallCountDelta: 0 } } } } } }),
+    } }).tests;
+    assertEqual(JSON.stringify(tests.A10.counts.C2), JSON.stringify({ valid: 1, met: 1, missed: 0, other: 0 }), 'A10 counts its multiplier bar');
+    assertEqual(tests.L.counts.pass.met, 1, 'L counts its passes');
+    assertEqual(tests['J-join'].counts.entryUnder2s.missed, 1, 'a 3 s entry clock is counted over 2 s');
+    assertEqual(tests['J-join'].counts.firstFrameUnder2s.met, 1, 'a 10 ms first-frame clock is counted under 2 s');
+    assertEqual(tests['J-cut'].counts.pass.met, 1, 'J cut counts its passes');
+    const refused = entry('refused', '13d-b-nop2p-20');
+    const refusedRun = run({ manifest: { status: 'complete', declaredClientTags: ['c01'] },
+      readings: { ...run().readings, 'byte-inventory': { refused: true, reason: 'stream-missing', detail: 'peerBytes:c01' } } });
+    assertEqual(nightVerdicts({ entries: [refused], runs: { refused: refusedRun } }).peaks[0].viewers.c01.peakReason, 'reader-refused:peerBytes:c01',
+      'a refused reader is named, not a missing viewer');
+  });
+
   await check('measurement night CLI: an existing output path returns 2 without changing it', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'measurement-night-'));
     try {

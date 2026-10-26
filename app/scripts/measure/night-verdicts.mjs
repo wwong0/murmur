@@ -61,6 +61,7 @@ export function multiplierVerdict(figures = {}, max) {
   const steady = figures?.steadyState;
   if (steady?.steady !== true) return { status: 'no-multiplier', failedLegs: failedLegs(steady) };
   const value = figures?.hostUploadMultiplier;
+  if (finite(value) && max === null) return { status: 'reading', value };
   if (!finite(value) || !finite(max)) return { status: 'unestablished', value: finite(value) ? value : null, max };
   return { status: value <= max ? 'met' : 'missed', value, max };
 }
@@ -331,6 +332,8 @@ function numericRanges(records) {
   return ranges;
 }
 
+const outcome = (held) => ({ status: held ? 'met' : 'missed' });
+
 function summarize(records, selector) {
   return { runs: records, counts: countStatuses(records, selector), ranges: numericRanges(records) };
 }
@@ -343,7 +346,8 @@ function peaks(entries, runs) {
     for (const tag of entry.clientTags ?? run.manifest?.declaredClientTags ?? Object.keys(reading?.viewers ?? {})) {
       const viewer = reading?.viewers?.[tag];
       const peakStoredBytes = finite(viewer?.peakStoredBytes) ? viewer.peakStoredBytes : null;
-      const peakReason = viewer?.peakReason ?? (viewer ? 'peak-unavailable' : 'viewer-missing');
+      const peakReason = viewer?.peakReason ?? (reading?.refused ? `reader-refused:${reading.detail ?? reading.reason}`
+        : viewer ? 'peak-unavailable' : 'viewer-missing');
       viewers[tag] = { peakStoredBytes, peakReason, flagged: peakStoredBytes >= 1_000_000_000 || peakReason === 'eviction-possible' };
     }
     return { directory: entry.directory ?? null, viewers };
@@ -365,15 +369,16 @@ export function nightVerdicts({ entries = [], runs = {} } = {}) {
   const cuts = entries.filter((entry) => classify(entry) === 'J-cut' && entry.scored !== false).map((entry) => cutRecord(entry, runs[entry.directory] ?? {}));
   const e = eRecord(entries, runs);
   const tests = {
-    A: summarize(a, (record) => record.criteria),
-    A10: summarize(a10, () => ({})),
+    A: summarize(a, (record) => ({ ...record.criteria, pass: outcome(record.pass) })),
+    A10: summarize(a10, (record) => ({ C2: record.reading.multiplier })),
     A2: summarize(a2, () => ({})),
     B: summarize(b, (record) => record.criteria),
     D: summarize(d, () => ({})),
     E: { ...e, ranges: numericRanges(e.pairs) },
-    L: summarize(l, () => ({})),
-    'J-join': summarize(joins, () => ({})),
-    'J-cut': summarize(cuts, () => ({})),
+    L: summarize(l, (record) => ({ pass: record.verdict.status === 'undecidable' ? { status: 'undecidable' } : outcome(record.pass) })),
+    'J-join': summarize(joins, (record) => ({ entryUnder2s: outcome(record.verdict.entryUnder2s),
+      firstFrameUnder2s: outcome(record.verdict.firstFrameUnder2s) })),
+    'J-cut': summarize(cuts, (record) => ({ pass: outcome(record.pass) })),
   };
   return { version: 1, entries: base, diagnostics, validity: Object.fromEntries(base.map((record) => [record.directory, {
     valid: record.valid, reasons: record.reasons, playbackRefused: record.playbackRefused,
