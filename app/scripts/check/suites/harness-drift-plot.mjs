@@ -7,7 +7,7 @@ const WINDOW = { startMs: 100, endMs: 2_100, excludedPrefixMs: 0, measureWindowM
 
 const byClient = (value) => Object.fromEntries(TAGS.map((tag) => [tag, value]));
 
-function publishedFixture() {
+function publishedFixture(driftSeriesByClient = { c01: [1, null, 3, null, 5], c02: [null, 2, null, 4, null], c03: [0, 1, 2, null, 4] }) {
   return publish('drift', {
     condition: { name: 'plot', capacityMbps: 10, runLengthMs: 2_000, criterion: { statistic: 'median', targetMs: 40 } },
     window: WINDOW,
@@ -38,7 +38,7 @@ function publishedFixture() {
     clockJoinCountByClient: byClient(1),
     clockProbesAbandonedByClient: byClient(0),
     clockProbeAbandonedFractionByClient: byClient(0),
-    driftSeriesByClient: { c01: [1, null, 3, null, 5], c02: [null, 2, null, 4, null], c03: [0, 1, 2, null, 4] },
+    driftSeriesByClient,
     epochsByClient: { c01: [1], c02: [1], c03: [1] },
     pairwiseDriftAbsMsMedian: 2,
     pairwiseDriftAbsMsP99: 3,
@@ -115,5 +115,15 @@ export default async function harnessDriftPlotSuite() {
     const lost = publish('drift', { ...published, condition: { name: 'plot', capacityMbps: 10, runLengthMs: 2_000 },
       criterionVerdict: { statistic: 'median', verdict: 'met' } }, { declaredClientTags: TAGS });
     assertEqual(throws(() => driftSvg(lost)), true, 'a drawn verdict without a target is refused');
+  });
+
+  await check('harness drift plot: an hour-long series draws, scaled by its largest sample', async () => {
+    const long = () => Array.from({ length: 170_000 }, (_, index) => (index % 7) - 3);
+    const series = { c01: long(), c02: long(), c03: long() };
+    series.c02[123_456] = -250;
+    const svg = driftSvg(publishedFixture(series));
+    // Extent 250: the +40 ms line sits at 28 + (250 - 40) / 500 * 388.
+    assert(svg.includes('y1="190.960"'), 'the criterion line is placed against the series extent of 250 ms');
+    assertEqual([...svg.matchAll(/<polyline\b/g)].length, 3, 'all three long series are drawn');
   });
 }

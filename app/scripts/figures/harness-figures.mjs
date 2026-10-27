@@ -489,18 +489,18 @@ export function computeFigures(input = {}) {
       result.oneViewingBytesInWindow = steady.oneViewingBytesInWindow;
       result.roomPositionSpreadMs = steady.roomPositionSpreadMs;
       result.steadyState = steady.steadyState;
-    }
-    if (steady.steadyState?.steady) {
-      result.hostUploadMultiplier = segmentBytesDeliveredInWindow / steady.oneViewingBytesInWindow;
-    } else if (!steady.unavailable) {
-      delete result.hostUploadMultiplier;
-      result.hostUploadMultiplierRefusal = {
-        reason: steady.steadyState.reason,
-        failedLegs: Object.entries(steady.steadyState.legs)
-          .filter(([, leg]) => leg.pass !== true)
-          .map(([leg, value]) => ({ leg, value })),
-        legs: steady.steadyState.legs,
-      };
+      if (steady.steadyState.steady) {
+        result.hostUploadMultiplier = segmentBytesDeliveredInWindow / steady.oneViewingBytesInWindow;
+      } else {
+        delete result.hostUploadMultiplier;
+        result.hostUploadMultiplierRefusal = {
+          reason: steady.steadyState.reason,
+          failedLegs: Object.entries(steady.steadyState.legs)
+            .filter(([, leg]) => leg.pass !== true)
+            .map(([leg, value]) => ({ leg, value })),
+          legs: steady.steadyState.legs,
+        };
+      }
     }
   }
   const disagreements = tags.filter((tag) => finite(result.realtimeFactorByClient[tag]) && finite(result.realtimeFactorFromFrameQualityByClient[tag])

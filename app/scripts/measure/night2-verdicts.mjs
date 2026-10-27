@@ -1,18 +1,11 @@
 import { median } from './stats.mjs';
-import { ePair, driftVerdict, multiplierVerdict, numericRanges, peaks as nightPeaks } from './night-verdicts.mjs';
+import {
+  driftCriterion, ePair, figuresOf, multiplierVerdict, numericRanges, peaks as nightPeaks, peerVerdict, readingOf, refused,
+  statusValidity, unique,
+} from './night-verdicts.mjs';
 
 const finite = (value) => Number.isFinite(value);
-const PLAYBACK_REFUSAL_REASONS = new Set([
-  'client-never-began-playback',
-  'client-did-not-start',
-  'dropped-frames-above-declared-bar',
-]);
 
-function unique(values) { return [...new Set(values.filter(Boolean))]; }
-function reasonValue(value) { return typeof value === 'string' ? value : value?.reason ?? null; }
-function figuresOf(run) { return run?.refusalReport?.figures ?? {}; }
-function readingOf(run, name) { return run?.readings?.[name] ?? null; }
-function refused(reading) { return !reading || reading.refused === true; }
 function peerExchange(entry, run) {
   return entry?.peerExchange ?? run?.manifest?.condition?.peerExchange === true;
 }
@@ -21,39 +14,15 @@ function tagsOf(entry, run, figures = figuresOf(run)) {
     ?? Object.keys(figures.realtimeFactorByClient ?? {});
 }
 
+// 13d's clauses 1 and 2; R2 only with peer exchange, R4 only for K (design D2).
 export function night2Validity(entry = {}, run = {}) {
-  const reasons = [];
-  if (!Number.isInteger(entry.exit)) reasons.push('exit-unobserved');
-  const manifest = run.manifest;
-  let playbackRefused = false;
-  if (manifest === null || manifest === undefined) reasons.push('manifest-missing');
-  else if (manifest.status === 'complete') {
-    // A complete manifest has the runner's normal terminal state.
-  } else if (manifest.status === 'refused') {
-    const refusalReasons = Array.isArray(manifest.refusalReasons) ? manifest.refusalReasons.map(reasonValue) : [];
-    if (refusalReasons.length > 0 && refusalReasons.every((reason) => PLAYBACK_REFUSAL_REASONS.has(reason))) playbackRefused = true;
-    else {
-      reasons.push('status:refused');
-      for (const reason of refusalReasons) if (reason && !PLAYBACK_REFUSAL_REASONS.has(reason)) reasons.push(`refusal:${reason}`);
-    }
-  } else {
-    reasons.push(`status:${manifest.status ?? 'missing'}`);
-    for (const reason of manifest.refusalReasons ?? []) {
-      const value = reasonValue(reason);
-      if (value) reasons.push(`refusal:${value}`);
-    }
-  }
+  const { reasons, playbackRefused } = statusValidity(entry, run);
   for (const name of ['lab-drift', 'gap-count']) {
     if (refused(readingOf(run, name))) reasons.push(`reader:${name}`);
   }
   if (peerExchange(entry, run) && refused(readingOf(run, 'byte-inventory'))) reasons.push('reader:byte-inventory');
   if (String(entry.condition ?? '').startsWith('13e-k-') && refused(readingOf(run, 'catch-up'))) reasons.push('reader:catch-up');
   return { valid: reasons.length === 0, reasons: unique(reasons), playbackRefused };
-}
-
-function floorOf(reading) {
-  const floors = (reading?.pairs ?? []).map((pair) => pair?.floorMs).filter(finite);
-  return floors.length ? Math.max(...floors) : null;
 }
 
 function reference(verdict) { return { ...verdict, label: 'reference', type: 'reference' }; }
@@ -63,23 +32,14 @@ function multiplierReference(figures, max) {
     ? { ...verdict, refusal: figures?.hostUploadMultiplierRefusal?.reason ?? null }
     : verdict);
 }
-function peerReference(value) {
-  const verdict = !finite(value) ? { status: 'unestablished', value: null, minimum: 0.6 }
-    : { status: value >= 0.6 ? 'met' : 'missed', value, minimum: 0.6 };
-  return reference(verdict);
-}
-function driftReference(value, floorMs, barMs, field) {
-  return reference({ ...driftVerdict(value, floorMs, barMs), field, floorMs });
-}
 function driftReferences(lab) {
-  const floorMs = floorOf(lab);
   return {
-    median: driftReference(lab?.absMedianMs, floorMs, 40, 'absMedianMs'),
-    p99: driftReference(lab?.absP99Ms, floorMs, 100, 'absP99Ms'),
+    median: reference(driftCriterion(lab, 'absMedianMs', 40)),
+    p99: reference(driftCriterion(lab, 'absP99Ms', 100)),
   };
 }
 function references(record, multiplierBar = 1.5) {
-  return { multiplier: multiplierReference(record.figures, multiplierBar), peerFraction: peerReference(record.figures.peerFractionAggregate), ...driftReferences(record.lab) };
+  return { multiplier: multiplierReference(record.figures, multiplierBar), peerFraction: reference(peerVerdict(record.figures.peerFractionAggregate, 0.6)), ...driftReferences(record.lab) };
 }
 
 function baseRecord(entry, run) {
@@ -208,28 +168,10 @@ function qRecord(entry, run) {
   return record;
 }
 
-function pairRecords(entries, runs, productCondition, controlCondition, build) {
-  const products = entries.filter((entry) => entry.scored !== false && entry.condition === productCondition);
-  const controls = entries.filter((entry) => entry.scored !== false && entry.condition === controlCondition);
-  const pairs = [];
-  for (let index = 0; index < Math.min(products.length, controls.length); index += 1) {
-    pairs.push({
-      pair: index,
-      product: build(products[index], runs[products[index].directory] ?? {}),
-      control: build(controls[index], runs[controls[index].directory] ?? {}),
-    });
-  }
-  return pairs;
-}
 function qTest(entries, runs) {
   const products = conditionRecords(entries, runs, (condition) => condition === '13e-q-product', qRecord);
   const controls = conditionRecords(entries, runs, (condition) => condition === '13e-q-control', qRecord);
-  const productEntries = entries.filter((entry) => entry.scored !== false && entry.condition === '13e-q-product');
-  const controlEntries = entries.filter((entry) => entry.scored !== false && entry.condition === '13e-q-control');
-  const pairs = [];
-  for (let index = 0; index < Math.min(productEntries.length, controlEntries.length); index += 1) {
-    pairs.push({ pair: index, product: products[index], control: controls[index] });
-  }
+  const pairs = products.slice(0, controls.length).map((product, index) => ({ pair: index, product, control: controls[index] }));
   const records = [...products, ...controls];
   return { runs: records, pairs, counts: {}, ranges: numericRanges(records) };
 }

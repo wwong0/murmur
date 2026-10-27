@@ -6,17 +6,18 @@ const PLAYBACK_REFUSAL_REASONS = new Set([
   'dropped-frames-above-declared-bar',
 ]);
 
-function unique(values) { return [...new Set(values.filter(Boolean))]; }
+export function unique(values) { return [...new Set(values.filter(Boolean))]; }
 
-function figuresOf(run) { return run?.refusalReport?.figures ?? {}; }
-function readingOf(run, name) { return run?.readings?.[name] ?? null; }
-function refused(reading) { return !reading || reading.refused === true; }
+export function figuresOf(run) { return run?.refusalReport?.figures ?? {}; }
+export function readingOf(run, name) { return run?.readings?.[name] ?? null; }
+export function refused(reading) { return !reading || reading.refused === true; }
 
 function reasonValue(value) {
   return typeof value === 'string' ? value : value?.reason ?? null;
 }
 
-export function runValidity(entry = {}, run = {}) {
+// D2 clauses 1 and 2: the exit was observed, and the manifest is complete or refused for playback only.
+export function statusValidity(entry = {}, run = {}) {
   const reasons = [];
   if (!Number.isInteger(entry.exit)) reasons.push('exit-unobserved');
   const manifest = run.manifest;
@@ -38,6 +39,11 @@ export function runValidity(entry = {}, run = {}) {
       if (value) reasons.push(`refusal:${value}`);
     }
   }
+  return { reasons, playbackRefused };
+}
+
+export function runValidity(entry = {}, run = {}) {
+  const { reasons, playbackRefused } = statusValidity(entry, run);
   for (const name of ['lab-drift', 'byte-inventory', 'gap-count']) {
     if (refused(readingOf(run, name))) reasons.push(`reader:${name}`);
   }
@@ -66,7 +72,7 @@ export function multiplierVerdict(figures = {}, max) {
   return { status: value <= max ? 'met' : 'missed', value, max };
 }
 
-function peerVerdict(value, minimum) {
+export function peerVerdict(value, minimum) {
   if (!finite(value) || !finite(minimum)) return { status: 'unestablished', value: finite(value) ? value : null, minimum };
   return { status: value >= minimum ? 'met' : 'missed', value, minimum };
 }
@@ -76,7 +82,7 @@ function floorOf(reading) {
   return floors.length ? Math.max(...floors) : null;
 }
 
-function driftCriterion(reading, field, barMs) {
+export function driftCriterion(reading, field, barMs) {
   const value = reading?.[field];
   const floorMs = floorOf(reading);
   return { ...driftVerdict(value, floorMs, barMs), field, floorMs };
