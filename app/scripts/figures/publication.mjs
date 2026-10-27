@@ -221,7 +221,13 @@ function missingField(path, context, figure) {
 
 export function missingFields(kind, context, figure = {}) {
   const fields = fieldsFor(kind, context, figure);
+  const unavailableOneViewing = kind === 'byte'
+    && (context.byteAccountingMethod ?? figure.byteAccountingMethod) === RECEIPT_COHORT_METHOD
+    && (context.multiplierDenominator ?? figure.multiplierDenominator) === 'one-viewing'
+    && figure.hostUploadMultiplierRefusal?.reason === 'one-viewing-unavailable';
+  const unavailableFields = new Set(['oneViewingBytesInWindow', 'steadyState', 'roomPositionSpreadMs']);
   for (const field of fields) {
+    if (unavailableOneViewing && unavailableFields.has(field)) continue;
     const direct = missingField(field, context, figure);
     if (direct) return direct;
     if (field.endsWith('ByClient')) {

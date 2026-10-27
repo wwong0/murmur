@@ -184,7 +184,15 @@ function unreceivedResponses(input, pairing, tolerances) {
       && response?.originResponseId && !started.has(response.originResponseId)
       && !qualification.has(response.originResponseId) && !carriedInWindow.has(response.originResponseId);
   });
-  const report = { count: candidates.length, bytes: 0, excused: { count: 0, bytes: 0 }, laterReceived: { count: 0, bytes: 0 } };
+  const bytelessUnreceived = input.condition?.excusals?.bytelessUnreceivedResponse === true
+    ? { count: 0, originResponseIds: [] } : null;
+  const report = {
+    count: candidates.length,
+    bytes: 0,
+    excused: { count: 0, bytes: 0 },
+    laterReceived: { count: 0, bytes: 0 },
+    ...(bytelessUnreceived ? { bytelessUnreceived } : {}),
+  };
   const failures = [];
   for (const candidate of candidates) {
     const response = host.get(candidate.originResponseId) ?? candidate;
@@ -200,6 +208,11 @@ function unreceivedResponses(input, pairing, tolerances) {
     if (later) {
       report.laterReceived.count += 1;
       report.laterReceived.bytes += bytes;
+      continue;
+    }
+    if (bytelessUnreceived && bytes === 0) {
+      bytelessUnreceived.count += 1;
+      bytelessUnreceived.originResponseIds.push(candidate.originResponseId);
       continue;
     }
     failures.push({ type: 'host-response-unreceived', originResponseId: candidate.originResponseId, bytes });

@@ -1,4 +1,4 @@
-import { assertEqual, assertNear, check } from '../harness.mjs';
+import { assert, assertEqual, assertNear, check } from '../harness.mjs';
 import { computeFigures } from '../../figures/harness-figures.mjs';
 import { publish } from '../../figures/publication.mjs';
 
@@ -21,6 +21,7 @@ function fixture(txBytes = 375_000) {
     segmentBytesDelivered: 1_000, initBytesDelivered: 0,
   }]));
   const records = [{ displaySharedMs: 0, scheduledMediaMs: 0, mediaMs: 0 },
+    { displaySharedMs: 500, scheduledMediaMs: 500, mediaMs: 500 },
     { displaySharedMs: 1_000, scheduledMediaMs: 1_000, mediaMs: 1_000 }];
   const clients = Object.fromEntries(TAGS.map((tag) => [tag, {
     records, requestTimebase: 'measure-window', requests: [request(tag)],
@@ -72,5 +73,28 @@ export default async function nop2pSteadySuite() {
     const figures = computeFigures(input);
     assertEqual(figures.multiplierDenominator, undefined, 'legacy arithmetic does not add one-viewing fields');
     assertNear(figures.hostUploadMultiplier, 5, 1e-12, 'legacy denominator remains distinct completed');
+  });
+
+  await check('no-P2P boundary loss refuses only the multiplier and keeps playback figures', async () => {
+    const input = fixture();
+    input.clients.c01.records = input.clients.c01.records.filter((record) => record.displaySharedMs < input.window.endMs);
+    const figures = computeFigures(input);
+    assertEqual(figures.hostUploadMultiplier, undefined, 'missing boundary evidence publishes no multiplier');
+    assertEqual(figures.hostUploadMultiplierRefusal?.reason, 'one-viewing-unavailable', 'boundary loss names the refusal');
+    assert(figures.hostUploadMultiplierRefusal.detail.startsWith('drift-record-after-boundary-unavailable:c01'),
+      'boundary loss names the after-boundary viewer');
+    assertEqual(figures.steadyState, undefined, 'boundary loss publishes no steady state');
+    assertEqual(figures.oneViewingBytesInWindow, undefined, 'boundary loss publishes no one-viewing bytes');
+    assertEqual(figures.roomPositionSpreadMs, undefined, 'boundary loss publishes no room spread');
+    const realtime = TAGS.map((tag) => figures.realtimeFactorByClient?.[tag]);
+    const stalls = TAGS.map((tag) => figures.stallCountByClient?.[tag]);
+    assert(realtime.every(Number.isFinite), 'all five realtime factors remain finite');
+    assert(stalls.every(Number.isFinite), 'all five stall counts remain finite');
+    const published = publish('byte', figures, { ...input, declaredClientTags: TAGS });
+    assert(published.published !== false, 'playback byte figure remains publishable without the multiplier');
+    const otherRefusal = publish('byte', { ...figures,
+      hostUploadMultiplierRefusal: { reason: 'steady-state-utilisation' } }, { ...input, declaredClientTags: TAGS });
+    assertEqual(otherRefusal.published, false, 'other refusals still require the complete one-viewing shape');
+    assertEqual(otherRefusal.missing, 'oneViewingBytesInWindow', 'other refusal names the omitted one-viewing field');
   });
 }

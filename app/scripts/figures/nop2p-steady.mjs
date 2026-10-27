@@ -2,7 +2,7 @@
 
 import { normalizeMediaPath } from './receipt-cohort.mjs';
 import { computeOneViewing } from './one-viewing.mjs';
-import { steadyState } from './peer-figures.mjs';
+import { BOUNDARY_RECORD_MISSING, steadyState } from './peer-figures.mjs';
 
 const finite = (value) => Number.isFinite(value);
 
@@ -28,14 +28,20 @@ export function receiptSegments(client, window) {
 }
 
 export function computeNoP2pSteady({ input = {}, figures = {}, tags = [], offsets = {} } = {}) {
-  const oneViewing = computeOneViewing({
-    clients: input.clients,
-    tags,
-    window: input.window,
-    offsets,
-    segmentSizes: input.content?.segmentSizes ?? input.segmentSizes,
-    segmentSeconds: input.segmentSeconds,
-  });
+  let oneViewing;
+  try {
+    oneViewing = computeOneViewing({
+      clients: input.clients,
+      tags,
+      window: input.window,
+      offsets,
+      segmentSizes: input.content?.segmentSizes ?? input.segmentSizes,
+      segmentSeconds: input.segmentSeconds,
+    });
+  } catch (error) {
+    if (!BOUNDARY_RECORD_MISSING.test(error.message)) throw error;
+    return { unavailable: error.message };
+  }
   const cohorts = Object.fromEntries(tags.map((tag) => [tag, receiptSegments(input.clients?.[tag], input.window)]));
   const steady = steadyState({ input, tags, figures, cohorts, oneViewing });
   return { ...oneViewing, steadyState: steady };

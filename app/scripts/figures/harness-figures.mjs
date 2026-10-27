@@ -478,13 +478,21 @@ export function computeFigures(input = {}) {
     const tagsForSteady = tagsFrom(input, clients);
     const offsets = input.condition?.positionOffsetMsByClient ?? input.declaredOffsetMsByClient ?? {};
     const steady = computeNoP2pSteady({ input, figures: result, tags: tagsForSteady, offsets });
-    result.oneViewingBytesInWindow = steady.oneViewingBytesInWindow;
-    result.roomPositionSpreadMs = steady.roomPositionSpreadMs;
-    result.steadyState = steady.steadyState;
     result.multiplierDenominator = 'one-viewing';
-    if (steady.steadyState.steady) {
-      result.hostUploadMultiplier = segmentBytesDeliveredInWindow / steady.oneViewingBytesInWindow;
+    if (steady.unavailable) {
+      delete result.hostUploadMultiplier;
+      result.hostUploadMultiplierRefusal = {
+        reason: 'one-viewing-unavailable',
+        detail: steady.unavailable,
+      };
     } else {
+      result.oneViewingBytesInWindow = steady.oneViewingBytesInWindow;
+      result.roomPositionSpreadMs = steady.roomPositionSpreadMs;
+      result.steadyState = steady.steadyState;
+    }
+    if (steady.steadyState?.steady) {
+      result.hostUploadMultiplier = segmentBytesDeliveredInWindow / steady.oneViewingBytesInWindow;
+    } else if (!steady.unavailable) {
       delete result.hostUploadMultiplier;
       result.hostUploadMultiplierRefusal = {
         reason: steady.steadyState.reason,

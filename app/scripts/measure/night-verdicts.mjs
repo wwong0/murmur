@@ -238,7 +238,7 @@ function landingValues(landings) {
 
 function sumLanding(values, key) { return addValues(values.start?.[key], values.seek?.[key]); }
 
-function ePair(product, control, index) {
+export function ePair(product, control, index) {
   const p = landingValues(product.landings);
   const c = landingValues(control.landings);
   const pSum = Object.fromEntries(['copies', 'waits', 'stalls'].map((key) => [key, sumLanding(p, key)]));
@@ -295,7 +295,7 @@ function countStatuses(records, selector) {
   return result;
 }
 
-function numericRanges(records) {
+export function numericRanges(records) {
   const values = new Map();
   function visit(value, key, directory) {
     if (finite(value)) {
@@ -324,7 +324,7 @@ function summarize(records, selector) {
   return { runs: records, counts: countStatuses(records, selector), ranges: numericRanges(records) };
 }
 
-function peaks(entries, runs) {
+export function peaks(entries, runs) {
   return entries.map((entry) => {
     const run = runs[entry.directory] ?? {};
     const reading = readingOf(run, 'byte-inventory');

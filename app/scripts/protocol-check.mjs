@@ -301,7 +301,9 @@ import retainedCapSuite from './check/suites/retained-cap.mjs';
 import supplierCutSuite from './check/suites/supplier-cut.mjs';
 import measureConditionsSuite from './check/suites/measure-conditions.mjs';
 import measureNightConditionsSuite from './check/suites/measure-night-conditions.mjs';
+import measureNight2ConditionsSuite from './check/suites/measure-night2-conditions.mjs';
 import measureNightVerdictsSuite from './check/suites/measure-night-verdicts.mjs';
+import measureNight2VerdictsSuite from './check/suites/measure-night2-verdicts.mjs';
 
 console.log(describeFixtures());
 
@@ -582,7 +584,9 @@ for (const suite of [
   supplierCutSuite,
   measureConditionsSuite,
   measureNightConditionsSuite,
+  measureNight2ConditionsSuite,
   measureNightVerdictsSuite,
+  measureNight2VerdictsSuite,
 ]) {
   await suite();
 }

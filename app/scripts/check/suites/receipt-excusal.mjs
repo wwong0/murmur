@@ -7,10 +7,13 @@ const receiptFields = {
   finished: false, canceled: true, urgent: false, source: 'http',
 };
 
-function fixture({ excusal = true, receipt = {}, settled = false } = {}) {
+function fixture({ excusal = true, receipt = {}, settled = false, unreceivedBytes = 100, unreceivedExcusal = false } = {}) {
   const input = {
     window: { startMs: 0, endMs: 100 }, declaredClientTags: ['c01', 'c02'],
-    condition: excusal ? { excusals: { bytelessCancelledReceipt: true } } : {},
+    condition: { excusals: {
+      ...(excusal ? { bytelessCancelledReceipt: true } : {}),
+      ...(unreceivedExcusal ? { bytelessUnreceivedResponse: true } : {}),
+    } },
     originStart: { responseRecords: [] }, originEnd: { responseRecords: [] },
     originSettled: { responseRecords: [] },
     clients: {
@@ -24,8 +27,8 @@ function fixture({ excusal = true, receipt = {}, settled = false } = {}) {
     const response = { originResponseId: 'host:1', clientTag: 'c01', kind: 'segment',
       urlPath: receiptFields.url, delivered: 100, expectedBytes: 100, aborted: false };
     input.condition.bars = { responseSettleGapMs: 1_000 };
-    input.originEnd.responseRecords = [response];
-    input.originSettled.responseRecords = [response];
+    input.originEnd.responseRecords = [{ ...response, delivered: unreceivedBytes }];
+    input.originSettled.responseRecords = [{ ...response, delivered: unreceivedBytes }];
   }
   return input;
 }
@@ -58,6 +61,28 @@ export default async function receiptExcusalSuite() {
     const result = response(fixture({ settled: true }));
     assertEqual(JSON.stringify(result.failures.map(({ type, originResponseId }) => [type, originResponseId])),
       JSON.stringify([['host-response-unreceived', 'host:1']]), 'the unreceived response is the one failure, named');
+  });
+
+  await check('receipt excusal: a zero-byte unreceived host response is excused and counted', async () => {
+    const result = response(fixture({ settled: true, unreceivedBytes: 0, unreceivedExcusal: true }));
+    assert(result.passed, 'the declared zero-byte unreceived response passes');
+    assertEqual(result.hostResponsesUnreceived.bytelessUnreceived.count, 1, 'one zero-byte response is excused');
+    assertEqual(JSON.stringify(result.hostResponsesUnreceived.bytelessUnreceived.originResponseIds),
+      JSON.stringify(['host:1']), 'the excused response identity is retained');
+  });
+
+  await check('receipt excusal: a one-byte unreceived host response still refuses', async () => {
+    const result = response(fixture({ settled: true, unreceivedBytes: 1, unreceivedExcusal: true }));
+    assertEqual(JSON.stringify(result.failures.map(({ type, originResponseId }) => [type, originResponseId])),
+      JSON.stringify([['host-response-unreceived', 'host:1']]), 'one delivered byte remains a refusal');
+    assertEqual(result.hostResponsesUnreceived.bytelessUnreceived.count, 0, 'a nonzero response is not excused');
+  });
+
+  await check('receipt excusal: without the unreceived excusal a zero-byte response refuses', async () => {
+    const result = response(fixture({ settled: true, unreceivedBytes: 0, unreceivedExcusal: false }));
+    assertEqual(JSON.stringify(result.failures.map(({ type, originResponseId }) => [type, originResponseId])),
+      JSON.stringify([['host-response-unreceived', 'host:1']]), 'undeclared, a zero-byte response refuses');
+    assertEqual(result.hostResponsesUnreceived.bytelessUnreceived, undefined, 'undeclared, no excusal report is published');
   });
 
   await check('receipt excusal: without the excusal the receipt refuses', async () => {

@@ -188,7 +188,7 @@ function refusalFor(steady) {
   return { reason: steady.reason, failedLegs, legs: steady.legs };
 }
 
-const BOUNDARY_RECORD_MISSING = /^drift-record-(before|after)-boundary-unavailable:/;
+export const BOUNDARY_RECORD_MISSING = /^drift-record-(before|after)-boundary-unavailable:/;
 
 // A legacy directory without drift records publishes its distinct-completed figure alone.
 // A viewer that never started has no record at a boundary: refuse the multiplier and let
