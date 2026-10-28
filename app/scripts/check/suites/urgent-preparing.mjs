@@ -1,4 +1,5 @@
 import { assert, assertEqual, check } from '../harness.mjs';
+import { bundleProductEntry, runEntry } from '../entry-harness.mjs';
 import { CONTROL_8B, CONTROL_PRODUCT } from '../../../public/lib/edge-control.mjs';
 import { parseSegmentTimes, requestClass } from '../../../public/lib/urgent-request.mjs';
 
@@ -32,5 +33,24 @@ export default async function urgentPreparingSuite() {
     assertEqual(requestClass({ ...base, path: '/media/master.m3u8', preparing: false }), 'urgent', 'the playlist remains urgent when not preparing');
     assertEqual(requestClass({ ...base, path: '/media/master.m3u8', preparing: true }), 'urgent', 'the playlist remains urgent while preparing');
     assert(requestClass({ ...base, path: '/media/seg-00092.m4s', preparing: 1 }) !== 'urgent', 'non-boolean preparing values are ignored');
+  });
+
+  // 13e-2 d1-findings.md F3: the page, not only the rule, passes its start's preparing state.
+  await check('urgent-preparing: the page marks a segment urgent while its start is preparing', async () => {
+    const product = await bundleProductEntry();
+    const page = runEntry(product.code, {
+      role: 'viewer',
+      search: '?room=r&role=viewer&tab=v',
+      settings: { delivery: 'host', iceServers: [], trackerUrl: null, mediaSource: 'dir', targetSegmentSeconds: 2, autoStart: false },
+      globals: { RTCPeerConnection: class {}, TextEncoder, TextDecoder },
+    });
+    for (let i = 0; i < 20; i += 1) await page.settled();
+    assertEqual(typeof page.harness.urgency, 'function', 'the page hands the host link its urgency');
+    page.harness.segmentTimes = segments;
+    const far = '/media/seg-00123.m4s';
+    assertEqual(page.harness.urgency(far), null, 'a far segment is not urgent while the start is idle');
+    page.harness.startState.waiting = 'preparing';
+    assertEqual(page.harness.urgency(far), 'urgent', 'the same segment is urgent while the start is preparing');
+    // Mutation (M1b), staged: startIsPreparing() returning false in room.entry.js turned this red.
   });
 }

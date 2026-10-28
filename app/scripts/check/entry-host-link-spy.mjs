@@ -1,7 +1,8 @@
 // scripts/check/entry-host-link-spy.mjs
 //
 // The real host link, with each `reclassify` call counted on the entry harness so
-// a test can see the page tick reach it.
+// a test can see the page tick reach it. The page's `urgency` is kept there too, and
+// `harness.segmentTimes`, when set, stands in for a received playlist.
 
 import { createHostLink as createRealHostLink } from '../../public/lib/host-link.mjs';
 
@@ -9,6 +10,9 @@ export * from '../../public/lib/host-link.mjs';
 
 export function createHostLink(config) {
   const link = createRealHostLink(config);
+  globalThis.__entryHarness.urgency = config.urgency;
+  const segmentTimes = link.segmentTimes;
+  link.segmentTimes = () => globalThis.__entryHarness.segmentTimes ?? segmentTimes.call(link);
   const reclassify = link.reclassify;
   link.reclassify = (...args) => {
     const harness = globalThis.__entryHarness;
