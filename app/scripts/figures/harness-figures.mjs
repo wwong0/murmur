@@ -12,7 +12,7 @@ import { aheadForGood, doubleStalls } from './ahead-for-good.mjs';
 import { riseRecovery } from './rise-recovery.mjs';
 import { settledDrift } from './settled-drift.mjs';
 import { removesMember } from '../harness/roster-kinds.mjs';
-import { notPresenting } from '../harness/not-presenting.mjs';
+import { countedRealtimeFactor, notPresenting } from '../harness/not-presenting.mjs';
 
 export const PEER_FRACTION_ABS_MAX = 0.02;
 
@@ -236,6 +236,17 @@ function droppedFrames(records) {
   return qualityCounter(records, 'droppedVideoFrames');
 }
 
+function frameQualityFactor(polls, window, content) {
+  const fps = content?.frameRate;
+  const frames = qualityCounter(polls, 'totalVideoFrames');
+  const seconds = window && finite(window.startMs) && finite(window.endMs)
+    ? (window.endMs - window.startMs) / 1000
+    : undefined;
+  return finite(fps) && fps > 0 && finite(frames) && finite(seconds) && seconds > 0
+    ? frames / (fps * seconds)
+    : undefined;
+}
+
 // One client's entry in each `…ByClient` figure, keyed by the figure's name.
 // A figure the client's evidence cannot support is left out.
 function clientFigures(tag, client, origin, window, content, receipt, { bytes = true } = {}) {
@@ -275,32 +286,15 @@ function clientFigures(tag, client, origin, window, content, receipt, { bytes = 
     if (finite(displayAdvance) && displayAdvance > 0 && finite(last.mediaMs) && finite(first.mediaMs)) {
       result.realtimeFactorByClient = (last.mediaMs - first.mediaMs) / displayAdvance;
     }
-    const fps = content?.frameRate;
-    const frames = qualityCounter(polls, 'totalVideoFrames');
-    const seconds = window && finite(window.startMs) && finite(window.endMs)
-      ? (window.endMs - window.startMs) / 1000
-      : undefined;
-    if (finite(fps) && fps > 0 && finite(frames) && finite(seconds) && seconds > 0) {
-      result.realtimeFactorFromFrameQualityByClient = frames / (fps * seconds);
-    }
   }
   const presentation = notPresenting(client.polls, window);
+  // A counted viewer's frame-quality factor does not need two records (13e-2 design.md D3 rule 4).
+  if (records.length >= 2 || presentation.counted) {
+    const fromFrameQuality = frameQualityFactor(polls, window, content);
+    if (finite(fromFrameQuality)) result.realtimeFactorFromFrameQualityByClient = fromFrameQuality;
+  }
   if (presentation.counted) {
-    const first = records[0];
-    const last = records.at(-1);
-    const denominator = window.endMs - first?.displaySharedMs;
-    result.realtimeFactorByClient = records.length >= 2 && finite(first?.mediaMs) && finite(last?.mediaMs)
-      && finite(denominator) && denominator > 0
-      ? (last.mediaMs - first.mediaMs) / denominator
-      : 0;
-    const fps = content?.frameRate;
-    const frames = qualityCounter(polls, 'totalVideoFrames');
-    const seconds = window && finite(window.startMs) && finite(window.endMs)
-      ? (window.endMs - window.startMs) / 1000
-      : undefined;
-    if (finite(fps) && fps > 0 && finite(frames) && finite(seconds) && seconds > 0) {
-      result.realtimeFactorFromFrameQualityByClient = frames / (fps * seconds);
-    }
+    result.realtimeFactorByClient = countedRealtimeFactor(records, window);
     result.noFrameMsByClient = presentation.noFrameMs;
   }
   const stalls = stallCount(polls);

@@ -5,7 +5,7 @@ import { armFor, REFUSAL_SCOPE } from './arms.mjs';
 import { appliedSeekEvidence, appliedWithoutRestart } from '../figures/seek-evidence.mjs';
 import { scheduleRefusals } from './capacity-schedule.mjs';
 import { removesMember } from './roster-kinds.mjs';
-import { notPresenting, STALL_COUNTED_CONTEXT_FIELDS, STALL_COUNTED_REASONS } from './not-presenting.mjs';
+import { countedRealtimeFactor, notPresenting, STALL_COUNTED_CONTEXT_FIELDS, STALL_COUNTED_REASONS } from './not-presenting.mjs';
 
 export const REFUSAL_REASONS = Object.freeze([
   'client-never-began-playback',
@@ -95,16 +95,6 @@ function moveCountedReasons(reasons, tag) {
   }
   reasons.splice(0, reasons.length, ...kept);
   return moved;
-}
-
-function countedRealtime(records, window) {
-  if (records.length < 2) return 0;
-  const first = records[0];
-  const last = records.at(-1);
-  const denominator = window.endMs - first.displaySharedMs;
-  return finite(first.mediaMs) && finite(last.mediaMs) && finite(denominator) && denominator > 0
-    ? (last.mediaMs - first.mediaMs) / denominator
-    : 0;
 }
 
 export function summarizeRefusalReasons(reasons = []) {
@@ -446,7 +436,7 @@ export function evaluateRefusals(input = {}) {
     const moved = moveCountedReasons(reasons, tag);
     countedAsStall.push({ tag, noFrameMs: presentation.noFrameMs, fromMs: presentation.fromMs, reasons: moved });
     noFrameMsByClient[tag] = presentation.noFrameMs;
-    realtimeFactorByClient[tag] = countedRealtime(inWindow(clientRecords(clients[tag] ?? {}), window), window);
+    realtimeFactorByClient[tag] = countedRealtimeFactor(inWindow(clientRecords(clients[tag] ?? {}), window), window);
   }
   const excused = excusedByRosterEvent(condition, input.rosterEvent, reasons, clients);
 

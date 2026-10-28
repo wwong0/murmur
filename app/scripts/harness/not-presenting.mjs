@@ -59,3 +59,15 @@ export function notPresenting(polls, window) {
   const recordingRan = why.length === 0;
   return { recordingRan, why, fromMs, noFrameMs, counted: recordingRan && noFrameMs >= MIN_NO_FRAME_MS };
 }
+
+// A counted viewer's realtime factor over its in-window records: the denominator runs to the
+// window's end, so the frames it did not show count against it (13e-2 design.md D3 rule 4).
+export function countedRealtimeFactor(records, window) {
+  if (records.length < 2) return 0;
+  const first = records[0];
+  const last = records.at(-1);
+  const denominator = window.endMs - first.displaySharedMs;
+  return finite(first.mediaMs) && finite(last.mediaMs) && finite(denominator) && denominator > 0
+    ? (last.mediaMs - first.mediaMs) / denominator
+    : 0;
+}
