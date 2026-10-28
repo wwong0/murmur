@@ -25,6 +25,22 @@ export const STALL_COUNTED_CONTEXT_FIELDS = Object.freeze([
 
 const finite = (value) => Number.isFinite(value);
 
+export function playingPresentedFrames(polls, window) {
+  const inWindow = (Array.isArray(polls) ? polls : [])
+    .filter((poll) => finite(poll?.atMs) && poll.atMs >= window?.startMs && poll.atMs <= window?.endMs);
+  let frames = 0;
+  for (let i = 1; i < inWindow.length; i += 1) {
+    const before = inWindow[i - 1];
+    const after = inWindow[i];
+    const values = [before.quality?.totalVideoFrames, before.quality?.droppedVideoFrames,
+      after.quality?.totalVideoFrames, after.quality?.droppedVideoFrames];
+    if (before.playback?.playing === true && after.playback?.playing === true && values.every(finite)) {
+      frames += Math.max(0, (values[2] - values[3]) - (values[0] - values[1]));
+    }
+  }
+  return frames;
+}
+
 export function notPresenting(polls, window) {
   if (!finite(window?.startMs) || !finite(window?.endMs)) {
     return { recordingRan: false, why: ['window'], fromMs: null, noFrameMs: null, counted: false };

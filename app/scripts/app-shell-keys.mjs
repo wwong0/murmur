@@ -3,7 +3,7 @@ export const APP_KEYS = [
   'harnessSeekError', 'engineWindows', 'headroom', 'hostPace', 'drift', 'summary',
   'controller', 'ticks', 'placement', 'startTiming', 'pitch', 'treatmentEvidence', 'delivery', 'hostLink',
   'urgentContext', 'hostAsks', 'hostCounters', 'hostReceipts', 'peerExchange',
-  'urgentDelay', 'peerEngineConfig', 'peerBytes', 'heldAhead', 'resumes', 'playback',
+  'urgentDelay', 'peerEngineConfig', 'peerBytes', 'segmentStore', 'heldAhead', 'resumes', 'playback',
   'playbackState', 'timeline', 'hostFile', 'title', 'hostGrace',
 ];
 

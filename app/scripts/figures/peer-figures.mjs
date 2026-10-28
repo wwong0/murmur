@@ -188,7 +188,7 @@ function refusalFor(steady) {
   return { reason: steady.reason, failedLegs, legs: steady.legs };
 }
 
-export const BOUNDARY_RECORD_MISSING = /^drift-record-(before|after)-boundary-unavailable:/;
+export const BOUNDARY_RECORD_MISSING = /^(drift-record-(before|after)-boundary-unavailable|played-stretch-invalid):/;
 
 // A legacy directory without drift records publishes its distinct-completed figure alone.
 // A viewer that never started has no record at a boundary: refuse the multiplier and let
@@ -296,6 +296,8 @@ export function computePeerFigures(input = {}, pairing = pairResponseEvidence(in
     }, cohorts, oneViewing, hostPace: input.hostPace, wallOffsetMs: input.wallOffsetMs });
     result.oneViewingBytesInWindow = oneViewing.oneViewingBytesInWindow;
     result.roomPositionSpreadMs = oneViewing.roomPositionSpreadMs;
+    if (oneViewing.oneViewingExcludedByBoundary) result.oneViewingExcludedByBoundary = oneViewing.oneViewingExcludedByBoundary;
+    if (oneViewing.oneViewingHeldByClient) result.oneViewingHeldByClient = oneViewing.oneViewingHeldByClient;
     result.peerFractionSteady = state.steady;
     result.steadyState = state;
     if (multiplierDenominator === 'one-viewing') {

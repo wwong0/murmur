@@ -21,6 +21,17 @@ function evidence({ missing = false, giant = false, end = 1_000 } = {}) {
 }
 
 export default async function measureBytesSuite() {
+  await check('measurement bytes: the store is read where it was recorded', async () => {
+    const fixture = evidence();
+    fixture.content.segmentSizes = [300_000_000, 300_000_000, 300_000_000, 300_000_000];
+    fixture.clients.c01.polls = [{ store: { peakBytes: 900_000_000 } }, { store: { peakBytes: 1_000_000_000 } }];
+    fixture.clients.c02.polls = [{ store: null }];
+    const result = byteInventory(fixture);
+    assertEqual(result.viewers.c01.storedBytes, 1_200_000_000, 'distinct completed bytes stay published');
+    assertEqual(result.viewers.c01.peakStoredBytes, 1_000_000_000, 'largest store peak is used');
+    assertEqual(result.viewers.c01.peakBasis, 'store', 'store basis is published');
+    assertEqual(result.viewers.c02.peakBasis, 'distinct-completed', 'null store keeps distinct basis');
+  });
   await check('measurement bytes: host, peer upload and watched inventory', async () => {
     const result = byteInventory(evidence());
     assertEqual(result.viewers.c01.uploadBytes, 1_000, 'peer id attributes upload to c01');

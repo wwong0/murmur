@@ -1,5 +1,6 @@
 import { assert, assertEqual, assertNear, check } from '../harness.mjs';
 import { computeFigures } from '../../figures/harness-figures.mjs';
+import { computeNoP2pSteady } from '../../figures/nop2p-steady.mjs';
 import { publish } from '../../figures/publication.mjs';
 
 const BARS = {
@@ -75,24 +76,28 @@ export default async function nop2pSteadySuite() {
     assertNear(figures.hostUploadMultiplier, 5, 1e-12, 'legacy denominator remains distinct completed');
   });
 
-  await check('no-P2P boundary loss refuses only the multiplier and keeps playback figures', async () => {
+  await check('no-P2P boundary loss holds the end and keeps playback figures', async () => {
     const input = fixture();
-    input.clients.c01.records = input.clients.c01.records.filter((record) => record.displaySharedMs < input.window.endMs);
+    input.clients.c01.records = [input.clients.c01.records[0], { displaySharedMs: 600, scheduledMediaMs: 600, mediaMs: 600 }];
     const figures = computeFigures(input);
-    assertEqual(figures.hostUploadMultiplier, undefined, 'missing boundary evidence publishes no multiplier');
-    assertEqual(figures.hostUploadMultiplierRefusal?.reason, 'one-viewing-unavailable', 'boundary loss names the refusal');
-    assert(figures.hostUploadMultiplierRefusal.detail.startsWith('drift-record-after-boundary-unavailable:c01'),
-      'boundary loss names the after-boundary viewer');
-    assertEqual(figures.steadyState, undefined, 'boundary loss publishes no steady state');
-    assertEqual(figures.oneViewingBytesInWindow, undefined, 'boundary loss publishes no one-viewing bytes');
-    assertEqual(figures.roomPositionSpreadMs, undefined, 'boundary loss publishes no room spread');
+    assert(figures.hostUploadMultiplier !== undefined || figures.hostUploadMultiplierRefusal?.reason.startsWith('steady-state-'), 'steady legs decide multiplier');
+    const oneViewing = computeNoP2pSteady({ input, figures, tags: TAGS });
+    assertEqual(oneViewing.playedMediaMsByClient.c01.end, 600, 'played end holds the last record');
+    assertEqual(oneViewing.oneViewingHeldByClient.c01.end, 'held-last', 'held end is listed');
+    assertEqual(figures.oneViewingBytesInWindow, 1000, 'one-viewing bytes remain available');
+    assertEqual(figures.roomPositionSpreadMs.end, 0, 'room spread remains available');
     const realtime = TAGS.map((tag) => figures.realtimeFactorByClient?.[tag]);
     const stalls = TAGS.map((tag) => figures.stallCountByClient?.[tag]);
     assert(realtime.every(Number.isFinite), 'all five realtime factors remain finite');
     assert(stalls.every(Number.isFinite), 'all five stall counts remain finite');
     const published = publish('byte', figures, { ...input, declaredClientTags: TAGS });
     assert(published.published !== false, 'playback byte figure remains publishable without the multiplier');
-    const otherRefusal = publish('byte', { ...figures,
+    input.clients.c01.records = [];
+    const missing = computeFigures(input);
+    assertEqual(missing.hostUploadMultiplier, undefined, 'no records withholds multiplier');
+    assertEqual(missing.hostUploadMultiplierRefusal?.reason, 'one-viewing-unavailable', 'no records names refusal');
+    assert(TAGS.slice(1).every((tag) => Number.isFinite(missing.realtimeFactorByClient[tag])), 'other realtime factors remain');
+    const otherRefusal = publish('byte', { ...figures, oneViewingBytesInWindow: undefined,
       hostUploadMultiplierRefusal: { reason: 'steady-state-utilisation' } }, { ...input, declaredClientTags: TAGS });
     assertEqual(otherRefusal.published, false, 'other refusals still require the complete one-viewing shape');
     assertEqual(otherRefusal.missing, 'oneViewingBytesInWindow', 'other refusal names the omitted one-viewing field');

@@ -1,6 +1,6 @@
 import { assert, assertEqual, assertNear, check } from '../harness.mjs';
 import { evaluateRefusals } from '../../harness/refusals.mjs';
-import { notPresenting } from '../../harness/not-presenting.mjs';
+import { notPresenting, playingPresentedFrames } from '../../harness/not-presenting.mjs';
 import { computeFigures } from '../../figures/harness-figures.mjs';
 
 const WINDOW = { startMs: 0, endMs: 180_000 };
@@ -117,12 +117,12 @@ export default async function notPresentingSuite() {
   });
 
   await check('not-presenting: counted viewers move only stall-family refusal reasons', async () => {
-    const frozen = evaluateRefusals(refusalEvidence({ polls: fiveSecondPolls({ freezeAt: 60_000 }) }));
-    assertEqual(frozen.runRefused, false, 'frozen viewer no longer refuses the run');
+    const frozen = evaluateRefusals(refusalEvidence({ polls: fiveSecondPolls({ playing: false }) }));
+    assertEqual(frozen.runRefused, false, 'parked viewer does not refuse the run');
     assertEqual(frozen.reasons.length, 0, 'moved reasons leave no refusal');
     assertEqual(frozen.countedAsStall.length, 1, 'one counted viewer is returned');
     assertEqual(frozen.countedAsStall[0].reasons.map((entry) => entry.reason).join(','), 'client-holds-no-drift-records,record-coverage-unavailable', 'moved reasons keep order');
-    assertEqual(frozen.published.noFrameMsByClient.c01, 120_000, 'published no-frame time');
+    assertEqual(frozen.published.noFrameMsByClient.c01, 180_000, 'published no-frame time');
     assertEqual(frozen.published.realtimeFactorByClient.c01, 0, 'empty records publish zero realtime');
 
     const stopped = evaluateRefusals(refusalEvidence({ polls: fiveSecondPolls({ endMs: 120_000, freezeAt: 120_000 }) }));
@@ -143,6 +143,33 @@ export default async function notPresentingSuite() {
     const nonStall = evaluateRefusals(refusalEvidence({ polls: fiveSecondPolls({ freezeAt: 60_000 }), driftLogMissed: 1 }));
     assert(nonStall.reasons.some((entry) => entry.reason === 'drift-log-discarded-records'), 'non-stall reason stays');
     assertEqual(nonStall.countedAsStall[0].reasons.some((entry) => entry.reason === 'drift-log-discarded-records'), false, 'non-stall reason is not moved');
+  });
+
+  await check('not-presenting: poll coverage distinguishes stopped records and the bar edge', async () => {
+    const polls = regularPolls({ freezeAt: 178_000 }).map((p) => ({ ...p, quality: { ...p.quality, totalVideoFrames: p.quality.totalVideoFrames * 5 } }));
+    const records = (count, spacing) => Array.from({ length: count }, (_, i) => ({ seq: i + 1, presentedFrames: i + 1, displaySharedMs: i * spacing, mediaMs: i * spacing }));
+    const stopped = evaluateRefusals(refusalEvidence({ polls, records: [...records(1440, 41.67), { seq: 1441, presentedFrames: 1441, displaySharedMs: 170_000, mediaMs: 170_000 }] }));
+    assertEqual(stopped.runRefused, true, 'trailing stall does not excuse stopped records');
+    assertEqual(stopped.countedAsStall.length, 1, 'viewer remains counted');
+    assert(stopped.reasons.some((entry) => entry.reason === 'record-coverage-below-declared-fraction'), 'coverage stays');
+    const complete = evaluateRefusals(refusalEvidence({ polls, records: records(4450, 40) }));
+    assertEqual(complete.runRefused, false, 'covered frames pass');
+    assertEqual(complete.published.coverageFromPollsByClient.c01.presentedFrames, 4450, 'playing frames counted');
+    assertEqual(complete.published.coverageFromPollsByClient.c01.records, 4450, 'in-window records counted');
+    assertEqual(complete.published.coverageFromPollsByClient.c01.coverage, 1, 'poll coverage is published');
+    const noRecordPolls = regularPolls({ freezeAt: 170_000 }).map((p) => ({ ...p, quality: { ...p.quality, totalVideoFrames: p.quality.totalVideoFrames * 5 } }));
+    const none = evaluateRefusals(refusalEvidence({ polls: noRecordPolls, records: [] }));
+    assertEqual(none.runRefused, true, 'frames without records refuse');
+    assert(none.reasons.some((entry) => entry.reason === 'record-coverage-unavailable' && entry.basis === 'polls'), 'unavailable coverage remains with poll basis');
+    assert(stopped.reasons.some((entry) => entry.basis === 'polls'), 'polls identify the added coverage reason');
+    const parked = regularPolls({ playing: false });
+    assertEqual(playingPresentedFrames(parked, WINDOW), 0, '8b park-frame rises do not count');
+    assertEqual(evaluateRefusals(refusalEvidence({ polls: parked })).runRefused, false, 'parked viewer is counted');
+    const edgePolls = regularPolls({ freezeAt: 40_000 }).map((p) => ({ ...p, quality: { ...p.quality, totalVideoFrames: p.quality.totalVideoFrames * 5 } }));
+    for (const [n, refused] of [[950, false], [949, true]]) {
+      const result = evaluateRefusals(refusalEvidence({ polls: edgePolls, records: records(n, 40) }));
+      assertEqual(result.runRefused, refused, `coverage with ${n} records`);
+    }
   });
 
   await check('not-presenting: counted figures use window-end realtime and frame quality without records', async () => {

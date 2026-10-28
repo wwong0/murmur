@@ -5,7 +5,7 @@ import { armFor, REFUSAL_SCOPE } from './arms.mjs';
 import { appliedSeekEvidence, appliedWithoutRestart } from '../figures/seek-evidence.mjs';
 import { scheduleRefusals } from './capacity-schedule.mjs';
 import { removesMember } from './roster-kinds.mjs';
-import { countedRealtimeFactor, notPresenting, STALL_COUNTED_CONTEXT_FIELDS, STALL_COUNTED_REASONS } from './not-presenting.mjs';
+import { countedRealtimeFactor, notPresenting, playingPresentedFrames, STALL_COUNTED_CONTEXT_FIELDS, STALL_COUNTED_REASONS } from './not-presenting.mjs';
 
 export const REFUSAL_REASONS = Object.freeze([
   'client-never-began-playback',
@@ -430,10 +430,27 @@ export function evaluateRefusals(input = {}) {
   const arm = armFor(condition);
   arm.refusals(input, (reason, scope, detail) => addReason(reasons, reason, scope, detail));
   const countedAsStall = [];
+  const coverageFromPollsByClient = {};
   for (const tag of tags) {
     const presentation = notPresenting(clientPolls(clients[tag] ?? {}), window);
     if (!presentation.counted) continue;
+    const P = playingPresentedFrames(clientPolls(clients[tag] ?? {}), window);
+    const N = inWindow(clientRecords(clients[tag] ?? {}), window).length;
+    const covered = P === 0 || N + 0.5 >= Number(bars.recordCoverageMin) * P;
+    if (covered && P > 0) coverageFromPollsByClient[tag] = { presentedFrames: P, records: N, coverage: N / P };
     const moved = moveCountedReasons(reasons, tag);
+    if (!covered) {
+      const coverageReasons = ['record-coverage-unavailable', 'record-coverage-below-declared-fraction'];
+      const retained = moved.filter((entry) => coverageReasons.includes(entry.reason)
+        || entry.reason === `required-context-absent:coverageRatioByClient[${tag}]`);
+      for (const entry of retained) reasons.push(coverageReasons.includes(entry.reason)
+        ? { ...entry, basis: 'polls', presentedFrames: P, records: N } : entry);
+      for (const entry of retained) moved.splice(moved.indexOf(entry), 1);
+      if (!retained.some((entry) => coverageReasons.includes(entry.reason))) {
+        addReason(reasons, 'record-coverage-below-declared-fraction', REFUSAL_SCOPE.coverage,
+          { tag, basis: 'polls', presentedFrames: P, records: N });
+      }
+    }
     countedAsStall.push({ tag, noFrameMs: presentation.noFrameMs, fromMs: presentation.fromMs, reasons: moved });
     noFrameMsByClient[tag] = presentation.noFrameMs;
     realtimeFactorByClient[tag] = countedRealtimeFactor(inWindow(clientRecords(clients[tag] ?? {}), window), window);
@@ -453,7 +470,7 @@ export function evaluateRefusals(input = {}) {
     coverage,
     dropped,
     countedAsStall,
-    published: { realtimeFactorByClient, noFrameMsByClient },
+    published: { realtimeFactorByClient, noFrameMsByClient, coverageFromPollsByClient },
     unattributedDelta: unattributed,
     figures: summary.figures,
   };

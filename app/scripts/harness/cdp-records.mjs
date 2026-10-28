@@ -204,6 +204,7 @@ export function pollExpression() {
       clock: __app.clock(),
       controller: __app.controller(),
       playback: scalar,
+      store: typeof __app.segmentStore === 'function' ? __app.segmentStore() : null,
       quality: video && typeof video.getVideoPlaybackQuality === 'function'
         ? (() => {
             const q = video.getVideoPlaybackQuality();

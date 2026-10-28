@@ -33,7 +33,7 @@ for (const name of ['droppedVideoFrames', 'totalVideoFrames', 'corruptedVideoFra
 /** What the driver receives: the page's value after returnByValue's own-enumerable copy. */
 const throughReturnByValue = (value) => JSON.parse(JSON.stringify(value));
 
-function evaluatePoll({ video = {}, stalls = null } = {}) {
+function evaluatePoll({ video = {}, stalls = null, segmentStore } = {}) {
   const context = {
     document: { querySelector: (selector) => (selector === 'video' ? video : null) },
     performance: { timeOrigin: 1_000_000, now: () => 5 },
@@ -43,12 +43,17 @@ function evaluatePoll({ video = {}, stalls = null } = {}) {
       playback: () => ({ playing: true, callbacks: 7, starts: [{ at: 1 }], seams: [{ at: 2 }] }),
       clock: () => ({ offsetMs: 3 }),
       controller: () => ({ rate: 1 }),
+      ...(segmentStore ? { segmentStore } : {}),
     },
   };
   return vm.runInNewContext(pollExpression(), context);
 }
 
 export default async function harnessPollShapeSuite() {
+  await check('harness poll shape: store crosses returnByValue or is null', async () => {
+    assertEqual(throughReturnByValue(evaluatePoll({ segmentStore: () => ({ bytes: 6000 }) })).store.bytes, 6000, 'store bytes cross');
+    assertEqual(throughReturnByValue(evaluatePoll()).store, null, 'missing publisher is null');
+  });
   await check('harness poll shape: the playback-quality counters survive returnByValue', async () => {
     const quality = new FakePlaybackQuality({ droppedVideoFrames: 4, totalVideoFrames: 900, corruptedVideoFrames: 0, creationTime: 12.5 });
     assertEqual(Object.keys(quality).length, 0, 'the stub carries no own enumerable counters, as the browser class does not');

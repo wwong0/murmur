@@ -2,6 +2,7 @@ import { validateEngineWindows, PRODUCT_ENGINE_WINDOWS } from './engine-windows.
 import { isFileIdentity } from './title-fields.mjs';
 
 export const HOST_LOAD_NO_BYTES_TIMEOUT_MS = 15_000;
+export const SEGMENT_MEMORY_LIMIT_MIB = 1024;
 export const PRODUCT_STREAM_CONFIG = Object.freeze({
   ...PRODUCT_ENGINE_WINDOWS,
   httpNotReceivingBytesTimeoutMs: HOST_LOAD_NO_BYTES_TIMEOUT_MS,
@@ -30,6 +31,7 @@ export function peerEngineConfig({ roomId, trackerUrl, iceServers, titleId = nul
     announceTrackers: Object.freeze([trackerUrl]),
     rtcConfig: Object.freeze({ iceServers }),
     ...(windows ?? PRODUCT_ENGINE_WINDOWS),
+    segmentMemoryStorageLimit: SEGMENT_MEMORY_LIMIT_MIB,
     httpNotReceivingBytesTimeoutMs: HOST_LOAD_NO_BYTES_TIMEOUT_MS,
   });
   return Object.freeze({ core });

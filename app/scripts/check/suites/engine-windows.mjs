@@ -228,6 +228,8 @@ export default async function engineWindowsSuite() {
     // 13d's copy archived product arms and runs the product's windows.
     const registeredBy13d = (name) => name.startsWith('13d-') || name.startsWith('shakedown/13d-');
     const registeredBy13e = (name) => name.startsWith('13e-') || name.startsWith('shakedown/13e-');
+    // 13f's copies run the product's windows.
+    const registeredBy13f = (name) => name.startsWith('13f-') || name.startsWith('shakedown/13f-');
     const supplied = [];
     const walk = (group, label) => {
       for (const [name, condition] of Object.entries(group)) {
@@ -236,7 +238,7 @@ export default async function engineWindowsSuite() {
           const declares = Object.prototype.hasOwnProperty.call(condition, 'engineWindows');
           if (productInputs.includes(`${label}${name}`) || registeredBy11a2(`${label}${name}`)
             || registeredBy12c1(`${label}${name}`) || registeredBy12c2(`${label}${name}`)
-            || registeredBy13d(`${label}${name}`) || registeredBy13e(`${label}${name}`)) { if (declares) supplied.push(`${label}${name}`); }
+            || registeredBy13d(`${label}${name}`) || registeredBy13e(`${label}${name}`) || registeredBy13f(`${label}${name}`)) { if (declares) supplied.push(`${label}${name}`); }
           else if (!declares) undeclared.push(`${label}${name}`);
         } else if (condition.delivery === undefined && !('peerExchange' in condition)
           && Object.values(condition).every((value) => value && typeof value === 'object')) {

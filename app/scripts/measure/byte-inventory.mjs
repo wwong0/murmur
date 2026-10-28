@@ -128,6 +128,7 @@ export function byteInventory(evidence) {
     for (const index of watched.indexes) unionWatched.add(index);
     const completed = completedByIndex(client.peerBytes, content);
     const storedBytes = [...completed.keys()].reduce((sum, index) => sum + sizeOf(content, index), 0);
+    const storePeaks = (client.polls ?? []).map((poll) => poll?.store?.peakBytes).filter(finite);
     const prefetchLeftBytes = watched.largest === null ? 0 : [...completed.values()]
       .filter((entry) => !watched.indexes.has(entry.index) && geometry.starts[entry.index] >= watched.largest)
       .reduce((sum, entry) => sum + sizeOf(content, entry.index), 0);
@@ -156,8 +157,11 @@ export function byteInventory(evidence) {
       watchedSegments: [...watched.indexes].sort((a, b) => a - b),
       watchedBytes: [...watched.indexes].reduce((sum, index) => sum + (sizeOf(content, index) ?? 0), 0),
       prefetchLeftBytes, storedBytes, storedSeries: storedSeries(completed, content),
-      peakStoredBytes: storedBytes < LIMIT_BYTES ? storedBytes : null,
-      ...(storedBytes >= LIMIT_BYTES ? { peakReason: 'eviction-possible' } : {}),
+      ...(storePeaks.length ? { peakStoredBytes: Math.max(...storePeaks), peakBasis: 'store' } : {
+        peakStoredBytes: storedBytes < LIMIT_BYTES ? storedBytes : null,
+        ...(storedBytes >= LIMIT_BYTES ? { peakReason: 'eviction-possible' } : {}),
+        peakBasis: 'distinct-completed',
+      }),
     };
   }
   const transport = evidence.originLink?.length >= 2

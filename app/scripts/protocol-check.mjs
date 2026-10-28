@@ -62,6 +62,7 @@ import originProxySuite from './check/suites/origin-proxy.mjs';
 import harnessPeerUploadSuite from './check/suites/harness-peer-upload.mjs';
 import peerFiguresSuite from './check/suites/peer-figures.mjs';
 import oneViewingSuite from './check/suites/one-viewing.mjs';
+import oneViewingBoundariesSuite from './check/suites/one-viewing-boundaries.mjs';
 import nop2pSteadySuite from './check/suites/nop2p-steady.mjs';
 import machineTestSuite from './check/suites/machine-test.mjs';
 import qaRecomputeSuite from './check/suites/qa-recompute.mjs';
@@ -103,6 +104,7 @@ import fetchShimBarsSuite from './check/suites/fetch-shim-bars.mjs';
 import peerBytesSuite from './check/suites/peer-bytes.mjs';
 import bytesReadoutSuite from './check/suites/bytes-readout.mjs';
 import peerEngineConfigSuite from './check/suites/peer-engine-config.mjs';
+import segmentStoreSuite from './check/suites/segment-store.mjs';
 import hostLoadTimeoutSuite from './check/suites/host-load-timeout.mjs';
 import engineWindowsSuite from './check/suites/engine-windows.mjs';
 import urgentSourceSuite from './check/suites/urgent-source.mjs';
@@ -306,6 +308,7 @@ import measureNightConditionsSuite from './check/suites/measure-night-conditions
 import measureNight2ConditionsSuite from './check/suites/measure-night2-conditions.mjs';
 import measureNightVerdictsSuite from './check/suites/measure-night-verdicts.mjs';
 import measureNight2VerdictsSuite from './check/suites/measure-night2-verdicts.mjs';
+import measureMemoryLimitVerdictsSuite from './check/suites/measure-memory-limit-verdicts.mjs';
 
 console.log(describeFixtures());
 
@@ -347,6 +350,7 @@ for (const suite of [
   harnessPeerUploadSuite,
   peerFiguresSuite,
   oneViewingSuite,
+  oneViewingBoundariesSuite,
   nop2pSteadySuite,
   machineTestSuite,
   qaRecomputeSuite,
@@ -388,6 +392,7 @@ for (const suite of [
   peerBytesSuite,
   bytesReadoutSuite,
   peerEngineConfigSuite,
+  segmentStoreSuite,
   hostLoadTimeoutSuite,
   engineWindowsSuite,
   urgentSourceSuite,
@@ -591,6 +596,7 @@ for (const suite of [
   measureNight2ConditionsSuite,
   measureNightVerdictsSuite,
   measureNight2VerdictsSuite,
+  measureMemoryLimitVerdictsSuite,
 ]) {
   await suite();
 }

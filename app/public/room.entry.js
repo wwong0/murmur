@@ -19,6 +19,7 @@ import { createPeerBytes } from './lib/peer-bytes.mjs';
 import { aheadReportDue, edgeIndexAfter, heldAheadMs } from './lib/held-ahead.mjs';
 import { createHoldResume, createResumeRing, READY_HELD_AHEAD_MS } from './lib/hold-resume.mjs';
 import { peerEngineConfig } from './lib/peer-engine-config.mjs';
+import { createSegmentStoreMonitor } from './lib/segment-store.mjs';
 import { PRODUCT_ENGINE_WINDOWS, validateEngineWindows } from './lib/engine-windows.mjs';
 import { HEADROOM_DEFAULT, validateHeadroomFraction } from './lib/send-pace.mjs';
 import { createClockSync, websocketProbe } from './lib/clock-sync.mjs';
@@ -552,6 +553,7 @@ let peerExchange = null;
 // each reader used to re-check for itself.
 let roomHasPeerExchange = false;
 const peerBytesPublisher = createPeerBytes();
+const segmentStoreMonitor = createSegmentStoreMonitor();
 // A viewer publishes this stub until its engine is attached, so no reading
 // before load says attribution is unavailable.
 let peerBytesRead = () => ({ attribution: null, peerExchange: peerExchange ?? 'off', peerId: null, peerIds: [] });
@@ -1544,6 +1546,7 @@ function execute(result) {
                 onEngine: (engine) => {
                   peerEngine = engine;
                   peerBytesPublisher.attach(engine);
+                  engine.addEventListener('onSegmentLoaded', () => segmentStoreMonitor.sample(engine));
                   engine.addEventListener('onSegmentLoaded', () => runTickSteps([
                     ['held-ahead', updateHeldAhead],
                     ['ahead-report', sendAheadReport],
@@ -1806,6 +1809,7 @@ window.__app = {
   urgentDelay,
   peerEngineConfig: () => (peerEngine ? peerEngine.getConfig().core : null),
   peerBytes: (afterSeq = 0) => peerBytesRead(afterSeq),
+  segmentStore: () => (peerEngine ? segmentStoreMonitor.read(peerEngine) : null),
   // T7/T8: the viewer's own held-ahead, and the host's resume ring.
   heldAhead: () => heldAheadValue,
   resumes: (afterSeq = 0) => {
