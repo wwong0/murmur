@@ -172,6 +172,18 @@ export default async function notPresentingSuite() {
     }
   });
 
+  await check('not-presenting: a viewer frozen for the last 120 s with covering records is counted, not refused', async () => {
+    const polls = regularPolls({ freezeAt: 60_000 }).map((p) => ({ ...p, quality: { ...p.quality, totalVideoFrames: p.quality.totalVideoFrames * 5 } }));
+    const records = (count) => Array.from({ length: count }, (_, i) => ({ seq: i + 1, presentedFrames: i + 1, displaySharedMs: i * 40, mediaMs: i * 40 }));
+    const frozen = evaluateRefusals(refusalEvidence({ polls, records: records(1500) }));
+    assertEqual(frozen.runRefused, false, 'covered frozen viewer does not refuse');
+    assertEqual(frozen.countedAsStall.map((entry) => entry.tag).join(','), 'c01', 'frozen viewer is counted');
+    assertEqual(frozen.published.noFrameMsByClient.c01, 120_000, 'no-frame time is the frozen stretch');
+    assertEqual(frozen.published.coverageFromPollsByClient.c01.presentedFrames, 1500, 'frames presented while playing');
+    // 1424 + 0.5 < 0.95 × 1500: the same freeze one record short of the bar refuses.
+    assertEqual(evaluateRefusals(refusalEvidence({ polls, records: records(1424) })).runRefused, true, 'one record under the bar refuses');
+  });
+
   await check('not-presenting: counted figures use window-end realtime and frame quality without records', async () => {
     const records = [
       { displaySharedMs: 0, mediaMs: 0, presentedFrames: 1 },

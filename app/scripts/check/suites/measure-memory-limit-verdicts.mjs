@@ -13,8 +13,9 @@ function run(peak = LIMIT, basis = 'store', figures = {}) {
     manifest: { status: 'complete', declaredClientTags: ['c01', 'c02'], condition: { peerExchange: true } },
     refusalReport: { figures: { hostUploadMultiplier: 1.5, steadyState: { steady: true },
       peerFractionAggregate: 0.60, stallCountByClient: { c01: 1 }, realtimeFactorByClient: { c01: 0.99 }, ...figures },
-      countedAsStall: [{ tag: 'c01', reasons: [] }],
-      published: { noFrameMsByClient: { c01: 2000 }, coverageFromPollsByClient: { c01: { coverage: 1 } } } },
+      // refusal-report.json's shape: the counting result sits under `refusal`, the figures beside it.
+      refusal: { countedAsStall: [{ tag: 'c01', reasons: [] }],
+        published: { noFrameMsByClient: { c01: 2000 }, coverageFromPollsByClient: { c01: { coverage: 1 } } } } },
     readings: { 'lab-drift': {}, 'gap-count': {}, 'byte-inventory': { viewers: {
       c01: { peakBasis: basis, peakStoredBytes: peak, storedBytes: LIMIT + 1 },
       c02: { peakBasis: 'store', peakStoredBytes: LIMIT - 1, storedBytes: LIMIT },
@@ -57,6 +58,17 @@ export default async function measureMemoryLimitVerdictsSuite() {
     assertEqual(beside.label, 'descriptive-invalid-run', 'baseline is labelled');
     assertEqual(beside.baseline.stallCountByClient.c01, 2, 'baseline figures carried');
     assertEqual(beside.baseline.ignored, undefined, 'only requested baseline fields carried');
+  });
+  await check('13f verdicts: the counting result is read where the harness writes it', async () => {
+    const decoy = run();
+    decoy.refusalReport.countedAsStall = [];
+    decoy.refusalReport.published = { noFrameMsByClient: {}, coverageFromPollsByClient: {} };
+    for (const condition of ['13f-w-long', '13f-r0-five']) {
+      const reading = verdict(decoy, condition).reading;
+      assertEqual(reading.countedAsStall.map((entry) => entry.tag).join(','), 'c01', `${condition}: nested counted viewer is listed`);
+      assertEqual(reading.coverageFromPollsByClient.c01?.coverage, 1, `${condition}: nested poll coverage is listed`);
+    }
+    assertEqual(verdict(decoy).reading.noFrameMsByClient.c01, 2000, 'nested no-frame time is listed');
   });
   await check('13f R0: multiplier and peer bars have both edges', async () => {
     const at = verdict(run(), '13f-r0-five').reading;

@@ -19,8 +19,10 @@ function readingFor(entry, run, baseline) {
   const inventory = readingOf(run, 'byte-inventory');
   const tags = entry.clientTags ?? run.manifest?.declaredClientTags ?? Object.keys(inventory?.viewers ?? {});
   const viewers = Object.fromEntries(tags.map((tag) => [tag, viewerReading(inventory?.viewers?.[tag])]));
-  const countedAsStall = run.refusalReport?.countedAsStall ?? [];
-  const coverageFromPollsByClient = run.refusalReport?.published?.coverageFromPollsByClient ?? {};
+  // The harness nests evaluateRefusals' output under `refusal` in refusal-report.json.
+  const counting = run.refusalReport?.refusal ?? {};
+  const countedAsStall = counting.countedAsStall ?? [];
+  const coverageFromPollsByClient = counting.published?.coverageFromPollsByClient ?? {};
   if (entry.condition === '13f-r0-five') return {
     viewers, countedAsStall, coverageFromPollsByClient,
     criterion2: multiplierVerdict(figures, 1.5), criterion3: peerVerdict(figures.peerFractionAggregate, 0.60),
@@ -31,7 +33,7 @@ function readingFor(entry, run, baseline) {
   const fields = ['stallCountByClient', 'realtimeFactorByClient', 'peerFractionAggregate'];
   const selected = (source) => Object.fromEntries(fields.map((key) => [key, source?.[key] ?? null]));
   return {
-    viewers, gate, ...selected(figures), noFrameMsByClient: run.refusalReport?.published?.noFrameMsByClient ?? null,
+    viewers, gate, ...selected(figures), noFrameMsByClient: counting.published?.noFrameMsByClient ?? null,
     countedAsStall, coverageFromPollsByClient,
     beside13eW: { baseline: baseline === null ? null : selected(baseline), label: 'descriptive-invalid-run',
       buildDifference: "13f runs with 13e-2's D2 (a preparing viewer's requests are urgent); 13e's W did not" },
