@@ -61,8 +61,8 @@ export function roomPositionAt({ clients = {}, tags = Object.keys(clients), inst
   return { positionMs: median(positions), spreadMs: positions.at(-1) - positions[0], byClient, excluded };
 }
 
-/** Interpolate a viewer's media position at a host-page boundary. */
-function playedMediaAt(client, tag, instant) {
+/** A viewer's media position at a boundary: interpolated, or held at its nearest record (13f D5). */
+function playedPositionAt(client, tag, instant) {
   if (!finite(instant)) throw new Error(`media instant is not finite:${tag}`);
   const records = orderedRecords(client);
   const before = recordAtOrBefore(records, instant);
@@ -80,14 +80,13 @@ function playedMediaAt(client, tag, instant) {
   return { positionMs: before.mediaMs + (after.mediaMs - before.mediaMs) * fraction, held: null };
 }
 
-function playedMediaValue(client, tag, instant) {
+/** The interpolated position only; refuses a boundary without a record on both sides. */
+export function playedMediaAt(client, tag, instant) {
   const records = orderedRecords(client);
   requireRecord(recordAtOrBefore(records, instant), tag, 'before', instant);
   requireRecord(recordAtOrAfter(records, instant), tag, 'after', instant);
-  return playedMediaAt(client, tag, instant).positionMs;
+  return playedPositionAt(client, tag, instant).positionMs;
 }
-
-export { playedMediaValue as playedMediaAt };
 
 /** Bytes of variable-sized segments intersecting the half-open media stretch. */
 export function bytesForStretch(startMs, endMs, segmentSizes, segmentSeconds) {
@@ -120,8 +119,8 @@ export function computeOneViewing({ clients = {}, tags = Object.keys(clients), w
   const playedMediaMsByClient = {};
   const oneViewingHeldByClient = {};
   for (const tag of tags) {
-    const first = playedMediaAt(clients[tag], tag, window.startMs);
-    const last = playedMediaAt(clients[tag], tag, window.endMs);
+    const first = playedPositionAt(clients[tag], tag, window.startMs);
+    const last = playedPositionAt(clients[tag], tag, window.endMs);
     if (last.positionMs < first.positionMs) throw new Error(`played-stretch-invalid:${tag}`);
     playedMediaMsByClient[tag] = { start: first.positionMs, end: last.positionMs };
     if (first.held || last.held) oneViewingHeldByClient[tag] = {

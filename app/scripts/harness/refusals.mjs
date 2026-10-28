@@ -124,6 +124,18 @@ function counterDelta(after, before, field) {
   return finite(right) && finite(left) ? right - left : undefined;
 }
 
+const COVERAGE_REASONS = ['record-coverage-unavailable', 'record-coverage-below-declared-fraction'];
+
+// 13f D4 rule 5: a counted viewer whose records fall short of the frames it presented while
+// playing keeps its coverage reasons as refusals. Returns the reasons that stay counted.
+function retainPollCoverage(reasons, moved, tag, detail) {
+  const isCoverage = (entry) => COVERAGE_REASONS.includes(entry.reason);
+  const stays = (entry) => isCoverage(entry) || entry.reason === `required-context-absent:coverageRatioByClient[${tag}]`;
+  for (const entry of moved.filter(stays)) reasons.push(isCoverage(entry) ? { ...entry, ...detail } : entry);
+  if (!moved.some(isCoverage)) addReason(reasons, 'record-coverage-below-declared-fraction', REFUSAL_SCOPE.coverage, { tag, ...detail });
+  return moved.filter((entry) => !stays(entry));
+}
+
 function clientRecords(client) {
   return client?.records ?? [];
 }
@@ -432,28 +444,20 @@ export function evaluateRefusals(input = {}) {
   const countedAsStall = [];
   const coverageFromPollsByClient = {};
   for (const tag of tags) {
-    const presentation = notPresenting(clientPolls(clients[tag] ?? {}), window);
+    const polls = clientPolls(clients[tag] ?? {});
+    const presentation = notPresenting(polls, window);
     if (!presentation.counted) continue;
-    const P = playingPresentedFrames(clientPolls(clients[tag] ?? {}), window);
-    const N = inWindow(clientRecords(clients[tag] ?? {}), window).length;
+    const records = inWindow(clientRecords(clients[tag] ?? {}), window);
+    const P = playingPresentedFrames(polls, window);
+    const N = records.length;
     const covered = P === 0 || N + 0.5 >= Number(bars.recordCoverageMin) * P;
     if (covered && P > 0) coverageFromPollsByClient[tag] = { presentedFrames: P, records: N, coverage: N / P };
     const moved = moveCountedReasons(reasons, tag);
-    if (!covered) {
-      const coverageReasons = ['record-coverage-unavailable', 'record-coverage-below-declared-fraction'];
-      const retained = moved.filter((entry) => coverageReasons.includes(entry.reason)
-        || entry.reason === `required-context-absent:coverageRatioByClient[${tag}]`);
-      for (const entry of retained) reasons.push(coverageReasons.includes(entry.reason)
-        ? { ...entry, basis: 'polls', presentedFrames: P, records: N } : entry);
-      for (const entry of retained) moved.splice(moved.indexOf(entry), 1);
-      if (!retained.some((entry) => coverageReasons.includes(entry.reason))) {
-        addReason(reasons, 'record-coverage-below-declared-fraction', REFUSAL_SCOPE.coverage,
-          { tag, basis: 'polls', presentedFrames: P, records: N });
-      }
-    }
-    countedAsStall.push({ tag, noFrameMs: presentation.noFrameMs, fromMs: presentation.fromMs, reasons: moved });
+    const counted = covered ? moved
+      : retainPollCoverage(reasons, moved, tag, { basis: 'polls', presentedFrames: P, records: N });
+    countedAsStall.push({ tag, noFrameMs: presentation.noFrameMs, fromMs: presentation.fromMs, reasons: counted });
     noFrameMsByClient[tag] = presentation.noFrameMs;
-    realtimeFactorByClient[tag] = countedRealtimeFactor(inWindow(clientRecords(clients[tag] ?? {}), window), window);
+    realtimeFactorByClient[tag] = countedRealtimeFactor(records, window);
   }
   const excused = excusedByRosterEvent(condition, input.rosterEvent, reasons, clients);
 
