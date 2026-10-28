@@ -86,6 +86,7 @@ export function createPlayer({ video }) {
  * nothing else in `npm run check` observes it: the real reducer is faked here,
  * so its own suite cannot see what the page passes (d1-findings.md R2).
  */
+export const WAITING_PREPARING = 'preparing';
 export function createPlaybackStart(options) {
   harness().log('playback-start-created', options);
   return {

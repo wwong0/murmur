@@ -158,7 +158,8 @@ export default async function hostOriginFiguresSuite() {
     }
     const missingFromStored = [...recomputedKeys].filter((key) => !storedKeys.has(key));
     const missingFromRecomputed = [...storedKeys].filter((key) => !recomputedKeys.has(key));
-    assertEqual(JSON.stringify(missingFromStored), JSON.stringify(['capacityBitsPerSecond']), 'the only pre-existing recompute key is capacityBitsPerSecond');
+    assertEqual(JSON.stringify(missingFromStored), JSON.stringify(['noFrameMsByClient', 'capacityBitsPerSecond']), 'the only new recompute keys are capacityBitsPerSecond and 13e-2 noFrameMsByClient');
+    assertEqual(JSON.stringify(recomputed.noFrameMsByClient), JSON.stringify({}), 'no retained 6a viewer is counted as not presenting');
     assertEqual(JSON.stringify(missingFromRecomputed), JSON.stringify([]), 'no stored publication key disappeared');
     const comparable = Object.fromEntries([...storedKeys].map((key) => [key, recomputed[key]]));
     assertEqual(JSON.stringify(comparable), JSON.stringify(stored), 'the stored publication deep-equals the recomputed stored-key projection');

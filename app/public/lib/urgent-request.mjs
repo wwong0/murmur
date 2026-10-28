@@ -65,8 +65,10 @@ export function requestIsUrgent({ path, positionMs, segments, runwayMs }) {
   return span.startMs <= positionMs || span.startMs < positionMs + runwayMs;
 }
 
-export function requestClass({ control, path, positionMs, segments, runwayMs, nearMs }) {
+export function requestClass({ control, path, positionMs, segments, runwayMs, nearMs, preparing = false }) {
   if (requestIsUrgent({ path, positionMs, segments, runwayMs })) return 'urgent';
+  if (control === CONTROL_PRODUCT && preparing === true && typeof path === 'string'
+    && segments?.get?.(path)) return 'urgent';
   if (control !== CONTROL_PRODUCT || typeof path !== 'string' || !Number.isFinite(positionMs)
     || !Number.isFinite(nearMs) || nearMs < 0) return null;
   const span = segments?.get?.(path);

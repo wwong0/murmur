@@ -30,7 +30,7 @@ import { createDriftLog } from './lib/frame-drift.mjs';
 import { createDriftController } from './lib/drift-controller.mjs';
 import { initializePlaybackTreatment } from './lib/playback-treatment.mjs';
 import { createFrameSampler } from './lib/frame-sampler.mjs';
-import { createPlaybackStart } from './lib/playback-start.mjs';
+import { createPlaybackStart, WAITING_PREPARING } from './lib/playback-start.mjs';
 import { createFarSkip } from './lib/far-skip.mjs';
 import { createFrameObserver, createStartTelemetry } from './lib/start-telemetry.mjs';
 import { createDiagnosticsOverlay } from './lib/diagnostics-overlay.mjs';
@@ -436,6 +436,7 @@ function urgentRequestFor(path) {
       segments: link?.segmentTimes() ?? null,
       runwayMs: READY_HELD_AHEAD_MS,
       nearMs,
+      preparing: startIsPreparing(),
     });
   } catch (error) {
     addNotice(`urgent request: ${error?.message ?? String(error)}`);
@@ -1321,6 +1322,9 @@ const start = createPlaybackStart({
   projectionMs: START_PROJECTION_MS,
   projectionMaxMs: START_PROJECTION_MAX_MS,
 });
+function startIsPreparing() {
+  return start.state().waiting === WAITING_PREPARING;
+}
 const farSkip = createFarSkip({ dwellMs: SKIP_DWELL_MS, repeatIntervalMs: SKIP_REPEAT_INTERVAL_MS });
 const STARTS_KEPT = 32;
 const starts = [];

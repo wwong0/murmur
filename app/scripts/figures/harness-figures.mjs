@@ -12,6 +12,7 @@ import { aheadForGood, doubleStalls } from './ahead-for-good.mjs';
 import { riseRecovery } from './rise-recovery.mjs';
 import { settledDrift } from './settled-drift.mjs';
 import { removesMember } from '../harness/roster-kinds.mjs';
+import { notPresenting } from '../harness/not-presenting.mjs';
 
 export const PEER_FRACTION_ABS_MAX = 0.02;
 
@@ -283,6 +284,25 @@ function clientFigures(tag, client, origin, window, content, receipt, { bytes = 
       result.realtimeFactorFromFrameQualityByClient = frames / (fps * seconds);
     }
   }
+  const presentation = notPresenting(client.polls, window);
+  if (presentation.counted) {
+    const first = records[0];
+    const last = records.at(-1);
+    const denominator = window.endMs - first?.displaySharedMs;
+    result.realtimeFactorByClient = records.length >= 2 && finite(first?.mediaMs) && finite(last?.mediaMs)
+      && finite(denominator) && denominator > 0
+      ? (last.mediaMs - first.mediaMs) / denominator
+      : 0;
+    const fps = content?.frameRate;
+    const frames = qualityCounter(polls, 'totalVideoFrames');
+    const seconds = window && finite(window.startMs) && finite(window.endMs)
+      ? (window.endMs - window.startMs) / 1000
+      : undefined;
+    if (finite(fps) && fps > 0 && finite(frames) && finite(seconds) && seconds > 0) {
+      result.realtimeFactorFromFrameQualityByClient = frames / (fps * seconds);
+    }
+    result.noFrameMsByClient = presentation.noFrameMs;
+  }
   const stalls = stallCount(polls);
   if (finite(stalls)) result.stallCountByClient = stalls;
   const presented = presentedFrames(records);
@@ -446,6 +466,7 @@ export function computeFigures(input = {}) {
     abortedQueuedResidualBytesByClient: {},
     realtimeFactorByClient: {},
     realtimeFactorFromFrameQualityByClient: {},
+    noFrameMsByClient: {},
     stallCountByClient: {},
     droppedFrameFractionByClient: {},
     presentedFramesByClient: {},
@@ -511,6 +532,7 @@ export function computeFigures(input = {}) {
 
 const PEER_AUXILIARY_FIELDS = [
   'realtimeFactorByClient', 'realtimeFactorFromFrameQualityByClient', 'stallCountByClient',
+  'noFrameMsByClient',
   'droppedFrameFractionByClient', 'presentedFramesByClient', 'coverageRatioByClient',
   'evaluationSkipsByClient', 'pollIntervalMsP50', 'pollIntervalMsP95', 'pollIntervalMsMax',
   'clockBestDelayMsP50ByClient', 'clockBestDelayMsP95ByClient', 'clockBestDelayMsP99ByClient',

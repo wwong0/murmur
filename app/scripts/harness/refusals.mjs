@@ -5,6 +5,7 @@ import { armFor, REFUSAL_SCOPE } from './arms.mjs';
 import { appliedSeekEvidence, appliedWithoutRestart } from '../figures/seek-evidence.mjs';
 import { scheduleRefusals } from './capacity-schedule.mjs';
 import { removesMember } from './roster-kinds.mjs';
+import { notPresenting, STALL_COUNTED_CONTEXT_FIELDS, STALL_COUNTED_REASONS } from './not-presenting.mjs';
 
 export const REFUSAL_REASONS = Object.freeze([
   'client-never-began-playback',
@@ -76,6 +77,34 @@ function inWindow(records, window) {
 
 function addReason(reasons, reason, scope, detail = {}) {
   reasons.push({ reason, scope: [...scope], ...detail });
+}
+
+function countedReasonNamesTag(entry, tag) {
+  return entry.tag === tag || (typeof entry.field === 'string' && entry.field.endsWith(`[${tag}]`));
+}
+
+function moveCountedReasons(reasons, tag) {
+  const moved = [];
+  const kept = [];
+  for (const entry of reasons) {
+    const stallReason = STALL_COUNTED_REASONS.includes(entry.reason) && countedReasonNamesTag(entry, tag);
+    const contextReason = STALL_COUNTED_CONTEXT_FIELDS.some((field) =>
+      entry.reason === `required-context-absent:${field}[${tag}]`);
+    if (stallReason || contextReason) moved.push(entry);
+    else kept.push(entry);
+  }
+  reasons.splice(0, reasons.length, ...kept);
+  return moved;
+}
+
+function countedRealtime(records, window) {
+  if (records.length < 2) return 0;
+  const first = records[0];
+  const last = records.at(-1);
+  const denominator = window.endMs - first.displaySharedMs;
+  return finite(first.mediaMs) && finite(last.mediaMs) && finite(denominator) && denominator > 0
+    ? (last.mediaMs - first.mediaMs) / denominator
+    : 0;
 }
 
 export function summarizeRefusalReasons(reasons = []) {
@@ -242,6 +271,7 @@ export function evaluateRefusals(input = {}) {
   const coverage = {};
   const dropped = {};
   const realtimeFactorByClient = {};
+  const noFrameMsByClient = {};
 
   rosterEventRefusal(input, (reason, scope, detail) => addReason(reasons, reason, scope, detail));
 
@@ -409,6 +439,15 @@ export function evaluateRefusals(input = {}) {
 
   const arm = armFor(condition);
   arm.refusals(input, (reason, scope, detail) => addReason(reasons, reason, scope, detail));
+  const countedAsStall = [];
+  for (const tag of tags) {
+    const presentation = notPresenting(clientPolls(clients[tag] ?? {}), window);
+    if (!presentation.counted) continue;
+    const moved = moveCountedReasons(reasons, tag);
+    countedAsStall.push({ tag, noFrameMs: presentation.noFrameMs, fromMs: presentation.fromMs, reasons: moved });
+    noFrameMsByClient[tag] = presentation.noFrameMs;
+    realtimeFactorByClient[tag] = countedRealtime(inWindow(clientRecords(clients[tag] ?? {}), window), window);
+  }
   const excused = excusedByRosterEvent(condition, input.rosterEvent, reasons, clients);
 
   const summary = summarizeRefusalReasons(reasons);
@@ -423,7 +462,8 @@ export function evaluateRefusals(input = {}) {
     duplicateReasons: summary.duplicateReasons,
     coverage,
     dropped,
-    published: { realtimeFactorByClient },
+    countedAsStall,
+    published: { realtimeFactorByClient, noFrameMsByClient },
     unattributedDelta: unattributed,
     figures: summary.figures,
   };

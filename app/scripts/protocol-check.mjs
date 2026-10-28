@@ -39,6 +39,7 @@ import harnessDriftPlotSuite from './check/suites/harness-drift-plot.mjs';
 import harnessByteCohortSuite from './check/suites/harness-byte-cohort.mjs';
 import receiptCohortSuite from './check/suites/receipt-cohort.mjs';
 import harnessRefusalsSuite from './check/suites/harness-refusals.mjs';
+import notPresentingSuite from './check/suites/not-presenting.mjs';
 import harnessArmsSuite from './check/suites/harness-arms.mjs';
 import harnessImagesSuite from './check/suites/harness-images.mjs';
 import harnessArmRecomputeSuite from './check/suites/harness-arm-recompute.mjs';
@@ -118,6 +119,7 @@ import sendPaceSuite from './check/suites/send-pace.mjs';
 import hostPaceSuite from './check/suites/host-pace.mjs';
 import sendArbiterSuite from './check/suites/send-arbiter.mjs';
 import urgentRequestSuite from './check/suites/urgent-request.mjs';
+import urgentPreparingSuite from './check/suites/urgent-preparing.mjs';
 import edgePositionSuite from './check/suites/edge-position.mjs';
 import wireEstimateSuite from './check/suites/wire-estimate.mjs';
 import climbRestartSuite from './check/suites/climb-restart.mjs';
@@ -322,6 +324,7 @@ for (const suite of [
   harnessByteCohortSuite,
   receiptCohortSuite,
   harnessRefusalsSuite,
+  notPresentingSuite,
   harnessArmsSuite,
   harnessImagesSuite,
   harnessArmRecomputeSuite,
@@ -401,6 +404,7 @@ for (const suite of [
   hostPaceSuite,
   sendArbiterSuite,
   urgentRequestSuite,
+  urgentPreparingSuite,
   edgePositionSuite,
   wireEstimateSuite,
   climbRestartSuite,
