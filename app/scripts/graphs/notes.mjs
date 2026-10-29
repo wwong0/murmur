@@ -12,7 +12,7 @@ export function alsoTested(inputs) {
       fewer = pairs.filter((p) => p.product[key].stalls < p.control[key].stalls).length;
     return `${key === 'start' ? 'Starting' : 'Jumping'}: the newer way froze for a middle ${
       newer.toFixed(1)
-    } seconds, the earlier way ${earlier.toFixed(1)} seconds; fewer in ${
+    } seconds in total, added across viewers, the earlier way ${earlier.toFixed(1)} seconds; fewer in ${
       countText(fewer, pairs.length, 'pairs')
     }.`;
   });

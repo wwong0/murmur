@@ -6,8 +6,7 @@ export const REASONS = {
   'status:refused': "the test's own checks refused it",
   'status:running': 'the test did not finish recording',
   'exit-unobserved': 'the test was stopped by hand',
-  'reader:byte-inventory':
-    'the byte count could not be checked against viewer records (a test without sharing has none)',
+  'reader:byte-inventory': "the byte count could not be checked against the viewers' records",
   'reader:lab-drift': 'the timing records could not be read',
   'reader:gap-count': 'the timing records could not be read',
   'one-viewing-unavailable': "a viewer stopped playing, so there is no fair 'one viewing' to divide by",
@@ -22,18 +21,20 @@ export function reasonText(entry, value) {
   if (mark.filled) {
     return 'completed';
   }
-  const reasons = value == null && entry.figures?.hostUploadMultiplierRefusal?.reason
-    ? [entry.figures.hostUploadMultiplierRefusal.reason]
-    : entry.reasons?.length
-    ? entry.reasons
-    : [entry.status ? `status:${entry.status}` : mark.reason];
-  return reasons.map((reason) => {
+  // An invalid run's own reasons lead; a refused multiplier must not hide them (13g D1 F1).
+  const refusal = value == null ? entry.figures?.hostUploadMultiplierRefusal?.reason : null;
+  const own = !entry.valid && entry.reasons?.length ? entry.reasons : [];
+  const reasons = [...own, ...(refusal ? [refusal] : [])];
+  if (!reasons.length) {
+    reasons.push(entry.reasons?.length ? entry.reasons : entry.status ? `status:${entry.status}` : mark.reason);
+  }
+  return [...new Set(reasons.flat().map((reason) => {
     const code = String(reason).split(':', 1 + 1).join(':');
     return REASONS[code] ??
       (code.startsWith('refusal:')
         ? "the test's own checks refused it"
         : `excluded by an automatic check (${code})`);
-  }).join('; ');
+  }))].join('; ');
 }
 export function conditionWords(regime) {
   const values = regime.lossDelay;
@@ -109,7 +110,7 @@ export function setupLines(regimes) {
     );
     const trip = trips.length ? `${Math.min(...trips).toFixed(1)}–${Math.max(...trips).toFixed(1)} ms` : 'unrecorded';
     const count = rows.filter((row) => row.label === label).length;
-    lines.push(`${label || 'This setup'}: ${count} tests; the round trip between browsers was ${trip}.`);
+    lines.push(`${label || 'This setup'}: ${count} tests; the round trip from each viewer to the room server was ${trip}.`);
   }
   return lines;
 }

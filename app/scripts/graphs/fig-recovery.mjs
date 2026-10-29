@@ -108,7 +108,8 @@ export const notes = (d) => {
   return `**In one sentence.** ${takeaway(d)}\n\n` +
     '**What the chart shows.** When viewers are about to run out, the current version has one viewer ' +
     'fetch each upcoming piece from the sharer and the others take it from that viewer. ' +
-    'The earlier version let every viewer fetch it from the sharer itself.\n\n' +
+    'The earlier version let every viewer fetch it from the sharer itself. ' +
+    'Both ran the same build of this app; only this rule differed.\n\n' +
     `**How it was tested.** ${setupLines(d.regimes).join(' ')} ` +
     'The tests ran side by side the same night, in alternating order.\n\n' +
     '**Every test.**\n\n| Test | Freezes per viewer | Status |\n| --- | --- | --- |\n' +

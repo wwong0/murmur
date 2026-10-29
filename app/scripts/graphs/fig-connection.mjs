@@ -15,7 +15,7 @@ import {
   table,
   text,
 } from './public-common.mjs';
-import { driftLabel } from './rules.mjs';
+import { driftLabel, ONE_REFRESH_TOLERANCE_MS } from './rules.mjs';
 import { refLine, swatch } from './svg.mjs';
 export const ID = 'connection', KIND = 'engineering', TITLE = "How full does the sharer's connection get?";
 export function data(inputs) {
@@ -48,7 +48,9 @@ export function data(inputs) {
   if (
     !bars.every((b) => Number.isFinite(b.value)) ||
     !(bars[2].value < bars[1].value && bars[1].value < 1 && bars[0].value >= 1 &&
-      [...appRuns, ...defaultRuns].every((r) => r.stalls === 0))
+      [...appRuns, ...defaultRuns].every((r) =>
+        r.stalls === 0 && Number.isFinite(r.p99) && r.p99 <= r.floor + ONE_REFRESH_TOLERANCE_MS
+      ))
   ) {
     throw new Error('takeaway-unsupported:connection');
   }

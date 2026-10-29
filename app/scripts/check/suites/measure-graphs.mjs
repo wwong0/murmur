@@ -126,6 +126,16 @@ export default async function measureGraphsSuite() {
       'excluded by an automatic check (x)',
       'unknown reason',
     );
+    // A refused run keeps its own reason beside the multiplier's, each phrase once (13g D1 F1).
+    assertEqual(
+      reasonText({
+        valid: false,
+        reasons: ['status:refused', 'refusal:a', 'refusal:b'],
+        figures: { hostUploadMultiplierRefusal: { reason: 'one-viewing-unavailable' } },
+      }, null),
+      "the test's own checks refused it; a viewer stopped playing, so there is no fair 'one viewing' to divide by",
+      'refused run with a refused multiplier',
+    );
     const v = normaliseVerdicts({ runs: [{ directory: 'a' }, { directory: 'b' }] }, {
       a: { figures: { x: 1 } },
     });
@@ -288,6 +298,11 @@ export default async function measureGraphsSuite() {
     );
     throws(
       () => connection.data(fixture(rows.map((r) => r.condition === '13d-a-five' ? { ...r, uplink: 1 } : r))),
+      'takeaway-unsupported:connection',
+    );
+    // "in-step": 30 ms is more than one refresh past the 16.7 ms floor (13g D1 F4).
+    throws(
+      () => connection.data(fixture(rows.map((r, i) => i === 0 ? { ...r, readings: lab(30) } : r))),
       'takeaway-unsupported:connection',
     );
     const pairRows = [
