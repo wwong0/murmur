@@ -1,7 +1,7 @@
 const CHOOSING = 'The host is choosing a video';
 const PREPARING = 'The host is preparing the video';
 const ABSENT = 'The host has left';
-const ABSENT_NOTE = "The room pauses until they're back";
+const ABSENT_NOTE = "The room is paused until they're back";
 
 // What the viewer's card says for the host's status, or null where there is nothing to wait for
 // (design.md D16). These are not `#host-preparing`'s texts: that line keeps its lowercase words
@@ -13,4 +13,24 @@ export function viewerWaitCard({ state, fraction } = {}) {
   if (state !== 'preparing') return null;
   const percent = Number.isFinite(fraction) ? Math.max(0, Math.min(100, Math.floor(fraction * 100))) : null;
   return { state, title: percent === null ? PREPARING : `${PREPARING} · ${percent}%`, note: null, percent };
+}
+
+// The replicated playing state selects the visible layer (design.md D1, D2).
+export function viewerLayer(input) {
+  const { hostStatus, hostSide, ended, connection, playing, graceLeftS } = input ?? {};
+  const status = hostStatus && typeof hostStatus === 'object' ? hostStatus : {};
+  const absentPlaying = status.state === 'absent' && playing === true;
+  const card = hostSide || ended || absentPlaying ? null : viewerWaitCard(status);
+  let pill = null;
+  if (absentPlaying && !hostSide && !ended && connection !== 'reconnecting') {
+    const seconds = Number.isFinite(graceLeftS) ? Math.max(0, Math.ceil(graceLeftS)) : null;
+    const timing = seconds === null ? 'soon' : seconds === 0 ? 'now' : `in ${seconds} s`;
+    pill = `${ABSENT} · pausing ${timing}`;
+  }
+  return { card, pill };
+}
+
+export function graceSecondsLeft(endsAtSharedMs, nowSharedMs) {
+  if (!Number.isFinite(endsAtSharedMs) || !Number.isFinite(nowSharedMs)) return null;
+  return Math.max(0, Math.ceil((endsAtSharedMs - nowSharedMs) / 1000));
 }

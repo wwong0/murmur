@@ -1,20 +1,20 @@
 import { RotateCcw } from 'lucide-react';
-import { viewerWaitCard } from '../lib/viewer-wait-card.mjs';
+import { viewerLayer } from '../lib/viewer-wait-card.mjs';
 import { inPlayer } from './in-player.js';
 import { Button } from './ui.jsx';
 import { useView } from './use-view.js';
 
-// The viewer's card over the video while the host has nothing to play (design.md D16). A new
-// element: `#host-preparing` keeps its own texts behind Stats. The layer takes no pointer event
-// and sits under the bar, so every control stays visible and disabled by the engine; its bottom
-// padding keeps the words off the bar. The host's own page shows the file card instead, and a
-// title that has ended shows the end.
+// The viewer's card over the video while the host has nothing to play (12b design.md D16), and,
+// for an absent host, only once the room is not playing (13h design.md D2). `#host-preparing`
+// keeps its own texts behind Stats. The layer takes no pointer event and sits under the bar, so
+// every control stays visible and disabled by the engine.
 export function ViewerWait({ view }) {
   const hostStatus = useView(view, (snapshot) => snapshot.hostStatus);
   const hostSide = useView(view, (snapshot) => snapshot.hostSide);
   const ended = useView(view, (snapshot) => snapshot.ended);
-  const card = viewerWaitCard(hostStatus);
-  if (hostSide || ended || card === null) return null;
+  const playing = useView(view, (snapshot) => snapshot.roomPlaying);
+  const card = viewerLayer({ hostStatus, hostSide, ended, playing }).card;
+  if (card === null) return null;
   return inPlayer(<div className="wait-layer" data-testid="viewer-wait" data-state={card.state} role="status">
     <div className="wait-body">
       {card.state === 'choosing' ? <div className="wait-dots" aria-hidden="true"><span /><span /><span /></div> : null}
@@ -30,6 +30,22 @@ export function ViewerWait({ view }) {
       ><div className="file-progress-fill" /></div> : null}
       {card.note ? <p className="wait-note">{card.note}</p> : null}
     </div>
+  </div>);
+}
+
+// The countdown shares the reconnecting pill's position (design.md D1).
+export function HostLeftPill({ view }) {
+  const hostStatus = useView(view, (snapshot) => snapshot.hostStatus);
+  const hostSide = useView(view, (snapshot) => snapshot.hostSide);
+  const ended = useView(view, (snapshot) => snapshot.ended);
+  const connection = useView(view, (snapshot) => snapshot.connection);
+  const playing = useView(view, (snapshot) => snapshot.roomPlaying);
+  const graceLeftS = useView(view, (snapshot) => snapshot.graceLeftS);
+  const pill = viewerLayer({ hostStatus, hostSide, ended, connection, playing, graceLeftS }).pill;
+  if (pill === null) return null;
+  return inPlayer(<div className="reconnect-pill" data-testid="host-left" role="status">
+    <span className="reconnect-dot" aria-hidden="true" />
+    <span>{pill}</span>
   </div>);
 }
 

@@ -13,7 +13,7 @@ import { namePromptDue } from '../lib/name-prompt.mjs';
 import { flipKeyframes } from '../lib/theatre-flip.mjs';
 import { PlayerBar, PlayerTop } from './player-bar.jsx';
 import { inPlayer } from './in-player.js';
-import { EndedCard, ReconnectPill, ViewerWait } from './player-states.jsx';
+import { EndedCard, HostLeftPill, ReconnectPill, ViewerWait } from './player-states.jsx';
 import { Front } from './front.jsx';
 import { Button, DialogPanel, IconButton, PopoverPanel, SegmentedControl, TextField } from './ui.jsx';
 import { useView } from './use-view.js';
@@ -530,6 +530,7 @@ export function RoomScreens({ view, actions }) {
     <ViewerWait view={view} />
     <EndedCard view={view} actions={actions} />
     <ReconnectPill view={view} />
+    <HostLeftPill view={view} />
     <PlayerBar view={view} actions={actions} theatre={theatre} theatreShown={wide} onTheatre={toggleTheatre} />
     <RoomActions view={view} actions={actions} />
     <StatsPanel view={view} />

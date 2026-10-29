@@ -26,6 +26,7 @@ import { createClockSync, websocketProbe } from './lib/clock-sync.mjs';
 import { createRoomTimeline } from './lib/room-timeline.mjs';
 import { offsetView, stateIdentity } from './lib/playback-state.mjs';
 import { createHostGrace } from './lib/host-grace.mjs';
+import { graceSecondsLeft } from './lib/viewer-wait-card.mjs';
 import { createEndLatch, endInstant, endPauseMs, isEnded } from './lib/title-end.mjs';
 import { createDriftLog } from './lib/frame-drift.mjs';
 import { createDriftController } from './lib/drift-controller.mjs';
@@ -225,6 +226,10 @@ const INITIAL_VIEW = {
   },
   // Which of `#play`/`#pause` the bar shows (design.md D8); both stay mounted either way.
   playSlot: 'play',
+  // The card follows replicated playing state (design.md D1).
+  roomPlaying: false,
+  // The pill waits for a known shared grace end (design.md D1).
+  graceLeftS: null,
   roster: [],
   people: [],
   selfClientId: null,
@@ -1111,6 +1116,8 @@ function renderControls() {
   view.set('controlMode', state?.controlMode === 'host' ? 'host' : 'open');
   const playSlot = state?.current.playing === true ? 'pause' : 'play';
   view.set('playSlot', playSlot);
+  view.set('roomPlaying', state?.current.playing === true);
+  view.set('graceLeftS', graceSecondsLeft(hostGrace?.snapshot().endsAtSharedMs ?? null, clockSync.sharedNow()));
   if (video?.dataset) video.dataset.clickable = String(clickActs(controls, playSlot));
 }
 
