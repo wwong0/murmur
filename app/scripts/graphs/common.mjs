@@ -23,6 +23,3 @@ export function sum(values) {
   const v = Object.values(values ?? {});
   return v.length && v.every(Number.isFinite) ? v.reduce((a, b) => a + b, 0) : null;
 }
-export const lowerEdge = (label) => {
-  return Number(/^\[(\d+(?:\.\d+)?),/.exec(label)?.[1]);
-};

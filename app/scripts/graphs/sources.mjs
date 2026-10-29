@@ -19,7 +19,6 @@ export const NIGHTS = {
   },
 };
 export const CLASSES_13F = { '13f-r0-five': 'healthy', '13f-w-long': 'healthy' };
-export const G4_ARMS = ['13d-j-join', '13d-j-cut', '13d-e-product', '13e-e10-product'];
 export const W13F = '13f-w-long-2026-10-28T13-23-36.241Z';
 export const SHARING = { without: ['13d-b-nop2p-20', '13e-b2-nop2p-20'], with: ['13d-b-product-20'] };
 export const NO_SHARING_10 = ['13d-b-nop2p-10', '13e-b2-nop2p-10'];

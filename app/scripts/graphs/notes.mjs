@@ -1,7 +1,6 @@
 import { MAX_RATE_DEVIATION } from '../../public/lib/drift-controller.mjs';
 import { median, select } from './public-common.mjs';
 import { countText } from './rules.mjs';
-import { g4Data } from './g4-events.mjs';
 export function alsoTested(inputs) {
   const study = inputs.nights['13d'].verdicts.tests.E,
     pairs = study.pairs.filter((p) => p.valid),
@@ -16,7 +15,13 @@ export function alsoTested(inputs) {
       countText(fewer, pairs.length, 'pairs')
     }.`;
   });
-  const cuts = g4Data(inputs).panels.cuts.map((r) => countText(r.stalled, r.of, 'froze'));
+  const cuts = select(inputs, '13d-j-cut').map((row) => {
+    const stalls = Object.values(row.readings['event-clocks']?.supplierCut?.stalls ?? {});
+    const stalled = stalls.length && stalls.every((s) => Number.isFinite(s.count))
+      ? stalls.filter((s) => s.count > 0).length
+      : null;
+    return countText(stalled, stalls.length || null, 'froze');
+  });
   const catches = select(inputs, ['13e-k-half', '13e-k-two']).map((r) => {
     const v = r.readings['catch-up'];
     return {

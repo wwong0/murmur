@@ -11,11 +11,11 @@ import {
   run,
   select,
   setupLines,
+  statusOf,
   text,
   named,
 } from './public-common.mjs';
 import { refLine } from './svg.mjs';
-import { reasonText } from './plain.mjs';
 export const ID = 'weaker', KIND = 'supporting', TITLE = 'Does sharing still work on weaker connections?';
 export function data(inputs) {
   const mainRows = select(inputs, WITH_SHARING_10),
@@ -38,10 +38,7 @@ export function data(inputs) {
     const runs = rows.map((row) => ({
       ...run(row, row.entry.figures?.peerFractionAggregate, label),
       upload: row.entry.figures?.hostUploadMultiplier ?? null,
-      uploadReason: reasonText(
-        { ...row.entry, status: row.ledger.outcome },
-        row.entry.figures?.hostUploadMultiplier ?? null,
-      ),
+      uploadReason: statusOf(row, row.entry.figures?.hostUploadMultiplier ?? null),
     }));
     return { label, value: median(runs.map((v) => v.value)), runs, rows };
   });
@@ -54,10 +51,7 @@ export function data(inputs) {
   const extra = select(inputs, WEAKER_NOTES_ONLY).map((row) => ({
     ...run(row, row.entry.figures?.peerFractionAggregate, 'every viewer'),
     upload: row.entry.figures?.hostUploadMultiplier ?? null,
-    uploadReason: reasonText(
-      { ...row.entry, status: row.ledger.outcome },
-      row.entry.figures?.hostUploadMultiplier ?? null,
-    ),
+    uploadReason: statusOf(row, row.entry.figures?.hostUploadMultiplier ?? null),
   }));
   return {
     bars: bars.map(({ rows: _, ...b }) => b),

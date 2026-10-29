@@ -1,7 +1,3 @@
-import { median } from '../measure/stats.mjs';
-
-// Changing these bars changes the criteria in docs/PROPOSAL.md §6.
-export const PROPOSAL_TARGETS = { multiplierAt: { 5: 1.5, 10: 2 }, medianMs: 40, p99Ms: 100, joinMs: 2000 };
 // Readings step by 0.1 ms; a worst p99 within 1 ms rounds to the floor's millisecond or the next.
 export const ONE_REFRESH_TOLERANCE_MS = 1;
 export const driftLabel = (value, floor) => {
@@ -15,9 +11,6 @@ export const pct = (value) => {
 };
 export const countText = (k, m, what) => {
   return `${k} of ${m} ${what}`;
-};
-export const armSummary = (values) => {
-  return ({ n: values.length, median: median(values.filter(Number.isFinite)) });
 };
 export function runMark(entry, value) {
   const figures = entry.figures ?? {};

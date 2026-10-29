@@ -18,12 +18,23 @@ import { conditionWords } from './plain.mjs';
 import { driftLabel, driftShown, ONE_REFRESH_TOLERANCE_MS } from './rules.mjs';
 import { refLine } from './svg.mjs';
 import { min } from './common.mjs';
-import { g5Data } from './g5-gap.mjs';
+import { records } from './common.mjs';
+function playingWeighted(viewers, field) {
+  if (!viewers.length || viewers.some((v) => !Number.isFinite(v.playingMs) || !Number.isFinite(v[field]))) {
+    return null;
+  }
+  const total = viewers.reduce((sum, v) => sum + v.playingMs, 0);
+  return total > 0 ? viewers.reduce((sum, v) => sum + v[field] * v.playingMs, 0) / total : null;
+}
 export const ID = 'sync', KIND = 'headline', TITLE = 'How closely in step do the screens stay?';
 export function data(inputs) {
-  const gaps = new Map(
-    g5Data(inputs, { with8b: true }).panels.flatMap((p) => p.runs).map((r) => [r.directory, r]),
-  );
+  const gaps = new Map(records(inputs).filter((row) => row.readings['gap-count']).map((row) => {
+    const viewers = Object.values(row.readings['gap-count'].viewers ?? {});
+    return [row.entry.directory, {
+      above40PerHour: playingWeighted(viewers, 'secondsAbove40PerHour'),
+      above100PerHour: playingWeighted(viewers, 'secondsAbove100PerHour'),
+    }];
+  }));
   const bars = SYNC.filter(({ condition }) => select(inputs, condition).length).map(
     ({ condition, oneRefresh }) => {
       const rows = select(inputs, condition), label = conditionWords(rows[0].regime);

@@ -6,21 +6,23 @@ import { pct } from './rules.mjs';
 import { column, document, gridX, gridY, hbar, linearScale, STYLE as C, text } from './svg.mjs';
 
 export { C, column, document, gridX, gridY, hbar, linearScale, median, pct, setupLines, text };
+const byLedger = (inputs, directoryOf) => {
+  const order = Object.values(inputs.nights).flatMap((night) => night.ledger.runs.map((entry) => entry.directory));
+  return (a, b) => order.indexOf(directoryOf(a)) - order.indexOf(directoryOf(b));
+};
 export function select(inputs, conditions) {
   const wanted = Array.isArray(conditions) ? conditions : [conditions];
   const rows = records(inputs).filter((row) => wanted.includes(row.entry.condition));
-  const order = Object.values(inputs.nights).flatMap((night) =>
-    night.ledger.runs.map((entry) => entry.directory)
-  );
-  rows.sort((a, b) => order.indexOf(a.entry.directory) - order.indexOf(b.entry.directory));
+  rows.sort(byLedger(inputs, (row) => row.entry.directory));
   return rows.map((row) => ({ ...row, regime: regimeOf(row.run, row.ledger, row.entry.figures) }));
 }
+export const statusOf = (row, value) => reasonText({ ...row.entry, status: row.ledger.outcome }, value);
 export function run(row, value, label) {
   return {
     directory: row.entry.directory,
     value: value ?? null,
     valid: row.entry.valid,
-    status: reasonText({ ...row.entry, status: row.ledger.outcome }, value),
+    status: statusOf(row, value),
     stalls: sum(row.entry.figures?.stallCountByClient),
     label,
     commit: row.ledger.commit ?? 'unrecorded',
@@ -28,10 +30,7 @@ export function run(row, value, label) {
   };
 }
 export function ledgerOrder(inputs, runs) {
-  const order = Object.values(inputs.nights).flatMap((night) =>
-    night.ledger.runs.map((entry) => entry.directory)
-  );
-  return [...runs].sort((a, b) => order.indexOf(a.directory) - order.indexOf(b.directory));
+  return [...runs].sort(byLedger(inputs, (run) => run.directory));
 }
 export function same(rows, fields, id) {
   if (fields.some((field) => rows.some((row) => row.regime[field] !== rows[0].regime[field]))) {

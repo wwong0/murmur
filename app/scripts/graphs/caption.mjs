@@ -27,25 +27,3 @@ export function regimeOf(run, ledgerEntry, figures) {
     durationMs: present(condition.runLengthMs), prefixMs: present(condition.excludedPrefixMs), windowMs: present(condition.measureWindowMs),
   };
 }
-export function captionLines(regimes, n, drift = false) {
-  const rows = regimes.map((item) => item.regime ? item : { arm: '', regime: item });
-  const keys = Object.keys(rows[0]?.regime ?? {});
-  // A field that differs prints one line per distinct value, naming the arms that share it. Ranges
-  // (the round trip) merge within an arm first, so an arm prints one range.
-  const arms = [...new Set(rows.map((row) => row.arm))];
-  const result = keys.flatMap((key) => {
-    const values = rows.map((row) => display(row.regime[key]));
-    if (values.every((value) => value === values[0])) return [`${key}: ${values[0]}`];
-    const byArm = new Map(arms.map((arm) => [arm, armValue(values.filter((value, index) => rows[index].arm === arm))]));
-    return [...new Set(byArm.values())].map((value) => `${key}: ${value} (${arms.filter((arm) => byArm.get(arm) === value).join(', ')})`);
-  });
-  result.push(`n = ${n} runs`);
-  if (drift) result.push('drift on reconstructed lab time');
-  return result;
-}
-function armValue(values) {
-  const ranges = values.map((value) => /^([\d.]+)–([\d.]+)$/.exec(value));
-  if (!ranges.every(Boolean)) return [...new Set(values)].join(' / ');
-  return `${Math.min(...ranges.map((m) => Number(m[1]))).toFixed(1)}–${Math.max(...ranges.map((m) => Number(m[2]))).toFixed(1)}`;
-}
-function display(value) { return Array.isArray(value) ? value.join(', ') : String(value); }

@@ -1,8 +1,7 @@
 import { HOUR } from './sources.mjs';
-import { C, document, gridY, linearScale, pct, run, select, setupLines, text } from './public-common.mjs';
+import { C, document, gridY, linearScale, pct, run, select, setupLines, statusOf, text } from './public-common.mjs';
 import { stackedColumn, swatch } from './svg.mjs';
 import { s1Data } from './s1-bytes.mjs';
-import { reasonText } from './plain.mjs';
 export const ID = 'hour', KIND = 'supporting', TITLE = 'Where does the video come from over an hour?';
 export function data(inputs) {
   const row = select(inputs, '13f-w-long').find((r) => r.entry.directory === HOUR),
@@ -18,10 +17,7 @@ export function data(inputs) {
     share: current.value,
     runs: [current],
     attempt: attempts.filter((r) => r.entry.directory !== HOUR).map((r) => run(r, null, 'earlier attempt')),
-    uploadReason: reasonText(
-      { ...row.entry, status: row.ledger.outcome },
-      row.entry.figures?.hostUploadMultiplier ?? null,
-    ),
+    uploadReason: statusOf(row, row.entry.figures?.hostUploadMultiplier ?? null),
     regimes: [{ label: 'hour-long test', regime: row.regime }],
   };
 }

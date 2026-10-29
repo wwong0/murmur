@@ -29,7 +29,7 @@ export function reasonText(entry, value) {
     reasons.push(entry.reasons?.length ? entry.reasons : entry.status ? `status:${entry.status}` : mark.reason);
   }
   return [...new Set(reasons.flat().map((reason) => {
-    const code = String(reason).split(':', 1 + 1).join(':');
+    const code = String(reason).split(':', 2).join(':');
     return REASONS[code] ??
       (code.startsWith('refusal:')
         ? "the test's own checks refused it"
@@ -50,16 +50,16 @@ export function conditionWords(regime) {
   }
   const [first] = parsed;
   if (
-    parsed.length === 1 + 1 && parsed.every((v) => v[1] === first[1] && v[1 + 1] === first[1 + 1]) &&
-    new Set(parsed.map((v) => v.at(-1))).size === 1 + 1 && parsed.some((v) => v.at(-1) === 'origin') &&
+    parsed.length === 2 && parsed.every((v) => v[1] === first[1] && v[2] === first[2]) &&
+    new Set(parsed.map((v) => v.at(-1))).size === 2 && parsed.some((v) => v.at(-1) === 'origin') &&
     parsed.some((v) => v.at(-1) === 'client')
   ) {
     return first[1] === 'loss'
-      ? `${first[1 + 1]} of data lost`
-      : `everyone ${first[1 + 1].replace('ms', ' ms')} delayed`;
+      ? `${first[2]} of data lost`
+      : `everyone ${first[2].replace('ms', ' ms')} delayed`;
   }
   if (parsed.length === 1 && first[1] === 'delay' && /^c\d+$/.test(first.at(-1))) {
-    return `one viewer ${first[1 + 1].replace('ms', ' ms')} farther away`;
+    return `one viewer ${first[2].replace('ms', ' ms')} farther away`;
   }
   throw new Error('unknown-netem');
 }
