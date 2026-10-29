@@ -309,6 +309,7 @@ import measureNight2ConditionsSuite from './check/suites/measure-night2-conditio
 import measureNightVerdictsSuite from './check/suites/measure-night-verdicts.mjs';
 import measureNight2VerdictsSuite from './check/suites/measure-night2-verdicts.mjs';
 import measureMemoryLimitVerdictsSuite from './check/suites/measure-memory-limit-verdicts.mjs';
+import measureGraphsSuite from './check/suites/measure-graphs.mjs';
 
 console.log(describeFixtures());
 
@@ -597,6 +598,7 @@ for (const suite of [
   measureNightVerdictsSuite,
   measureNight2VerdictsSuite,
   measureMemoryLimitVerdictsSuite,
+  measureGraphsSuite,
 ]) {
   await suite();
 }
