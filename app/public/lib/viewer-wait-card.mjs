@@ -19,15 +19,13 @@ export function viewerWaitCard({ state, fraction } = {}) {
 export function viewerLayer(input) {
   const { hostStatus, hostSide, ended, connection, playing, graceLeftS } = input ?? {};
   const status = hostStatus && typeof hostStatus === 'object' ? hostStatus : {};
-  const absentPlaying = status.state === 'absent' && playing === true;
-  const card = hostSide || ended || absentPlaying ? null : viewerWaitCard(status);
-  let pill = null;
-  if (absentPlaying && !hostSide && !ended && connection !== 'reconnecting') {
-    const seconds = Number.isFinite(graceLeftS) ? Math.max(0, Math.ceil(graceLeftS)) : null;
-    const timing = seconds === null ? 'soon' : seconds === 0 ? 'now' : `in ${seconds} s`;
-    pill = `${ABSENT} · pausing ${timing}`;
-  }
-  return { card, pill };
+  if (hostSide || ended) return { card: null, pill: null };
+  if (status.state !== 'absent' || playing !== true) return { card: viewerWaitCard(status), pill: null };
+  // Reconnecting, the "Reconnecting…" pill holds the place (design.md D1).
+  if (connection === 'reconnecting') return { card: null, pill: null };
+  const seconds = Number.isFinite(graceLeftS) ? Math.max(0, Math.ceil(graceLeftS)) : null;
+  const timing = seconds === null ? 'soon' : seconds === 0 ? 'now' : `in ${seconds} s`;
+  return { card: null, pill: `${ABSENT} · pausing ${timing}` };
 }
 
 export function graceSecondsLeft(endsAtSharedMs, nowSharedMs) {
