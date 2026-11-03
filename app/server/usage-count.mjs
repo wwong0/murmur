@@ -1,4 +1,7 @@
 import fs from 'node:fs';
+import { createPlaybackStateHolder } from '../public/lib/playback-state.mjs';
+import { MAX_FUTURE_MS } from '../public/lib/playback-leads.mjs';
+import { TYPE_PLAYBACK_OPERATION } from '../public/lib/envelope.mjs';
 
 export const USAGE_KEYS = Object.freeze(['since', 'roomsOpened', 'visits', 'largestRoom', 'watchedMs']);
 
@@ -64,7 +67,10 @@ export function createUsageCount({ file, now, log, flushMs, keepMs }) {
     let playing = false;
     let lastAt = now();
     let opened = prior !== undefined;
+    // The room's replicated playback state, applied as the pages apply it, so the count knows when it plays (D5).
+    const holder = createPlaybackStateHolder({ maxFutureMs: MAX_FUTURE_MS });
     const tracker = {
+      holder,
       accrue() {
         const t = now();
         if (playing && members > 0 && t > lastAt) totals.watchedMs += Math.round((t - lastAt) * members);
@@ -79,7 +85,15 @@ export function createUsageCount({ file, now, log, flushMs, keepMs }) {
         write();
       },
       depart(size) { tracker.accrue(); members = size; },
-      setPlaying(flag) { tracker.accrue(); playing = flag === true; },
+      relayed(env, roster) {
+        if (env.type !== TYPE_PLAYBACK_OPERATION) return;
+        try {
+          if (!holder.state && !holder.awaitingCreation) holder.expectCreation();
+          holder.apply(env, roster);
+          tracker.accrue();
+          playing = holder.state?.current.playing === true;
+        } catch { log('usage: playback apply failed'); }
+      },
       end() {
         tracker.accrue(); members = 0; live.delete(tracker);
         if (!opened) return;

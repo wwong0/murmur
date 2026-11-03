@@ -26,8 +26,6 @@ import { WebSocketServer } from 'ws';
 import { classifyPath, countDelivered, createCounters } from './byte-accounting.mjs';
 import { RELAY_ENV_NAMES, createRelayCredentials, relaySettings } from './relay-credentials.mjs';
 import { createUsageCount, usageLine } from './usage-count.mjs';
-import { createPlaybackStateHolder } from '../public/lib/playback-state.mjs';
-import { MAX_FUTURE_MS } from '../public/lib/playback-leads.mjs';
 
 import {
   PROTOCOL_VERSION,
@@ -39,7 +37,6 @@ import {
   TYPE_LEAVE,
   TYPE_ECHO,
   TYPE_CHAT,
-  TYPE_PLAYBACK_OPERATION,
   SERVER_ONLY_TYPES,
   relayEnvelope,
   validateClientEnvelope,
@@ -377,7 +374,7 @@ export function startRoomServer(opts = {}) {
     let room = rooms.get(name);
     if (!room) {
       room = { name, seq: 0, members: new Map() };
-      if (usage) room.usage = { track: usage.room(name), holder: createPlaybackStateHolder({ maxFutureMs: MAX_FUTURE_MS }) };
+      if (usage) room.usage = usage.room(name);
       rooms.set(name, room);
       log(`room created: ${name}`);
     }
@@ -387,7 +384,7 @@ export function startRoomServer(opts = {}) {
   /** Rooms are reaped when the last member goes, so the map cannot grow without bound. */
   function reapIfEmpty(room) {
     if (room.members.size === 0) {
-      room.usage?.track.end();
+      room.usage?.end();
       rooms.delete(room.name);
       log(`room reaped: ${room.name}`);
     }
@@ -826,14 +823,7 @@ export function startRoomServer(opts = {}) {
         recv,
       });
       broadcast(room, out);
-      if (room.usage && out.type === TYPE_PLAYBACK_OPERATION) {
-        try {
-          const { holder, track } = room.usage;
-          if (!holder.state && !holder.awaitingCreation) holder.expectCreation();
-          holder.apply(out, rosterOf(room));
-          track.setPlaying(holder.state?.current.playing === true);
-        } catch { log('usage: playback apply failed'); }
-      }
+      room.usage?.relayed(out, rosterOf(room));
       return;
     }
 
@@ -985,7 +975,7 @@ export function startRoomServer(opts = {}) {
     }
 
     room.members.set(clientId, member);
-    room.usage?.track.admit({ tabId: member.tabId, reclaim: Boolean(reclaimed), size: room.members.size });
+    room.usage?.admit({ tabId: member.tabId, reclaim: Boolean(reclaimed), size: room.members.size });
     conn.clientId = clientId;
     conn.roomName = room.name;
     conn.tabId = member.tabId;
@@ -1037,7 +1027,7 @@ export function startRoomServer(opts = {}) {
     const member = room.members.get(conn.clientId);
     if (!member) return;
     room.members.delete(conn.clientId);
-    room.usage?.track.depart(room.members.size);
+    room.usage?.depart(room.members.size);
     log(`depart ${room.name} ${conn.clientId} (${reason}), ${room.members.size} left`);
     if (room.members.size > 0) announce(room, 'leave', member, serverNow());
     reapIfEmpty(room);

@@ -22,6 +22,7 @@ export const CLOSED_SETS = Object.freeze({
   notice: new Set(['connected', 'disconnected', 'reconnecting', 'joined', 'superseded', 'join-refused', 'refused', 'gap', 'presence-join', 'presence-leave', 'presence-name', 'presence', 'player-error', 'operation-rejected', 'playback-opened', 'host-link', 'far-skip', 'play-failed', 'settings-unavailable', 'urgent-request', 'failure', 'other']),
 });
 
+export const BUILD_ID_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z-[0-9a-z]+$/;
 const num = (value) => Number.isFinite(value) ? value : null;
 const bool = (value) => typeof value === 'boolean' ? value : null;
 const oneOf = (value, set) => set.has(value) ? value : value == null ? null : 'other';
@@ -106,7 +107,7 @@ export function buildStatsExport(sources = {}) {
   const stalls = sources.stalls;
   return {
     format: 'murmur-stats-1',
-    build: typeof sources.build === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z-[0-9a-z]+$/.test(sources.build) ? sources.build : null,
+    build: typeof sources.build === 'string' && BUILD_ID_RE.test(sources.build) ? sources.build : null,
     role: oneOf(sources.role, CLOSED_SETS.role), exportedAtMs: num(sources.nowMs),
     lines: lines(sources.lines), drift: drift(sources.driftRead, sources.driftSummary, sources.timeOriginMs),
     startWait: { waitMs: num(sources.startWaitMs) }, bytes: bytes(sources.peerBytes),

@@ -1,5 +1,5 @@
 import { check, assert, assertEqual } from '../harness.mjs';
-import { buildStatsExport, CLOSED_SETS } from '../../../public/lib/stats-export.mjs';
+import { buildStatsExport, BUILD_ID_RE, CLOSED_SETS } from '../../../public/lib/stats-export.mjs';
 import { createStallLog } from '../../../public/lib/stall-log.mjs';
 import { driftLineForm } from '../../../public/lib/drift-readout.mjs';
 import { FAULT_REASONS, TREATMENT_FAULT_MODE } from '../../../public/lib/playback-treatment.mjs';
@@ -66,7 +66,7 @@ export default async function statsExportSuite() {
     const allowed = new Set(['murmur-stats-1', 'other', ...Object.values(CLOSED_SETS).flatMap((set) => [...set])]);
     function walk(value, key) {
       if (typeof value === 'string') {
-        assert(allowed.has(value) || (key === 'drift' && driftLineForm(value) !== null) || (key === 'build' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z-[0-9a-z]+$/.test(value)), `unexpected string ${value}`);
+        assert(allowed.has(value) || (key === 'drift' && driftLineForm(value) !== null) || (key === 'build' && BUILD_ID_RE.test(value)), `unexpected string ${value}`);
       } else if (value && typeof value === 'object') {
         for (const [childKey, child] of Object.entries(value)) walk(child, childKey);
       }
