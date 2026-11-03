@@ -37,11 +37,13 @@ export function usageLine({ since, roomsOpened, visits, largestRoom, watchedMs }
   return `${roomsOpened} rooms, ${visits} visits, ${(watchedMs / 3_600_000).toFixed(1)} hours watched since ${since} (largest room ${largestRoom})`;
 }
 
-export function createUsageCount({ file, now, log, flushMs }) {
+export function createUsageCount({ file, now, log, flushMs, keepMs }) {
   const totals = readUsageFile(file) ?? { since: new Date(now()).toISOString().slice(0, 10), roomsOpened: 0, visits: 0, largestRoom: 0, watchedMs: 0 };
   let written = JSON.stringify(totals);
   if (!fs.existsSync(file)) writeUsageFile(file, totals);
   const live = new Set();
+  // A reaped room's counted tabs, by name, in memory for keepMs: a sole member's reload is not a new room or visit (D4).
+  const kept = new Map();
   function write() {
     const current = JSON.stringify(totals);
     if (current === written) return;
@@ -54,12 +56,14 @@ export function createUsageCount({ file, now, log, flushMs }) {
   }
   const timer = setInterval(flush, flushMs);
   timer.unref();
-  function room() {
-    const admittedTabs = new Set();
+  function room(name) {
+    const prior = kept.get(name);
+    if (prior) { clearTimeout(prior.timer); kept.delete(name); }
+    const admittedTabs = prior?.admittedTabs ?? new Set();
     let members = 0;
     let playing = false;
     let lastAt = now();
-    let opened = false;
+    let opened = prior !== undefined;
     const tracker = {
       accrue() {
         const t = now();
@@ -76,10 +80,16 @@ export function createUsageCount({ file, now, log, flushMs }) {
       },
       depart(size) { tracker.accrue(); members = size; },
       setPlaying(flag) { tracker.accrue(); playing = flag === true; },
-      end() { tracker.accrue(); members = 0; live.delete(tracker); },
+      end() {
+        tracker.accrue(); members = 0; live.delete(tracker);
+        if (!opened) return;
+        const timer = setTimeout(() => kept.delete(name), keepMs);
+        timer.unref();
+        kept.set(name, { admittedTabs, timer });
+      },
     };
     live.add(tracker);
     return tracker;
   }
-  return { totals: () => ({ ...totals }), room, flush, close() { clearInterval(timer); flush(); } };
+  return { totals: () => ({ ...totals }), room, flush, close() { clearInterval(timer); for (const entry of kept.values()) clearTimeout(entry.timer); kept.clear(); flush(); } };
 }

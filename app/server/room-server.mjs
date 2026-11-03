@@ -348,7 +348,7 @@ export function startRoomServer(opts = {}) {
   const sink = opts.logSink ?? console.log;
   const log = quiet ? () => {} : (...args) => sink(['[room]', ...args].join(' '));
   const usage = typeof opts.usageFile === 'string' && opts.usageFile.length > 0
-    ? createUsageCount({ file: path.resolve(opts.usageFile), now: opts.usageNow ?? serverNow, log, flushMs: opts.usageFlushMs ?? 60_000 })
+    ? createUsageCount({ file: path.resolve(opts.usageFile), now: opts.usageNow ?? serverNow, log, flushMs: opts.usageFlushMs ?? 60_000, keepMs: hostGraceMs })
     : null;
   if (usage) log(`usage: ${usageLine(usage.totals())}`);
   const relay = relayConfig.token === undefined
@@ -377,7 +377,7 @@ export function startRoomServer(opts = {}) {
     let room = rooms.get(name);
     if (!room) {
       room = { name, seq: 0, members: new Map() };
-      if (usage) room.usage = { track: usage.room(), holder: createPlaybackStateHolder({ maxFutureMs: MAX_FUTURE_MS }) };
+      if (usage) room.usage = { track: usage.room(name), holder: createPlaybackStateHolder({ maxFutureMs: MAX_FUTURE_MS }) };
       rooms.set(name, room);
       log(`room created: ${name}`);
     }

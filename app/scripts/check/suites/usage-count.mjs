@@ -152,6 +152,21 @@ export default async function usageCountSuite() {
     assertEqual(spawnSync(process.execPath, ['scripts/usage-line.mjs', path.join(dir, 'missing')]).status, 1, 'missing exit');
   }));
 
+  await check('U9 a sole member rejoining inside the host grace is not a new room or visit', () => scope(async ({ boot, join }) => {
+    const server = boot({ hostGraceMs: 150 });
+    const reaped = async (peer) => {
+      peer.send(buildClientEnvelope({ type: 'leave', to: 'server' }));
+      for (let i = 0; i < 100 && server.rooms.has('a'); i += 1) await new Promise((r) => setTimeout(r, 5));
+      assert(!server.rooms.has('a'), 'room reaped');
+    };
+    await reaped(await join(server, 'a', 'h', 'host'));
+    await reaped(await join(server, 'a', 'h', 'host'));
+    assertEqual(JSON.stringify([server.usage.totals().roomsOpened, server.usage.totals().visits]), '[1,1]', 'rejoin inside the grace');
+    await new Promise((r) => setTimeout(r, 300));
+    await join(server, 'a', 'h', 'host');
+    assertEqual(JSON.stringify([server.usage.totals().roomsOpened, server.usage.totals().visits]), '[2,2]', 'rejoin after the grace');
+  }));
+
   await check('U8 write failure does not stop counting', () => scope(async ({ file, boot, join }) => {
     const lines = [];
     const server = boot({ quiet: false, logSink: (line) => lines.push(line) });

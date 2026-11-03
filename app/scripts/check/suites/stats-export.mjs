@@ -26,9 +26,26 @@ function sources() {
   };
 }
 
+// An identifier in every position the builder reads, so a new field copying any of them fails S1 or S3.
+function seededEverywhere() {
+  const [a, b, c, d, e, f, g, h, i, j, k, l] = seeded;
+  return {
+    ...sources(), role: d,
+    lines: { clock: `clock: ${a}`, drift: `drift: ${b}`, bytes: `bytes: ${a}`, controller: `controller: ${c}`, startWait: `start wait: ${g}`, links: `host links: ${k}` },
+    driftSummary: { framesHeld: e, medianDriftMs: 1.5, capacity: l },
+    driftRead: { missed: f, counters: { framesOffered: g, [h]: 1 }, records: [{ seq: h, driftMs: b, displaySharedMs: 1500, clock: { offsetMs: 25, halfWidthMs: a } }] },
+    startWaitMs: c,
+    hostStats: { protocolErrors: i, responses: 1, channels: new Map([[i, {}], [j, {}]]), peerId: j, address: k },
+    controller: { mode: f, reason: g, measurementLimit: h, thresholdUsable: b, counters: { drops: { seam: c } }, settings: { [b]: 1, LEAD_MS: d }, extra: b },
+    playback: { waiting: c, starts: a, callbacks: b },
+    stalls: { count: a, totalMs: 1, evicted: 0, open: { atMs: k }, records: [{ atMs: l, durationMs: 1 }] },
+    notices: [...sources().notices, { text: c, atMs: d, warn: e }],
+  };
+}
+
 export default async function statsExportSuite() {
   await check('S1 nothing identifying', async () => {
-    const result = buildStatsExport(sources());
+    const result = buildStatsExport(seededEverywhere());
     const text = JSON.stringify(result);
     for (const value of seeded) assert(!text.includes(value), `export contains ${value}`);
     assertEqual(result.lines.bytes, null, 'unknown bytes line');
@@ -45,7 +62,7 @@ export default async function statsExportSuite() {
     assertEqual(result.drift.records[0].atMs, 475, 'page-relative time');
   });
   await check('S3 every string is allowed', async () => {
-    const result = buildStatsExport(sources());
+    const result = buildStatsExport(seededEverywhere());
     const allowed = new Set(['murmur-stats-1', 'other', ...Object.values(CLOSED_SETS).flatMap((set) => [...set])]);
     function walk(value, key) {
       if (typeof value === 'string') {
