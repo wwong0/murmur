@@ -78,17 +78,7 @@ function loader(root) {
     },
   };
 }
-export async function runCommand(argv = process.argv) {
-  const outValue = option(argv, 'out');
-  if (!outValue) {
-    throw new Error('usage: node scripts/measure-graphs.mjs --out <dir> [--results <dir>]');
-  }
-  const out = path.resolve(outValue),
-    root = path.resolve(option(argv, 'results') ?? path.join(appRoot, 'results'));
-  if (fs.existsSync(out)) {
-    console.error(`output path already exists: ${out}`);
-    return 2;
-  }
+export async function loadInputs(root) {
   const load = loader(root), nights = {};
   for (const [night, files] of Object.entries(NIGHTS)) {
     nights[night] = {
@@ -120,6 +110,27 @@ export async function runCommand(argv = process.argv) {
   }
   load.figure('hour');
   inputs.traces.hour = await load.clients(HOUR);
+  const nightFiles = new Set(Object.values(NIGHTS).flatMap((v) => Object.values(v)).filter(Boolean));
+  const sourcesOf = (id, data) => {
+    const content = JSON.stringify(data);
+    return [...load.sources].filter(([file, tags]) =>
+      tags.has(id) || (tags.has('shared') && (nightFiles.has(file) || content.includes(file.split('/')[0])))
+    ).map(([file]) => file).sort();
+  };
+  return { inputs, sourcesOf };
+}
+export async function runCommand(argv = process.argv) {
+  const outValue = option(argv, 'out');
+  if (!outValue) {
+    throw new Error('usage: node scripts/measure-graphs.mjs --out <dir> [--results <dir>]');
+  }
+  const out = path.resolve(outValue),
+    root = path.resolve(option(argv, 'results') ?? path.join(appRoot, 'results'));
+  if (fs.existsSync(out)) {
+    console.error(`output path already exists: ${out}`);
+    return 2;
+  }
+  const { inputs, sourcesOf } = await loadInputs(root);
   const modules = [sharing, roomSize, sync, connection, recovery, waits, weaker, hour];
   const built = modules.map((m) => {
     const data = m.data(inputs);
@@ -134,14 +145,7 @@ export async function runCommand(argv = process.argv) {
       notes: m.notes(data),
     };
   });
-  const also = alsoTested(inputs),
-    nightFiles = new Set(Object.values(NIGHTS).flatMap((v) => Object.values(v)).filter(Boolean));
-  const sourcesOf = (id, data) => {
-    const content = JSON.stringify(data);
-    return [...load.sources].filter(([file, tags]) =>
-      tags.has(id) || (tags.has('shared') && (nightFiles.has(file) || content.includes(file.split('/')[0])))
-    ).map(([file]) => file).sort();
-  };
+  const also = alsoTested(inputs);
   const result = built.map(({ svg: _, notes: __, ...entry }) => ({
     ...entry,
     regime: entry.regime.map((item) => item.regime),

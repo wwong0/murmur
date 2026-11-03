@@ -18,7 +18,7 @@ import * as hour from '../../graphs/fig-hour.mjs';
 import { alsoTested, limits } from '../../graphs/notes.mjs';
 
 const app = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-function fixture(rows, tests = {}) {
+export function fixture(rows, tests = {}) {
   const nights = {}, runs = {};
   for (const night of ['13d', '13e', '13f']) {
     nights[night] = {
@@ -103,7 +103,7 @@ function validSvg(module, data) {
   assert(!BANNED.test(module.notes(data)), `plain notes ${module.ID}`);
   return s;
 }
-const lab = (p99) => {
+export const lab = (p99) => {
   return ({
     'lab-drift': {
       overall: { absMedianMs: 0.2, absP99Ms: p99, worstPair: 'c01|c03' },

@@ -154,6 +154,7 @@ import controlEvidenceSuite from './check/suites/control-evidence.mjs';
 import controlFiguresSuite from './check/suites/control-figures.mjs';
 import controlReadingSuite from './check/suites/control-reading.mjs';
 import controlReadingScriptSuite from './check/suites/control-reading-script.mjs';
+import historyCheckSuite from './check/suites/history-check.mjs';
 import buildMatchSuite from './check/suites/build-match.mjs';
 import controlReadingRepairsSuite from './check/suites/control-reading-repairs.mjs';
 import harnessContentSuite from './check/suites/harness-content.mjs';
@@ -310,6 +311,7 @@ import measureNightVerdictsSuite from './check/suites/measure-night-verdicts.mjs
 import measureNight2VerdictsSuite from './check/suites/measure-night2-verdicts.mjs';
 import measureMemoryLimitVerdictsSuite from './check/suites/measure-memory-limit-verdicts.mjs';
 import measureGraphsSuite from './check/suites/measure-graphs.mjs';
+import writeupFiguresSuite from './check/suites/writeup-figures.mjs';
 import usageCountSuite from './check/suites/usage-count.mjs';
 import tabIdSuite from './check/suites/tab-id.mjs';
 import statsExportSuite from './check/suites/stats-export.mjs';
@@ -446,6 +448,7 @@ for (const suite of [
   controlFiguresSuite,
   controlReadingSuite,
   controlReadingScriptSuite,
+  historyCheckSuite,
   buildMatchSuite,
   controlReadingRepairsSuite,
   harnessContentSuite,
@@ -602,6 +605,7 @@ for (const suite of [
   measureNight2VerdictsSuite,
   measureMemoryLimitVerdictsSuite,
   measureGraphsSuite,
+  writeupFiguresSuite,
   usageCountSuite,
   tabIdSuite,
   statsExportSuite,

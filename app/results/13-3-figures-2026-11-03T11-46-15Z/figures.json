@@ -1,0 +1,277 @@
+[
+  {
+    "id": "sharing",
+    "title": "Does sharing cut what the host uploads?",
+    "bars": [
+      {
+        "label": "no sharing",
+        "runs": [
+          {
+            "directory": "13e-b2-nop2p-20-2026-10-27T17-59-11.523Z",
+            "value": 4.99881822603538
+          }
+        ]
+      },
+      {
+        "label": "with sharing",
+        "runs": [
+          {
+            "directory": "13d-b-product-20-2026-10-26T19-03-31.943Z",
+            "value": 1.0003018713965093
+          },
+          {
+            "directory": "13d-b-product-20-2026-10-26T20-15-11.489Z",
+            "value": 1.0316143651973326
+          }
+        ]
+      }
+    ],
+    "sources": [
+      "13d-b-product-20-2026-10-26T19-03-31.943Z/assignment-control.json",
+      "13d-b-product-20-2026-10-26T19-03-31.943Z/content-manifest.json",
+      "13d-b-product-20-2026-10-26T19-03-31.943Z/manifest.json",
+      "13d-b-product-20-2026-10-26T20-15-11.489Z/assignment-control.json",
+      "13d-b-product-20-2026-10-26T20-15-11.489Z/content-manifest.json",
+      "13d-b-product-20-2026-10-26T20-15-11.489Z/manifest.json",
+      "13d-readings-2026-10-26T22-20-47Z/readings.json",
+      "13d-session-2026-10-26/classes.json",
+      "13d-verdicts-2026-10-26-d1-repair/verdicts.json",
+      "13e-b2-nop2p-20-2026-10-27T17-59-11.523Z/assignment-control.json",
+      "13e-b2-nop2p-20-2026-10-27T17-59-11.523Z/content-manifest.json",
+      "13e-b2-nop2p-20-2026-10-27T17-59-11.523Z/manifest.json",
+      "13e-session-2026-10-27/classes.json",
+      "13e-session-2026-10-27/readings/readings.json",
+      "13e-session-2026-10-27/verdicts/verdicts.json",
+      "13f-session-2026-10-28/readings/readings.json",
+      "13f-session-2026-10-28/review-d1/verdicts/verdicts.json",
+      "RUNS-13d.json",
+      "RUNS-13e.json",
+      "RUNS-13f.json"
+    ]
+  },
+  {
+    "id": "room-size",
+    "title": "Does the host upload more as the room grows?",
+    "bars": [
+      {
+        "label": "2 viewers",
+        "runs": [
+          {
+            "directory": "13d-a2-two-2026-10-26T18-36-35.763Z",
+            "value": 1.010013895441269
+          },
+          {
+            "directory": "13d-a2-two-2026-10-26T20-08-45.233Z",
+            "value": 1.0102035149896909
+          }
+        ]
+      },
+      {
+        "label": "3 viewers",
+        "runs": [
+          {
+            "directory": "13d-a2-three-2026-10-26T18-42-58.972Z",
+            "value": 1.0113571475199212
+          },
+          {
+            "directory": "13d-a2-three-2026-10-26T20-02-14.707Z",
+            "value": 0.9987957956767733
+          }
+        ]
+      },
+      {
+        "label": "5 viewers",
+        "runs": [
+          {
+            "directory": "13d-a-five-2026-10-26T18-22-55.136Z",
+            "value": 1.000100458984065
+          },
+          {
+            "directory": "13d-a-five-2026-10-26T19-55-35.971Z",
+            "value": 1.0333501186540697
+          },
+          {
+            "directory": "13d-a-five-2026-10-26T21-13-45.342Z",
+            "value": 0.9778973858478343
+          }
+        ]
+      },
+      {
+        "label": "10 viewers",
+        "runs": [
+          {
+            "directory": "13d-a-ten-2026-10-26T18-29-33.461Z",
+            "value": 1.1016765005660465
+          },
+          {
+            "directory": "13d-a-ten-2026-10-26T19-48-11.858Z",
+            "value": 1.1065695001372198
+          },
+          {
+            "directory": "13d-a-ten-2026-10-26T21-20-25.898Z",
+            "value": 1.1072626122084372
+          }
+        ]
+      }
+    ],
+    "sources": [
+      "13d-a-five-2026-10-26T18-22-55.136Z/assignment-control.json",
+      "13d-a-five-2026-10-26T18-22-55.136Z/content-manifest.json",
+      "13d-a-five-2026-10-26T18-22-55.136Z/manifest.json",
+      "13d-a-five-2026-10-26T19-55-35.971Z/assignment-control.json",
+      "13d-a-five-2026-10-26T19-55-35.971Z/content-manifest.json",
+      "13d-a-five-2026-10-26T19-55-35.971Z/manifest.json",
+      "13d-a-five-2026-10-26T21-13-45.342Z/assignment-control.json",
+      "13d-a-five-2026-10-26T21-13-45.342Z/content-manifest.json",
+      "13d-a-five-2026-10-26T21-13-45.342Z/manifest.json",
+      "13d-a-ten-2026-10-26T18-29-33.461Z/assignment-control.json",
+      "13d-a-ten-2026-10-26T18-29-33.461Z/content-manifest.json",
+      "13d-a-ten-2026-10-26T18-29-33.461Z/manifest.json",
+      "13d-a-ten-2026-10-26T19-48-11.858Z/assignment-control.json",
+      "13d-a-ten-2026-10-26T19-48-11.858Z/content-manifest.json",
+      "13d-a-ten-2026-10-26T19-48-11.858Z/manifest.json",
+      "13d-a-ten-2026-10-26T21-20-25.898Z/assignment-control.json",
+      "13d-a-ten-2026-10-26T21-20-25.898Z/content-manifest.json",
+      "13d-a-ten-2026-10-26T21-20-25.898Z/manifest.json",
+      "13d-a2-three-2026-10-26T18-42-58.972Z/assignment-control.json",
+      "13d-a2-three-2026-10-26T18-42-58.972Z/content-manifest.json",
+      "13d-a2-three-2026-10-26T18-42-58.972Z/manifest.json",
+      "13d-a2-three-2026-10-26T20-02-14.707Z/assignment-control.json",
+      "13d-a2-three-2026-10-26T20-02-14.707Z/content-manifest.json",
+      "13d-a2-three-2026-10-26T20-02-14.707Z/manifest.json",
+      "13d-a2-two-2026-10-26T18-36-35.763Z/assignment-control.json",
+      "13d-a2-two-2026-10-26T18-36-35.763Z/content-manifest.json",
+      "13d-a2-two-2026-10-26T18-36-35.763Z/manifest.json",
+      "13d-a2-two-2026-10-26T20-08-45.233Z/assignment-control.json",
+      "13d-a2-two-2026-10-26T20-08-45.233Z/content-manifest.json",
+      "13d-a2-two-2026-10-26T20-08-45.233Z/manifest.json",
+      "13d-readings-2026-10-26T22-20-47Z/readings.json",
+      "13d-session-2026-10-26/classes.json",
+      "13d-verdicts-2026-10-26-d1-repair/verdicts.json",
+      "13e-session-2026-10-27/classes.json",
+      "13e-session-2026-10-27/readings/readings.json",
+      "13e-session-2026-10-27/verdicts/verdicts.json",
+      "13f-session-2026-10-28/readings/readings.json",
+      "13f-session-2026-10-28/review-d1/verdicts/verdicts.json",
+      "RUNS-13d.json",
+      "RUNS-13e.json",
+      "RUNS-13f.json"
+    ]
+  },
+  {
+    "id": "sync",
+    "title": "How closely in step do the screens stay?",
+    "bars": [
+      {
+        "label": "no network trouble",
+        "runs": [
+          {
+            "directory": "13d-a-five-2026-10-26T18-22-55.136Z",
+            "value": 16.699951171875
+          },
+          {
+            "directory": "13d-a-five-2026-10-26T19-55-35.971Z",
+            "value": 16.7001953125
+          },
+          {
+            "directory": "13d-a-five-2026-10-26T21-13-45.342Z",
+            "value": 16.79931640625
+          }
+        ]
+      },
+      {
+        "label": "5% of data lost",
+        "runs": [
+          {
+            "directory": "13d-l-loss5-2026-10-26T19-23-40.956Z",
+            "value": 16.800048828125
+          },
+          {
+            "directory": "13d-l-loss5-2026-10-26T20-55-50.039Z",
+            "value": 16.7001953125
+          },
+          {
+            "directory": "13d-l-loss5-2026-10-26T21-41-16.988Z",
+            "value": 0.2001953125
+          }
+        ]
+      },
+      {
+        "label": "everyone 25 ms delayed",
+        "runs": [
+          {
+            "directory": "13d-d-delay25-2026-10-26T19-30-21.916Z",
+            "value": 16.7998046875
+          },
+          {
+            "directory": "13d-d-delay25-2026-10-26T20-49-14.088Z",
+            "value": 16.60009765625
+          },
+          {
+            "directory": "13d-d-delay25-2026-10-26T21-48-02.121Z",
+            "value": 16.80029296875
+          }
+        ]
+      },
+      {
+        "label": "one viewer 60 ms farther away",
+        "runs": [
+          {
+            "directory": "13e-t-skew60-2026-10-27T15-49-34.047Z",
+            "value": 42.867195312457625
+          },
+          {
+            "directory": "13e-t-skew60-2026-10-27T17-17-57.046Z",
+            "value": 33.39990234375
+          }
+        ]
+      }
+    ],
+    "sources": [
+      "13d-a-five-2026-10-26T18-22-55.136Z/assignment-control.json",
+      "13d-a-five-2026-10-26T18-22-55.136Z/content-manifest.json",
+      "13d-a-five-2026-10-26T18-22-55.136Z/manifest.json",
+      "13d-a-five-2026-10-26T19-55-35.971Z/assignment-control.json",
+      "13d-a-five-2026-10-26T19-55-35.971Z/content-manifest.json",
+      "13d-a-five-2026-10-26T19-55-35.971Z/manifest.json",
+      "13d-a-five-2026-10-26T21-13-45.342Z/assignment-control.json",
+      "13d-a-five-2026-10-26T21-13-45.342Z/content-manifest.json",
+      "13d-a-five-2026-10-26T21-13-45.342Z/manifest.json",
+      "13d-d-delay25-2026-10-26T19-30-21.916Z/assignment-control.json",
+      "13d-d-delay25-2026-10-26T19-30-21.916Z/content-manifest.json",
+      "13d-d-delay25-2026-10-26T19-30-21.916Z/manifest.json",
+      "13d-d-delay25-2026-10-26T20-49-14.088Z/assignment-control.json",
+      "13d-d-delay25-2026-10-26T20-49-14.088Z/content-manifest.json",
+      "13d-d-delay25-2026-10-26T20-49-14.088Z/manifest.json",
+      "13d-d-delay25-2026-10-26T21-48-02.121Z/assignment-control.json",
+      "13d-d-delay25-2026-10-26T21-48-02.121Z/content-manifest.json",
+      "13d-d-delay25-2026-10-26T21-48-02.121Z/manifest.json",
+      "13d-l-loss5-2026-10-26T19-23-40.956Z/assignment-control.json",
+      "13d-l-loss5-2026-10-26T19-23-40.956Z/content-manifest.json",
+      "13d-l-loss5-2026-10-26T19-23-40.956Z/manifest.json",
+      "13d-l-loss5-2026-10-26T20-55-50.039Z/assignment-control.json",
+      "13d-l-loss5-2026-10-26T20-55-50.039Z/content-manifest.json",
+      "13d-l-loss5-2026-10-26T20-55-50.039Z/manifest.json",
+      "13d-l-loss5-2026-10-26T21-41-16.988Z/assignment-control.json",
+      "13d-l-loss5-2026-10-26T21-41-16.988Z/content-manifest.json",
+      "13d-l-loss5-2026-10-26T21-41-16.988Z/manifest.json",
+      "13d-readings-2026-10-26T22-20-47Z/readings.json",
+      "13d-session-2026-10-26/classes.json",
+      "13d-verdicts-2026-10-26-d1-repair/verdicts.json",
+      "13e-session-2026-10-27/classes.json",
+      "13e-session-2026-10-27/readings/readings.json",
+      "13e-session-2026-10-27/verdicts/verdicts.json",
+      "13e-t-skew60-2026-10-27T15-49-34.047Z/assignment-control.json",
+      "13e-t-skew60-2026-10-27T15-49-34.047Z/content-manifest.json",
+      "13e-t-skew60-2026-10-27T15-49-34.047Z/manifest.json",
+      "13e-t-skew60-2026-10-27T17-17-57.046Z/assignment-control.json",
+      "13e-t-skew60-2026-10-27T17-17-57.046Z/content-manifest.json",
+      "13e-t-skew60-2026-10-27T17-17-57.046Z/manifest.json",
+      "13f-session-2026-10-28/readings/readings.json",
+      "13f-session-2026-10-28/review-d1/verdicts/verdicts.json",
+      "RUNS-13d.json",
+      "RUNS-13e.json",
+      "RUNS-13f.json"
+    ]
+  }
+]
