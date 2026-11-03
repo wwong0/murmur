@@ -119,17 +119,24 @@ export async function loadInputs(root) {
   };
   return { inputs, sourcesOf };
 }
-export async function runCommand(argv = process.argv) {
+// `--out` and `--results` for a figure script; null, after saying so, when the output already exists.
+export function outputArgs(argv, script) {
   const outValue = option(argv, 'out');
   if (!outValue) {
-    throw new Error('usage: node scripts/measure-graphs.mjs --out <dir> [--results <dir>]');
+    throw new Error(`usage: node scripts/${script} --out <dir> [--results <dir>]`);
   }
   const out = path.resolve(outValue),
     root = path.resolve(option(argv, 'results') ?? path.join(appRoot, 'results'));
   if (fs.existsSync(out)) {
     console.error(`output path already exists: ${out}`);
-    return 2;
+    return null;
   }
+  return { out, root };
+}
+export async function runCommand(argv = process.argv) {
+  const args = outputArgs(argv, 'measure-graphs.mjs');
+  if (!args) return 2;
+  const { out, root } = args;
   const { inputs, sourcesOf } = await loadInputs(root);
   const modules = [sharing, roomSize, sync, connection, recovery, waits, weaker, hour];
   const built = modules.map((m) => {

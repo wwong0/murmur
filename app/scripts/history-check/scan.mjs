@@ -2,6 +2,7 @@ const MEDIA = /\.(mp4|m4s|m4v|mkv|webm|mov|avi|ts|mp3|m4a|aac|flac|wav|ogg|opus)
 const TEST = /(?:^|\/)test_videos(?:\/|$)/i;
 const SECRET_PATH = /(?:^|\/)(?:[^/]*\.env|[^/]*\.(?:pem|key)|id_[^/]+)$/i;
 const PERSONAL_PATH = /(?:^|\/)(?:\.scratch|\.coordinator|\.impeccable)(?:\/|$)/i;
+export const PROFILE = /(?:[A-Za-z]:(?:\\{1,2}|\/+)+Users(?:\\{1,2}|\/+)+|\/Users\/|\/home\/)([^\\/\r\n]+)/gi;
 const sample = (value) => `${value.slice(0, 4)}… (${value.length})`;
 const hit = (classNo, sub, extra = {}) => ({ class: classNo, sub, ...extra });
 
@@ -45,8 +46,7 @@ export function scanText(text, terms = []) {
       }
     } catch { /* malformed URL */ }
   }
-  const profile = /(?:[A-Za-z]:(?:\\{1,2}|\/+)+Users(?:\\{1,2}|\/+)+|\/Users\/|\/home\/)([^\\/\r\n]+)/gi;
-  for (const m of text.matchAll(profile)) {
+  for (const m of text.matchAll(PROFILE)) {
     hits.push(hit(6, 'profile', { sample: `Users/${m[1][0]}…` })); sensitive.push(m[0]);
   }
   return { hits, hosts, sensitive };

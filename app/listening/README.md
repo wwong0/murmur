@@ -6,11 +6,17 @@ code, no controller, and no automated experiment.
 
 ## How to run it
 
-Open the page in the same Chrome the comparison batches used, with headphones:
+Open the page in the same Chrome the comparison batches used, with headphones. From the
+repository root:
 
 ```powershell
-& "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" "app\listening\listening.html"
+& "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" "$PWD\app\listening\listening.html"
 ```
+
+**The audio is not in the public copy.** Supply your own before opening the page: put a
+speech clip at `clips/speech.m4a` and a music clip at `clips/music.m4a`, as 48 kHz AAC and
+loudness-matched to each other. The speech passage plays the first 24 s and the music passage
+the first 48 s, so each clip should be at least that long.
 
 1. Pick **Speech** or **Music**.
 2. Optionally tick **Hide labels**. The four conditions then become A–D in a
@@ -56,11 +62,11 @@ is the page's own timer, polling every 5 ms.
 
 The clips in `clips/` are 48 kHz AAC, which matches the fixture's audio rate,
 and they are loudness-matched to the same level. The full music download is in
-`source/`.
+`source/`. Neither folder is in the public copy; the table says where the music came from.
 
 | Clip | Cut | Source | Licence |
 |---|---|---|---|
-| `speech.m4a` | The whole 24.7 s file | Supplied by the user as `Downloads\ludwig.wav` (48 kHz 16-bit PCM) | — |
+| `speech.m4a` | The whole 24.7 s file | A private speech recording (48 kHz 16-bit PCM), not distributed | — |
 | `music.m4a` | 0–50 s | Mozart, Piano Sonata No. 10 in C major, K. 330, I — performed by Bui-Nguyen Trieu-Tuong, [MusOpen Project](https://commons.wikimedia.org/wiki/File:Mozart,_Wolfgang_Amadeus_%E2%80%94_Piano_Sonata_No._10_in_C_major,_K._330_%E2%80%94_1st_movement_%E2%80%94_Bui-Nguyen_Trieu-Tuong_%E2%80%94_MusOpen_Project.mp3), Wikimedia Commons | CC BY-SA 3.0 |
 
 ## What this can and cannot show

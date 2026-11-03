@@ -9,8 +9,8 @@ folder that holds it.
 - The **host** is the person sharing the file.
 - **Host copies** is how many full copies of the video the host uploaded for the room, over the
   measured window. With N viewers and no sharing it is N: one copy per viewer.
-- **Peer fraction** is the share of the video's bytes a viewer received from other viewers
-  rather than from the host.
+- **Peer fraction** is the room's figure: the share of all the video bytes the viewers received
+  that came from other viewers rather than from the host.
 - The **main setup**: host upload 10 Mbit/s, every viewer's upload 10 Mbit/s, downloads not
   limited, no loss or delay, 2-second video pieces of one 2.64 Mbit/s video, 5 viewers, a
   6-minute run of which the last 3 minutes are measured. All on one test PC.
@@ -56,13 +56,13 @@ in-browser conversion), and React.
 ## 3. The headline
 
 **Sharing keeps the host near one copy.** With 5 viewers the host sent 0.98–1.03 copies, where
-no sharing means 5; the highest, 1.033 of 5 copies, is 20.7%. Each viewer got 0.79–0.80 of the
+no sharing means 5; the highest, 1.033 of 5 copies, is 20.7%. Viewers together got 0.79–0.80 of the
 video from other viewers. Main setup, night 1, 3 of 3 tests met the goal (13d "A5: 3/3 runs
 pass").
 
 **A bigger room barely costs the host more.** With 2, 3 and 10 viewers the host sent 1.01,
 1.00–1.01 and 1.10–1.11 copies; the highest at 10 viewers, 1.107 of 10, is 11.1%. With 10
-viewers each got 0.89 of the video from other viewers. Main setup, night 1: 2 tests each at 2
+viewers, they together got 0.89 of the video from other viewers. Main setup, night 1: 2 tests each at 2
 and 3 viewers (13d "A2 (reading)"), 3 tests at 10 (13d "A10: multiplier ≤2.0 met in 3/3 runs").
 
 ![Host upload by room size, beside the one copy per viewer that no sharing needs: 0.98 to 1.03 copies at 2, 3 and 5 viewers, 1.10 to 1.11 at 10. Main setup, night 1. Each column reaches the highest test and is labeled with the range.](app/results/13-3-figures-2026-11-03T11-46-15Z/fig-room-size.svg)
@@ -155,7 +155,7 @@ viewers are unaffected; the claim that a page's instant is the harness's wall ti
 
 ## 6. The four goals
 
-The proposal set four goals (`docs/PROPOSAL.md` §6). The latest tests, nights 1 and 2, read all
+The proposal set four goals. The latest tests, nights 1 and 2, read all
 four on one build per night.
 
 ### 6.1 Sync
@@ -172,7 +172,7 @@ reconstructed lab time.
 Its clock offset, which it cannot see directly, was estimated at −31.2 and −29.9 ms against the
 30 ms the extra distance predicts. Night 2, 2 tests (13e "T (2)"), reconstructed lab time.
 
-![The 99th-percentile gap between screens, per network condition: within one 16.7 ms frame except with one viewer 60 ms farther away (33–43 ms). Main setup. Each bar reaches the highest test; gray marks a condition over one frame.](app/results/13-3-figures-2026-11-03T11-46-15Z/fig-sync.svg)
+![The 99th-percentile gap between screens, per network condition: within one 16.7 ms frame except with one viewer 60 ms farther away (33–43 ms). Main setup, night 1; the far viewer night 2. Each bar reaches the highest test; gray marks a condition over one frame.](app/results/13-3-figures-2026-11-03T11-46-15Z/fig-sync.svg)
 
 ### 6.2 Host upload and 6.3 sharing
 
@@ -211,8 +211,8 @@ and 6.1.
 51.4 and 48.8 s. A viewer 2 s behind closed it with one jump in 3.1 and 3.2 s. Neither caused a
 freeze or moved the others. Night 2, one viewer paused, 4 tests (13e "K (4)").
 
-**An hour-long room.** Over 57 measured minutes of a 60-minute run, each viewer got 0.797 of the
-video from other viewers; nobody froze, playback ran at 1.0000 of real time, and each viewer's
+**An hour-long room.** Over 57 measured minutes of a 60-minute run, the viewers together got 0.797
+of the video from other viewers; nobody froze, playback ran at 1.0000 of real time, and each viewer's
 storage stayed at or under its 1 GiB limit (1 073 741 824 bytes) while 1 209 083 368 bytes were
 fetched (13f "W attempt 2 … valid, gate met", 1 test). A 6-minute main-setup run on the same build
 read 0.9997 host copies and peer fraction 0.7996 (13f "R0 … valid").
@@ -269,9 +269,6 @@ What the tests do not show, in plain words.
     off. An unmuted viewer plays on.
 11. **The host must keep the room's tab in front.** While the host's tab is hidden it sends
     nothing, and its viewers stall once their buffer runs out.
-12. **A guest may freeze.** One guest on the hosted instance was seen frozen on one picture while
-    its page said it was playing, with no recording. A rig freeze with the same look was found and
-    fixed; whether that was the guest's cause is not established.
 
 ## 10. Reproduce
 
@@ -282,18 +279,17 @@ every assertion suite in seconds, with no browser. `npm run dev:file` serves the
 The harness is `app/harness/` (Docker, one container per browser, `tc` shaping) and its runner
 `app/scripts/harness-run.mjs --condition <name>`, with the conditions in
 `app/harness/conditions.json`. `app/scripts/measure-night.mjs` reads a night's runs into verdicts,
-and `app/scripts/measure-graphs.mjs` draws the figures. Each run's evidence is in its own folder
-under `app/results/`, and each change's reasoning in its archived `design.md` under
-`openspec/changes/archive/`.
+and `app/scripts/measure-graphs.mjs` draws the figures. The verdict and figure summaries the
+numbers above come from are kept under `app/results/`, in the folders below; the individual run
+folders are not part of this repository.
 
 **Where each figure is.**
 
 | Figures | Folder |
 |---|---|
-| Night 1: 5, 10, 2 and 3 viewers; the 20 Mbit/s pair; loss; delay; join and cut; the wait | `app/results/13d-verdicts-2026-10-26-d1-repair/`, the runs `app/results/13d-*`, the record `openspec/changes/archive/2026-10-26-measurement-night-1/` |
-| Night 2: no sharing at 20 Mbit/s; the defaults; the drop; one far viewer; weaker connections; catching up; ten-viewer waits | `app/results/13e-session-2026-10-27/verdicts/`, the runs `app/results/13e-*`, the record `openspec/changes/archive/2026-10-27-measurement-night-2/` |
-| The hour; the 13f main-setup run | `app/results/13f-*`, the record `openspec/changes/archive/2026-10-28-segment-memory-limit/` |
+| Night 1: 5, 10, 2 and 3 viewers; the 20 Mbit/s pair; loss; delay; join and cut; the wait | `app/results/13d-verdicts-2026-10-26-d1-repair/` |
+| Night 2: no sharing at 20 Mbit/s; the defaults; the drop; one far viewer; weaker connections; catching up; ten-viewer waits | `app/results/13e-session-2026-10-27/verdicts/` |
+| The hour | its figure data in `app/results/13g-figures-2026-10-29T01-38-55Z/` |
 | Uplink use for the pacing pair; the figures' data | `app/results/13g-figures-2026-10-29T01-38-55Z/` |
 | The timebase check | `app/results/13c-readings-2026-10-26T15-40Z/` |
-| The earlier rounds: 7c, 8a, 9b, 11a-2, 12c-1 | `docs/plan/07c-naive-regimes.md`, `docs/plan/09b-edge-assignment-baseline.md`, `docs/plan/12c-1-leave-recovery.md`, and their archives under `openspec/changes/archive/` |
-| The hosted instance | `openspec/changes/archive/2026-10-26-hosted-instance/hosted-pass-2026-10-26.md` |
+| The write-up's three charts and their data | `app/results/13-3-figures-2026-11-03T11-46-15Z/` |

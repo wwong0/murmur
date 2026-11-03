@@ -2,15 +2,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { identityCounts, parseTerms, pathKind, scanPath, scanText } from './history-check/scan.mjs';
+import { identityCounts, parseTerms, pathKind, PROFILE, scanPath, scanText } from './history-check/scan.mjs';
 
 const scriptRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const limit = 512 * 1024 * 1024;
+const REFUSALS = new Set(['terms file is inside the repository work tree', 'terms file is known to git', 'report already exists', 'JSON already exists', 'report is required', 'invalid arguments', 'report and JSON paths must differ']);
 function git(repo, args, input) {
   const r = spawnSync('git', ['-C', repo, ...args], { input, maxBuffer: limit });
   if (r.status !== 0 || r.error) throw new Error('git command failed');
   return r.stdout;
 }
+const revList = (repo, args) => git(repo, ['rev-list', ...args]).toString().trim().split('\n').filter(Boolean);
 function options(args) {
   const result = { repo: scriptRoot, main: 'main' };
   for (let i = 0; i < args.length; i += 2) {
@@ -35,8 +37,7 @@ function readTerms(repo, file) {
   return parseTerms(fs.readFileSync(actual, 'utf8'));
 }
 function cleanText(value, sensitive) {
-  let result = String(value).replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+/gi, '[email]')
-    .replace(/(?:[A-Za-z]:(?:\\{1,2}|\/+)+Users(?:\\{1,2}|\/+)+|\/Users\/|\/home\/)[^\\/\r\n]+/gi, '[profile]');
+  let result = String(value).replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+/gi, '[email]').replace(PROFILE, '[profile]');
   for (const secret of [...sensitive].filter(Boolean).sort((a, b) => b.length - a.length)) {
     const escaped = secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     // A short value removed anywhere would erase ordinary letters from the whole report.
@@ -103,18 +104,11 @@ function objectVolume(repo, main, paths) {
   const total = Object.values(groups).reduce((a, b) => a + b, 0);
   return { packedBytes: total, groups, largest: largest.sort((a, b) => b.size - a.size).slice(0, 20), sizePack: git(repo, ['count-objects', '-vH']).toString().match(/^size-pack: (.+)$/m)?.[1] || 'unknown' };
 }
-async function run() {
-  const opt = options(process.argv.slice(2));
-  if (fs.existsSync(opt.report)) throw new Error('report already exists');
-  if (opt.json && fs.existsSync(opt.json)) throw new Error('JSON already exists');
-  if (opt.json && path.resolve(opt.json) === path.resolve(opt.report)) throw new Error('report and JSON paths must differ');
-  const terms = readTerms(opt.repo, opt.terms);
-  const sensitive = new Set((terms || []).map((term) => term.value));
-  const mainHead = git(opt.repo, ['rev-parse', '--verify', `${opt.main}^{commit}`]).toString().trim();
-  const head = git(opt.repo, ['rev-parse', '--verify', 'HEAD^{commit}']).toString().trim();
-  const all = git(opt.repo, ['rev-list', '--all', '--reverse', '--topo-order']).toString().trim().split('\n').filter(Boolean);
-  const main = new Set(git(opt.repo, ['rev-list', opt.main]).toString().trim().split('\n').filter(Boolean));
-  const commits = readCommits(opt.repo), pairs = new Map(), mainPaths = new Map(), identities = { all: [], main: [] };
+// Every commit on any ref, then every distinct blob once. Adds each matched value, name and email to `sensitive`.
+async function scanHistory(repo, mainRef, terms, sensitive) {
+  const list = terms || [];
+  const all = revList(repo, ['--all', '--reverse', '--topo-order']), main = new Set(revList(repo, [mainRef]));
+  const commits = readCommits(repo), pairs = new Map(), mainPaths = new Map(), identities = { all: [], main: [] };
   const rows = new Map(), hosts = new Map();
   function collect(result, commit, file, onMain) {
     for (const value of result.sensitive) sensitive.add(value);
@@ -123,9 +117,8 @@ async function run() {
       entry.all++; if (onMain) entry.main++; hosts.set(host, entry);
     }
     for (const item of result.hits) {
-      const display = shownPath(file);
       const key = JSON.stringify([item.class, item.sub, commit, item.sub === 'test-videos' ? '[test_videos]' : file]);
-      const row = rows.get(key) || { ...item, commit, path: display, all: 0, main: 0, samples: new Set() };
+      const row = rows.get(key) || { ...item, commit, path: shownPath(file), all: 0, main: 0, samples: new Set() };
       if (item.sample && (item.class === 1 || !row.samples.size)) row.samples.add(item.sample);
       row.all++; if (onMain) row.main++; rows.set(key, row);
     }
@@ -136,9 +129,8 @@ async function run() {
     const onMain = main.has(id);
     for (const name of meta.names) sensitive.add(name);
     for (const email of meta.emails) { sensitive.add(email); identities.all.push({ email }); if (onMain) identities.main.push({ email }); }
-    for (const input of [meta.message, ...meta.names, ...meta.emails]) collect(scanText(input, terms || []), id, '[commit]', onMain);
-    const tree = git(opt.repo, ['ls-tree', '-r', '-z', '--full-tree', id]).toString().split('\0');
-    for (const entry of tree) {
+    for (const input of [meta.message, ...meta.names, ...meta.emails]) collect(scanText(input, list), id, '[commit]', onMain);
+    for (const entry of git(repo, ['ls-tree', '-r', '-z', '--full-tree', id]).toString().split('\0')) {
       if (!entry) continue;
       const tab = entry.indexOf('\t'), info = entry.slice(0, tab).split(' '), file = entry.slice(tab + 1);
       if (info[1] !== 'blob') continue;
@@ -153,19 +145,24 @@ async function run() {
   const byBlob = new Map();
   for (const pair of pairs.values()) { if (!byBlob.has(pair.blob)) byBlob.set(pair.blob, []); byBlob.get(pair.blob).push(pair); }
   let binary = 0;
-  await blobs(opt.repo, [...byBlob.keys()], (id, bytes) => {
+  await blobs(repo, [...byBlob.keys()], (id, bytes) => {
     const isBinary = bytes.subarray(0, 8000).includes(0);
     if (isBinary) binary++;
-    const content = isBinary ? null : scanText(bytes.toString('utf8'), terms || []);
+    const content = isBinary ? null : scanText(bytes.toString('utf8'), list);
     for (const pair of byBlob.get(id)) {
-      collect(scanPath(pair.file, bytes.length, terms || []), pair.commit, pair.file, pair.main);
+      collect(scanPath(pair.file, bytes.length, list), pair.commit, pair.file, pair.main);
       if (content) collect(content, pair.commit, pair.file, pair.main);
     }
   });
+  return { main, rows, hosts, identities, mainPaths, binary };
+}
+const rowsOf = (rows, n) => [...rows.values()].filter((row) => row.class === n);
+const NOT_RUN = 'not run (no terms file)';
+function tally(rows, identities, terms) {
   const counts = {};
   for (const n of [1, 3, 4, 5, 6]) {
-    const selected = [...rows.values()].filter((row) => row.class === n);
-    counts[n] = n === 1 && !terms ? { all: 'not run (no terms file)', main: 'not run (no terms file)' } : {
+    const selected = rowsOf(rows, n);
+    counts[n] = n === 1 && !terms ? { all: NOT_RUN, main: NOT_RUN } : {
       all: selected.reduce((sum, row) => sum + row.all, 0), main: selected.reduce((sum, row) => sum + row.main, 0),
     };
   }
@@ -176,16 +173,19 @@ async function run() {
     entry.all += row.all; entry.main += row.main; entry.rows++; bySub[key] = entry;
   }
   counts.bySubclass = bySub;
-  const volume = { commitsMain: main.size, binaryBlobsSkipped: binary, ...objectVolume(opt.repo, opt.main, mainPaths) };
-  const countLine = (n) => n === 2 ? `${counts[2].all.distinct} distinct / ${counts[2].all.nonNoreply} non-noreply | ${counts[2].main.distinct} distinct / ${counts[2].main.nonNoreply} non-noreply` : `${counts[n].all} | ${counts[n].main}`;
-  const cmd = process.argv.slice(1).map((arg, i, args) => args[i - 1] === '--terms' ? '<terms file>' : arg).join(' ');
+  return counts;
+}
+const countLine = (counts, n) => n === 2 ? `${counts[2].all.distinct} distinct / ${counts[2].all.nonNoreply} non-noreply | ${counts[2].main.distinct} distinct / ${counts[2].main.nonNoreply} non-noreply` : `${counts[n].all} | ${counts[n].main}`;
+const share = (volume, size) => volume.packedBytes ? (100 * size / volume.packedBytes).toFixed(2) : '0.00';
+const subclasses = (counts) => Object.entries(counts.bySubclass).sort();
+function reportText({ head, mainHead, cmd, counts, rows, hosts, volume, terms }) {
   const lines = ['# Whole-history check', '', `HEAD: ${head}`, `Main head: ${mainHead}`, `Command: node ${cmd}`, `Date: ${new Date().toISOString()}`, '', '| Class | All refs | From main |', '|---|---:|---:|'];
-  for (let n = 1; n <= 6; n++) lines.push(`| ${n} | ${countLine(n)} |`);
+  for (let n = 1; n <= 6; n++) lines.push(`| ${n} | ${countLine(counts, n)} |`);
   lines.push('', '| Class: sub-class | Occurrences, all refs | From main | Rows (commit, path) |', '|---|---:|---:|---:|');
-  for (const [key, entry] of Object.entries(bySub).sort()) lines.push(`| ${key} | ${entry.all} | ${entry.main} | ${entry.rows} |`);
+  for (const [key, entry] of subclasses(counts)) lines.push(`| ${key} | ${entry.all} | ${entry.main} | ${entry.rows} |`);
   for (let n = 1; n <= 6; n++) {
     lines.push('', `## Class ${n}`, '');
-    const selected = [...rows.values()].filter((row) => row.class === n);
+    const selected = rowsOf(rows, n);
     if (n === 2) lines.push('Identity counts appear above; addresses and names are omitted.');
     else if (!selected.length) lines.push(n === 1 && !terms ? 'Not run (no terms file).' : 'No findings.');
     // Capped per sub-class, rarest first: a common shape must not crowd a rare one out of the report.
@@ -198,25 +198,41 @@ async function run() {
   }
   lines.push('', '## Hosts', '', '| Host | All refs | From main |', '|---|---:|---:|');
   for (const [host, count] of hosts) lines.push(`| ${host} | ${count.all} | ${count.main} |`);
-  lines.push('', '## Volume', '', `Main commits: ${volume.commitsMain}`, `Reachable packed bytes: ${volume.packedBytes}`, `Skipped binary blobs: ${binary}`, `Repository size-pack: ${volume.sizePack}`, '', 'Each object is counted once; blobs use their first observed main path and other objects go in everything else.', '', 'Packed bytes by tree:');
-  for (const [group, size] of Object.entries(volume.groups)) lines.push(`- ${group}: ${size} (${volume.packedBytes ? (100 * size / volume.packedBytes).toFixed(2) : '0.00'}%)`);
+  lines.push('', '## Volume', '', `Main commits: ${volume.commitsMain}`, `Reachable packed bytes: ${volume.packedBytes}`, `Skipped binary blobs: ${volume.binaryBlobsSkipped}`, `Repository size-pack: ${volume.sizePack}`, '', 'Each object is counted once; blobs use their first observed main path and other objects go in everything else.', '', 'Packed bytes by tree:');
+  for (const [group, size] of Object.entries(volume.groups)) lines.push(`- ${group}: ${size} (${share(volume, size)}%)`);
   lines.push('', 'Largest blobs on main:');
   for (const item of volume.largest) lines.push(`- ${item.size} bytes; ${item.path}`);
-  const scrub = (value) => cleanText(value, sensitive);
-  const report = scrub(lines.join('\n') + '\n');
-  fs.writeFileSync(opt.report, report, { flag: 'wx' });
-  if (opt.json) fs.writeFileSync(opt.json, scrub(JSON.stringify({ counts }, null, 2)) + '\n', { flag: 'wx' });
+  return lines.join('\n') + '\n';
+}
+function summaryText({ head, mainHead, counts, volume }) {
   const output = [`HEAD: ${head}`, `Main head: ${mainHead}`];
-  for (let n = 1; n <= 6; n++) output.push(`Class ${n} (all | main): ${countLine(n)}`);
-  for (const [key, entry] of Object.entries(bySub).sort()) output.push(`  ${key}: ${entry.all} | ${entry.main} (${entry.rows} rows)`);
-  output.push(`Main commits: ${volume.commitsMain}; packed bytes: ${volume.packedBytes}; skipped binary blobs: ${binary}; size-pack: ${volume.sizePack}`);
-  for (const [group, size] of Object.entries(volume.groups)) output.push(`${group}: ${size} bytes (${volume.packedBytes ? (100 * size / volume.packedBytes).toFixed(2) : '0.00'}%)`);
+  for (let n = 1; n <= 6; n++) output.push(`Class ${n} (all | main): ${countLine(counts, n)}`);
+  for (const [key, entry] of subclasses(counts)) output.push(`  ${key}: ${entry.all} | ${entry.main} (${entry.rows} rows)`);
+  output.push(`Main commits: ${volume.commitsMain}; packed bytes: ${volume.packedBytes}; skipped binary blobs: ${volume.binaryBlobsSkipped}; size-pack: ${volume.sizePack}`);
+  for (const [group, size] of Object.entries(volume.groups)) output.push(`${group}: ${size} bytes (${share(volume, size)}%)`);
   for (const item of volume.largest) output.push(`${item.size} bytes; ${item.path}`);
-  console.log(scrub(output.join('\n')));
+  return output.join('\n');
+}
+async function run() {
+  const opt = options(process.argv.slice(2));
+  if (fs.existsSync(opt.report)) throw new Error('report already exists');
+  if (opt.json && fs.existsSync(opt.json)) throw new Error('JSON already exists');
+  if (opt.json && path.resolve(opt.json) === path.resolve(opt.report)) throw new Error('report and JSON paths must differ');
+  const terms = readTerms(opt.repo, opt.terms);
+  const sensitive = new Set((terms || []).map((term) => term.value));
+  const mainHead = git(opt.repo, ['rev-parse', '--verify', `${opt.main}^{commit}`]).toString().trim();
+  const head = git(opt.repo, ['rev-parse', '--verify', 'HEAD^{commit}']).toString().trim();
+  const { main, rows, hosts, identities, mainPaths, binary } = await scanHistory(opt.repo, opt.main, terms, sensitive);
+  const counts = tally(rows, identities, terms);
+  const volume = { commitsMain: main.size, binaryBlobsSkipped: binary, ...objectVolume(opt.repo, opt.main, mainPaths) };
+  const cmd = process.argv.slice(1).map((arg, i, args) => args[i - 1] === '--terms' ? '<terms file>' : arg).join(' ');
+  const scrub = (value) => cleanText(value, sensitive);
+  fs.writeFileSync(opt.report, scrub(reportText({ head, mainHead, cmd, counts, rows, hosts, volume, terms })), { flag: 'wx' });
+  if (opt.json) fs.writeFileSync(opt.json, scrub(JSON.stringify({ counts }, null, 2)) + '\n', { flag: 'wx' });
+  console.log(scrub(summaryText({ head, mainHead, counts, volume })));
 }
 run().catch((error) => {
-  const reasons = new Set(['terms file is inside the repository work tree', 'terms file is known to git', 'report already exists', 'JSON already exists', 'report is required', 'invalid arguments', 'report and JSON paths must differ']);
-  const reason = reasons.has(error.message) ? error.message : 'scan could not complete';
+  const reason = REFUSALS.has(error.message) ? error.message : 'scan could not complete';
   console.error(`history check: ${reason}`);
   process.exitCode = reason.startsWith('terms file') ? 2 : 1;
 });

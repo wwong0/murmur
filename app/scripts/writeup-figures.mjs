@@ -1,17 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadInputs } from './measure-graphs.mjs';
+import { loadInputs, outputArgs } from './measure-graphs.mjs';
 import * as sharing from './graphs/fig-sharing.mjs';
 import * as roomSize from './graphs/fig-room-size.mjs';
 import * as sync from './graphs/fig-sync.mjs';
 import { sharingBars, sharingSvg, roomSizeSvg, syncSvg, TITLES } from './graphs/writeup.mjs';
 
-const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const option = (argv, name) => {
-  const i = argv.indexOf(`--${name}`);
-  return i < 0 ? null : argv[i + 1] ?? null;
-};
 export function buildFigures(inputs, sourcesOf) {
   return [
     { id: 'sharing', data: sharing.data(inputs), render: sharingSvg, bars: sharingBars },
@@ -26,13 +21,9 @@ export function buildFigures(inputs, sourcesOf) {
   });
 }
 export async function runCommand(argv = process.argv) {
-  const outValue = option(argv, 'out');
-  if (!outValue) throw new Error('usage: node scripts/writeup-figures.mjs --out <dir> [--results <dir>]');
-  const out = path.resolve(outValue), root = path.resolve(option(argv, 'results') ?? path.join(appRoot, 'results'));
-  if (fs.existsSync(out)) {
-    console.error(`output path already exists: ${out}`);
-    return 2;
-  }
+  const args = outputArgs(argv, 'writeup-figures.mjs');
+  if (!args) return 2;
+  const { out, root } = args;
   const { inputs, sourcesOf } = await loadInputs(root);
   const charts = buildFigures(inputs, sourcesOf);
   fs.mkdirSync(path.dirname(out), { recursive: true });
