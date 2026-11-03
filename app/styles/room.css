@@ -531,6 +531,7 @@
   .stats-body { display: flex; flex-direction: column; gap: 0.5rem; }
   .stats-body :is(#host-file-status, #keyframe-notice, #host-preparing):empty { display: none; }
   .stats-caption { margin: 0.5rem 0 0; font: inherit; font-weight: 500; color: var(--secondary); }
+  .stats-download { align-self: flex-start; }
   #clock-line, #drift-line, #bytes-line, #controller-line, #status-line { color: var(--ink-soft); }
   #keyframe-notice { color: var(--secondary); }
   #host-file-status, #host-preparing { color: var(--secondary); }

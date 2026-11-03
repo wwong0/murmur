@@ -4,7 +4,7 @@ export const APP_KEYS = [
   'controller', 'ticks', 'placement', 'startTiming', 'pitch', 'treatmentEvidence', 'delivery', 'hostLink',
   'urgentContext', 'hostAsks', 'hostCounters', 'hostReceipts', 'peerExchange',
   'urgentDelay', 'peerEngineConfig', 'peerBytes', 'segmentStore', 'heldAhead', 'resumes', 'playback',
-  'playbackState', 'timeline', 'hostFile', 'title', 'hostGrace',
+  'playbackState', 'timeline', 'hostFile', 'title', 'hostGrace', 'statsExport',
 ];
 
 export function appKeysEqual(actual) {

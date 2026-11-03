@@ -25,6 +25,7 @@ const ACTIVE = new Map([
   ['APP_TRACKER_URL', `wss://${HOST}/tracker`],
   ['APP_ALLOWED_ORIGIN', `https://${HOST}`],
   ['APP_TRUSTED_PROXY', '1'],
+  ['APP_USAGE_FILE', '/var/lib/murmur/usage.json'],
   ['APP_TURN_KEY_ID', ''],
   ['APP_TURN_API_TOKEN', ''],
 ]);
@@ -139,6 +140,7 @@ export default async function deployFilesSuite() {
     assertEqual(options.mediaSource, 'file', 'media source');
     assertEqual(options.delivery, 'host', 'delivery');
     assertEqual(options.trustedProxy, true, 'trusted proxy');
+    assertEqual(options.usageFile, '/var/lib/murmur/usage.json', 'usage file');
     assertEqual(options.harnessCounters, false, 'harness counters');
     assertEqual(options.autoStart, false, 'auto start');
     assertEqual(options.port, 8100, 'port');
@@ -176,6 +178,8 @@ export default async function deployFilesSuite() {
       'each location proxies to its service port',
     );
     assert(roomUnit.includes('EnvironmentFile=/etc/murmur/room.env'), 'room unit uses the room environment file');
+    assert(/^StateDirectory=murmur\r?$/m.test(roomUnit), 'room unit creates the usage directory');
+    assert(active.get('APP_USAGE_FILE').startsWith('/var/lib/murmur/'), 'usage file is in the state directory');
   });
 
   await check('6.6 access logs carry no path', async () => {

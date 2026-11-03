@@ -17,6 +17,7 @@ NoNewPrivileges=true
 ProtectSystem=full
 ProtectHome=true
 PrivateTmp=true
+StateDirectory=murmur
 
 [Install]
 WantedBy=multi-user.target

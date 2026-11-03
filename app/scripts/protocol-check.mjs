@@ -310,6 +310,9 @@ import measureNightVerdictsSuite from './check/suites/measure-night-verdicts.mjs
 import measureNight2VerdictsSuite from './check/suites/measure-night2-verdicts.mjs';
 import measureMemoryLimitVerdictsSuite from './check/suites/measure-memory-limit-verdicts.mjs';
 import measureGraphsSuite from './check/suites/measure-graphs.mjs';
+import usageCountSuite from './check/suites/usage-count.mjs';
+import tabIdSuite from './check/suites/tab-id.mjs';
+import statsExportSuite from './check/suites/stats-export.mjs';
 
 console.log(describeFixtures());
 
@@ -599,6 +602,9 @@ for (const suite of [
   measureNight2VerdictsSuite,
   measureMemoryLimitVerdictsSuite,
   measureGraphsSuite,
+  usageCountSuite,
+  tabIdSuite,
+  statsExportSuite,
 ]) {
   await suite();
 }

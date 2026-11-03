@@ -327,7 +327,7 @@ function HostFileControls({ view, actions }) {
 // Mounted always: closed it is `hidden` and every readout stays current by `textContent`
 // (diagnostics → The overlay is shown on request and always readable). `#overlay` follows
 // the panel through the same value.
-function StatsPanel({ view }) {
+function StatsPanel({ view, actions }) {
   const hostFile = useView(view, (snapshot) => snapshot.hostFile);
   const status = useView(view, (snapshot) => snapshot.status);
   const hostStatus = useView(view, (snapshot) => snapshot.hostStatus);
@@ -336,6 +336,7 @@ function StatsPanel({ view }) {
   const notice = hostFile.notice;
   return <section id="stats-panel" className="stats-panel" aria-label="Stats" hidden={!overlayVisible}>
     <div className="stats-body">
+      <Button id="download-stats" className="stats-download" onClick={actions.downloadStats}>Download stats</Button>
       <div id="overlay" hidden={!overlayVisible}>
         <OverlayLine view={view} id="clock-line" name="clock" />
         <OverlayLine view={view} id="drift-line" name="drift" />
@@ -533,7 +534,7 @@ export function RoomScreens({ view, actions }) {
     <HostLeftPill view={view} />
     <PlayerBar view={view} actions={actions} theatre={theatre} theatreShown={wide} onTheatre={toggleTheatre} />
     <RoomActions view={view} actions={actions} />
-    <StatsPanel view={view} />
+    <StatsPanel view={view} actions={actions} />
     <RoomColumn view={view} actions={actions} />
   </>;
 }

@@ -9,6 +9,9 @@
 // public/room.html.
 
 import { createRoomClient } from './lib/room-client.mjs';
+import { chooseTabId, parseStoredTab } from './lib/tab-id.mjs';
+import { createStallLog } from './lib/stall-log.mjs';
+import { buildStatsExport } from './lib/stats-export.mjs';
 import {
   ADDR_SERVER, CHAT_MAX_CODE_POINTS, ERROR_CODES, NAME_MAX_CODE_POINTS, TYPE_AHEAD, TYPE_HOST_STATUS,
   buildAheadEnvelope, buildHostStatusEnvelope, newReclaimSecret, readAheadReport, readBody,
@@ -125,7 +128,6 @@ const initialRoute = readRoute(window.location.search);
 let route = initialRoute.room ? 'room' : 'front';
 let room = initialRoute.room;
 let role = initialRoute.role;
-let tabId = initialRoute.room ? (initialRoute.tab ?? randomTabId()) : null;
 let activeClient = null;
 let appStarted = false;
 
@@ -149,6 +151,16 @@ function sessionKey(key) {
       try { storage.removeItem(key); } catch {}
     },
   };
+}
+
+let tabId = null;
+if (initialRoute.room) {
+  let navigationType = null;
+  try { navigationType = globalThis.performance?.getEntriesByType?.('navigation')?.[0]?.type ?? null; } catch {}
+  const storage = sessionKey('watchalong.tab');
+  const choice = chooseTabId({ urlTab: initialRoute.tab, stored: parseStoredTab(storage?.get()), room: initialRoute.room, navigationType, draw: randomTabId });
+  tabId = choice.tabId;
+  if (choice.store !== null) storage?.set(JSON.stringify(choice.store));
 }
 
 const PREPARED_NAME_KEY = 'watchalong.prepared-name';
@@ -260,6 +272,7 @@ document.addEventListener('fullscreenchange', () => {
 let noticeSeq = 0;
 const NOTICE_CAP = 100;
 const startWait = createStartWait();
+const stallLog = createStallLog();
 let reportStats = null;
 const linkKinds = createLinkKinds({
   links: openHostLinks,
@@ -275,6 +288,7 @@ function renderMute() {
 function addNotice(text, { warn = false } = {}) {
   view.set('notices', appendCapped(view.get().notices, {
     seq: noticeSeq++,
+    atMs: performance.now(),
     text: `[${new Date().toLocaleTimeString()}] ${text}`,
     warn,
   }, NOTICE_CAP));
@@ -1246,6 +1260,17 @@ const actions = {
     return document.getElementById('player')?.requestFullscreen?.();
   },
   stats: () => view.set('overlayVisible', !view.get().overlayVisible),
+  downloadStats: () => {
+    try {
+      const result = buildStatsExport(statsExportSources());
+      const url = URL.createObjectURL(new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' }));
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'murmur-stats.json';
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (error) { addNotice(`stats download failed: ${error?.message ?? error}`, { warn: true }); }
+  },
   // The page keeps only the name the roster hands back.
   setName: (text) => sendOwn('name', text, NAME_MAX_CODE_POINTS, (name) => client.setName(name)),
   sendChat: (text) => sendOwn('chat', text, CHAT_MAX_CODE_POINTS, (message) => client.sendChat(message)),
@@ -1410,6 +1435,8 @@ function observeElement(type) {
 for (const type of ['canplay', 'canplaythrough', 'seeked']) {
   video.addEventListener(type, () => runTickSteps([['readiness', () => observeElement(type)]], reportStep));
 }
+video.addEventListener('waiting', () => stallLog.waiting(performance.now()));
+video.addEventListener('playing', () => stallLog.resumed(performance.now()));
 
 for (const type of ['timeupdate', 'seeking']) {
   video.addEventListener(type, () => runTickSteps([
@@ -1769,7 +1796,19 @@ setInterval(tickPlayback, 250);
 // two readings, not one frozen at load.
 // ---------------------------------------------------------------------------
 
+function statsExportSources() {
+  return {
+    build: BUILD_ID, role: client.role, nowMs: performance.now(), timeOriginMs: performance.timeOrigin,
+    lines: view.get().overlay, driftRead: driftLog.read(), driftSummary: driftLog.summary(),
+    startWaitMs: startWait.waitMs(), peerBytes: client.role === 'host' ? null : peerBytesRead(),
+    hostStats: hostOrigin ? hostOrigin.stats() : null, controller: controllerView(),
+    playback: { waiting: start.state().waiting, starts: starts.length, callbacks: sampler.callbacks },
+    stalls: stallLog.read(), notices: view.get().notices,
+  };
+}
+
 window.__app = {
+  statsExport: () => buildStatsExport(statsExportSources()),
   buildId: BUILD_ID,
   get room() { return room; },
   get tabId() { return tabId; },
