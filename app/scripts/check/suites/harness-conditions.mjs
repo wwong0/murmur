@@ -3,7 +3,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { assert, assertEqual, check } from '../harness.mjs';
+import { assert, assertEqual, check, skip, skipWithoutResults } from '../harness.mjs';
 import { clientReadyTimeoutMs, conditions, runHarness } from '../../harness-run.mjs';
 import { harnessChromeFlags } from '../../../harness/chrome-flags.mjs';
 
@@ -86,6 +86,7 @@ function fieldEqual(left, right, field, label) {
 }
 
 export default async function harnessConditionsSuite() {
+  if (skipWithoutResults('harness-conditions')) return;
   await check('harness conditions: P7 missing delivery refuses before topology', async () => {
     const root = path.join(ROOT, '.tmp', `harness-conditions-${process.pid}-${Date.now()}`);
     let prepared = false;
@@ -103,12 +104,11 @@ export default async function harnessConditionsSuite() {
     assertEqual(fs.existsSync(root), false, 'P7 missing delivery creates no run directory');
   });
 
-  await check('harness conditions: every existing condition only gains delivery http', async () => {
-    const base = baseConditions();
-    if (!base) {
-      assert(true, 'not a git work tree â€” base condition history cannot be read');
-      return;
-    }
+  // A shallow clone or a rewritten history cannot read the base: a counted skip,
+  // never a PASS that compared nothing (14d design.md D6).
+  const base = baseConditions();
+  if (!base) skip('harness conditions: every existing condition only gains delivery http', 'base commit 3e1583b is unreadable');
+  else await check('harness conditions: every existing condition only gains delivery http', async () => {
     const baseEntries = new Map(conditionEntries(base));
     const currentEntries = new Map(conditionEntries(conditions));
     for (const [name, condition] of baseEntries) {

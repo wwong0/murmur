@@ -48,6 +48,7 @@ import {
   makeEchoReply,
 } from '../public/lib/envelope.mjs';
 import { DEFAULT_TARGET_SEGMENT_SECONDS, targetMillis } from '../public/lib/remux-settings.mjs';
+import { DEFAULT_MEDIA_DIR } from './media-dir.mjs';
 import {
   admitMemberSend,
   allowanceFromEnv,
@@ -68,10 +69,6 @@ const PUBLIC_DIR = path.join(APP_DIR, 'public');
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 8100;
-// ONE named setting, not a fixed path (design.md D1): change 6 runs this in
-// containers and change 11 relocates it again, and neither should have to edit
-// a measured code path for a reason unrelated to what it measures.
-const DEFAULT_MEDIA_DIR = path.resolve(APP_DIR, '..', 'step0', 'content');
 // Settable at start because the protocol check must prove a dead connection is
 // removed, and at the default that puts a multi-second floor on every run —
 // which turns a check you run constantly into one you run occasionally (D8).
@@ -1073,8 +1070,7 @@ export function startRoomServer(opts = {}) {
     if (err.code === 'EADDRINUSE') {
       console.error(
         `[room] ERROR: port ${port} is already in use.\n` +
-          `[room] Another copy of this server is the likely culprit. Note that step0 uses 8080 and 8000,\n` +
-          `[room] and spike-host-origin uses 8080, 8001 and 8000 — none of which should collide with ${port}.\n` +
+          `[room] Another copy of this server is the likely culprit.\n` +
           `[room] On Windows: Get-NetTCPConnection -LocalPort ${port} -State Listen | Stop-Process`
       );
       process.exit(1);

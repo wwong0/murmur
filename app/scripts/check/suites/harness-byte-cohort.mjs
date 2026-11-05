@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { check, assert, assertEqual } from '../harness.mjs';
+import { check, assert, assertEqual, skipWithoutResults } from '../harness.mjs';
 import { computeFigures } from '../../figures/harness-figures.mjs';
 import { isPublishedFigure, publish } from '../../figures/publication.mjs';
 import { evaluateRefusals } from '../../harness/refusals.mjs';
@@ -89,6 +89,7 @@ function initOnlyFixture() {
 }
 
 export default async function harnessByteCohortSuite() {
+  if (skipWithoutResults('harness-byte-cohort')) return;
   await check('byte cohort integration: both boundaries match receipts and the denominator counts the client union', async () => {
     const { figures, evaluation, publishedByte } = evaluate(fixture());
     assertEqual(figures.byteAccountingMethod, METHOD, 'the published method is explicit');

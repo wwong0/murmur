@@ -19,599 +19,317 @@
 // which boots them on import, so importing a suite is enough to have something
 // to run it against.
 //
-// No test framework — step0/ establishes invariant checks in plain scripts as
-// this project's convention (see step0/scripts/aggregate.mjs).
+// No test framework: invariant checks in plain scripts are this project's
+// convention.
 //
 // Node 24, ESM.
 
-import { report } from './check/harness.mjs';
+import { report, suiteFailed } from './check/harness.mjs';
 import { describeFixtures, disposeFixtures } from './check/fixtures.mjs';
-
-import mediaSuite from './check/suites/media.mjs';
-import byteAccountingSuite from './check/suites/byte-accounting.mjs';
-import harnessCountersSettingSuite from './check/suites/harness-counters-setting.mjs';
-import harnessFiguresSuite from './check/suites/harness-figures.mjs';
-import harnessQueueSuite from './check/suites/harness-queue.mjs';
-import harnessUdpLoadSuite from './check/suites/harness-udp-load.mjs';
-import harnessPairwiseSuite from './check/suites/harness-pairwise.mjs';
-import harnessDriftPublicationSuite from './check/suites/harness-drift-publication.mjs';
-import harnessDriftPlotSuite from './check/suites/harness-drift-plot.mjs';
-import harnessByteCohortSuite from './check/suites/harness-byte-cohort.mjs';
-import receiptCohortSuite from './check/suites/receipt-cohort.mjs';
-import harnessRefusalsSuite from './check/suites/harness-refusals.mjs';
-import notPresentingSuite from './check/suites/not-presenting.mjs';
-import harnessArmsSuite from './check/suites/harness-arms.mjs';
-import harnessImagesSuite from './check/suites/harness-images.mjs';
-import harnessArmRecomputeSuite from './check/suites/harness-arm-recompute.mjs';
-import harnessCadenceSuite from './check/suites/harness-cadence.mjs';
-import harnessPollShapeSuite from './check/suites/harness-poll-shape.mjs';
-import harnessRecordsSuite from './check/suites/harness-records.mjs';
-import trackerSpawnSuite from './check/suites/tracker-spawn.mjs';
-import harnessConditionsSuite from './check/suites/harness-conditions.mjs';
-import harnessBehindSuite from './check/suites/harness-behind.mjs';
-import harnessBehindPastSuite from './check/suites/harness-behind-past.mjs';
-import harnessFrameStallsSuite from './check/suites/harness-frame-stalls.mjs';
-import harnessDistanceBehindSuite from './check/suites/harness-distance-behind.mjs';
-import harnessRosterEventSuite from './check/suites/harness-roster-event.mjs';
-import segmentWaitSuite from './check/suites/segment-wait.mjs';
-import harnessSocketControlSuite from './check/suites/harness-socket-control.mjs';
-import harnessPeerConditionsSuite from './check/suites/harness-peer-conditions.mjs';
-import harnessPeerTopologySuite from './check/suites/harness-peer-topology.mjs';
-import topologyReadbackSuite from './check/suites/topology-readback.mjs';
-import originProxySuite from './check/suites/origin-proxy.mjs';
-import harnessPeerUploadSuite from './check/suites/harness-peer-upload.mjs';
-import peerFiguresSuite from './check/suites/peer-figures.mjs';
-import oneViewingSuite from './check/suites/one-viewing.mjs';
-import oneViewingBoundariesSuite from './check/suites/one-viewing-boundaries.mjs';
-import nop2pSteadySuite from './check/suites/nop2p-steady.mjs';
-import machineTestSuite from './check/suites/machine-test.mjs';
-import qaRecomputeSuite from './check/suites/qa-recompute.mjs';
-import p2pMeasurementSuite from './check/suites/p2p-measurement.mjs';
-import regimesReadingSuite from './check/suites/regimes-reading.mjs';
-import regimesConditionsSuite from './check/suites/regimes-conditions.mjs';
-import peerSpacingSuite from './check/suites/peer-spacing.mjs';
-import peerChecksSuite from './check/suites/peer-checks.mjs';
-import peerChecksGroupSuite from './check/suites/peer-checks-group.mjs';
-import receiptExcusalSuite from './check/suites/receipt-excusal.mjs';
-import peerConservationShapedSuite from './check/suites/peer-conservation-shaped.mjs';
-import peerSettleSuite from './check/suites/peer-settle.mjs';
-import hostOriginRefusalsSuite from './check/suites/host-origin-refusals.mjs';
-import harnessStartRequalSuite from './check/suites/harness-start-requal.mjs';
-import harnessDriftRunnerSuite from './check/suites/harness-drift-runner.mjs';
-import joinSuite from './check/suites/join.mjs';
-import hostSuite from './check/suites/host.mjs';
-import identitySuite from './check/suites/identity.mjs';
-import routingSuite from './check/suites/routing.mjs';
-import serverOnlyTypesSuite from './check/suites/server-only-types.mjs';
-import presenceSuite from './check/suites/presence.mjs';
-import timeEchoSuite from './check/suites/time-echo.mjs';
-import robustnessSuite from './check/suites/robustness.mjs';
-import livenessSuite from './check/suites/liveness.mjs';
-import settingsSuite from './check/suites/settings.mjs';
-import mediaSourceSettingSuite from './check/suites/media-source-setting.mjs';
-import roomClientSuite from './check/suites/room-client.mjs';
-import clockSuite from './check/suites/clock.mjs';
-import clockSyncSuite from './check/suites/clock-sync.mjs';
-import segmentProtocolSuite from './check/suites/segment-protocol.mjs';
-import segmentFlowSuite from './check/suites/segment-flow.mjs';
-import hostLinkSuite from './check/suites/host-link.mjs';
-import hostOriginSuite from './check/suites/host-origin.mjs';
-import hostAccountingSuite from './check/suites/host-accounting.mjs';
-import hostReceiptsSuite from './check/suites/host-receipts.mjs';
-import hostOriginFiguresSuite from './check/suites/host-origin-figures.mjs';
-import hostOriginBarsSuite from './check/suites/host-origin-bars.mjs';
-import fetchShimBarsSuite from './check/suites/fetch-shim-bars.mjs';
-import peerBytesSuite from './check/suites/peer-bytes.mjs';
-import bytesReadoutSuite from './check/suites/bytes-readout.mjs';
-import peerEngineConfigSuite from './check/suites/peer-engine-config.mjs';
-import segmentStoreSuite from './check/suites/segment-store.mjs';
-import hostLoadTimeoutSuite from './check/suites/host-load-timeout.mjs';
-import engineWindowsSuite from './check/suites/engine-windows.mjs';
-import urgentSourceSuite from './check/suites/urgent-source.mjs';
-import edgeAssignmentSuite from './check/suites/edge-assignment.mjs';
-import edgeSpreadSuite from './check/suites/edge-spread.mjs';
-import edgeSourceSuite from './check/suites/edge-source.mjs';
-import edgeRequestSuite from './check/suites/edge-request.mjs';
-import runwayEntrySuite from './check/suites/runway-entry.mjs';
-import edgeControlSuite from './check/suites/edge-control.mjs';
-import enginePatchSuite from './check/suites/engine-patch.mjs';
-import edgeAsksSuite from './check/suites/edge-asks.mjs';
-import capacityEstimateSuite from './check/suites/capacity-estimate.mjs';
-import sendPaceSuite from './check/suites/send-pace.mjs';
-import hostPaceSuite from './check/suites/host-pace.mjs';
-import sendArbiterSuite from './check/suites/send-arbiter.mjs';
-import urgentRequestSuite from './check/suites/urgent-request.mjs';
-import urgentPreparingSuite from './check/suites/urgent-preparing.mjs';
-import edgePositionSuite from './check/suites/edge-position.mjs';
-import wireEstimateSuite from './check/suites/wire-estimate.mjs';
-import climbRestartSuite from './check/suites/climb-restart.mjs';
-import classRiseSuite from './check/suites/class-rise.mjs';
-import classRiseEntrySuite from './check/suites/class-rise-entry.mjs';
-import intervalPaceSuite from './check/suites/interval-pace.mjs';
-import riseRecoverySuite from './check/suites/rise-recovery.mjs';
-import leaveArmSuite from './check/suites/leave-arm.mjs';
-import leaveRecoveryReadingSuite from './check/suites/leave-recovery-reading.mjs';
-import leaveRecoveryConditionsSuite from './check/suites/leave-recovery-conditions.mjs';
-import settledDriftSuite from './check/suites/settled-drift.mjs';
-import timelineOffsetConditionsSuite from './check/suites/timeline-offset-conditions.mjs';
-import healthyRoomReadingSuite from './check/suites/healthy-room-reading.mjs';
-import echoDelaySuite from './check/suites/echo-delay.mjs';
-import harnessJoinOrderSuite from './check/suites/harness-join-order.mjs';
-import qualificationEarlySuite from './check/suites/qualification-early.mjs';
-import boundaryAsyncSuite from './check/suites/boundary-async.mjs';
-import assignmentControlSuite from './check/suites/assignment-control.mjs';
-import capacityScheduleSuite from './check/suites/capacity-schedule.mjs';
-import scheduleRecoverySuite from './check/suites/schedule-recovery.mjs';
-import runwaySuite from './check/suites/runway.mjs';
-import askEvidenceSuite from './check/suites/ask-evidence.mjs';
-import edgeFiguresSuite from './check/suites/edge-figures.mjs';
-import edgeReadingSuite from './check/suites/edge-reading.mjs';
-import edgeConditionsSuite from './check/suites/edge-conditions.mjs';
-import paceBoundSuite from './check/suites/pace-bound.mjs';
-import capUsedSuite from './check/suites/cap-used.mjs';
-import steadyCapUsedSuite from './check/suites/steady-cap-used.mjs';
-import controlEvidenceSuite from './check/suites/control-evidence.mjs';
-import controlFiguresSuite from './check/suites/control-figures.mjs';
-import controlReadingSuite from './check/suites/control-reading.mjs';
-import controlReadingScriptSuite from './check/suites/control-reading-script.mjs';
-import historyCheckSuite from './check/suites/history-check.mjs';
-import buildMatchSuite from './check/suites/build-match.mjs';
-import controlReadingRepairsSuite from './check/suites/control-reading-repairs.mjs';
-import harnessContentSuite from './check/suites/harness-content.mjs';
-import segmentSecondsSuite from './check/suites/segment-seconds.mjs';
-import controlRereadSuite from './check/suites/control-reread.mjs';
-import headroomSuite from './check/suites/headroom.mjs';
-import seekEntrySuite from './check/suites/seek-entry.mjs';
-import capacityStepSuite from './check/suites/capacity-step.mjs';
-import seekEvidenceSuite from './check/suites/seek-evidence.mjs';
-import seekHoldSuite from './check/suites/seek-hold.mjs';
-import trapFiguresSuite from './check/suites/trap-figures.mjs';
-import trapReadingSuite from './check/suites/trap-reading.mjs';
-import starvedRecomputeSuite from './check/suites/starved-recompute.mjs';
-import heldAheadSuite from './check/suites/held-ahead.mjs';
-import spanCourseSuite from './check/suites/span-course.mjs';
-import peerExchangeEntrySuite from './check/suites/peer-exchange-entry.mjs';
-import peerExchangeBarsSuite from './check/suites/peer-exchange-bars.mjs';
-import positionOffsetSuite from './check/suites/position-offset.mjs';
-import roomTimelineSuite from './check/suites/room-timeline.mjs';
-import aheadRelaySuite from './check/suites/ahead-relay.mjs';
-import playbackHoldSuite from './check/suites/playback-hold.mjs';
-import heldAheadLiveSuite from './check/suites/held-ahead-live.mjs';
-import holdResumeSuite from './check/suites/hold-resume.mjs';
-import playbackStateSuite from './check/suites/playback-state.mjs';
-import playbackTitleSuite from './check/suites/playback-title.mjs';
-import playbackStateRulesSuite from './check/suites/playback-state-rules.mjs';
-import playbackAcquisitionSuite from './check/suites/playback-acquisition.mjs';
-import acquisitionPresenceSuite from './check/suites/acquisition-presence.mjs';
-import playbackStoreSuite from './check/suites/playback-store.mjs';
-import serverRestartSuite from './check/suites/server-restart.mjs';
-import playbackAcquisitionTimingSuite from './check/suites/playback-acquisition-timing.mjs';
-import playbackElectionSuite from './check/suites/playback-election.mjs';
-import autoStartSuite from './check/suites/auto-start.mjs';
-import autoStartPinSuite from './check/suites/auto-start-pin.mjs';
-import pausedSeekSuite from './check/suites/paused-seek.mjs';
-import titleEndSuite from './check/suites/title-end.mjs';
-import hostGraceSuite from './check/suites/host-grace.mjs';
-import seekScrubSuite from './check/suites/seek-scrub.mjs';
-import playerKeysSuite from './check/suites/player-keys.mjs';
-import routeSuite from './check/suites/route.mjs';
-import roomRoleStatusSuite from './check/suites/room-role-status.mjs';
-import driftSuite from './check/suites/drift.mjs';
-import driftControllerSuite from './check/suites/drift-controller.mjs';
-import driftLoadSuite from './check/suites/drift-load.mjs';
-import driftFiguresSuite from './check/suites/drift-figures.mjs';
-import driftConvergenceSuite from './check/suites/drift-convergence.mjs';
-import driftReportingSuite from './check/suites/drift-reporting.mjs';
-import driftSettlingSuite from './check/suites/drift-settling.mjs';
-import playbackStartSuite from './check/suites/playback-start.mjs';
-import playbackStartReparkSuite from './check/suites/playback-start-repark.mjs';
-import playbackStartCoverSuite from './check/suites/playback-start-cover.mjs';
-import farSkipSuite from './check/suites/far-skip.mjs';
-import farSkipEntrySuite from './check/suites/far-skip-entry.mjs';
-import tabReturnEntrySuite from './check/suites/tab-return-entry.mjs';
-import hiddenTabReadingsSuite from './check/suites/hidden-tab-readings.mjs';
-import tickStepsSuite from './check/suites/tick-steps.mjs';
-import settleWaitSuite from './check/suites/settle-wait.mjs';
-import startResidualSuite from './check/suites/start-residual.mjs';
-import startTelemetrySuite from './check/suites/start-telemetry.mjs';
-import startTimingSuite from './check/suites/start-timing.mjs';
-import startTreatedSuite from './check/suites/start-treated.mjs';
-import driftReadoutSuite from './check/suites/drift-readout.mjs';
-import diagnosticsOverlaySuite from './check/suites/diagnostics-overlay.mjs';
-import d8ProductIntegrationSuite from './check/suites/d8-product-integration.mjs';
-import playbackTreatmentSuite from './check/suites/playback-treatment.mjs';
-import playbackTreatmentEntrySuite from './check/suites/playback-treatment-entry.mjs';
-import roomControlsEntrySuite from './check/suites/room-controls-entry.mjs';
-import mediaSessionEntrySuite from './check/suites/media-session-entry.mjs';
-import roomPlayerEntrySuite from './check/suites/room-player-entry.mjs';
-import leaveWarningSuite from './check/suites/leave-warning.mjs';
-import theatreFlipSuite from './check/suites/theatre-flip.mjs';
-import fontSuite from './check/suites/font.mjs';
-import hostEntrySuite from './check/suites/host-entry.mjs';
-import hostAnswerSuite from './check/suites/host-answer.mjs';
-import runnerCoreSuite from './check/suites/runner-core.mjs';
-import remuxCutPlanSuite from './check/suites/remux-cut-plan.mjs';
-import remuxIndexSuite from './check/suites/remux-index.mjs';
-import remuxWriterSuite from './check/suites/remux-writer.mjs';
-import remuxPublishSuite from './check/suites/remux-publish.mjs';
-import fileIdentitySuite from './check/suites/file-identity.mjs';
-import remuxRunnerSuite from './check/suites/remux-runner.mjs';
-import preparedStoreSuite from './check/suites/prepared-store.mjs';
-import prepareRunnerSuite from './check/suites/prepare-runner.mjs';
-import preparationProgressSuite from './check/suites/preparation-progress.mjs';
-import hostChoosingProgressSuite from './check/suites/host-choosing-progress.mjs';
-import hostStatusSuite from './check/suites/host-status.mjs';
-import titleReportSuite from './check/suites/title-report.mjs';
-import hostFileSourceSuite from './check/suites/host-file-source.mjs';
-import hostFileCardSuite from './check/suites/host-file-card.mjs';
-import hostFileEntrySuite from './check/suites/host-file-entry.mjs';
-import hostPreparingEntrySuite from './check/suites/host-preparing-entry.mjs';
-import hostGraceEntrySuite from './check/suites/host-grace-entry.mjs';
-import hostTitleGateSuite from './check/suites/host-title-gate.mjs';
-import titleGateSuite from './check/suites/title-gate.mjs';
-import titleEntrySuite from './check/suites/title-entry.mjs';
-import hostNewRoomSuite from './check/suites/host-new-room.mjs';
-import hostFileStepsSuite from './check/suites/host-file-steps.mjs';
-import roomContinuityStepsSuite from './check/suites/room-continuity-steps.mjs';
-import roomScreensStepsSuite from './check/suites/room-screens-steps.mjs';
-import browserCheckListSuite from './check/suites/browser-check-list.mjs';
-import browserResultLogSuite from './check/suites/browser-result-log.mjs';
-import pageViewSuite from './check/suites/page-view.mjs';
-import fileHelpSuite from './check/suites/file-help.mjs';
-import syncDotSuite from './check/suites/sync-dot.mjs';
-import roomPeopleSuite from './check/suites/room-people.mjs';
-import roomActivityEntrySuite from './check/suites/room-activity-entry.mjs';
-import roomWaitingEntrySuite from './check/suites/room-waiting-entry.mjs';
-import viewerWaitCardSuite from './check/suites/viewer-wait-card.mjs';
-import namePromptSuite from './check/suites/name-prompt.mjs';
-import touchRevealSuite from './check/suites/touch-reveal.mjs';
-import syncWordsSuite from './check/suites/sync-words.mjs';
-import fmp4PlacementSuite from './check/suites/fmp4-placement.mjs';
-import driftPlacementSuite from './check/suites/drift-placement.mjs';
-import entryPlacementSuite from './check/suites/entry-placement.mjs';
-import hostFileS7gSuite from './check/suites/host-file-s7g.mjs';
-import memberTextSuite from './check/suites/member-text.mjs';
-import namesSuite from './check/suites/names.mjs';
-import chatSuite from './check/suites/chat.mjs';
-import chatRateSuite from './check/suites/chat-rate.mjs';
-import envelopeAllowanceSuite from './check/suites/envelope-allowance.mjs';
-import frameCapSuite from './check/suites/frame-cap.mjs';
-import joinAllowanceSuite from './check/suites/join-allowance.mjs';
-import supersededSocketSuite from './check/suites/superseded-socket.mjs';
-import sendBufferSuite from './check/suites/send-buffer.mjs';
-import securityHeadersSuite from './check/suites/security-headers.mjs';
-import allowedOriginSuite from './check/suites/allowed-origin.mjs';
-import upgradeHostSuite from './check/suites/upgrade-host.mjs';
-import relayCredentialsSuite from './check/suites/relay-credentials.mjs';
-import deployFilesSuite from './check/suites/deploy-files.mjs';
-import startWaitSuite from './check/suites/start-wait.mjs';
-import linkKindsSuite from './check/suites/link-kinds.mjs';
-import pageHardeningSuite from './check/suites/page-hardening.mjs';
-import appShellKeysSuite from './check/suites/app-shell-keys.mjs';
-import chatLogSuite from './check/suites/chat-log.mjs';
-import roomClientNamesSuite from './check/suites/room-client-names.mjs';
-import roomPeopleNamesSuite from './check/suites/room-people-names.mjs';
-import namesChatEntrySuite from './check/suites/names-chat-entry.mjs';
-import namesAndChatStepsSuite from './check/suites/names-and-chat-steps.mjs';
-import measureStatsSuite from './check/suites/measure-stats.mjs';
-import measureLabDriftSuite from './check/suites/measure-lab-drift.mjs';
-import measureBytesSuite from './check/suites/measure-bytes.mjs';
-import measureLedgerSuite from './check/suites/measure-ledger.mjs';
-import measureGapCountSuite from './check/suites/measure-gap-count.mjs';
-import measureCommandSuite from './check/suites/measure-command.mjs';
-import measureLandingsSuite from './check/suites/measure-landings.mjs';
-import measureCatchUpSuite from './check/suites/measure-catch-up.mjs';
-import measureEventClocksSuite from './check/suites/measure-event-clocks.mjs';
-import retainedCapSuite from './check/suites/retained-cap.mjs';
-import supplierCutSuite from './check/suites/supplier-cut.mjs';
-import measureConditionsSuite from './check/suites/measure-conditions.mjs';
-import measureNightConditionsSuite from './check/suites/measure-night-conditions.mjs';
-import measureNight2ConditionsSuite from './check/suites/measure-night2-conditions.mjs';
-import measureNightVerdictsSuite from './check/suites/measure-night-verdicts.mjs';
-import measureNight2VerdictsSuite from './check/suites/measure-night2-verdicts.mjs';
-import measureMemoryLimitVerdictsSuite from './check/suites/measure-memory-limit-verdicts.mjs';
-import measureGraphsSuite from './check/suites/measure-graphs.mjs';
-import writeupFiguresSuite from './check/suites/writeup-figures.mjs';
-import usageCountSuite from './check/suites/usage-count.mjs';
-import tabIdSuite from './check/suites/tab-id.mjs';
-import statsExportSuite from './check/suites/stats-export.mjs';
+import { runSuites } from './check/run-suites.mjs';
 
 console.log(describeFixtures());
 
 // Order matters only for legibility: each suite takes rooms of its own, so none
-// of them can observe another.
-for (const suite of [
-  mediaSuite,
-  byteAccountingSuite,
-  harnessCountersSettingSuite,
-  harnessFiguresSuite,
-  harnessQueueSuite,
-  harnessUdpLoadSuite,
-  harnessPairwiseSuite,
-  harnessDriftPublicationSuite,
-  harnessDriftPlotSuite,
-  harnessByteCohortSuite,
-  receiptCohortSuite,
-  harnessRefusalsSuite,
-  notPresentingSuite,
-  harnessArmsSuite,
-  harnessImagesSuite,
-  harnessArmRecomputeSuite,
-  harnessCadenceSuite,
-  harnessPollShapeSuite,
-  harnessRecordsSuite,
-  trackerSpawnSuite,
-  harnessConditionsSuite,
-  harnessBehindSuite,
-  harnessBehindPastSuite,
-  harnessFrameStallsSuite,
-  harnessDistanceBehindSuite,
-  harnessRosterEventSuite,
-  segmentWaitSuite,
-  harnessSocketControlSuite,
-  harnessPeerConditionsSuite,
-  harnessPeerTopologySuite,
-  topologyReadbackSuite,
-  originProxySuite,
-  harnessPeerUploadSuite,
-  peerFiguresSuite,
-  oneViewingSuite,
-  oneViewingBoundariesSuite,
-  nop2pSteadySuite,
-  machineTestSuite,
-  qaRecomputeSuite,
-  p2pMeasurementSuite,
-  regimesReadingSuite,
-  regimesConditionsSuite,
-  peerSpacingSuite,
-  peerChecksSuite,
-  peerChecksGroupSuite,
-  receiptExcusalSuite,
-  peerConservationShapedSuite,
-  peerSettleSuite,
-  hostOriginRefusalsSuite,
-  harnessStartRequalSuite,
-  harnessDriftRunnerSuite,
-  joinSuite,
-  hostSuite,
-  identitySuite,
-  routingSuite,
-  serverOnlyTypesSuite,
-  presenceSuite,
-  timeEchoSuite,
-  robustnessSuite,
-  livenessSuite,
-  settingsSuite,
-  mediaSourceSettingSuite,
-  roomClientSuite,
-  clockSuite,
-  clockSyncSuite,
-  segmentProtocolSuite,
-  segmentFlowSuite,
-  hostLinkSuite,
-  hostOriginSuite,
-  hostAccountingSuite,
-  hostReceiptsSuite,
-  hostOriginFiguresSuite,
-  hostOriginBarsSuite,
-  fetchShimBarsSuite,
-  peerBytesSuite,
-  bytesReadoutSuite,
-  peerEngineConfigSuite,
-  segmentStoreSuite,
-  hostLoadTimeoutSuite,
-  engineWindowsSuite,
-  urgentSourceSuite,
-  edgeAssignmentSuite,
-  edgeSpreadSuite,
-  edgeSourceSuite,
-  edgeRequestSuite,
-  runwayEntrySuite,
-  edgeControlSuite,
-  enginePatchSuite,
-  edgeAsksSuite,
-  capacityEstimateSuite,
-  sendPaceSuite,
-  hostPaceSuite,
-  sendArbiterSuite,
-  urgentRequestSuite,
-  urgentPreparingSuite,
-  edgePositionSuite,
-  wireEstimateSuite,
-  climbRestartSuite,
-  classRiseSuite,
-  classRiseEntrySuite,
-  intervalPaceSuite,
-  riseRecoverySuite,
-  leaveArmSuite,
-  leaveRecoveryReadingSuite,
-  leaveRecoveryConditionsSuite,
-  settledDriftSuite,
-  timelineOffsetConditionsSuite,
-  healthyRoomReadingSuite,
-  echoDelaySuite,
-  harnessJoinOrderSuite,
-  qualificationEarlySuite,
-  boundaryAsyncSuite,
-  assignmentControlSuite,
-  capacityScheduleSuite,
-  scheduleRecoverySuite,
-  runwaySuite,
-  askEvidenceSuite,
-  edgeFiguresSuite,
-  edgeReadingSuite,
-  edgeConditionsSuite,
-  paceBoundSuite,
-  capUsedSuite,
-  steadyCapUsedSuite,
-  controlEvidenceSuite,
-  controlFiguresSuite,
-  controlReadingSuite,
-  controlReadingScriptSuite,
-  historyCheckSuite,
-  buildMatchSuite,
-  controlReadingRepairsSuite,
-  harnessContentSuite,
-  segmentSecondsSuite,
-  controlRereadSuite,
-  headroomSuite,
-  seekEntrySuite,
-  capacityStepSuite,
-  seekEvidenceSuite,
-  seekHoldSuite,
-  trapFiguresSuite,
-  trapReadingSuite,
-  starvedRecomputeSuite,
-  heldAheadSuite,
-  spanCourseSuite,
-  peerExchangeEntrySuite,
-  peerExchangeBarsSuite,
-  positionOffsetSuite,
-  roomTimelineSuite,
-  aheadRelaySuite,
-  playbackHoldSuite,
-  heldAheadLiveSuite,
-  holdResumeSuite,
-  playbackStateSuite,
-  playbackTitleSuite,
-  playbackStateRulesSuite,
-  playbackAcquisitionSuite,
-  acquisitionPresenceSuite,
-  playbackStoreSuite,
-  serverRestartSuite,
-  playbackAcquisitionTimingSuite,
-  playbackElectionSuite,
-  autoStartSuite,
-  autoStartPinSuite,
-  pausedSeekSuite,
-  titleEndSuite,
-  hostGraceSuite,
-  seekScrubSuite,
-  playerKeysSuite,
-  routeSuite,
-  roomRoleStatusSuite,
-  driftSuite,
-  driftControllerSuite,
-  driftLoadSuite,
-  driftFiguresSuite,
-  driftConvergenceSuite,
-  driftReportingSuite,
-  driftSettlingSuite,
-  playbackStartSuite,
-  playbackStartReparkSuite,
-  playbackStartCoverSuite,
-  farSkipSuite,
-  farSkipEntrySuite,
-  tabReturnEntrySuite,
-  hiddenTabReadingsSuite,
-  tickStepsSuite,
-  settleWaitSuite,
-  startResidualSuite,
-  startTelemetrySuite,
-  startTimingSuite,
-  startTreatedSuite,
-  driftReadoutSuite,
-  diagnosticsOverlaySuite,
-  d8ProductIntegrationSuite,
-  playbackTreatmentSuite,
-  playbackTreatmentEntrySuite,
-  roomControlsEntrySuite,
-  mediaSessionEntrySuite,
-  roomPlayerEntrySuite,
-  leaveWarningSuite,
-  theatreFlipSuite,
-  fontSuite,
-  hostEntrySuite,
-  hostAnswerSuite,
-  runnerCoreSuite,
-  remuxCutPlanSuite,
-  remuxIndexSuite,
-  remuxWriterSuite,
-  remuxPublishSuite,
-  fileIdentitySuite,
-  remuxRunnerSuite,
-  preparedStoreSuite,
-  prepareRunnerSuite,
-  preparationProgressSuite,
-  hostChoosingProgressSuite,
-  hostStatusSuite,
-  titleReportSuite,
-  hostFileSourceSuite,
-  hostFileCardSuite,
-  hostFileEntrySuite,
-  hostPreparingEntrySuite,
-  hostGraceEntrySuite,
-  hostTitleGateSuite,
-  titleGateSuite,
-  titleEntrySuite,
-  hostNewRoomSuite,
-  hostFileStepsSuite,
-  roomContinuityStepsSuite,
-  roomScreensStepsSuite,
-  browserCheckListSuite,
-  browserResultLogSuite,
-  pageViewSuite,
-  fileHelpSuite,
-  syncDotSuite,
-  roomPeopleSuite,
-  roomActivityEntrySuite,
-  roomWaitingEntrySuite,
-  viewerWaitCardSuite,
-  namePromptSuite,
-  touchRevealSuite,
-  syncWordsSuite,
-  fmp4PlacementSuite,
-  driftPlacementSuite,
-  entryPlacementSuite,
-  hostFileS7gSuite,
-  memberTextSuite,
-  namesSuite,
-  chatSuite,
-  chatRateSuite,
-  envelopeAllowanceSuite,
-  frameCapSuite,
-  joinAllowanceSuite,
-  supersededSocketSuite,
-  sendBufferSuite,
-  securityHeadersSuite,
-  allowedOriginSuite,
-  upgradeHostSuite,
-  relayCredentialsSuite,
-  deployFilesSuite,
-  startWaitSuite,
-  linkKindsSuite,
-  pageHardeningSuite,
-  appShellKeysSuite,
-  chatLogSuite,
-  roomClientNamesSuite,
-  roomPeopleNamesSuite,
-  namesChatEntrySuite,
-  namesAndChatStepsSuite,
-  measureStatsSuite,
-  measureLabDriftSuite,
-  measureBytesSuite,
-  measureLedgerSuite,
-  measureGapCountSuite,
-  measureCommandSuite,
-  measureLandingsSuite,
-  measureCatchUpSuite,
-  measureEventClocksSuite,
-  retainedCapSuite,
-  supplierCutSuite,
-  measureConditionsSuite,
-  measureNightConditionsSuite,
-  measureNight2ConditionsSuite,
-  measureNightVerdictsSuite,
-  measureNight2VerdictsSuite,
-  measureMemoryLimitVerdictsSuite,
-  measureGraphsSuite,
-  writeupFiguresSuite,
-  usageCountSuite,
-  tabIdSuite,
-  statsExportSuite,
-]) {
-  await suite();
-}
+// of them can observe another. Every suite is imported before the first runs,
+// and one that throws is one failed check, not the end of the run (14d D7).
+const SUITES = [
+  'media',
+  'byte-accounting',
+  'harness-counters-setting',
+  'harness-figures',
+  'harness-queue',
+  'harness-udp-load',
+  'harness-pairwise',
+  'harness-drift-publication',
+  'harness-drift-plot',
+  'harness-byte-cohort',
+  'receipt-cohort',
+  'harness-refusals',
+  'not-presenting',
+  'harness-arms',
+  'harness-images',
+  'harness-arm-recompute',
+  'harness-cadence',
+  'harness-poll-shape',
+  'harness-records',
+  'tracker-spawn',
+  'harness-conditions',
+  'harness-behind',
+  'harness-behind-past',
+  'harness-frame-stalls',
+  'harness-distance-behind',
+  'harness-roster-event',
+  'segment-wait',
+  'harness-socket-control',
+  'harness-peer-conditions',
+  'harness-peer-topology',
+  'topology-readback',
+  'origin-proxy',
+  'harness-peer-upload',
+  'peer-figures',
+  'one-viewing',
+  'one-viewing-boundaries',
+  'nop2p-steady',
+  'machine-test',
+  'qa-recompute',
+  'p2p-measurement',
+  'regimes-reading',
+  'regimes-conditions',
+  'peer-spacing',
+  'peer-checks',
+  'peer-checks-group',
+  'receipt-excusal',
+  'peer-conservation-shaped',
+  'peer-settle',
+  'host-origin-refusals',
+  'harness-start-requal',
+  'harness-drift-runner',
+  'join',
+  'host',
+  'identity',
+  'routing',
+  'server-only-types',
+  'presence',
+  'time-echo',
+  'robustness',
+  'liveness',
+  'settings',
+  'media-source-setting',
+  'room-client',
+  'clock',
+  'clock-sync',
+  'segment-protocol',
+  'segment-flow',
+  'host-link',
+  'host-origin',
+  'host-accounting',
+  'host-receipts',
+  'host-origin-figures',
+  'host-origin-bars',
+  'fetch-shim-bars',
+  'peer-bytes',
+  'bytes-readout',
+  'peer-engine-config',
+  'segment-store',
+  'host-load-timeout',
+  'engine-windows',
+  'urgent-source',
+  'edge-assignment',
+  'edge-spread',
+  'edge-source',
+  'edge-request',
+  'runway-entry',
+  'edge-control',
+  'engine-patch',
+  'edge-asks',
+  'capacity-estimate',
+  'send-pace',
+  'host-pace',
+  'send-arbiter',
+  'urgent-request',
+  'urgent-preparing',
+  'edge-position',
+  'wire-estimate',
+  'climb-restart',
+  'class-rise',
+  'class-rise-entry',
+  'interval-pace',
+  'rise-recovery',
+  'leave-arm',
+  'leave-recovery-reading',
+  'leave-recovery-conditions',
+  'settled-drift',
+  'timeline-offset-conditions',
+  'healthy-room-reading',
+  'echo-delay',
+  'harness-join-order',
+  'qualification-early',
+  'boundary-async',
+  'assignment-control',
+  'capacity-schedule',
+  'schedule-recovery',
+  'runway',
+  'ask-evidence',
+  'edge-figures',
+  'edge-reading',
+  'edge-conditions',
+  'pace-bound',
+  'cap-used',
+  'steady-cap-used',
+  'control-evidence',
+  'control-figures',
+  'control-reading',
+  'control-reading-script',
+  'history-check',
+  'build-match',
+  'control-reading-repairs',
+  'harness-content',
+  'segment-seconds',
+  'control-reread',
+  'headroom',
+  'seek-entry',
+  'capacity-step',
+  'seek-evidence',
+  'seek-hold',
+  'trap-figures',
+  'trap-reading',
+  'starved-recompute',
+  'held-ahead',
+  'span-course',
+  'peer-exchange-entry',
+  'peer-exchange-bars',
+  'position-offset',
+  'room-timeline',
+  'ahead-relay',
+  'playback-hold',
+  'held-ahead-live',
+  'hold-resume',
+  'playback-state',
+  'playback-title',
+  'playback-state-rules',
+  'playback-acquisition',
+  'acquisition-presence',
+  'playback-store',
+  'server-restart',
+  'playback-acquisition-timing',
+  'playback-election',
+  'auto-start',
+  'auto-start-pin',
+  'paused-seek',
+  'title-end',
+  'host-grace',
+  'seek-scrub',
+  'player-keys',
+  'route',
+  'room-role-status',
+  'drift',
+  'drift-controller',
+  'drift-load',
+  'drift-figures',
+  'drift-convergence',
+  'drift-reporting',
+  'drift-settling',
+  'playback-start',
+  'playback-start-repark',
+  'playback-start-cover',
+  'far-skip',
+  'far-skip-entry',
+  'tab-return-entry',
+  'hidden-tab-readings',
+  'tick-steps',
+  'settle-wait',
+  'start-residual',
+  'start-telemetry',
+  'start-timing',
+  'start-treated',
+  'drift-readout',
+  'diagnostics-overlay',
+  'd8-product-integration',
+  'playback-treatment',
+  'playback-treatment-entry',
+  'room-controls-entry',
+  'media-session-entry',
+  'room-player-entry',
+  'leave-warning',
+  'theatre-flip',
+  'font',
+  'host-entry',
+  'host-answer',
+  'runner-core',
+  'remux-cut-plan',
+  'remux-index',
+  'remux-writer',
+  'remux-publish',
+  'file-identity',
+  'remux-runner',
+  'prepared-store',
+  'prepare-runner',
+  'preparation-progress',
+  'host-choosing-progress',
+  'host-status',
+  'title-report',
+  'host-file-source',
+  'host-file-card',
+  'host-file-entry',
+  'host-preparing-entry',
+  'host-grace-entry',
+  'host-title-gate',
+  'title-gate',
+  'title-entry',
+  'host-new-room',
+  'host-file-steps',
+  'room-continuity-steps',
+  'room-screens-steps',
+  'browser-check-list',
+  'browser-result-log',
+  'page-view',
+  'file-help',
+  'sync-dot',
+  'room-people',
+  'room-activity-entry',
+  'room-waiting-entry',
+  'viewer-wait-card',
+  'name-prompt',
+  'touch-reveal',
+  'sync-words',
+  'fmp4-placement',
+  'drift-placement',
+  'entry-placement',
+  'host-file-s7g',
+  'member-text',
+  'names',
+  'chat',
+  'chat-rate',
+  'envelope-allowance',
+  'frame-cap',
+  'join-allowance',
+  'superseded-socket',
+  'send-buffer',
+  'security-headers',
+  'allowed-origin',
+  'upgrade-host',
+  'relay-credentials',
+  'deploy-files',
+  'start-wait',
+  'link-kinds',
+  'page-hardening',
+  'app-shell-keys',
+  'chat-log',
+  'room-client-names',
+  'room-people-names',
+  'names-chat-entry',
+  'names-and-chat-steps',
+  'measure-stats',
+  'measure-lab-drift',
+  'measure-bytes',
+  'measure-ledger',
+  'measure-gap-count',
+  'measure-command',
+  'measure-landings',
+  'measure-catch-up',
+  'measure-event-clocks',
+  'retained-cap',
+  'supplier-cut',
+  'measure-conditions',
+  'measure-night-conditions',
+  'measure-night2-conditions',
+  'measure-night-verdicts',
+  'measure-night2-verdicts',
+  'measure-memory-limit-verdicts',
+  'measure-graphs',
+  'writeup-figures',
+  'usage-count',
+  'tab-id',
+  'stats-export',
+  'suite-runner',
+  'content-generator',
+];
+
+await runSuites(SUITES, {
+  load: (name) => import(`./check/suites/${name}.mjs`),
+  onThrow: suiteFailed,
+});
 
 await disposeFixtures();
 process.exit(report());

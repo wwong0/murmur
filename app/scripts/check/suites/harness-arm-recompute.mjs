@@ -1,12 +1,21 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assert, assertEqual, check } from '../harness.mjs';
 import { armFor } from '../../harness/arms.mjs';
+import { LEGACY_CONTENT_MANIFEST, readLegacyContentManifest } from '../../harness/legacy-content.mjs';
 
 const suiteDir = path.dirname(fileURLToPath(import.meta.url));
-const contentManifestPath = path.resolve(suiteDir, '../../../../step0/content/content-manifest.json');
-const contentManifest = JSON.parse(fs.readFileSync(contentManifestPath, 'utf8'));
+// A run directory that retains its own content manifest, so the recompute reads
+// constructed sizes and needs neither the media nor the legacy copy (14d D5).
+const contentManifest = { segmentSeconds: 2, segmentSizes: [1_001, 2_002, 3_003] };
+const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-arm-recompute-'));
+fs.writeFileSync(path.join(runDir, 'content-manifest.json'), JSON.stringify(contentManifest));
+// The tracked copy's digest and length, taken from the original manifest when it was copied.
+const LEGACY_SHA256 = '46e58bff4e4f7f0fad7a6553ff45ec84881566a28079f2ab4f0c9f8167ddf923';
+const LEGACY_BYTES = 23_696;
 const manifest = {
   byteAccountingMethod: 'constructed-accounting',
   cdpQualification: { receipt: { requestId: 'constructed' } },
@@ -45,10 +54,9 @@ export default async function harnessArmRecomputeSuite() {
     }
 
     const peer = arms[2][1];
-    const recomputedContent = peer.recomputeContent(manifest);
+    const recomputedContent = peer.recomputeContent(manifest, runDir);
     assert(recomputedContent !== manifest.content, 'peer content is recomputed');
-    assertEqual(recomputedContent.segmentSizes.length, contentManifest.segmentSizes.length, 'peer content has segment sizes');
-    assertEqual(recomputedContent.segmentSizes[0], contentManifest.segmentSizes[0], 'peer content preserves segment bytes');
+    assertEqual(JSON.stringify(recomputedContent.segmentSizes), '[1001,2002,3003]', 'peer content takes the retained segment sizes');
     assertEqual(peer.recomputeAccountingMethod(manifest), peer.byteAccountingMethod, 'peer accounting uses its arm method');
     assertEqual(JSON.stringify(peer.recomputeInputExtras(manifest)), JSON.stringify({ cdpQualification: manifest.cdpQualification }),
       'peer carries qualification input');
@@ -64,9 +72,33 @@ export default async function harnessArmRecomputeSuite() {
   await check('harness arm recompute: a one-viewing host run sizes its stretch from the content', async () => {
     const host = arms[1][1];
     const oneViewing = { ...manifest, multiplierDenominator: 'one-viewing' };
-    assertEqual(host.recomputeContent(oneViewing).segmentSizes?.length, contentManifest.segmentSizes.length,
-      'one-viewing host content has segment sizes');
-    assertEqual(host.recomputeSegmentSeconds(oneViewing), contentManifest.segmentSeconds, 'one-viewing host segment seconds');
+    assertEqual(JSON.stringify(host.recomputeContent(oneViewing, runDir).segmentSizes), '[1001,2002,3003]',
+      'one-viewing host content has the retained segment sizes');
+    assertEqual(host.recomputeSegmentSeconds(oneViewing, runDir), 2, 'one-viewing host segment seconds');
+  });
+
+  // 14a d1-findings F2: the fallback once read any manifest at its path, unchecked.
+  await check('harness arm recompute: the legacy fallback reads the tracked copy and refuses other numbers', async () => {
+    const bytes = fs.readFileSync(LEGACY_CONTENT_MANIFEST);
+    assertEqual(bytes.length, LEGACY_BYTES, 'the tracked legacy manifest has its original length');
+    assertEqual(crypto.createHash('sha256').update(bytes).digest('hex'), LEGACY_SHA256, 'the tracked legacy manifest is the original, byte for byte');
+    const legacyRun = { ...manifest, content: { identity: 'step0-content-media-v1' }, multiplierDenominator: 'one-viewing' };
+    const sizes = arms[1][1].recomputeContent(legacyRun).segmentSizes;
+    assertEqual(sizes.length, 1_800, 'a run with no retained manifest recomputes from the legacy copy');
+    assertEqual(sizes[0], 1_235_680, 'the legacy copy supplies its own first segment');
+    const legacy = readLegacyContentManifest();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'legacy-mismatch-'));
+    try {
+      for (const [field, value] of [['segmentSeconds', 2], ['segmentCount', 1_799], ['totalBytes', legacy.totalBytes + 1]]) {
+        const file = path.join(dir, `${field}.json`);
+        fs.writeFileSync(file, JSON.stringify({ ...legacy, [field]: value }));
+        let message = null;
+        try { readLegacyContentManifest(file); } catch (error) { message = error.message; }
+        assertEqual(message, 'content-legacy-mismatch', `a manifest with another ${field} is refused`);
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   // arms.mjs is excluded: armFor is where peerExchange selects the arm.
@@ -83,4 +115,6 @@ export default async function harnessArmRecomputeSuite() {
       assert(!branch.test(source), `${relative} has no peerExchange comparison branch`);
     }
   });
+
+  fs.rmSync(runDir, { recursive: true, force: true });
 }

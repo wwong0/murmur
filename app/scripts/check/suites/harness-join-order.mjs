@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assert, assertEqual, check } from '../harness.mjs';
+import { assert, assertEqual, check, skipWithoutResults } from '../harness.mjs';
 import { conditions, runHarness } from '../../harness-run.mjs';
 import { HTTP } from '../fixtures.mjs';
 
@@ -56,6 +56,7 @@ async function orderOf(conditionName, condition) {
 }
 
 export default async function harnessJoinOrderSuite() {
+  if (skipWithoutResults('harness-join-order')) return;
   await check('harness join order: a host run joins every viewer before it qualifies the first, and starts no echo before that', async () => {
     const condition = conditions.shakedown['hostorigin-qual'];
     const { events, thrown } = await orderOf(condition.name, condition);

@@ -12,13 +12,16 @@
 // client keeps rejoining underneath every later timing assertion, and one
 // failure manufactures the next.
 //
-// No test framework — step0/ establishes invariant checks in plain scripts as
-// this project's convention (see step0/scripts/aggregate.mjs). `newScope` is
-// about forty lines of bookkeeping inside that convention, not a framework.
+// No test framework: invariant checks in plain scripts are this project's
+// convention. `newScope` is about forty lines of bookkeeping inside that
+// convention, not a framework.
 //
 // Node 24, ESM, ws + node:net.
 
+import fs from 'node:fs';
 import net from 'node:net';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 
 import { createRoomClient } from '../../public/lib/room-client.mjs';
@@ -427,9 +430,43 @@ export async function checkGroup(entries) {
   for (const result of settled) record(result);
 }
 
+/**
+ * A suite that threw outside a `check()`, at import or in its body: one failed
+ * check named for the suite, so the run goes on and says what it lost (14d D7).
+ */
+export function suiteFailed(name, error) {
+  record({ name: `suite ${name}: threw outside a check`, ok: false, error });
+}
+
+/**
+ * A check that cannot run here, printed and counted apart from passes, never a
+ * PASS: `assert(true)` in its place read as a guard that guarded nothing (14d D6).
+ */
+export const skipped = [];
+
+export function skip(name, reason) {
+  skipped.push({ name, reason });
+  console.log(`  SKIP  ${name} — ${reason}`);
+}
+
+/** The retained evidence tree; a clone may not carry it (14b P1d). */
+export const RESULTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'results');
+
+/** Skips the named suite, counted, when `app/results/` is absent; true when it did. */
+export function skipWithoutResults(suite) {
+  if (fs.existsSync(RESULTS_DIR)) return false;
+  skip(`suite ${suite}`, 'app/results/ is absent');
+  return true;
+}
+
 export function report() {
   const failed = results.filter((r) => !r.ok);
-  console.log(`\nprotocol-check: ${results.length - failed.length}/${results.length} assertions passed`);
+  const skips = skipped.length ? `, ${skipped.length} skipped` : '';
+  console.log(`\nprotocol-check: ${results.length - failed.length}/${results.length} assertions passed${skips}`);
+  if (skipped.length > 0) {
+    console.log('\nskipped:');
+    for (const s of skipped) console.log(`  - ${s.name} — ${s.reason}`);
+  }
   if (failed.length > 0) {
     console.log('\nfailed:');
     for (const f of failed) console.log(`  - ${f.name}`);

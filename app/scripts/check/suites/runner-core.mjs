@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { check, assert, assertEqual } from '../harness.mjs';
+import { check, assert, assertEqual, skipWithoutResults } from '../harness.mjs';
 import {
   assertServedBundle,
   createDeadline,
@@ -68,6 +68,7 @@ async function withServer(handler, body) {
 }
 
 export default async function runnerCoreSuite() {
+  if (skipWithoutResults('runner-core')) return;
   await check('runner-core: an existing run directory is refused, and the refusal leaves its contents alone', async () => {
     withTempResults((resultsDir) => {
       const runDir = path.join(resultsDir, 'run');

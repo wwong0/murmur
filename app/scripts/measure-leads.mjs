@@ -32,6 +32,7 @@ import {
   TICK_BACKSTOP_MS,
 } from './lead-measurement.mjs';
 import { requireDelivery } from './delivery-pin.mjs';
+import { mediaDirFrom } from '../server/media-dir.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -92,7 +93,7 @@ function prepareRun() {
       windowState: 'visible, non-occluded (Chrome automation flags)',
       flags: FLAGS,
       contentFps: null,
-      mediaDir: path.resolve(process.env.APP_MEDIA_DIR ?? path.join(APP_DIR, '..', 'step0', 'content')),
+      mediaDir: mediaDirFrom(),
     },
     planned: {
       sendsPerSender: samples,

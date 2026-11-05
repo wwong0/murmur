@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { FLAGS, attach, cdpHttp, sleep } from './cdp.mjs';
 import { selectBrowserPlatform } from './runner/browser-platform.mjs';
 import { requireAutoStart } from './delivery-pin.mjs';
+import { mediaDirFrom } from '../server/media-dir.mjs';
 
 // The platform adapter rather than cdp.mjs's Windows re-exports (D9): change 6a
 // runs this same file inside the client container, where the Windows path does
@@ -35,14 +36,13 @@ const ORIGIN = process.env.APP_ORIGIN ?? 'http://127.0.0.1:8100';
 // GPU there to use. Carried per platform so the host run's flag set is unchanged
 // — a measurement taken under a different flag set is a different measurement.
 const PLATFORM_FLAGS = BROWSER.name === 'linux' ? ['--no-sandbox', '--disable-gpu'] : [];
-const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // THE SAME RESOLUTION room-server.mjs USES, env var included. The bar below is
 // read from this directory and applied to whatever the server is serving, so the
 // two must name the same content: give this run the APP_MEDIA_DIR the server was
 // given. Resolved from the script, never from the cwd — a bar read out of a
 // different tree is exactly the silently-wrong bar D4 re-reads the frame rate to
 // avoid.
-const MEDIA_DIR = path.resolve(process.env.APP_MEDIA_DIR ?? path.join(APP_DIR, '..', 'step0', 'content'));
+const MEDIA_DIR = mediaDirFrom();
 
 // Fixed before the first run (design.md D4) — not touched by what a run sees.
 const MEASURE_MS = 20000;

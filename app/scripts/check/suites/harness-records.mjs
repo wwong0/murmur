@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { check, assert } from '../harness.mjs';
+import { check, assert, skipWithoutResults } from '../harness.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -26,6 +26,7 @@ const REGISTERS = [
 ];
 
 export default async function harnessRecordsSuite() {
+  if (skipWithoutResults('harness-records')) return;
   for (const { change, required } of REGISTERS) {
     await check(`harness records: every retained ${change} run directory is in the register, and every register entry exists`, async () => {
       const file = path.join(RESULTS_DIR, `RUNS-${change}.json`);

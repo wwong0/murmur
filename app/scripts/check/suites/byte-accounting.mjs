@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import crypto from 'node:crypto';
 import net from 'node:net';
 import path from 'node:path';
@@ -11,7 +12,7 @@ const SIZE = 8 * 1024 * 1024;
 const CRLF = '\r\n';
 
 function makeMediaRoot() {
-  const root = fs.mkdtempSync(path.join(path.resolve('.tmp'), 'byte-accounting-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'byte-accounting-'));
   const media = path.join(root, 'media');
   fs.mkdirSync(media);
   fs.writeFileSync(path.join(media, 'seg-00000.m4s'), Buffer.alloc(SIZE, 2));

@@ -6,7 +6,7 @@ import { assert, assertEqual, check } from '../harness.mjs';
 import { readMountedContentManifest, validateContentManifest } from '../../harness/topology.mjs';
 
 const LEGACY = { identity: 'step0-content-media-v1', segmentSeconds: 4, segmentCount: 1_800, totalBytes: 2_365_859_777 };
-// step0/content/content-manifest.json's own shape: no identity field.
+// The legacy content manifest's own shape: no identity field.
 const LEGACY_MANIFEST = { segmentSeconds: 4, segmentCount: 1_800, totalBytes: 2_365_859_777 };
 
 function refusal(content, manifest) {
@@ -39,7 +39,7 @@ export default async function harnessContentSuite() {
     assertEqual(refusal({ hostDir: '.tmp/content' }, { ...LEGACY }), 'content-invalid', 'host directory without identity');
     assertEqual(refusal({ identity: 'wanted' }, { identity: 'wanted', segmentSeconds: null }), 'content-segment-seconds-unavailable', 'missing segment seconds');
     assertEqual(refusal(LEGACY, { ...LEGACY_MANIFEST, segmentSeconds: 1 }), 'content-legacy-mismatch', 'legacy manifest mismatch');
-    assertEqual(validateContentManifest(LEGACY, LEGACY_MANIFEST).segmentSeconds, 4, 'legacy step0 values are accepted');
+    assertEqual(validateContentManifest(LEGACY, LEGACY_MANIFEST).segmentSeconds, 4, 'legacy content values are accepted');
     assertEqual(refusal({ identity: 'dense' }, LEGACY_MANIFEST), 'content-identity-mismatch', 'a manifest with no identity matches no declared one');
   });
 

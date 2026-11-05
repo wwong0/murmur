@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { check, assert, assertEqual } from '../harness.mjs';
+import { check, assert, assertEqual, skipWithoutResults } from '../harness.mjs';
 import { mechanismCheck, mechanismControl, reduceTreated } from '../../start-timing.mjs';
 import { PRESENTATION_ADVANCE_MS } from '../../../public/lib/playback-leads.mjs';
 
@@ -82,6 +82,7 @@ const spreadAround = (centre, span) => PHASES.concat(PHASES).map((_, index) => c
 const gateOf = (result, name) => result.gates.find((entry) => entry.name === name) ?? null;
 
 export default async function startTreatedSuite() {
+  if (skipWithoutResults('start-treated')) return;
   await check('start treated: the negative control goes red on the retained baseline, and its positive twin green', async () => {
     const baseline = readBaseline();
     // The control is only a control if it runs on the real frozen figures.

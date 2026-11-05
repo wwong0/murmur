@@ -3,6 +3,7 @@
 // gap are published; a host gap inside a span reads it incomplete where declared.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { assert, assertEqual, check } from '../harness.mjs';
 import { asyncExec, defaultExec } from '../../../harness/apply-qdisc.mjs';
@@ -91,7 +92,7 @@ async function thrownBy(run) {
 
 export default async function boundaryAsyncSuite() {
   await check('boundary async: the polls run every 250 ms through a 4 000 ms read-back', async () => {
-    const runDir = fs.mkdtempSync(path.join(path.resolve('.tmp'), 'boundary-async-'));
+    const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'boundary-async-'));
     try {
       const fake = world();
       const topology = createComposeTopology({ exec: fake.exec, execAsync: fake.execAsync, down: false });

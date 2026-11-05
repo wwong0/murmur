@@ -46,7 +46,7 @@ export function rewriteWebSocketDebuggerUrl(target, port) {
 /**
  * Autoplay without a gesture, and every throttle Chrome applies to a window it
  * thinks nobody is looking at. A measurement taken through a throttled
- * compositor is a measurement of the throttle (step0's flag set, carried).
+ * compositor is a measurement of the throttle.
  */
 export const FLAGS = [
   '--autoplay-policy=no-user-gesture-required',

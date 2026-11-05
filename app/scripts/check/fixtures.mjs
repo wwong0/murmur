@@ -36,8 +36,8 @@ export const SLOW_LIVENESS_MS = 480;
 export const FROZEN_LIVENESS_MS = 60000;
 
 // ---------------------------------------------------------------------------
-// A throwaway media root, so the media assertions do not depend on step0/
-// having been generated.
+// A throwaway media root, so the media assertions do not depend on the real
+// content having been generated.
 // ---------------------------------------------------------------------------
 
 function makeMediaRoot() {

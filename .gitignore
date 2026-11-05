@@ -25,8 +25,9 @@ desktop.ini
 *.bundle.css
 *.bundle.js.map
 
-# Generated media — `npm run content` in step0/ rebuilds it (~2.3 GB, 1800
-# fMP4 segments of synthetic testsrc2).
+# Generated media — `npm run content` in app/ rebuilds it (~2.3 GB, 1800
+# fMP4 segments of synthetic testsrc2). step0/content/ is where it lived before.
+app/content/
 step0/content/
 
 # The owner's personal media, read by change 11's keyframe report. Never committed.

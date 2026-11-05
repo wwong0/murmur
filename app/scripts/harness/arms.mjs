@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { validateCdpQualification, validateLinkReceiptQualification, CDP_QUALIFICATION_REASON, LINK_RECEIPT_QUALIFICATION_REASON, QUALIFICATION_FETCH_TIMEOUT } from './qualification.mjs';
 import { peerPageReadingExpression } from './cdp-records.mjs';
 import { viewerHttpLeak, uplinkVersusDelivered } from '../figures/host-origin-checks.mjs';
@@ -12,6 +11,7 @@ import { evidenceRefusals } from './control-evidence.mjs';
 import { controlInjection, controlRefusals } from './assignment-control.mjs';
 import { changesMembership } from './roster-kinds.mjs';
 import { buildIdentityFromRun, buildRefusals, recordPageBuildIds } from './build-identity.mjs';
+import { LEGACY_CONTENT_IDENTITY, readLegacyContentManifest } from './legacy-content.mjs';
 
 export const REFUSAL_SCOPE = Object.freeze({
   neverPlayed: Object.freeze(['byte', 'drift']),
@@ -83,14 +83,11 @@ function readJson(file) {
   }
 }
 
-const STEP0_CONTENT_MANIFEST = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
-  '../../../step0/content/content-manifest.json');
-
 function contentManifestOf(manifest, runDir) {
   const retained = runDir ? path.join(runDir, 'content-manifest.json') : null;
   if (retained && fs.existsSync(retained)) return readJson(retained);
   if (manifest.content?.manifestPath) return readJson(manifest.content.manifestPath);
-  if (manifest.content?.identity === 'step0-content-media-v1') return readJson(STEP0_CONTENT_MANIFEST);
+  if (manifest.content?.identity === LEGACY_CONTENT_IDENTITY) return readLegacyContentManifest();
   throw new Error('content manifest unavailable');
 }
 

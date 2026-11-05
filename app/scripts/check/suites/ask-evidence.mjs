@@ -2,6 +2,7 @@
 // recorded per viewer; the host's response counts are read at both boundaries.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { assert, assertEqual, check } from '../harness.mjs';
 import { askExpression, askFile, createAskEvidence, recordHostStats } from '../../harness/ask-evidence.mjs';
@@ -69,7 +70,7 @@ export default async function askEvidenceSuite() {
   });
 
   await check('ask evidence: the health file and the ask files are read back for the figures', async () => {
-    const runDir = fs.mkdtempSync(path.join(path.resolve('.tmp'), 'ask-evidence-'));
+    const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ask-evidence-'));
     try {
       const fake = world([ask(1), ask(2)]);
       const ndjson = { append: (name, records) => fs.appendFileSync(path.join(runDir, name), records.map((record) => `${JSON.stringify(record)}\n`).join('')) };

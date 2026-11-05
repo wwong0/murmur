@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { assert, assertEqual, assertNear, check } from '../harness.mjs';
+import { assert, assertEqual, assertNear, check, skipWithoutResults } from '../harness.mjs';
 import { readRunDirectory, recomputeRunDirectory } from '../../harness-figures.mjs';
 import { bytesForStretch, computeOneViewing } from '../../figures/one-viewing.mjs';
 import { computePeerFigures, steadyState } from '../../figures/peer-figures.mjs';
@@ -82,6 +82,7 @@ function oneViewingInput(input) {
 }
 
 export default async function oneViewingSuite() {
+  if (skipWithoutResults('one-viewing')) return;
   await check('one viewing: pro-rates both boundary segments', async () => {
     assertNear(bytesForStretch(2_000, 9_000, [1_000, 2_000, 3_000], 4), 3_250, 0, '2s to 9s is 3250 bytes');
   });

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createHostAccounting } from '../../../public/lib/host-accounting.mjs';
-import { assert, assertEqual, check } from '../harness.mjs';
+import { assert, assertEqual, check, skipWithoutResults } from '../harness.mjs';
 import { recomputeRunDirectory, readRunDirectory } from '../../harness-figures.mjs';
 import { computeFigures } from '../../figures/harness-figures.mjs';
 
@@ -93,6 +93,7 @@ function writeRun(runDir, evidence) {
 let now = 0;
 
 export default async function hostOriginFiguresSuite() {
+  if (skipWithoutResults('host-origin-figures')) return;
   await check('host-origin figures: host manifests select receipts and retain CDP requests separately', async () => {
     const root = path.join(APP_ROOT, '.tmp');
     fs.mkdirSync(root, { recursive: true });

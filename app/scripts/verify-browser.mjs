@@ -97,6 +97,7 @@ import { PEER_PAGE_READING } from './peer-exchange-probe.mjs';
 import { Core } from '../node_modules/p2p-media-loader-core/lib/core.js';
 import { requireAutoStart } from './delivery-pin.mjs';
 import { closeNamePrompt, toggleControlMode } from './room-page-steps.mjs';
+import { mediaDirFrom } from '../server/media-dir.mjs';
 
 const PASS_STARTED_AT = Date.now();
 const PORT = 9223;
@@ -118,7 +119,7 @@ const RUN_DIR = RUN_DIR_ARGUMENT === null
 // here would trip on the same input, and two guards at one threshold cannot be
 // told apart by a probe (CONSTRAINTS.md -> Verification).
 const RUN_DIRECTORY_NAME = path.relative(RESULTS_DIR, RUN_DIR).split(path.sep).join('/');
-const MEDIA_DIR = path.resolve(process.env.APP_MEDIA_DIR ?? path.join(APP_DIR, '..', 'step0', 'content'));
+const MEDIA_DIR = mediaDirFrom();
 const WINDOW_STATE = 'visible, non-occluded (Chrome automation flags)';
 const MAX_RETAINED_BYTES = 16 * 1024 * 1024;
 /**

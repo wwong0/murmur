@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { assert, assertEqual, check } from '../harness.mjs';
+import { assert, assertEqual, check, skipWithoutResults } from '../harness.mjs';
 import { buildControlReadingReport } from '../../control-reading.mjs';
 
 const EDGE_READING = {
@@ -34,6 +34,7 @@ function run(condition, reading, multiplier) {
 }
 
 export default async function controlReadingScriptSuite() {
+  if (skipWithoutResults('control-reading-script')) return;
   await check('control reading script: a labelled 11a-2 register derives edge arms from retained regimes', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'control-reading-script-'));
     try {

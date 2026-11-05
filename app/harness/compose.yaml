@@ -41,7 +41,7 @@ x-client: &client
     # content's frame rate with ffprobe every run rather than carrying a
     # constant (executor-spec.md §10), and it runs in HERE. Nothing in the
     # client serves this directory — the media still arrives over wa-media.
-    - ${WA_MEDIA_DIR:-../../step0/content}:/media:ro
+    - ${WA_MEDIA_DIR:-../content}:/media:ro
     - ../results:/results
   networks:
     - wa-media
@@ -67,7 +67,7 @@ services:
       APP_TRACKER_HOST: origin-media
       WA_ORIGIN_ROLE: ${WA_ORIGIN_ROLE:-server}
     volumes:
-      - ${WA_MEDIA_DIR:-../../step0/content}:/media:ro
+      - ${WA_MEDIA_DIR:-../content}:/media:ro
       - ../results:/results
     ports:
       - '127.0.0.1:8110:8100'
@@ -99,7 +99,7 @@ services:
       APP_TRACKER_HOST: server-media
       WA_ORIGIN_ROLE: server
     volumes:
-      - ${WA_MEDIA_DIR:-../../step0/content}:/media:ro
+      - ${WA_MEDIA_DIR:-../content}:/media:ro
       - ../results:/results
     ports:
       - '127.0.0.1:8111:8100'

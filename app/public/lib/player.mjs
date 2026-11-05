@@ -3,8 +3,7 @@
 // Minimal hls.js player wrapper. Takes the <video> element as an argument —
 // never looks it up itself — so this module has no DOM lookups of its own
 // and a later React rewrite can reuse it unedited. No rate cap, no sync,
-// no P2P: this change is plain hls.js over HTTP (see step0/public/player.js
-// for the fuller harness this deliberately does not carry over).
+// no P2P: this change is plain hls.js over HTTP.
 // The host path's shim drops x-app-tab while serving media from the host.
 //
 // Constraints: this file lives under public/lib/, so it must never touch the

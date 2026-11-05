@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node server/room-server.mjs",
     "usage": "node scripts/usage-line.mjs",
+    "content": "node scripts/content/prepare-content.mjs",
     "dev": "node scripts/dev.mjs",
     "dev:file": "node scripts/dev.mjs --file",
     "build": "node scripts/check-structure.mjs && node scripts/build.mjs",

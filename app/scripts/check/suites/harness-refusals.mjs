@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { check, assert, assertEqual, assertNear } from '../harness.mjs';
+import { check, assert, assertEqual, assertNear, skipWithoutResults } from '../harness.mjs';
 import {
   captureBoundary,
   conditions,
@@ -121,6 +121,7 @@ function writeRefusalFixture(root, result) {
 }
 
 export default async function harnessRefusalsSuite() {
+  if (skipWithoutResults('harness-refusals')) return;
   await check('harness-refusals: green control passes coverage and publishes realtime 0.74', async () => {
     const result = evaluateRefusals(evidence());
     assert(!result.refused, `control refused: ${JSON.stringify(result.reasons)}`);

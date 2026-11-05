@@ -42,6 +42,7 @@ import {
 import { startLead } from './start-residual.mjs';
 import { PRESENTATION_ADVANCE_MS } from '../public/lib/playback-leads.mjs';
 import { requireDelivery } from './delivery-pin.mjs';
+import { mediaDirFrom } from '../server/media-dir.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RESULTS_DIR = path.join(APP_DIR, 'results');
@@ -165,7 +166,7 @@ function prepareRun() {
       buildId: null,
       servedBundleSha256: null,
       onDiskBundleSha256: null,
-      mediaDir: path.resolve(process.env.APP_MEDIA_DIR ?? path.join(APP_DIR, '..', 'step0', 'content')),
+      mediaDir: mediaDirFrom(),
       ownedServerPort,
     },
     planned: {

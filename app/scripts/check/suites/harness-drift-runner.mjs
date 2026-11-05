@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { check, assert, assertEqual } from '../harness.mjs';
+import { check, assert, assertEqual, skipWithoutResults } from '../harness.mjs';
 import { recomputeRunDirectory } from '../../harness-figures.mjs';
 import { decideFinalization, runHarness, settleFinalization } from '../../harness-run.mjs';
 import { maybeInjectDisturbance, DISTURBANCE_MARKER } from '../../harness/disturbance.mjs';
@@ -131,6 +131,7 @@ function fakeResult() {
 }
 
 export default async function harnessDriftRunnerSuite() {
+  if (skipWithoutResults('harness-drift-runner')) return;
   await check('harness drift runner: the drift file settled by the runner equals a later recompute', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-drift-recompute-'));
     try {

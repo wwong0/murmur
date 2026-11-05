@@ -225,17 +225,17 @@ export function recomputeQaRun(input, directory = undefined) {
   const tags = tagsOf(input);
   const windowsByClient = Object.fromEntries(tags.map((tag) => [tag,
     step0WindowForViewer(input.clients?.[tag], tag)]));
-  const step0 = figuresForWindows(input, windowsByClient);
+  const windowFigures = figuresForWindows(input, windowsByClient);
   const union = Object.values(windowsByClient);
   const step0Window = {
     windowsByClient,
-    ...step0,
+    ...windowFigures,
     uplinkUtilisationMean: linkUtilisation(input.linkSamples, union, capacityOf(input)),
   };
-  const reproduces = step0.peerFractionAggregate !== null
-    && step0.peerFractionAggregate <= 0.02
-    && tags.every((tag) => finite(step0.realtimeFactorByClient[tag])
-      && step0.realtimeFactorByClient[tag] < 0.98);
+  const reproduces = windowFigures.peerFractionAggregate !== null
+    && windowFigures.peerFractionAggregate <= 0.02
+    && tags.every((tag) => finite(windowFigures.realtimeFactorByClient[tag])
+      && windowFigures.realtimeFactorByClient[tag] < 0.98);
   return {
     ...(directory ? { directory } : {}),
     step0Window,

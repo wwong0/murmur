@@ -13,6 +13,7 @@ import { assertServedBundle, createManifestFile, prepareRunDirectory } from './r
 import { portFree, stopChild, unusedPort } from './runner/local-processes.mjs';
 import { requireAutoStart, requireDelivery } from './delivery-pin.mjs';
 import { FETCH_SHIM_BARS, evaluateFetchShim } from './figures/fetch-shim-bars.mjs';
+import { mediaDirFrom } from '../server/media-dir.mjs';
 
 const args = new Set(process.argv.slice(2));
 if ([...args].some((arg) => arg !== '--qualify-red')) throw new Error('usage: node scripts/verify-fetch-shim.mjs [--qualify-red]');
@@ -28,7 +29,7 @@ const PENDING_DEADLINE_MS = 2_000;
 const RECEIPT_DEADLINE_MS = 2_000;
 const RANGE_START = 100_000;
 const SEGMENT_NAME = 'seg-00010.m4s';
-const MEDIA_DIR = path.resolve(APP_DIR, process.env.APP_MEDIA_DIR ?? '../step0/content');
+const MEDIA_DIR = mediaDirFrom();
 const SEGMENT_PATH = path.join(MEDIA_DIR, SEGMENT_NAME);
 // Case g's own segment: the highest-numbered one, which the player never
 // reaches in a pass this short, so no player fetch can share its path.

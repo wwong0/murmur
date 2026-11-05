@@ -19,13 +19,12 @@ import {
 } from '../../harness/apply-qdisc.mjs';
 import { requireDelivery } from '../delivery-pin.mjs';
 import { armFor } from './arms.mjs';
+import { LEGACY_CONTENT, LEGACY_CONTENT_IDENTITY } from './legacy-content.mjs';
 import { hostSourceOnLoopback, topologyReadback } from './topology-readback.mjs';
 
 const HARNESS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'harness');
 const COMPOSE_FILE = path.join(HARNESS_DIR, 'compose.yaml');
 const APP_DIR = path.resolve(HARNESS_DIR, '..');
-const LEGACY_CONTENT_IDENTITY = 'step0-content-media-v1';
-const LEGACY_CONTENT = Object.freeze({ segmentSeconds: 4, segmentCount: 1_800, totalBytes: 2_365_859_777 });
 
 export const PROJECT = 'wa6a';
 export const MEDIA_NETWORK = 'wa-media';
@@ -259,7 +258,7 @@ export function readContentFrameRate(container, exec = defaultExec) {
 
 export function validateContentManifest(content = {}, manifest = {}) {
   if (content.hostDir !== undefined && typeof content.identity !== 'string') throw new Error('content-invalid');
-  // step0's manifest carries no identity field, so the legacy identity is matched by its numbers.
+  // The legacy manifest carries no identity field, so the legacy identity is matched by its numbers.
   if (content.identity === LEGACY_CONTENT_IDENTITY && !Object.prototype.hasOwnProperty.call(content, 'targetSeconds')) {
     if (manifest.segmentSeconds !== LEGACY_CONTENT.segmentSeconds
       || manifest.segmentCount !== LEGACY_CONTENT.segmentCount

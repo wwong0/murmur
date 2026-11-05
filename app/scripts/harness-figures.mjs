@@ -16,6 +16,7 @@ import { parseRate } from '../harness/apply-qdisc.mjs';
 import { computeEdgeFigures, readEdgeEvidence } from './figures/edge-publication.mjs';
 import { behindReading } from './figures/behind.mjs';
 import { seekWithPolledHold } from './figures/seek-hold.mjs';
+import { LEGACY_CONTENT_IDENTITY, readLegacyContentManifest } from './harness/legacy-content.mjs';
 
 function readJson(filePath, fallback = undefined) {
   try {
@@ -40,9 +41,6 @@ function counterFrom(value) {
   return value === undefined || value === null ? undefined : (value.counters ?? value);
 }
 
-const STEP0_CONTENT_MANIFEST = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
-  '../../step0/content/content-manifest.json');
-
 function readContentManifest(manifest, runDir) {
   const retained = readJson(path.join(runDir, 'content-manifest.json'));
   if (retained) return retained;
@@ -50,7 +48,7 @@ function readContentManifest(manifest, runDir) {
     const declared = readJson(manifest.content.manifestPath);
     if (declared) return declared;
   }
-  return manifest.content?.identity === 'step0-content-media-v1' ? readJson(STEP0_CONTENT_MANIFEST) : null;
+  return manifest.content?.identity === LEGACY_CONTENT_IDENTITY ? readLegacyContentManifest() : null;
 }
 
 // The re-read's rule override (design.md D1): a copy of the manifest condition,
