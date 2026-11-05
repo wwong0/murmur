@@ -736,7 +736,11 @@
 
   /* The front page (12e design.md D1, D6): it spans every row of .layout, and the page scrolls.
      The hero is the first screen: 82vh, so the features start just under the fold. */
-  .front { grid-column: 1 / -1; grid-row: 1 / -1; }
+  .front { position: relative; grid-column: 1 / -1; grid-row: 1 / -1; }
+  /* The repository link, top right: clear of the headline at both FP sizes (hero padding-top). */
+  .front-repo { position: absolute; top: 0.5rem; right: 0; display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: var(--radius-control); color: var(--secondary); transition: color 160ms var(--ease-out); }
+  .front-repo:hover { color: var(--ink); }
+  .front-repo svg { width: 1.5rem; height: 1.5rem; fill: currentColor; }
   .front-wrap { max-width: 1120px; margin: 0 auto; padding: 0 1rem; }
   .front-hero {
     display: grid;

@@ -19,6 +19,7 @@ const HEADLINE = 'Watch together';
 const FIRST_SCREEN = ['#front h1', '#host', '#join-input', '#join'];
 const HEADER_LINK = '.room-header a[href]';
 const WRITEUP_URL = 'https://github.com/wwong0/murmur/blob/main/WRITEUP.md';
+const REPO_URL = 'https://github.com/wwong0/murmur';
 // A number followed by a unit of time, rate or size, or a percent sign.
 const FIGURE = String.raw`\d(?:[\d.,]*\d)?\s*(?:ms|s|Mbit\/s|MB|GB|%)(?![A-Za-z])`;
 const ROSTER_COUNT = "document.querySelectorAll('#roster li').length";
@@ -92,13 +93,15 @@ async function rowFont() {
   }, { beforeNavigate: record });
 }
 
-// The front page holds one link, and it is the write-up on the public repo.
-async function rowWriteupLink() {
+// The front page holds two links: the write-up, and the repository as a named icon.
+async function rowLinks() {
   return driver.withTab(`${ORIGIN}/`, 'FP7', async (tab) => {
     const front = await until(tab, present('#host'), Boolean);
     if (!front.ok) return { exercised: false, detail: 'the front page did not render' };
-    const hrefs = await read(tab, "[...document.querySelectorAll('a[href]')].map((a) => a.href)");
-    return { exercised: true, ok: hrefs?.length === 1 && hrefs[0] === WRITEUP_URL, detail: { links: hrefs?.length ?? null, isWriteup: hrefs?.[0] === WRITEUP_URL } };
+    const links = await read(tab, "[...document.querySelectorAll('a[href]')].map((a) => ({ href: a.href, named: (a.getAttribute('aria-label') ?? '').trim().length > 0 }))");
+    const writeup = links?.filter((link) => link.href === WRITEUP_URL).length === 1;
+    const repo = links?.find((link) => link.href === REPO_URL);
+    return { exercised: true, ok: links?.length === 2 && writeup && repo?.named === true, detail: { links: links?.length ?? null, writeup, repo: Boolean(repo), repoNamed: repo?.named === true } };
   });
 }
 
@@ -181,6 +184,6 @@ await driver.run(async () => {
   await driver.runRow('FP4 the title reads Murmur on the front page and in a room, and the header shows it', rowName);
   await driver.runRow('FP5 a viewer following the header link reaches the front page and leaves the room', rowViewerLeaves);
   await driver.runRow("FP6 opening Stats keeps the player's and the right column's widths", rowStatsKeepsWidths);
-  await driver.runRow('FP7 the front page holds exactly one link, to the write-up', rowWriteupLink);
+  await driver.runRow('FP7 the front page holds exactly two links, the write-up and the named repository icon', rowLinks);
   await driver.runRow('FP8 the front page states no figure', rowNoFigure);
 });
