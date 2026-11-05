@@ -7,7 +7,7 @@ import { column, document, gridX, gridY, hbar, linearScale, STYLE as C, text } f
 
 export { C, column, document, gridX, gridY, hbar, linearScale, median, pct, setupLines, text };
 const byLedger = (inputs, directoryOf) => {
-  const order = Object.values(inputs.nights).flatMap((night) => night.ledger.runs.map((entry) => entry.directory));
+  const order = Object.values(inputs.batches).flatMap((batch) => batch.ledger.runs.map((entry) => entry.directory));
   return (a, b) => order.indexOf(directoryOf(a)) - order.indexOf(directoryOf(b));
 };
 export function select(inputs, conditions) {

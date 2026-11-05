@@ -202,7 +202,7 @@ export default async function harnessByteCohortSuite() {
   });
 
   await check('byte cohort integration: a retained version-2 origin requires a declared method', async () => {
-    const retained = JSON.parse(fs.readFileSync(new URL('../../../results/6a-repair-qual/origin-counters-end.json', import.meta.url), 'utf8'));
+    const retained = JSON.parse(fs.readFileSync(new URL('../../../results/test-inputs/origin-counters/origin-counters-end.json', import.meta.url), 'utf8'));
     const originEnd = retained.counters ?? retained;
     assertEqual(originEnd.responseAccountingVersion, 2, 'retained origin evidence uses version 2');
     let error;

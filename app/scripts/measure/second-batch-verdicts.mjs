@@ -1,8 +1,8 @@
 import { median } from './stats.mjs';
 import {
-  driftCriterion, ePair, figuresOf, multiplierVerdict, numericRanges, peaks as nightPeaks, peerVerdict, readingOf, refused,
+  driftCriterion, ePair, figuresOf, multiplierVerdict, numericRanges, peaks as batchPeaks, peerVerdict, readingOf, refused,
   statusValidity, unique,
-} from './night-verdicts.mjs';
+} from './batch-verdicts.mjs';
 
 const finite = (value) => Number.isFinite(value);
 
@@ -15,7 +15,7 @@ function tagsOf(entry, run, figures = figuresOf(run)) {
 }
 
 // Validity clauses 1 and 2; the byte inventory only with peer exchange, the catch-up only for K.
-export function night2Validity(entry = {}, run = {}) {
+export function secondBatchValidity(entry = {}, run = {}) {
   const { reasons, playbackRefused } = statusValidity(entry, run);
   for (const name of ['lab-drift', 'gap-count']) {
     if (refused(readingOf(run, name))) reasons.push(`reader:${name}`);
@@ -43,7 +43,7 @@ function references(record, multiplierBar = 1.5) {
 }
 
 function baseRecord(entry, run) {
-  const validity = night2Validity(entry, run);
+  const validity = secondBatchValidity(entry, run);
   const figures = figuresOf(run);
   const peer = peerExchange(entry, run);
   return {
@@ -268,7 +268,7 @@ function b2Record(entry, run) {
 }
 
 function peaks(entries, runs) {
-  return nightPeaks(entries, runs).map((peak, index) => {
+  return batchPeaks(entries, runs).map((peak, index) => {
     const entry = entries[index];
     const run = runs[entry.directory] ?? {};
     if (peerExchange(entry, run)) return peak;
@@ -283,7 +283,7 @@ function testSummary(entries, runs, matcher, build, selector) {
   return summarize(conditionRecords(entries, runs, matcher, build), selector);
 }
 
-export function night2Verdicts({ entries = [], runs = {} } = {}) {
+export function secondBatchVerdicts({ entries = [], runs = {} } = {}) {
   const base = entries.map((entry) => baseRecord(entry, runs[entry.directory] ?? {}));
   const diagnostics = entries.filter((entry) => entry.scored === false)
     .map((entry) => ({ directory: entry.directory ?? null, condition: entry.condition ?? null }));

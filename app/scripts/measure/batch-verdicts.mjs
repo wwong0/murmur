@@ -379,7 +379,7 @@ const TESTS = {
   'J-cut': perRun(named('13d-j-cut'), cutRecord, (record) => ({ pass: outcome(record.pass) })),
 };
 
-export function nightVerdicts({ entries = [], runs = {} } = {}) {
+export function batchVerdicts({ entries = [], runs = {} } = {}) {
   const base = entries.map((entry) => validRecord(entry, runs[entry.directory] ?? {}));
   const diagnostics = entries.filter((entry) => entry.scored === false).map((entry) => ({ directory: entry.directory ?? null, condition: entry.condition ?? null }));
   const tests = Object.fromEntries(Object.entries(TESTS).map(([name, test]) => [name, test(entries, runs)]));

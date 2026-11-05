@@ -21,7 +21,7 @@ export default async function measureLedgerSuite() {
     const omittedG = at('9b-shakedown-13c-g', '2026-10-26T14-00-00.000Z');
     const result = attemptLedger({ registry, manifests, finalizations, resultNames: [
       at('11a-ok'), omittedOk, at('9b-shakedown-13c-g'), omittedG,
-      at('9b-edge-drop'), at('9b-shakedown-13c-eleven'), '13c-readings-2026-10-26T15-40Z'] });
+      at('9b-edge-drop'), at('9b-shakedown-13c-eleven'), 'clock-check'] });
     assertEqual(result.entries.map((entry) => entry.outcome).join(','), 'published,timed-out,aborted,refused,refused,published', 'all outcome classes are named');
     assertEqual(result.unregistered.map((entry) => entry.directory).sort().join(','), [omittedOk, omittedG].sort().join(','),
       'an arm-prefixed run of a registered condition is found; edge-drop is not edge, and other conditions are not claimed');

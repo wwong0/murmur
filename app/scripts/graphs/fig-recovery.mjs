@@ -20,7 +20,7 @@ export const ID = 'recovery',
 export function data(inputs) {
   const rows = select(inputs, [RECOVERY.current, RECOVERY.earlier]),
     byDirectory = new Map(rows.map((r) => [r.entry.directory, r]));
-  const bars = inputs.nights['13e'].verdicts.tests.Q.pairs.map((p) => {
+  const bars = inputs.batches['13e'].verdicts.tests.Q.pairs.map((p) => {
     const current = byDirectory.get(p.product.directory), earlier = byDirectory.get(p.control.directory);
     if ([current, earlier].some((r) => r.run.manifest.window.opensAt !== 'capacity-schedule-rise')) {
       throw new Error('wrong-window:recovery');
@@ -111,7 +111,7 @@ export const notes = (d) => {
     'The earlier version let every viewer fetch it from the sharer itself. ' +
     'Both ran the same build of this app; only this rule differed.\n\n' +
     `**How it was tested.** ${setupLines(d.regimes).join(' ')} ` +
-    'The tests ran side by side the same night, in alternating order.\n\n' +
+    'The tests ran side by side the same batch, in alternating order.\n\n' +
     '**Every test.**\n\n| Test | Freezes per viewer | Status |\n| --- | --- | --- |\n' +
     `${
       d.bars.flatMap((b, i) => [

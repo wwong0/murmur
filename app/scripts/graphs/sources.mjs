@@ -1,13 +1,13 @@
-export const NIGHTS = {
+export const BATCHES = {
   '13d': {
     ledger: 'RUNS-13d.json',
-    verdicts: '13d-verdicts-2026-10-26-d1-repair/verdicts.json',
+    verdicts: 'core-tests/verdicts.json',
     readings: '13d-readings-2026-10-26T22-20-47Z/readings.json',
     classes: '13d-session-2026-10-26/classes.json',
   },
   '13e': {
     ledger: 'RUNS-13e.json',
-    verdicts: '13e-session-2026-10-27/verdicts/verdicts.json',
+    verdicts: 'comparison-and-stress-tests/verdicts.json',
     readings: '13e-session-2026-10-27/readings/readings.json',
     classes: '13e-session-2026-10-27/classes.json',
   },

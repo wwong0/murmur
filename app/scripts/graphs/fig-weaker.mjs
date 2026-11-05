@@ -120,7 +120,7 @@ export const notes = (d) => {
         (Math.abs(b.runs[0].value - b.runs[1].value) * 100).toFixed(1)
       } percentage points.`
     ).join(' ')
-  } The dashed line is the main setup from another test night, on build ${
+  } The dashed line is the main setup from another test batch, on build ${
     [...new Set(d.referenceRuns.map((r) => r.commit))].join(', ')
   }, against ${
     [...new Set(d.runs.map((r) => r.commit))].join(', ')

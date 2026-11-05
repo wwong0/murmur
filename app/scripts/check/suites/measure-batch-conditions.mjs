@@ -82,7 +82,7 @@ const diagnostics = [
   'shakedown/13d-j-cut',
 ];
 
-export default async function measureNightConditionsSuite() {
+export default async function measureBatchConditionsSuite() {
   await check('13d: conditions copy their declared archived base and factor', async () => {
     for (const [name, baseName, factor] of conditions) {
       const actual = conditionForName(name);

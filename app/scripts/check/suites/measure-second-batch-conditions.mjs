@@ -13,7 +13,7 @@ const canonical = (value) => {
 const netem = (container, params) => ({ container, network: 'wa-media', interface: '<resolved at runtime>',
   direction: 'egress', discipline: 'netem', order: 2, params });
 
-const nightTwoConditions = [
+const secondBatchConditions = [
   ['13e-w-long', '13d-a-five', (value) => { value.runLengthMs = 3_600_000; value.measureWindowMs = 3_420_000; value.retainedBytesMax = 1_073_741_824; }],
   ['13e-u-host5', '13d-a-five', (value) => { value.qdiscs[0].params = { rate: '5mbit', burst: '32kbit', latency: '400ms' }; value.capacityMbps = 5; }],
   ['13e-u-viewers3', '13d-a-five', (value) => { value.qdiscs[1].params.rate = '3mbit'; }],
@@ -50,7 +50,7 @@ const nightTwoConditions = [
   ['13e-b2-nop2p-10', '13d-b-nop2p-10', () => {}],
   ['13e-b2-nop2p-20', '13d-b-nop2p-20', () => {}],
 ];
-const nightTwoDiagnostics = ['shakedown/13e-t-diag', 'shakedown/13e-q-pilot', 'shakedown/13e-e10-check'];
+const secondBatchDiagnostics = ['shakedown/13e-t-diag', 'shakedown/13e-q-pilot', 'shakedown/13e-e10-check'];
 
 function expectedCondition(name, baseName, factor, publishes = true) {
   const expected = clone(conditionForName(baseName));
@@ -61,9 +61,9 @@ function expectedCondition(name, baseName, factor, publishes = true) {
   return expected;
 }
 
-export default async function measureNight2ConditionsSuite() {
+export default async function measureSecondBatchConditionsSuite() {
   await check('13e: conditions validate and equal their factored bases', async () => {
-    for (const [name, baseName, factor] of nightTwoConditions) {
+    for (const [name, baseName, factor] of secondBatchConditions) {
       const actual = conditionForName(name);
       assertEqual(conditionValidationReason(actual), null, `${name} passes condition validation`);
       assertEqual(canonical(actual), canonical(expectedCondition(name, baseName, factor)), `${name} equals its factored base`);
@@ -74,7 +74,7 @@ export default async function measureNight2ConditionsSuite() {
     const bases = { 'shakedown/13e-t-diag': ['13e-t-skew60', (value) => {
       value.runLengthMs = 180_000; value.excludedPrefixMs = 120_000; value.measureWindowMs = 60_000;
     }], 'shakedown/13e-q-pilot': ['13e-q-product', () => {}], 'shakedown/13e-e10-check': ['13e-e10-control', () => {}] };
-    for (const name of nightTwoDiagnostics) {
+    for (const name of secondBatchDiagnostics) {
       const [baseName, factor] = bases[name];
       const actual = conditionForName(name);
       assertEqual(conditionValidationReason(actual), null, `${name} passes condition validation`);
@@ -98,7 +98,7 @@ export default async function measureNight2ConditionsSuite() {
   });
 
   await check('13e: excusal, identity and legacy condition boundaries stay explicit', async () => {
-    const names = [...nightTwoConditions.map(([name]) => name), ...nightTwoDiagnostics];
+    const names = [...secondBatchConditions.map(([name]) => name), ...secondBatchDiagnostics];
     const peerExcusals = names.map((name) => conditionForName(name).peerExchange === true
       ? conditionForName(name).excusals?.bytelessUnreceivedResponse : undefined);
     assert(peerExcusals.filter((value) => value !== undefined).every((value) => value === true), 'every peer 13e arm declares the unreceived excusal');

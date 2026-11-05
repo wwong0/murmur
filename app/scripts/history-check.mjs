@@ -92,7 +92,7 @@ async function blobs(repo, ids, consume) {
 function objectVolume(repo, main, paths) {
   const ids = git(repo, ['rev-list', '--objects', main]).toString().split('\n').filter(Boolean).map((line) => line.split(' ')[0]);
   const data = git(repo, ['cat-file', '--batch-check=%(objectname) %(objecttype) %(objectsize) %(objectsize:disk)'], ids.join('\n') + '\n').toString();
-  const groups = { 'app/results/': 0, 'step0/results/': 0, 'step0/content/': 0, 'spike-host-origin/results/': 0, 'everything else': 0 };
+  const groups = { 'app/results/': 0, 'everything else': 0 };
   const largest = [];
   for (const line of data.trim().split('\n')) {
     const [id, type, size, disk] = line.split(' ');

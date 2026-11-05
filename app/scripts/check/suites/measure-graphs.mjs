@@ -19,17 +19,17 @@ import { alsoTested, limits } from '../../graphs/notes.mjs';
 
 const app = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 export function fixture(rows, tests = {}) {
-  const nights = {}, runs = {};
-  for (const night of ['13d', '13e', '13f']) {
-    nights[night] = {
+  const batches = {}, runs = {};
+  for (const batch of ['13d', '13e', '13f']) {
+    batches[batch] = {
       ledger: { runs: [] },
-      verdicts: { entries: [], tests: tests[night] ?? {} },
+      verdicts: { entries: [], tests: tests[batch] ?? {} },
       readings: { runs: {} },
       classes: {},
     };
   }
   for (const [index, r] of rows.entries()) {
-    const night = nights[r.condition.slice(0, 3)],
+    const batch = batches[r.condition.slice(0, 3)],
       directory = r.directory ?? `${r.condition}-${index}`,
       viewers = r.viewers ?? 5,
       cap = r.cap ?? 10;
@@ -54,15 +54,15 @@ export function fixture(rows, tests = {}) {
       reasons: r.reasons ?? [],
       figures,
     };
-    night.ledger.runs.push({
+    batch.ledger.runs.push({
       directory,
       condition: r.condition,
       commit: 'abc',
       bundleBuildId: 'build',
       outcome: 'complete',
     });
-    night.verdicts.entries.push(entry);
-    night.readings.runs[directory] = r.readings ?? {};
+    batch.verdicts.entries.push(entry);
+    batch.readings.runs[directory] = r.readings ?? {};
     runs[directory] = {
       manifest: {
         condition: {
@@ -81,7 +81,7 @@ export function fixture(rows, tests = {}) {
       },
     };
   }
-  return { nights, runs, traces: {} };
+  return { batches, runs, traces: {} };
 }
 function throws(fn, expected) {
   let message = '';
@@ -312,10 +312,10 @@ export default async function measureGraphsSuite() {
         { condition: '13e-q-control', directory: 'c1', stalls: 20 },
       ],
       input = fixture(pairRows);
-    input.nights['13e'].verdicts.tests.Q = {
+    input.batches['13e'].verdicts.tests.Q = {
       pairs: [0, 1].map((i) => ({
-        product: input.nights['13e'].verdicts.entries.find((e) => e.directory === `p${i}`),
-        control: input.nights['13e'].verdicts.entries.find((e) => e.directory === `c${i}`),
+        product: input.batches['13e'].verdicts.entries.find((e) => e.directory === `p${i}`),
+        control: input.batches['13e'].verdicts.entries.find((e) => e.directory === `c${i}`),
       })),
     };
     const q = recovery.data(input);
@@ -323,9 +323,9 @@ export default async function measureGraphsSuite() {
     assertEqual(q.bars[0].earlier, 109, 'earlier');
     const image = validSvg(recovery, q);
     assert(image.includes('earlier version') && !/off-the-shelf|library/i.test(image), 'distinct comparison');
-    input.nights['13e'].verdicts.tests.Q.pairs[0].product.figures.stallCountByClient = { c03: 109 };
+    input.batches['13e'].verdicts.tests.Q.pairs[0].product.figures.stallCountByClient = { c03: 109 };
     throws(() => recovery.data(input), 'takeaway-unsupported:recovery');
-    input.nights['13e'].verdicts.tests.Q.pairs[0].product.figures.stallCountByClient = { c03: 2 };
+    input.batches['13e'].verdicts.tests.Q.pairs[0].product.figures.stallCountByClient = { c03: 2 };
     input.runs.p0.manifest.window.opensAt = 'other';
     throws(() => recovery.data(input), 'wrong-window:recovery');
     const u = fixture([
@@ -334,9 +334,9 @@ export default async function measureGraphsSuite() {
       ...[0.671, 0.665].map((peer) => ({ condition: '13e-u-one1', peer })),
       { condition: '13e-u-viewers3', peer: 0.3 },
     ]);
-    const extra = u.nights['13e'].verdicts.entries.find((v) => v.condition === '13e-u-viewers3');
+    const extra = u.batches['13e'].verdicts.entries.find((v) => v.condition === '13e-u-viewers3');
     u.runs[extra.directory].manifest.condition.qdiscs[1].params.rate = '3mbit';
-    for (const e of u.nights['13e'].verdicts.entries.filter((v) => v.condition === '13e-u-one1')) {
+    for (const e of u.batches['13e'].verdicts.entries.filter((v) => v.condition === '13e-u-one1')) {
       u.runs[e.directory].manifest.condition.qdiscs = [{
         container: 'origin',
         direction: 'egress',
@@ -352,7 +352,7 @@ export default async function measureGraphsSuite() {
         !validSvg(weaker, wd).includes('every viewer uploads at 3 Mbit/s'),
       'notes only',
     );
-    u.nights['13e'].verdicts.entries.find((v) => v.condition === '13e-u-host5').figures.stallCountByClient
+    u.batches['13e'].verdicts.entries.find((v) => v.condition === '13e-u-host5').figures.stallCountByClient
       .c03 = 1;
     throws(() => weaker.data(u), 'takeaway-unsupported:weaker');
   });
@@ -404,7 +404,7 @@ export default async function measureGraphsSuite() {
     const h = hour.data(input);
     assert(hour.takeaway(h).includes('80%'), 'published share');
     validSvg(hour, h);
-    input.nights['13f'].verdicts.entries[0].figures.stallCountByClient.c03 = 1;
+    input.batches['13f'].verdicts.entries[0].figures.stallCountByClient.c03 = 1;
     throws(() => hour.data(input), 'takeaway-unsupported:hour');
     const root = path.join(app, '.scratch');
     fs.mkdirSync(root, { recursive: true });
@@ -443,7 +443,7 @@ export default async function measureGraphsSuite() {
       '13d': { E: { label: 'internal', pairs: [pair] } },
       '13e': { E10: { pairs: [] } },
     });
-    const caught = input.nights['13e'].verdicts.entries[0].directory;
+    const caught = input.batches['13e'].verdicts.entries[0].directory;
     input.runs[caught].manifest.disturbance = { pauseMs: 500 };
     const notes = alsoTested(input);
     assert(!BANNED.test(notes.paragraphs.join(' ')), 'plain also tested');

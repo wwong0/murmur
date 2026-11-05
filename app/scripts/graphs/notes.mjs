@@ -2,9 +2,9 @@ import { MAX_RATE_DEVIATION } from '../../public/lib/drift-controller.mjs';
 import { median, select } from './public-common.mjs';
 import { countText } from './rules.mjs';
 export function alsoTested(inputs) {
-  const study = inputs.nights['13d'].verdicts.tests.E,
+  const study = inputs.batches['13d'].verdicts.tests.E,
     pairs = study.pairs.filter((p) => p.valid),
-    ten = inputs.nights['13e'].verdicts.tests.E10.pairs.filter((p) => p.valid);
+    ten = inputs.batches['13e'].verdicts.tests.E10.pairs.filter((p) => p.valid);
   const comparisons = ['start', 'seek'].map((key) => {
     const newer = median(pairs.map((p) => p.product[key].stalls)) / 1000,
       earlier = median(pairs.map((p) => p.control[key].stalls)) / 1000,

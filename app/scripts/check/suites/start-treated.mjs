@@ -18,7 +18,7 @@ import { PRESENTATION_ADVANCE_MS } from '../../../public/lib/playback-leads.mjs'
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 /** The baseline the treated run is matched against, frozen before task 12 landed. */
-const BASELINE_DIR = 'results/5-start-diagnostic-2026-09-17T06-25-21.953Z';
+const BASELINE_DIR = 'results/test-inputs/start-diagnostic';
 const json = (value) => JSON.stringify(value);
 
 function readBaseline() {

@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { nightVerdicts } from './measure/night-verdicts.mjs';
-import { night2Verdicts } from './measure/night2-verdicts.mjs';
+import { batchVerdicts } from './measure/batch-verdicts.mjs';
+import { secondBatchVerdicts } from './measure/second-batch-verdicts.mjs';
 import { memoryLimitVerdicts } from './measure/memory-limit-verdicts.mjs';
 
 function option(argv, name) {
@@ -31,10 +31,10 @@ export function runCommand(argv = process.argv) {
   const registryValue = option(argv, 'registry');
   const readingsValue = option(argv, 'readings');
   const outValue = option(argv, 'out');
-  const night = option(argv, 'night');
-  if (!registryValue || !readingsValue || !outValue) throw new Error('usage: node scripts/measure-night.mjs --registry <file> --readings <readings.json> --out <dir>');
-  if (night !== null && night !== '13d' && night !== '13e' && night !== '13f') {
-    console.error(`unknown night: ${night}`);
+  const batch = option(argv, 'batch');
+  if (!registryValue || !readingsValue || !outValue) throw new Error('usage: node scripts/measure-batch.mjs --registry <file> --readings <readings.json> --out <dir>');
+  if (batch !== null && batch !== '13d' && batch !== '13e' && batch !== '13f') {
+    console.error(`unknown batch: ${batch}`);
     return 2;
   }
   const outDir = path.resolve(outValue);
@@ -51,9 +51,9 @@ export function runCommand(argv = process.argv) {
     readings: readings.runs?.[entry.directory] ?? {},
   }]));
   const baselineValue = option(argv, 'baseline');
-  const baseline = night === '13f' && baselineValue ? JSON.parse(fs.readFileSync(path.resolve(baselineValue), 'utf8')).figures : null;
-  const verdicts = night === '13f' ? memoryLimitVerdicts({ entries, runs, baseline })
-    : night === '13e' ? night2Verdicts({ entries, runs }) : nightVerdicts({ entries, runs });
+  const baseline = batch === '13f' && baselineValue ? JSON.parse(fs.readFileSync(path.resolve(baselineValue), 'utf8')).figures : null;
+  const verdicts = batch === '13f' ? memoryLimitVerdicts({ entries, runs, baseline })
+    : batch === '13e' ? secondBatchVerdicts({ entries, runs }) : batchVerdicts({ entries, runs });
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, 'verdicts.json'), `${JSON.stringify(verdicts, null, 2)}\n`);
   return 0;

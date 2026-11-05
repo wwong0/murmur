@@ -61,11 +61,11 @@ export function notes(d) {
     'as a percentage of the video one viewer watched.\n\n' +
     `**How it was tested.** ${setupLines(d.regimes).join(' ')}\n\n` +
     `**Every test.**\n\n${table(d.runs)}\n\n` +
-    `The tests without sharing came from two test nights; the builds for each test were ${
+    `The tests without sharing came from two test batches; the builds for each test were ${
       commits.join(', ')
     } ` +
     `(${new Set(commits).size === 1 ? 'the same build' : 'different builds'}). ` +
     'The flagged runs were flagged only because a test without sharing has no viewer-to-viewer records ' +
-    "to check, which a later night's rule allowed; the sharer's upload was counted normally. " +
+    "to check, which a later batch's rule allowed; the sharer's upload was counted normally. " +
     "The no-sharing tests on a slower connection are in the connection figure's notes.";
 }

@@ -17,7 +17,7 @@ import {
 
 const EDGE_CHANGE = '9b';
 const GOODPUT_CONDITION = 'shakedown/cap10';
-const TRAP_RESULT = 'results/8a-trap-reading-d9.json';
+const TRAP_RESULT = 'results/test-inputs/buffer-edge-seek.json';
 const TRAP_BAR_KEYS = ['behindHeldAheadMsBelow', 'reproducedPeerFractionMax',
   'notReproducedPeerFractionMin', 'scatteredSpreadMsAbove'];
 

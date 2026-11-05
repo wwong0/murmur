@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { CLASSES_13F, HOUR, NIGHTS, normaliseVerdicts, RECOVERY } from './graphs/sources.mjs';
+import { CLASSES_13F, HOUR, BATCHES, normaliseVerdicts, RECOVERY } from './graphs/sources.mjs';
 import { records } from './graphs/common.mjs';
 import * as sharing from './graphs/fig-sharing.mjs';
 import * as roomSize from './graphs/fig-room-size.mjs';
@@ -79,9 +79,9 @@ function loader(root) {
   };
 }
 export async function loadInputs(root) {
-  const load = loader(root), nights = {};
-  for (const [night, files] of Object.entries(NIGHTS)) {
-    nights[night] = {
+  const load = loader(root), batches = {};
+  for (const [batch, files] of Object.entries(BATCHES)) {
+    batches[batch] = {
       ledger: load.json(files.ledger),
       verdicts: load.json(files.verdicts),
       readings: load.json(files.readings),
@@ -89,12 +89,12 @@ export async function loadInputs(root) {
     };
   }
   const reports = {};
-  for (const e of nights['13f'].verdicts.runs ?? []) {
+  for (const e of batches['13f'].verdicts.runs ?? []) {
     reports[e.directory] = load.json(`${e.directory}/refusal-report.json`, true);
   }
-  nights['13f'].verdicts = normaliseVerdicts(nights['13f'].verdicts, reports);
+  batches['13f'].verdicts = normaliseVerdicts(batches['13f'].verdicts, reports);
   const runs = {};
-  for (const e of Object.values(nights).flatMap((n) => n.verdicts.entries)) {
+  for (const e of Object.values(batches).flatMap((n) => n.verdicts.entries)) {
     const content = load.json(`${e.directory}/content-manifest.json`);
     delete content.segmentSizes;
     runs[e.directory] = {
@@ -103,18 +103,18 @@ export async function loadInputs(root) {
       assignmentControl: load.json(`${e.directory}/assignment-control.json`, true),
     };
   }
-  const inputs = { nights, runs, traces: {} };
+  const inputs = { batches, runs, traces: {} };
   load.figure('recovery');
   for (const row of records(inputs).filter((r) => r.entry.condition === RECOVERY.current)) {
     row.run.schedule = load.json(`${row.entry.directory}/capacity-schedule.json`);
   }
   load.figure('hour');
   inputs.traces.hour = await load.clients(HOUR);
-  const nightFiles = new Set(Object.values(NIGHTS).flatMap((v) => Object.values(v)).filter(Boolean));
+  const batchFiles = new Set(Object.values(BATCHES).flatMap((v) => Object.values(v)).filter(Boolean));
   const sourcesOf = (id, data) => {
     const content = JSON.stringify(data);
     return [...load.sources].filter(([file, tags]) =>
-      tags.has(id) || (tags.has('shared') && (nightFiles.has(file) || content.includes(file.split('/')[0])))
+      tags.has(id) || (tags.has('shared') && (batchFiles.has(file) || content.includes(file.split('/')[0])))
     ).map(([file]) => file).sort();
   };
   return { inputs, sourcesOf };

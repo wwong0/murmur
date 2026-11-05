@@ -26,15 +26,11 @@ desktop.ini
 *.bundle.js.map
 
 # Generated media — `npm run content` in app/ rebuilds it (~2.3 GB, 1800
-# fMP4 segments of synthetic testsrc2). step0/content/ is where it lived before.
+# fMP4 segments of synthetic testsrc2).
 app/content/
-step0/content/
 
 # Personal test media, read by the keyframe report. Never committed.
 test_videos/
-
-# Scratch from the spike rig's runs.
-spike-host-origin/.tmp/
 
 
 # IDE workspace state. Per-machine and per-developer — module paths, code-style
@@ -46,24 +42,7 @@ spike-host-origin/.tmp/
 # NOT ignored, deliberately:
 #   *.md anywhere — the docs are the review surface, and belong inside the diff
 #     a review reads. An untracked doc is the one thing a review cannot undo.
-#   step0/results/, spike-host-origin/results/ — measurement records, not build
-#     output. They are the evidence behind FINDINGS.md and RESULT.md.
 #   package-lock.json — the hls.js version is load-bearing.
-
-# Derived rate-response analysis, regenerable from the raw channels beside it. One full
-# sweep writes ~130MB of these against ~25MB of irreplaceable capture, and
-# `node scripts/verify-rate-response.mjs --reanalyze <dir>` rebuilds every one of
-# them offline from frames/captures/commands — which is why the mode exists. The
-# raw channels, manifest.json, scheduled.json, executed.json and the re-analysis
-# provenance stay tracked; those cannot be recomputed from anything.
-# Short shakedown runs committed before this rule keep their copies: git does not
-# untrack a file because a pattern later matches it.
-app/results/4e-response-*/analysis.json
-app/results/4e-response-*/analysis-reanalyzed-*.json
-app/results/4e-response-*/console.log
-app/results/4e-duration-*/analysis.json
-app/results/4e-duration-*/analysis-reanalyzed-*.json
-app/results/4e-duration-*/console.log
 
 # Chrome/crashpad debris. Written into the repo root by the browser dev aids
 # and by tooling that launches them.

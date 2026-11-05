@@ -1,5 +1,5 @@
-import { night2Validity } from './night2-verdicts.mjs';
-import { figuresOf, multiplierVerdict, peerVerdict, readingOf } from './night-verdicts.mjs';
+import { secondBatchValidity } from './second-batch-verdicts.mjs';
+import { figuresOf, multiplierVerdict, peerVerdict, readingOf } from './batch-verdicts.mjs';
 
 const LIMIT_BYTES = 1_073_741_824;
 const finite = (value) => Number.isFinite(value);
@@ -35,7 +35,7 @@ function readingFor(entry, run, baseline) {
   return {
     viewers, gate, ...selected(figures), noFrameMsByClient: counting.published?.noFrameMsByClient ?? null,
     countedAsStall, coverageFromPollsByClient,
-    besideNightTwoW: { baseline: baseline === null ? null : selected(baseline), label: 'descriptive-invalid-run',
+    besideSecondBatchW: { baseline: baseline === null ? null : selected(baseline), label: 'descriptive-invalid-run',
       buildDifference: "13f runs with 13e-2's urgent requests for a preparing viewer; 13e's W did not" },
   };
 }
@@ -43,7 +43,7 @@ function readingFor(entry, run, baseline) {
 export function memoryLimitVerdicts({ entries = [], runs = {}, baseline = null } = {}) {
   const records = entries.map((entry) => {
     const run = runs[entry.directory] ?? {};
-    const validity = night2Validity(entry, run);
+    const validity = secondBatchValidity(entry, run);
     const record = { directory: entry.directory ?? null, condition: entry.condition ?? null, ...validity };
     if (validity.valid && ['13f-w-long', '13f-r0-five'].includes(entry.condition)) {
       record.reading = readingFor(entry, run, baseline);

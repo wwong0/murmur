@@ -4,7 +4,7 @@ import path from 'node:path';
 import { assert, assertEqual, check } from '../harness.mjs';
 import { conditionForName } from '../../harness-run.mjs';
 import { memoryLimitVerdicts } from '../../measure/memory-limit-verdicts.mjs';
-import { runCommand } from '../../measure-night.mjs';
+import { runCommand } from '../../measure-batch.mjs';
 
 const LIMIT = 1_073_741_824;
 const entry = (condition = '13f-w-long') => ({ directory: 'run', condition, exit: 0, peerExchange: true, clientTags: ['c01', 'c02'] });
@@ -54,7 +54,7 @@ export default async function measureMemoryLimitVerdictsSuite() {
     assertEqual(missing.gate, 'unestablished', 'missing store leaves gate unestablished');
     assertEqual(verdict(run(null)).reading.viewers.c01.status, 'unestablished', 'non-finite peak is unestablished');
     const baseline = { stallCountByClient: { c01: 2 }, realtimeFactorByClient: { c01: 0.8 }, peerFractionAggregate: 0.7, ignored: 1 };
-    const beside = verdict(run(), '13f-w-long', baseline).reading.besideNightTwoW;
+    const beside = verdict(run(), '13f-w-long', baseline).reading.besideSecondBatchW;
     assertEqual(beside.label, 'descriptive-invalid-run', 'baseline is labelled');
     assertEqual(beside.baseline.stallCountByClient.c01, 2, 'baseline figures carried');
     assertEqual(beside.baseline.ignored, undefined, 'only requested baseline fields carried');
@@ -103,9 +103,9 @@ export default async function measureMemoryLimitVerdictsSuite() {
       const out = path.join(root, 'out');
       fs.writeFileSync(registry, JSON.stringify({ runs: [{ ...entry(), directory: runDir }] }));
       fs.writeFileSync(readings, JSON.stringify({ runs: { [runDir]: sample.readings } }));
-      assertEqual(runCommand(['node', 'measure-night.mjs', '--night', '13f', '--registry', registry, '--readings', readings, '--out', out]), 0, '13f command succeeds');
+      assertEqual(runCommand(['node', 'measure-batch.mjs', '--batch', '13f', '--registry', registry, '--readings', readings, '--out', out]), 0, '13f command succeeds');
       const result = JSON.parse(fs.readFileSync(path.join(out, 'verdicts.json'), 'utf8'));
-      assertEqual(result.runs[0].reading.besideNightTwoW.baseline, null, 'absent baseline is null');
+      assertEqual(result.runs[0].reading.besideSecondBatchW.baseline, null, 'absent baseline is null');
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 }
