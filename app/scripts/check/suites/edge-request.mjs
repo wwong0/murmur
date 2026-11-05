@@ -96,11 +96,11 @@ export default async function edgeRequestSuite() {
     assertEqual(result.do, 'peer', 'join request uses peer action');
     assertEqual(result.holderId, 'a-holder', 'join request uses spread holder');
     assert(result.holderId !== 'z-holder', 'join request does not use the first listed holder');
-    // Prevention proof under CONSTRAINTS.md → Verification: opportunity is the
+    // Prevention proof: opportunity is the
     // flagged request at the product decision boundary. Mutation: restore stock
     // loadThroughP2P in the block → the engine-patch assertion is red; return
-    // the first holder → this E1 assertion is red. Restoration and green check
-    // run are recorded in the worker report.
+    // the first holder → this E1 assertion is red. Restored; the check ran
+    // green.
   });
 
   await check('edge-request E2: a kept seek waits for quiet rank order', async () => {
@@ -140,10 +140,10 @@ export default async function edgeRequestSuite() {
     const productPass = source.slice(productStart, productEnd);
     assertEqual((engineBlock.match(/this\.edgeDecision\(/g) ?? []).length, 0, 'engine block does not decide product requests');
     assertEqual((productPass.match(/this\.edgeDecision\(/g) ?? []).length, 1, 'product pass decides once');
-    // Prevention proof under CONSTRAINTS.md → Verification: opportunity is the
+    // Prevention proof: opportunity is the
     // flagged segment's single processQueue pass. Mutation: leave the block's own
     // edgeDecision evaluation in → the engine-block count is 1 and E5 is red;
-    // restoration and green check run are recorded in the worker report.
+    // restored, the check ran green.
   });
 
   await check('edge-request: a peer transfer in flight keeps its arms', async () => {

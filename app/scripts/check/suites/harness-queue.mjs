@@ -1,4 +1,4 @@
-// Queue fields use nearest rank; the name guards the interpolated-median trap (6b design.md D2).
+// Queue fields use nearest rank; the name guards the interpolated-median trap.
 
 import { computeFigures } from '../../figures/harness-figures.mjs';
 import { assert, assertEqual, check } from '../harness.mjs';
@@ -22,7 +22,7 @@ function figures(backlogs) {
 export default async function harnessQueueSuite() {
   await check('harness queue: alternating backlog uses nearest-rank p50', async () => {
     const result = figures([0, 2_500_000, 0, 2_500_000]);
-    // 2,500,000*8 / 100,000,000*1,000 = 200 ms (6b design.md D2).
+    // 2,500,000*8 / 100,000,000*1,000 = 200 ms.
     assertEqual(result.capacityBitsPerSecond, CAPACITY, 'capacity is published beside queue fields');
     assertEqual(result.qdiscBacklogNonzeroFraction, 0.5, 'two of four samples have backlog');
     assertEqual(result.qdiscBacklogBytesP99, 2_500_000, 'nearest-rank backlog p99 selects the largest sample');
@@ -33,7 +33,7 @@ export default async function harnessQueueSuite() {
 
   await check('harness queue: persistent backlog reports 200 ms at both ranks', async () => {
     const result = figures([2_500_000, 2_500_000, 2_500_000]);
-    // 2,500,000*8 / 100,000,000*1,000 = 200 ms (6b design.md D2).
+    // 2,500,000*8 / 100,000,000*1,000 = 200 ms.
     assertEqual(result.standingQueueDelayMsP50NearestRank, 200, 'persistent queue p50 is 200 ms');
     assertEqual(result.standingQueueDelayMsP99, 200, 'persistent queue p99 is 200 ms');
     assertEqual(result.qdiscBacklogNonzeroFraction, 1, 'all samples hold backlog');
@@ -59,7 +59,7 @@ export default async function harnessQueueSuite() {
   });
 
   await check('harness queue: the sampler reads a KiB-multiple backlog that text tc prints as Kb', async () => {
-    // 63488 = 62 * 1024, which text tc prints as "backlog 62Kb" (6b design.md D1).
+    // 63488 = 62 * 1024, which text tc prints as "backlog 62Kb".
     const text = 'qdisc tbf 10: root refcnt 17 rate 10Mbit burst 4Kb lat 400ms\n Sent 6040622 bytes 4185 pkt (dropped 237, overlimits 12554 requeues 0)\n backlog 62Kb 43p requeues 0\n';
     assertEqual(parseQdisc(text).backlogBytes, null, 'the text parser cannot read Kb');
     const json = JSON.stringify([

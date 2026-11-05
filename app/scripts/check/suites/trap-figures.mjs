@@ -105,7 +105,7 @@ export default async function trapFiguresSuite() {
     assertNear(figures.realtimeFactorByClient.c01, 170 / 180, 1e-12, 'trap realtime uses presented frames');
   });
 
-  // 8a's second qualification attempt aborted here: a starved viewer's origin bytes
+  // An earlier qualification attempt aborted here: a starved viewer's origin bytes
   // exceed its received bytes, which the discarded legacy column calls impossible.
   await check('T4(e): a peer run computes when its discarded legacy byte column would be impossible', async () => {
     const base = fixture();

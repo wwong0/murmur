@@ -1,4 +1,4 @@
-// T5 (design.md D3, D4; tasks.md 3.1): the held mapping and the held creation.
+// The held mapping and the held creation.
 // Pure holder-level scenarios first, then the room-level ones through the
 // entry harness, then a direct rejoin against `createPlaybackAcquisition`.
 

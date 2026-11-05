@@ -1,4 +1,4 @@
-// scripts/check/suites/names.mjs — names in join, roster and presence; the `name` message (12d D1, D2).
+// scripts/check/suites/names.mjs — names in join, roster and presence; the `name` message.
 
 import { check, assert, assertEqual, memberOf } from '../harness.mjs';
 import {

@@ -1,4 +1,4 @@
-// Pure classification for the registered 7c regime reading.
+// Pure classification for the registered regime reading.
 
 import { median as medianOfSorted } from '../../public/lib/frame-drift.mjs';
 
@@ -51,7 +51,7 @@ export function median(values) {
 }
 
 // The register's label and the runner's retained verdict must agree: the recompute
-// cannot see the live refusals (7c d1-findings.md F3).
+// cannot see the live refusals.
 export function accepted(entry) {
   return entry?.outcome === 'complete' && entry?.publishes === true
     && entry?.finalization?.writeByte === true;
@@ -95,7 +95,7 @@ function viewerBuild(entry) {
 
 const UNESTABLISHED = ['viewers-unavailable', 'build-id-partial', 'build-id-mixed'];
 
-// The rig is the image pair the run's containers came from (7c d1-findings.md F4).
+// The rig is the image pair the run's containers came from.
 export function buildMatch(left, right) {
   const leftImages = imagePair(imagesOf(left));
   const rightImages = imagePair(imagesOf(right));
@@ -113,7 +113,7 @@ export function buildMatch(left, right) {
     : { same: false, matchedOn: null, reason: 'different-build-id' };
 }
 
-// The match 7c and 8a registered: one viewer build id on each side, and the images.
+// The registered match: one viewer build id on each side, and the images.
 export function sameBuildId(left, right) {
   return buildMatch(left, right).matchedOn === 'build-id-and-images';
 }

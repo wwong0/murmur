@@ -2,18 +2,18 @@
 //
 // Two pure pieces: one drift record derived from one displayed frame, and the
 // bounded log a harness reads. No timers, no clock read, no DOM — the sampler
-// next door supplies every instant (change 3a design.md D3 to D6).
+// next door supplies every instant.
 //
 // Rules that survive any edit:
 //
 //  1. A MISSING INPUT PRODUCES NO RECORD AND ONE NAMED COUNTER, never a zero
 //     and never a substitute. A drift computed against a missing clock claims
-//     this client is already aligned with the room (D4).
+//     this client is already aligned with the room.
 //  2. `video.currentTime` IS NOT READ HERE, IN ANY BRANCH, and is not an
-//     acceptable fallback when frames stop arriving (`CONSTRAINTS.md` →
-//     *Playback measurement*). Silence is reported as silence.
+//     acceptable fallback when frames stop arriving: it does not say which
+//     frame is on screen. Silence is reported as silence.
 //  3. `driftMs` is media minus scheduled, so POSITIVE MEANS AHEAD OF THE ROOM
-//     and change 4 corrects a positive error by slowing down.
+//     and the drift controller corrects a positive error by slowing down.
 //
 // Under public/lib/: no DOM, no page access.
 
@@ -24,7 +24,7 @@ export const DEFAULT_CAPACITY = 3600;
  * How far `expectedDisplayTime` may sit from the client's own reading of the
  * same timebase. WIDE ON PURPOSE: it catches a display timestamp from another
  * clock domain, wrong by hours — not jitter, wrong by a frame. The callback
- * fires shortly before display, so the honest value is a little ahead (D3).
+ * fires shortly before display, so the honest value is a little ahead.
  */
 export const DISPLAY_WINDOW_MS = 1000;
 
@@ -56,7 +56,7 @@ const REFUSED = Object.freeze(
  * and would agree with it about a foreign timebase.
  *
  * The clock is read AT THE FRAME'S DISPLAY INSTANT, so the age term in the
- * uncertainty describes the clock as it was when the frame was shown (D5).
+ * uncertainty describes the clock as it was when the frame was shown.
  *
  * @param {{metadata: object, timeOriginMs: number, localNowMs: number,
  *   clock: {read: (atMs: number) => object}, timeline: {mediaMsAt: Function, epochMsAt: Function},
@@ -82,7 +82,7 @@ export function deriveDriftRecord({ metadata, timeOriginMs, localNowMs, clock, t
 
   const estimate = clock.read(displayLocalMs);
   // This counter reads zero in the product, so its zero is NOT evidence of a
-  // good clock. NON-ZERO MEANS A PAGE BEGAN PLAYING BEFORE IT HAD ONE (D4).
+  // good clock. NON-ZERO MEANS A PAGE BEGAN PLAYING BEFORE IT HAD ONE.
   if (!estimate || !Number.isFinite(estimate.offsetMs)) return REFUSED.noClock;
 
   const displaySharedMs = displayLocalMs + estimate.offsetMs;
@@ -97,18 +97,19 @@ export function deriveDriftRecord({ metadata, timeOriginMs, localNowMs, clock, t
     ok: true,
     record: {
       // On every record: a pairwise figure across clients holding different
-      // epochs is meaningless, and D1's remaining hole makes that reachable.
+      // epochs is meaningless, and a room that outlives its earliest member
+      // gives late joiners a different epoch.
       epochMs,
       mediaMs,
       placementMs,
       displaySharedMs,
-      // The timeline's answer, not the arithmetic behind it — change 5 replaces
-      // the implementation without touching the record.
+      // The timeline's answer, not the arithmetic behind it, so the
+      // implementation can change without touching the record.
       scheduledMediaMs,
       driftMs: mediaMs - scheduledMediaMs,
       presentedFrames: Number.isFinite(metadata.presentedFrames) ? metadata.presentedFrames : null,
       // Both parts of the half-width, separably — delay and age are different
-      // diagnoses, and change 6 is obliged to tell them apart (D5).
+      // diagnoses, and the harness must tell them apart.
       clock: {
         offsetMs: estimate.offsetMs,
         halfWidthMs: estimate.halfWidthMs,
@@ -135,7 +136,7 @@ export function percentile(sorted, fraction) {
 }
 
 /**
- * The ring. `capacity` is a parameter rather than a constant so change 6 can
+ * The ring. `capacity` is a parameter rather than a constant so a harness can
  * raise it for a slow poll without editing this module.
  *
  * @param {{capacity?: number}} [config]
@@ -168,7 +169,7 @@ export function createDriftLog(config = {}) {
   /**
    * Everything after `afterSeq`, and how many records fell out of the ring
    * before this request could see them. A silent drop and a client that
-   * produced fewer frames look identical — `missed` is the difference (D6).
+   * produced fewer frames look identical — `missed` is the difference.
    *
    * @param {{afterSeq?: number}} [query]
    */
@@ -186,9 +187,9 @@ export function createDriftLog(config = {}) {
 
   /**
    * OVER THE RECORDS THE RING HOLDS — a rolling window, not the run, and one
-   * client against the room timeline rather than criterion 1's pairwise figure.
-   * Report it under either of those names and change 6's own figures will look
-   * like a contradiction (D5, D6).
+   * client against the room timeline rather than the pairwise figure between
+   * clients. Report it under either of those names and the harness's own figures
+   * will look like a contradiction.
    *
    * Empty is `null`, not 0: zero drift is what perfect synchronization looks
    * like.

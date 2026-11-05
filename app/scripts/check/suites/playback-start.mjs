@@ -401,7 +401,7 @@ export default async function playbackStartSuite() {
     assertEqual(pausedRig.poll({ state: { ...paused(), controlMode: 'host' }, nowSharedMs: 1300 }).actions.length, 0, 'paused control-mode-only change does nothing');
   });
 
-  // --- The presentation advance (executor-spec.md §14 items 1-3, O2 option 1') ---
+  // --- The presentation advance ---
   //
   // One playing mapping, exact by construction: S = max(1000, 1000 + 400) =
   // 1400, the room position at S is 500 + 400 = 900, and the room epoch is
@@ -432,7 +432,7 @@ export default async function playbackStartSuite() {
   await check('playback-start: a nonzero advance moves the physical park and nothing else', async () => {
     const zero = advanceRig(0);
     const advanced = advanceRig(ADVANCE);
-    // R6: the two rigs differ in the advance and in nothing else, so every
+    // The two rigs differ in the advance and in nothing else, so every
     // field that is equal below is equal for that reason.
     for (const [kind, before, after] of [['park', zero.prepared.actions[0], advanced.prepared.actions[0]], ['play', zero.played, advanced.played]]) {
       assertEqual(after.positionMs, before.positionMs + ADVANCE, `${kind}: the physical park moves by the advance`);

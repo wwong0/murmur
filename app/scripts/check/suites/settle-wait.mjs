@@ -1,6 +1,6 @@
 // scripts/check/suites/settle-wait.mjs
 //
-// The D11 in-sync settle path over constructed T5 reads. Pure. The bars are
+// The in-sync settle path over constructed reads. Pure. The bars are
 // pinned off the browser pass's values (8 records, 5000ms, RATE_EPSILON) so a
 // constant in the module cannot pass.
 

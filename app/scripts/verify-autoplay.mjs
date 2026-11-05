@@ -1,8 +1,8 @@
 // scripts/verify-autoplay.mjs
 //
-// Refused-start recovery under Chrome's real autoplay policy (change 5 design.md
-// D6, D11; tasks.md 9.2). verify-browser.mjs launches Chrome with the policy
-// switched off, so a refused `play()` can only be produced here: the same flags
+// Refused-start recovery under Chrome's real autoplay policy. verify-browser.mjs
+// launches Chrome with the policy switched off, so a refused `play()` can only be
+// produced here: the same flags
 // minus `--autoplay-policy`, a fresh profile, and the element unmuted by a
 // script with no user gesture BEFORE the first start. A click on the page is
 // then the activation that lets a fresh attempt play.
@@ -112,7 +112,7 @@ try {
   const refusedStarts = refusal.value?.starts?.length ?? 0;
 
   // A trusted click through the input pipeline, on a non-control element: the header's own
-  // background at its centre. The wordmark is a link to the front page (12e D13).
+  // background at its centre. The wordmark is a link to the front page.
   const box = await tab.evaluate(`(() => {
     const header = document.querySelector('.room-header');
     if (!header) return null;

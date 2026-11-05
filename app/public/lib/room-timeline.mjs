@@ -1,6 +1,6 @@
 // public/lib/room-timeline.mjs
 //
-// The room timeline is a thin interface over replicated playback state (D5).
+// The room timeline is a thin interface over replicated playback state.
 // It is pure: the caller supplies the shared instant and state reader.
 
 import { epochMsAt as stateEpochMsAt, mediaMsAt as stateMediaMsAt } from './playback-state.mjs';

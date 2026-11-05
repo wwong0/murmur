@@ -1,7 +1,7 @@
 // Convergence, swept rather than sampled.
 //
 // A check that samples one point of a continuum reports the point, not the
-// continuum (`docs/constraints/verification.md`) — three checks each driving the
+// continuum — three checks each driving the
 // plant from one hand-picked standing error were all green while eight of
 // thirteen starting errors at 60Hz never converged at all.
 //
@@ -14,7 +14,7 @@
 // client that reached `settled` once and spent the rest of the run outside it.
 // Convergence is asserted as reaching it; holding it is measured as a duty
 // cycle and asserted with a floor, and the two are separate assertions because
-// change 4a fixed one of them and not the other.
+// one fix closed one of them and not the other.
 
 import { check, assert, assertEqual } from '../harness.mjs';
 import { plant, runUntil } from '../drift-plant.mjs';
@@ -27,7 +27,7 @@ const FIRST_ERROR_MS = -320;
 const LAST_ERROR_MS = -80;
 const ERROR_STEP_MS = 20;
 const REFRESH_RATES = [60, 180];
-/** The owner-adopted floor, swept against the same bars as f = 0 (remedy-product-integration-spec.md 4.3). */
+/** The adopted floor, swept against the same bars as f = 0. */
 const ADOPTED = Object.freeze({ MIN_COMMAND_DEVIATION: D8_COMMAND_THRESHOLD });
 
 /**
@@ -76,9 +76,9 @@ export default async function driftConvergenceSuite() {
 
   await check('drift-convergence: a converged client stays converged for most of the run', async () => {
     // A FLOOR, NOT THE TARGET. The remaining excursions are window-composition
-    // artifacts that outlive one ESTIMATE_WINDOW_MS, and closing them is a design
-    // question filed as a ⚑ under change 4b. This asserts the property has not
-    // regressed to the pre-4a behaviour, where a client left `settled` and never
+    // artifacts that outlive one ESTIMATE_WINDOW_MS, and closing them is an open design
+    // question. This asserts the property has not
+    // regressed to the earlier behaviour, where a client left `settled` and never
     // returned; it is deliberately not a claim that the duty cycle is 100%.
     for (const refreshHz of REFRESH_RATES) {
       for (const { standingError, dutyCycle } of sweep(refreshHz)) {
@@ -101,7 +101,7 @@ export default async function driftConvergenceSuite() {
     // The two arms must not move apart: no poll may combine a displaced estimate
     // with a dispersion arm that has collapsed below the distance it must cover.
     // That is what a MAD did on this signal, and what a centre-distance statistic
-    // will do again (design.md D1).
+    // will do again.
     for (const refreshHz of REFRESH_RATES) {
       const vsyncMs = 1000 / refreshHz;
       for (const { standingError, history } of sweep(refreshHz)) {
@@ -118,7 +118,7 @@ export default async function driftConvergenceSuite() {
   await check('drift-convergence: a rate too small to write does not prevent converging', async () => {
     // PINNED, not swept: -100ms at 60Hz is the case whose final correction parks
     // the applied rate four billionths above unity, which is what an exact
-    // `=== BASE_RATE` test held in `declining` forever (design.md D3). It is also
+    // `=== BASE_RATE` test held in `declining` forever. It is also
     // client B's own measured offset. The assertion below fails loudly if this
     // case stops parking off unity, rather than passing vacuously.
     const sim = plant({ refreshHz: 60, standingError: -100, pollEvery: POLL_EVERY_FRAMES });
@@ -175,7 +175,7 @@ export default async function driftConvergenceSuite() {
     //
     // The bound is ZERO, not the `<= 2` an earlier version of this assertion
     // carried. Proportional control of an integrator does not overshoot, so any
-    // reversal at all is the failure D1 names — an integral term winding through
+    // reversal at all is the failure to look for — an integral term winding through
     // the correction — and 0.05 of one produces exactly one reversal here, which
     // a bound of 2 would have let through.
     closeSteps({}, '');

@@ -35,7 +35,7 @@ async function pressEscape(tab) {
 
 /**
  * Closes the name prompt that a plain invite link opens over the room, so the page's next
- * coordinate click is not taken by its backdrop (design.md D18, D19). Call it right after the
+ * coordinate click is not taken by its backdrop. Call it right after the
  * page is opened. It is idempotent: a page with no prompt answers `{ shown: false, closed: true }`
  * after the wait. The answer is for the driver's console, never a row.
  */
@@ -63,7 +63,7 @@ async function waitHostFileEnabled(tab) {
 /**
  * Sets `filename` on the host's file input over CDP, once the input takes a pick. The input
  * carries the disabled flag while the source is not choosable, and a pick set on it then is
- * dropped with nothing to say so (design.md D15, F10), so every driver picks through this.
+ * dropped with nothing to say so, so every driver picks through this.
  */
 export async function setHostFile(tab, filename) {
   await waitHostFileEnabled(tab);
@@ -76,7 +76,7 @@ export async function setHostFile(tab, filename) {
 /**
  * Changes the room's control mode through the settings menu, as a person does: open
  * `#settings`, press the item that is not pressed, close the menu. The menu floats over the
- * page, so a step that left it open would take the next coordinate click (design.md D11, D18).
+ * page, so a step that left it open would take the next coordinate click.
  * `click` is the caller's coordinate click: verify-browser has its own.
  */
 export async function toggleControlMode(tab, { click = clickElement } = {}) {
@@ -92,7 +92,7 @@ export async function toggleControlMode(tab, { click = clickElement } = {}) {
   });
   await step('opening #settings', () => click(tab, '#settings'));
   await wait('waiting for #control-mode', '#control-mode', true);
-  // post-result (12b C2): the toggle stays disabled while an operation is in flight, and a
+  // post-result: the toggle stays disabled while an operation is in flight, and a
   // click on it then does nothing; the base waited for the control itself to be enabled.
   await step('waiting for the unpressed mode to be enabled', async () => {
     if (!await waitForPresence(tab, ENABLED_UNPRESSED, true, { waitMs: ENABLE_WAIT_MS })) throw new Error(`${ENABLED_UNPRESSED} was not present within ${ENABLE_WAIT_MS} ms`);

@@ -34,7 +34,7 @@ function browserGlobals({ worker = ReadyWorker, locks = true, storage = true, es
 }
 
 // One page, so a pair of checks differs in the field it names and in nothing else.
-// `host` delivery is the only one a server allows beside `file` (D1).
+// `host` delivery is the only one a server allows beside `file`.
 function hostPage(code, { mediaSource = 'file', search = '?room=r&role=host&tab=h', role = 'host', globals = browserGlobals() } = {}) {
   return runEntry(code, { role, search, settings: { delivery: 'host', iceServers: [], mediaSource, targetSegmentSeconds: 2 }, globals });
 }

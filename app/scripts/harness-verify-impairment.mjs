@@ -1,4 +1,4 @@
-// Is the declared impairment real? (executor-spec.md §3.3, acceptance A2.)
+// Is the declared impairment real?
 //
 // Nothing here publishes a figure. Every arm is rig verification: it applies
 // one condition's qdiscs and measures whether the link behaves as the condition
@@ -7,8 +7,8 @@
 //
 // `uncapped` is the positive control and is not optional. Without it "10 Mbps"
 // could be the bridge's own ceiling and the cap10 assertion would pass against
-// a qdisc that shapes nothing (CONSTRAINTS.md -> Verification, "a guard that
-// cannot be reached cannot be tested"). `delay200` is the discrimination probe
+// a qdisc that shapes nothing: a guard that cannot be reached cannot be
+// tested. `delay200` is the discrimination probe
 // for the two-network split: it must move the media round trip and leave the
 // CDP round trip where it was, because a qdisc on the interface the measurement
 // is read over would be measured through itself.
@@ -172,7 +172,7 @@ function sinkReports(container, exec) {
 
 async function measureUdpCapacity({ origin, sink, exec = defaultExec }) {
   const before = sinkReports(sink, exec);
-  // TCP under loss backs off before the bucket is measured; UDP isolates the capacity (6b design.md D1).
+  // TCP under loss backs off before the bucket is measured; UDP isolates the capacity.
   dockerExec(origin, ['node', 'harness/background-load.mjs', '--to=sink:9500', '--mbps=150', '--protocol=udp', '--granularity-ms=10', '--max-ms=10000', '--report=/tmp/udp-capacity.json'], exec);
   const sender = JSON.parse(dockerExec(origin, ['cat', '/tmp/udp-capacity.json'], exec));
   const until = Date.now() + 5_000;

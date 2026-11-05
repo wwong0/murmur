@@ -34,7 +34,7 @@ export default async function edgePositionSuite() {
     page.control.fire('timeupdate');
     const after = page.app.urgentContext();
     assertEqual(json({ ownMediaMs: after.ownMediaMs, roomMediaMs: after.roomMediaMs }), json({ ownMediaMs: 100_000, roomMediaMs: 130_000 }), 'timeupdate publishes own element position and keeps room position');
-    // Mutation (a) page proof, D3: the event opportunity is a viewer behind the
+    // Mutation (a) page proof: the event opportunity is a viewer behind the
     // room, and the boundary is urgentContext() immediately after timeupdate.
     // Returning the state position from ownPositionMs makes this assertion red
     // (130000, not 100000); staged checkout restored the implementation and the
@@ -51,7 +51,7 @@ export default async function edgePositionSuite() {
     page.act([loadAction(3)], { startAtSharedMs: 1_000 });
     const between = page.app.urgentContext();
     assertEqual(between.ownMediaMs, 130_000, 'the second load has no own sample before its first position event');
-    // Mutation (c) proof, D3: after one sampled load, a second load is an
+    // Mutation (c) proof: after one sampled load, a second load is an
     // opportunity to retain stale element position; the boundary is the context
     // read before the second load's first event. Removing the load reset makes
     // this assertion red (25000, not 130000). Staged checkout restored the file;
@@ -73,7 +73,7 @@ export default async function edgePositionSuite() {
     const joined = page.app.urgentContext();
     assertEqual(json({ viewerIds: joined.viewerIds, selfId: joined.selfId }), json({ viewerIds: ['v1', 'v2', 'v3'], selfId: 'v2' }), 'the order and the id are in force at the join');
     assertEqual(json({ roomMediaMs: joined.roomMediaMs, ownMediaMs: joined.ownMediaMs, held: joined.held }), json({ roomMediaMs: 0, ownMediaMs: 0, held: false }), 'no position is invented without a clock');
-    // Proof, D2: the opportunity is a join with no clock, where the positioned
+    // Proof: the opportunity is a join with no clock, where the positioned
     // context cannot be written; the boundary is urgentContext() after the join.
     // Without the setUrgentOrder call in updateUrgentContext the order assertion
     // is red ([] and null). With it restored npm run check was green. E8 is the
@@ -101,7 +101,7 @@ export default async function edgePositionSuite() {
     page.setNow(5_100);
     page.tick();
     assertEqual(page.app.urgentContext().notBeforeMs, 5_000 + leadMs, 'a later tick names the same instant');
-    // Proof, D4: the opportunity is a held state applied ahead of its instant,
+    // Proof: the opportunity is a held state applied ahead of its instant,
     // and the boundary is urgentContext() before the next tick. Passing 0 from
     // updateUrgentContext makes the applied assertion red (0, not 5300). With it
     // restored npm run check was green.

@@ -303,7 +303,7 @@ export function refusalAfterSettlingAudit(events) {
 /**
  * INT's failures: `hold-after-first-settling` is dropped only when every refusal
  * after settling meets `drift-control` (`after.status === 'met'`); the clause is
- * change 5's frozen policy, not a requirement of that capability.
+ * the frozen refusal policy, not a requirement of that capability.
  */
 export function intStepFailures(refusalDwell, after) {
   const mapped = after.failures.map((failure) => `refusal-after-settling:${failure}`);
@@ -386,8 +386,8 @@ export function routeSignatureMatches(route, signature = T8_ROUTE_SIGNATURE) {
 /**
  * The attempt's label. Treatment first: a client whose treatment did not hold
  * makes the attempt `treatment-not-held` whatever else passed. Then every other
- * condition; a T8 failure is excused only if it is on the frozen list, the
- * owner accepted that list, and the route showed the same causal signature.
+ * condition; a T8 failure is excused only if it is on the frozen list, that list
+ * was accepted, and the route showed the same causal signature.
  */
 export function classifyIntegration({ clients = [], failures = [], exitCode = null, completed = false, route = null, replayAgreement = false, resources = null, t8Accepted = false } = {}) {
   const knownT8 = failures.filter((label) => T8_INHERITED_ALLOWLIST.includes(label));

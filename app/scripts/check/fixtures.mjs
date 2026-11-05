@@ -21,11 +21,11 @@ import { startRoomServer } from '../../server/room-server.mjs';
 // enough that a loaded machine does not spuriously terminate a healthy socket.
 export const LIVENESS_MS = 120;
 
-// Two more intervals, for the D13 assertions.
+// Two more intervals, for the assertions that a figure tracks the liveness interval.
 //
 // ANYTHING CLAIMING TO TRACK THE LIVENESS INTERVAL MUST BE SHOWN AT MORE THAN
-// ONE INTERVAL, or it is being asserted against itself — the fault D13
-// replaced was invisible at a single setting.
+// ONE INTERVAL, or it is being asserted against itself — the fault it
+// guards against is invisible at a single setting.
 //
 // `slow` is far enough above the client's 250ms first backoff that a fixed
 // one-second budget fails there. `frozen` never sweeps within a run, so its

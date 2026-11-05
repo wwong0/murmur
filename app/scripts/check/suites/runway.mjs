@@ -1,4 +1,4 @@
-// 9b design.md D5, corrected post-result: a playing page's published held-ahead
+// A playing page's published held-ahead
 // runs from its mapping's anchor, so the runway is that figure less the time
 // played. Pure; the schedule case runs on a fake clock.
 
@@ -35,7 +35,7 @@ function roomAnchored(poll) {
 
 export default async function runwaySuite() {
   await check('runway: a playing page\'s own held-ahead is the runway', async () => {
-    // 9b's second qualification attempt, c01: 154 s published 109 s after the seek's anchor, and 210 s at 349 s.
+    // The second qualification attempt, c01: 154 s published 109 s after the seek's anchor, and 210 s at 349 s.
     assertEqual(runwayMs(playing(154_000, 109_000)), 45_000, '45 000 ms of runway at the drop');
     assertEqual(runwayMs(playing(166_000, 151_000)), 15_000, '15 000 ms 40 s later, where the published figure had risen');
     assertEqual(runwayMs(playing(210_000, 349_000)), 0, 'and none at the ceiling: floored at zero, not below it');

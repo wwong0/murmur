@@ -1,4 +1,4 @@
-// Whether the "Choose a name" prompt is due, once per tab (design.md D19). Read the raw
+// Whether the "Choose a name" prompt is due, once per tab. Read the raw
 // parameters, not `readRoute`: its role defaults to `viewer`, so a rig URL would read as an
 // invite. An empty `?room=` is the front page.
 export function namePromptDue(search, prompted, fromFront = false) {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
 // Conditional PCM/pitch-preserving path, not an observed device configuration
-// or a WSOLA waveform simulation. See 4e observation-model.md for source pins.
+// or a WSOLA waveform simulation.
 export function audioPassthroughHypothesis(ppm, sampleRate = 48000, preservesPitch = true) {
   const rate = 1 + ppm / 1e6;
   assert(Number.isFinite(rate) && rate > 0 && Number.isSafeInteger(sampleRate) && sampleRate >= 100);

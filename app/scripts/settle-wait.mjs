@@ -1,6 +1,6 @@
 // scripts/settle-wait.mjs
 //
-// The second way a T5 window can be done (change 5 design.md D11): a scheduled
+// The second way a T5 window can be done: a scheduled
 // start that lands inside the stopping threshold never needs a correction, so it
 // never reaches `settled`. Pure — the samples are the T5 seam reads.
 

@@ -35,7 +35,7 @@ export default async function urgentPreparingSuite() {
     assert(requestClass({ ...base, path: '/media/seg-00092.m4s', preparing: 1 }) !== 'urgent', 'non-boolean preparing values are ignored');
   });
 
-  // 13e-2 d1-findings.md F3: the page, not only the rule, passes its start's preparing state.
+  // The page, not only the rule, passes its start's preparing state.
   await check('urgent-preparing: the page marks a segment urgent while its start is preparing', async () => {
     const product = await bundleProductEntry();
     const page = runEntry(product.code, {

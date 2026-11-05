@@ -119,8 +119,7 @@ export function driftContext({ clients = {}, tags = Object.keys(clients), window
 }
 
 // The run figures a drift figure carries. Byte figures pass the byte gates, not
-// these, so a byte figure copied in here would publish without them
-// (d1-findings.md F1, F2).
+// these, so a byte figure copied in here would publish without them.
 const DRIFT_REGIME_FIGURES = Object.freeze([
   'uplinkUtilisationMean', 'uplinkUtilisationPeak', 'capacityBitsPerSecond',
   'qdiscBacklogBytesMean', 'qdiscBacklogBytesPeak', 'qdiscBacklogNonzeroFraction', 'qdiscBacklogBytesP99',

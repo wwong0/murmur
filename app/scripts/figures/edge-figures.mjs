@@ -1,4 +1,4 @@
-// 9b design.md D7: what a run publishes beside its criteria. None of these is a
+// What a run publishes beside its criteria. None of these is a
 // leg or a criterion; each reads `null` where its evidence gives no value.
 
 import { median } from '../../public/lib/frame-drift.mjs';

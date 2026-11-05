@@ -2,7 +2,7 @@
 // the page supplies the room context and the engine supplies peer status.
 
 export const PEER_WAIT_LIMIT_MS = 3_000;
-// design.md D8 (m): nobody is watching a held room, so it waits longer on a loader.
+// Nobody is watching a held room, so it waits longer on a loader.
 export const PEER_WAIT_HELD_LIMIT_MS = 6_000;
 export const PEER_WAIT_MARGIN_MS = 1_500;
 export const URGENT_DELAY_MAX_MS = 500;
@@ -67,7 +67,7 @@ function validateHostAsk(record) {
 export function hostAskDecidedAtMs({ timeOriginMs, decisionMs, passMs, atMs } = {}) {
   finiteNonNegative(timeOriginMs, 'timeOriginMs');
   finiteNonNegative(atMs, 'atMs');
-  // The archived 8b asks have no decision run and no pass instant (joint D1 F1).
+  // The archived 8b asks have no decision run and no pass instant.
   if (decisionMs === undefined) return atMs;
   finiteNonNegative(passMs, 'passMs');
   if (decisionMs === passMs) return atMs;
@@ -175,7 +175,7 @@ export function urgentSource({
   finiteNonNegative(delayMs, 'delayMs');
   finiteNonNegative(budgetMs, 'budgetMs');
   const spentAt = waitStartMs + budgetMs;
-  // design.md D8 (l): a transfer under way in a held room is left to finish or to
+  // A transfer under way in a held room is left to finish or to
   // the engine's own no-bytes timeout, and so is one from a peer that holds the
   // segment, whatever the budget. Otherwise its budget runs from its start, and
   // `wakeMs` is that budget's end while it is still ahead.
@@ -283,7 +283,7 @@ export function edgeSource({
       : { source: 'http', reason: 'fallback-no-holder' };
   }
   if (rank === 0) return { source: 'http', reason: 'first' };
-  // design.md D4: a viewer that parks ahead of a held state's instant counts from
+  // A viewer that parks ahead of a held state's instant counts from
   // that instant, when the viewers still playing first need the segment.
   const at = Math.max(finiteNonNegative(episode?.quietSinceMs, 'quietSinceMs'), notBeforeMs)
     + rank * (held ? EDGE_HELD_STEP_MS : EDGE_STEP_MS);

@@ -67,7 +67,7 @@ function takeNamePrompt(fromFront) {
   }
 }
 
-// Holds nothing up: the engine has joined behind it (design.md D19), and closing it unanswered
+// Holds nothing up: the engine has joined behind it, and closing it unanswered
 // leaves the member unnamed. Submitting hands the field to `setName`; the page keeps only the
 // name the roster returns. Focus is left alone on close, so a driver's next click lands as it
 // would have with no prompt. `fromFront` is read once, on mount: a host who pressed Host kept
@@ -120,7 +120,7 @@ function EndedMarker({ view }) {
 }
 
 // The popup mounts only while open. The group is the engine's `control-mode` entry: a viewer
-// sees it disabled with the current mode pressed (design.md D11).
+// sees it disabled with the current mode pressed.
 function SettingsMenu({ view, actions }) {
   const mode = useView(view, (snapshot) => snapshot.controlMode);
   const disabled = useView(view, (snapshot) => snapshot.controls['control-mode'].disabled);
@@ -141,7 +141,7 @@ function SettingsMenu({ view, actions }) {
 }
 
 // Theatre does not display the header (room.css) and shows no settings button anywhere: settings
-// is reached by leaving theatre (owner, 8.5, design.md D9).
+// is reached by leaving theatre.
 function RoomHeader({ view, actions, theatre }) {
   return <header className="room-header">
     <a href="/" className="wordmark" data-testid="wordmark">Murmur</a>
@@ -150,7 +150,7 @@ function RoomHeader({ view, actions, theatre }) {
 }
 
 // Storage that throws is "off": theatre is a convenience, and a tab that cannot keep it still
-// toggles (design.md D9).
+// toggles.
 function readTheatre() {
   try {
     return sessionStorage.getItem(THEATRE_KEY) === '1';
@@ -186,7 +186,7 @@ function useWide() {
 // The static .layout carries the flag for the stylesheet, as EndedMarker does for #player.
 // Theatre moves no element: the media element is the same one it was. A change after mount
 // plays #player from its old box to its new one; a remembered theatre does not animate in on
-// load (12e design.md D11).
+// load.
 function TheatreMarker({ theatre }) {
   const mounted = useRef(false);
   useLayoutEffect(() => {
@@ -264,7 +264,7 @@ function KeyframeHint({ shown }) {
   return shown && phase !== 'gone' ? <div className="file-hint" data-phase={phase}>{KEYFRAME_HINT}</div> : null;
 }
 
-// The host's card over the video while there is nothing to play (design.md D15). #host-file is
+// The host's card over the video while there is nothing to play. #host-file is
 // the input drivers set files on, so it stays mounted and visually hidden, never `hidden`, and
 // carries the disabled flag itself: a CDP pick bypasses the button. The refusal's command keeps
 // its ids and texts, and `hidden` closes the card with no display class on `.file-state`.
@@ -502,7 +502,7 @@ function RoomColumn({ view, actions }) {
 export function RoomScreens({ view, actions }) {
   const route = useView(view, (snapshot) => snapshot.route);
   // Pressing Host swaps the route in this document, and the room's URL then reads like a rig
-  // URL: the prompt needs this to know the host came from the front page (design.md D19).
+  // URL: the prompt needs this to know the host came from the front page.
   const sawFront = useRef(false);
   useLayoutEffect(() => {
     if (route === 'front') sawFront.current = true;

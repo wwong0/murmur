@@ -1,4 +1,4 @@
-// T8 (design.md D3; tasks.md 3.4): the resume rule, pure, then its host driver
+// The resume rule, pure, then its host driver
 // through the entry harness. `createHoldResume()` takes every instant as an
 // argument — every scenario below drives it by hand, no timer anywhere.
 

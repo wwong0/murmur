@@ -1,4 +1,4 @@
-// 9b design.md D2, D3: the eleven conditions 9b registers, read from the file.
+// The eleven edge conditions, read from the file.
 // They land in a commit of their own, so before it none is present and after it all are.
 
 import fs from 'node:fs';
@@ -10,7 +10,7 @@ import { validateControlReading } from '../../figures/control-reading.mjs';
 
 const FILE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'harness', 'conditions.json');
 
-// Name → the 8b2 condition it copies, the top-level fields it may differ in, and its accepted minimum / most attempts.
+// Name → the condition it copies, the top-level fields it may differ in, and its accepted minimum / most attempts.
 const ALWAYS = ['bars', 'excusals', 'name', 'reading'];
 const ARMS = {
   'edge-five': { copies: 'control-five', differs: [], min: 2, max: 3 },
@@ -96,14 +96,14 @@ export default async function edgeConditionsSuite() {
       assertEqual(JSON.stringify(read.control), '{"condition":"p2p-scattered","peerFractionMin":0.5}', `${name} control`);
       assertEqual(read.productInputs, !name.startsWith('edge-sweep-'), `${name} product inputs`);
       assertEqual(read.sweep === true, name.startsWith('edge-sweep-'), `${name} sweep`);
-      // The owner set no copies bar (Open Question 1); the prefetch limit is edge-five's alone, on the whole duration (Open Question 3).
+      // No copies bar is set; the prefetch limit is edge-five's alone, on the whole duration.
       assertEqual('hostCopies' in read.criteria, false, `${name} registers no copies bar`);
       assertEqual('prefetchWait' in read.criteria, name === 'edge-five', `${name} and the prefetch limit`);
       attempts += read.attemptsMax;
     }
     assertEqual(`${registered['edge-ten'].reading.controlArm}/${registered['edge-seek'].reading.controlArm}`, 'edge-control-ten/edge-control-seek', 'the two arms that name a control arm');
     assertEqual(JSON.stringify(registered['edge-drop'].reading.published), '["startWait","startRecovery"]', 'the drop arm publishes the start wait and recovery');
-    // design.md D2: goodput, the no-P2P baseline and the scattered control at 2 each, and qualification at 2.
+    // Goodput, the no-P2P baseline and the scattered control at 2 each, and qualification at 2.
     assertEqual(attempts, 24, 'the ten arms\' maxima');
     assertEqual(attempts + 3 * 2 + 2, 32, 'with the three unedited arms and qualification, 32');
   });

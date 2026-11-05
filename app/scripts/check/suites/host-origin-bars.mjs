@@ -70,7 +70,7 @@ export default async function hostOriginBarsSuite() {
     const judged = judgeHostOrigin({ baseline, capped: armFigures(cappedRecompute, 'capped'), uncapped: fast });
     assertEqual(judged.routing, 'instrument-refusal', 'a publication-refused capped arm routes to refusal');
     expectError(() => armFigures(cappedRecompute), 'arm must be capped or uncapped');
-    // Mutation, D1 2026-09-23: the fallback to recomputed figures for either arm
+    // Mutation, 2026-09-23: the fallback to recomputed figures for either arm
     // turned 'a publication-refused capped arm routes to refusal' red; restored, green.
   });
 }

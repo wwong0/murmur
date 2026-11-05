@@ -311,7 +311,7 @@ export function createShimXhr({ link, RealXHR, baseUrl } = {}) {
       this._backing = backing;
       if (this._pendingResponseType) backing.responseType = this._pendingResponseType;
       for (const [name, value] of this._pendingProperties) backing[name] = value;
-      // A listener added before open is replayed, not copied as a field (7a d1-findings D1-2).
+      // A listener added before open is replayed, not copied as a field.
       for (const [type, fn, options] of this._pendingListeners) backing.addEventListener(type, fn, options);
     }
 

@@ -1,4 +1,4 @@
-// T7 (design.md D5; tasks.md 3.3): held-ahead and ready-at-once reports.
+// Held-ahead and ready-at-once reports.
 
 import { assert, assertEqual, check } from '../harness.mjs';
 import { aheadReportDue, heldAheadMs } from '../../../public/lib/held-ahead.mjs';
@@ -164,7 +164,7 @@ export default async function heldAheadLiveSuite() {
     page.tick();
     const held = page.app.heldAhead();
     assert(held, 'heldAhead is published once a held state resolves');
-    // Change 8b's case, kept: `updateHeldAhead` reads through `viewState()`.
+    // An older case, kept: `updateHeldAhead` reads through `viewState()`.
     assertEqual(held.positionMs, 60_000, 'positionMs is the offset-adjusted view position, not the raw room position (0)');
   });
 }

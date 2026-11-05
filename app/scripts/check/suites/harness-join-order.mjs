@@ -1,6 +1,6 @@
-// 8b design.md D3 (i): a host run's viewers all join before its first is
+// A host run's viewers all join before its first is
 // qualified, so the room's 2 s roster settle does not start it with one viewer.
-// 9b design.md D1: the first viewer's fetch is begun at its join and not awaited.
+// The first viewer's fetch is begun at its join and not awaited.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -69,7 +69,7 @@ export default async function harnessJoinOrderSuite() {
     // Mutation probe, staged: arms.mjs's HOST_ARM `qualifyAfterJoins` set false.
     // `npm run check` turned 'the host, every viewer, one qualification' red
     // (join:c00 join:c01 qualify echo:c01 join:c02 echo:c02). Reverted; green again.
-    // Re-run in 9b's C2 with the fetch begun at the first join: the same red, no `begin`.
+    // Re-run with the fetch begun at the first join: the same red, no `begin`.
   });
 
   await check('harness join order: an HTTP run still qualifies after its first client', async () => {

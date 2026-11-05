@@ -137,7 +137,7 @@ export default async function harnessDriftRunnerSuite() {
     try {
       // The runner's order: manifest written as running, recompute, then settle,
       // which writes the lifecycle keys. Comparing against a file this check wrote
-      // itself compared the code with itself (d1-findings.md F1).
+      // itself compared the code with itself.
       const mf = diskManifestFile(root, { ...writeFixture(root), status: 'running', outcome: 'running' });
       mf.write();
       const first = recomputeRunDirectory(root);
@@ -158,8 +158,7 @@ export default async function harnessDriftRunnerSuite() {
   });
 
   await check('harness drift runner: a byte-scoped run refusal still writes drift, a drift-scoped one does not', async () => {
-    // 6a design.md D5: a byte-attribution fault does not suppress a drift figure
-    // (d1-findings.md F2).
+    // A byte-attribution fault does not suppress a drift figure.
     for (const [scope, driftEligible] of [[['byte'], true], [['byte', 'drift'], false]]) {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-f2-'));
       try {

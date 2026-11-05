@@ -3,12 +3,11 @@
 // starts, hold a wall-clock budget, append NDJSON, sum what was retained, and
 // write the same tail whether the run passed or aborted.
 //
-// Where the runners differed, the difference is an argument here, not a branch
-// (6a design.md D9).
+// Where the runners differed, the difference is an argument here, not a branch.
 //
 // TEST MACHINERY. No product code imports this. Its guards are covered by
 // `check/suites/runner-core.mjs`, because a guard that only exists inside a
-// runner is a guard nobody runs (CONSTRAINTS.md -> Verification).
+// runner is a guard nobody runs.
 
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -23,7 +22,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * The refusals are ordered, and the order is the one the callers had:
  * containment first, then the git-ignore check, then existence. A run that
  * writes to a fixed path destroys the run before it, which is what cost the
- * first pair of captures on 2026-09-05 (CONSTRAINTS.md -> Measurement).
+ * first pair of captures on 2026-09-05.
  *
  * `refuseIgnored` and `createParents` exist because the four callers differed
  * in exactly those two places and nowhere else. Neither defaults on: giving a
@@ -173,10 +172,9 @@ const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
 
 /**
  * Which build is this run talking to? A 200 on a page proves something is
- * answering, not what it is (CONSTRAINTS.md -> Verification, "reachable is not
- * fresh"). This detects a page running a DIFFERENT build; it cannot detect a
- * page misreporting its own, and change 3b's design.md D3 says why that limit
- * stands. Callers keep their own assertion text and their own labels.
+ * answering, not what it is: reachable is not fresh. This detects a page
+ * running a DIFFERENT build; it cannot detect a page misreporting its own, and
+ * does not claim to. Callers keep their own assertion text and their own labels.
  */
 export async function assertServedBundle({ origin, bundlePath, pageBuildId }) {
   const served = await (await fetch(`${origin}/room.bundle.js`)).text();

@@ -1,4 +1,4 @@
-// Named labels, initials, the repeat suffix, the rename and rate lines, and chat lines (12d D6, D8), pure.
+// Named labels, initials, the repeat suffix, the rename and rate lines, and chat lines, pure.
 
 import { assert, assertEqual, check } from '../harness.mjs';
 import { activityText, chatLine, labelMap, memberLabels } from '../../../public/lib/room-people.mjs';

@@ -30,7 +30,7 @@ const ACTIVE = new Map([
   ['APP_TURN_API_TOKEN', ''],
 ]);
 
-// An allowlist: a denylist of path variables misses aliases such as $document_uri (13-2 F2).
+// An allowlist: a denylist of path variables misses aliases such as $document_uri.
 const LOG_VARIABLES = new Set([
   '$time_iso8601',
   '$remote_addr',

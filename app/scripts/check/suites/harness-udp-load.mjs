@@ -44,7 +44,7 @@ export default async function harnessUdpLoadSuite() {
       remainderBytes = pacing.remainderBytes;
       datagrams += pacing.datagrams;
     }
-    // floor(100 * 112,500 / 1,400) = 8,035; carried remainder avoids UDP underfill (6b design.md D1).
+    // floor(100 * 112,500 / 1,400) = 8,035; carried remainder avoids UDP underfill.
     assert(Math.abs(datagrams - Math.floor(11_250_000 / 1_400)) <= 1, '100 ticks preserve the paced datagram total');
   });
 

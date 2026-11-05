@@ -7,15 +7,15 @@
 //
 // NOTHING IN HERE OPENS A SOCKET, TOUCHES A BROWSER OR WAITS FOR TIME. The
 // three modules read no clock and hold no timer of their own — the caller
-// supplies every instant and the frame callback is injected (design.md D7) — so
+// supplies every instant and the frame callback is injected — so
 // every branch is reachable synchronously. If a check in this file ever has to
 // wait for something, one of those modules has grown a timer it must not have.
 //
 // fake-frames.mjs is the instrument this one is measured with. It runs FORWARDS
 // from a configured regime to metadata where the derivation runs BACKWARDS from
 // metadata to a drift, and §3 compares the two against the generator's own
-// `truthDriftMs` rather than against a number written down here — CONSTRAINTS.md
-// → *Measurement*, an uninstrumented rig reports the builder's expectation.
+// `truthDriftMs` rather than against a number written down here: an
+// uninstrumented rig reports the builder's expectation.
 
 import { check, assert, assertEqual, assertNear } from '../harness.mjs';
 import {
@@ -115,7 +115,7 @@ export default async function driftSuite() {
   // -------------------------------------------------------------------------
 
   await check('frame-drift: a late frame is behind the room and an early one is ahead, exactly', async () => {
-    // The sign convention change 4 is built on: POSITIVE MEANS AHEAD OF THE
+    // The sign convention the drift controller is built on: POSITIVE MEANS AHEAD OF THE
     // ROOM, so a positive error is corrected by slowing down. Media stays at a
     // whole 10.000s and the display instant moves, so all three are exact.
     const onTime = derive(frameAt({ scheduledMediaMs: 10000 })).outcome;
@@ -140,7 +140,7 @@ export default async function driftSuite() {
   });
 
   await check('frame-drift: the clock is read at the frame’s display instant, not at now', async () => {
-    // D5: the age term has to describe the clock as it was when the frame was
+    // The age term has to describe the clock as it was when the frame was
     // shown. The callback fires before the frame is displayed, so reading at
     // `now` reports the estimate of a different instant — 8ms here, and a whole
     // frame interval on a slow compositor.
@@ -187,12 +187,12 @@ export default async function driftSuite() {
   });
 
   await check('frame-drift: a frame with more than one thing wrong is charged to the first, not the last', async () => {
-    // D4's ORDER IS A RULE, NOT AN ACCIDENT, and nothing else here reaches it:
+    // THE REFUSAL ORDER IS A RULE, NOT AN ACCIDENT, and nothing else here reaches it:
     // every other refusal check breaks exactly one input, so an implementation
     // that tested the context before the frame passes all of them. The
     // co-occurrence is the ordinary case, not a corner — a page at load has
     // neither a clock nor an epoch, and charging that to `noEpoch` would leave
-    // change 3b's load-gate alarm reading zero through the fault it watches for.
+    // the page's load-gate alarm reading zero through the fault it watches for.
     const noClockNoEpoch = derive(frameAt({ scheduledMediaMs: 10000 }), {
       clock: createFakeClock({ present: false }),
       timeline: createRoomTimeline({ readState: () => null }),
@@ -263,7 +263,7 @@ export default async function driftSuite() {
     // rather than relying on the comparison: `Math.abs(NaN) > w` is FALSE, so
     // written as a bare `>` this frame would be accepted and its display
     // timestamp never judged at all. Reachable the moment a caller injects its
-    // own `now` — change 3b and change 6 both do.
+    // own `now` — the page and the harness both do.
     const unreadable = frameAt({ scheduledMediaMs: 10000 });
     unreadable.localNowMs = NaN;
     assertEqual(derive(unreadable).outcome.reason, 'displayTimeForeign', 'a display timestamp that cannot be judged is refused, not waved through');
@@ -279,9 +279,9 @@ export default async function driftSuite() {
     assertEqual(record.clock.delayTermMs, 7.5, 'its delay term');
     assertEqual(record.clock.ageTermMs, 2.25, 'its age term');
     assertEqual(record.clock.sampleCount, 6, 'and the sample count behind it');
-    // THIS PROVES THE PARTS SURVIVED THE COPY from change 2's estimate — that no
+    // THIS PROVES THE PARTS SURVIVED THE COPY from the clock estimate — that no
     // field was dropped or crossed on the way onto the record. It says nothing
-    // about the clock being right; the clock suite proves that (D5). A review
+    // about the clock being right; the clock suite proves that. A review
     // that reads this as clock verification stops looking.
     assertEqual(record.clock.delayTermMs + record.clock.ageTermMs, record.clock.halfWidthMs, 'and the half-width is still the sum of them');
   });
@@ -335,7 +335,7 @@ export default async function driftSuite() {
   });
 
   await check('drift-log: reading leaves the store unchanged for the reader after it', async () => {
-    // There are two readers — change 3b's read-out line and change 6's harness —
+    // There are two readers — the page's read-out line and the harness —
     // and a destructive read makes the number on the page change whenever the
     // harness happens to poll.
     const log = createDriftLog({ capacity: 16 });
@@ -380,7 +380,7 @@ export default async function driftSuite() {
     const nothing = idle.log.summary();
     assertEqual(nothing.framesHeld, 0, 'a source that delivered nothing recorded nothing');
     assertEqual(nothing.framesOffered, 0, 'and offered nothing');
-    // The distinction D4 exists for: a run that logs nothing and a run that logs
+    // The distinction that matters: a run that logs nothing and a run that logs
     // zeros are the same rig, and only one of them says so.
     assertEqual(nothing.medianDriftMs, null, 'so there is no median, rather than a median of zero');
     assertEqual(nothing.maxAbsDriftMs, null, 'and no maximum');
@@ -439,7 +439,7 @@ export default async function driftSuite() {
 
     // A stall: the media clock freezes for ten frames while the room's does not,
     // and the deficit stays after playback resumes. Nothing corrects it — this
-    // change measures and never touches `playbackRate` (change 4).
+    // module measures and never touches `playbackRate`.
     const stalled = rig({ count: 30, stallAt: 10, stallFrames: 10 });
     stalled.sampler.start();
     stalled.binding.deliver(30);
@@ -450,7 +450,7 @@ export default async function driftSuite() {
   });
 
   await check('frame-sampler: a repeated frame is recorded, and says it was a repeat', async () => {
-    // D4: every frame that passes is recorded, a re-presented one included, and
+    // Every frame that passes is recorded, a re-presented one included, and
     // `presentedFrames` is what lets a consumer tell them apart. This module
     // does not decide what a repeat means.
     const repeated = rig({ count: 4, repeatAt: { 2: true } });
@@ -495,9 +495,8 @@ export default async function driftSuite() {
   });
 
   await check('frame-sampler: with no clock estimate it refuses every frame and records none, then records the first frame after one arrives', async () => {
-    // READ DURING THE TRANSIENT, not only at the end (`CONSTRAINTS.md` →
-    // *Verification*, change 2's lesson): a steady state reached from a bad one
-    // looks identical to a steady state that was never bad.
+    // READ DURING THE TRANSIENT, not only at the end: a steady state reached
+    // from a bad one looks identical to a steady state that was never bad.
     const { sampler, binding, log, clock } = rig({ count: 5, clockPresent: false });
     sampler.start();
     binding.deliver(3);

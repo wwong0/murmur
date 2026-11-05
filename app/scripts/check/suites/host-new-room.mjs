@@ -1,4 +1,4 @@
-// 13b: a room hosted from the front page starts empty (D1), and Back from it reaches the front page (D2).
+// A room hosted from the front page starts empty, and Back from it reaches the front page.
 
 import { assertEqual, check } from '../harness.mjs';
 import { bundleProductEntry, runEntry } from '../entry-harness.mjs';

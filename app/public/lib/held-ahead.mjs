@@ -1,8 +1,8 @@
 // public/lib/held-ahead.mjs
 //
-// T7 (design.md D5): a held viewer's own runway, from its own finished
-// segments and its own held position — never from `video.currentTime`
-// (docs/constraints/playback.md). Pure: no clock, no engine, no timer.
+// A held viewer's own runway, from its own finished segments and its own held
+// position — never from `video.currentTime`, which does not say which frame is
+// on screen. Pure: no clock, no engine, no timer.
 
 // Absorbs float seconds x 1000 (hlsjs reports segment.startTime/endTime in
 // seconds); a real gap between segments is at least one segment, ~4000 ms.

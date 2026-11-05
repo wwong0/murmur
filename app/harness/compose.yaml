@@ -2,8 +2,8 @@
 # sink, and TWO networks.
 #
 # `wa-media` carries HTTP, the media and the websocket. `wa-control` carries
-# CDP and the agent API. **Every qdisc attaches to the media interface only**
-# (design.md D1, executor-spec.md §3.1): a qdisc on the one interface would
+# CDP and the agent API. **Every qdisc attaches to the media interface only**:
+# a qdisc on the one interface would
 # shape the channel the measurement is read over, and a 200ms `netem delay`
 # would then be measured through itself.
 #
@@ -25,7 +25,7 @@ x-client: &client
   init: true
   # Chrome's shared memory, sized rather than relocated. `--disable-dev-shm-usage`
   # changes WHERE Chrome puts shared memory, which is a change to the regime;
-  # a larger /dev/shm is not (executor-spec.md §3.3).
+  # a larger /dev/shm is not.
   shm_size: 1gb
   cap_add:
     - NET_ADMIN
@@ -39,7 +39,7 @@ x-client: &client
   volumes:
     # Read-only, and read for one reason: `verify-frames.mjs` re-reads the
     # content's frame rate with ffprobe every run rather than carrying a
-    # constant (executor-spec.md §10), and it runs in HERE. Nothing in the
+    # constant, and it runs in HERE. Nothing in the
     # client serves this directory — the media still arrives over wa-media.
     - ${WA_MEDIA_DIR:-../content}:/media:ro
     - ../results:/results

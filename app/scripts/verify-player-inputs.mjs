@@ -1,4 +1,4 @@
-// Browser proof for the player's inputs (change 12e, design.md D7–D11 and D13): the sync dot
+// Browser proof for the player's inputs: the sync dot
 // with one member and two, the keys, a click and a right click on the video, the fullscreen
 // button, the seek thumb after a drag, theatre's animation, and the leave warning. It owns one
 // default-paused server; a host and a viewer share one room. Records carry booleans, counts,

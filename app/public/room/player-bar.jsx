@@ -23,8 +23,8 @@ const LOOKS = {
 
 // The engine's text goes in the label span, never the button: the icon is its sibling, and the
 // button's textContent must stay the engine's text alone (survey 1.2). `slot` names the one of
-// `#play`/`#pause` the bar shows; the other keeps its text, `disabled` and handler under `hidden`
-// (design.md D8), and carries no display class that would override it.
+// `#play`/`#pause` the bar shows; the other keeps its text, `disabled` and handler under `hidden`,
+// and carries no display class that would override it.
 function BarButton({ view, actions, id, action, slot }) {
   const ref = useRef(null);
   const labelRef = useRef(null);

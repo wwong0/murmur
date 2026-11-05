@@ -1,7 +1,7 @@
 // scripts/check/suites/entry-placement.mjs
 //
 // Every place the entry turns the element's time into a member's media time
-// goes through the load's placement (change 12c-2 D1). Reads the entry's source
+// goes through the load's placement. Reads the entry's source
 // text, and runs its own `mediaDurationS` against F9's numbers.
 
 import fs from 'node:fs';

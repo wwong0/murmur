@@ -1,4 +1,4 @@
-// 9b design.md D7: host copies, the prefetch wait, the room's position, the
+// Host copies, the prefetch wait, the room's position, the
 // media-time ratio and the held-ahead at a span's end. Every number is written here.
 
 import { assert, assertEqual, assertNear, check } from '../harness.mjs';

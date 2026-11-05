@@ -1,4 +1,4 @@
-// 9b design.md D1 (J16): a boundary read-back awaits its `docker exec`s, so the
+// A boundary read-back awaits its `docker exec`s, so the
 // poll loops run through it; the join's brackets and each page's largest poll
 // gap are published; a host gap inside a span reads it incomplete where declared.
 

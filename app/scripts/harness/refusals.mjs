@@ -126,7 +126,7 @@ function counterDelta(after, before, field) {
 
 const COVERAGE_REASONS = ['record-coverage-unavailable', 'record-coverage-below-declared-fraction'];
 
-// 13f D4 rule 5: a counted viewer whose records fall short of the frames it presented while
+// A counted viewer whose records fall short of the frames it presented while
 // playing keeps its coverage reasons as refusals. Returns the reasons that stay counted.
 function retainPollCoverage(reasons, moved, tag, detail) {
   const isCoverage = (entry) => COVERAGE_REASONS.includes(entry.reason);
@@ -164,7 +164,7 @@ function rosterEventRefusal(input, addReason) {
   }
 }
 
-// 10b design.md D7: the member a leave removed ends its streams at the event by design,
+// The member a leave removed ends its streams at the event by design,
 // and a joiner was not in the room when the cadence was established. Their reasons are
 // kept, named, beside the ones the run is judged on.
 const ROSTER_EVENT_EXCUSABLE_REASONS = new Set([
@@ -359,7 +359,7 @@ export function evaluateRefusals(input = {}) {
     }
   }
 
-  // The cadence gate is D6's, not D5's. It is evaluated only when the run
+  // The cadence gate is evaluated only when the run
   // declares a cadence or publishes a figure, so constructed evidence for the
   // other gates need not carry one.
   if (Object.prototype.hasOwnProperty.call(input, 'cadence') || condition.publishes === true) {

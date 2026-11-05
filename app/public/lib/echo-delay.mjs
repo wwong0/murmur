@@ -1,4 +1,4 @@
-// The host's queue signal (design.md D2, the echo round trip): how far each
+// The host's queue signal, from the echo round trip: how far each
 // channel's round trip sits above its floor. Pure: every instant is supplied.
 
 export const ECHO_PERIOD_MS = 100;
@@ -36,7 +36,7 @@ export function createEchoDelay({ periodMs = ECHO_PERIOD_MS } = {}) {
   }
 
   // Where echo `n` ends in the bytes this channel has been handed. Its answer
-  // confirms every byte before it arrived (design.md D2, the cap).
+  // confirms every byte before it arrived.
   function handed(key, n, endBytes) {
     const entry = channels.get(key)?.sent.get(n);
     if (entry) entry.endBytes = endBytes;

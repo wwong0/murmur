@@ -26,7 +26,7 @@ import { plant } from './check/drift-plant.mjs';
  * out of the figures the moment the controller started explaining itself.
  *
  * An allow-list, so an input hold, a resolution-budget refusal and any reason a
- * later branch invents are excluded without this file being edited again. 4d
+ * later branch invents are excluded without this file being edited again. Older
  * evidence predates the declining reasons and carries `null` for the same
  * states, which is why the old value stays in the list rather than beside it.
  */
@@ -34,7 +34,7 @@ export function actedOnMeasurement(sample) {
   return sample?.reason === null || DECLINING_REASONS.includes(sample?.reason);
 }
 
-// Current snapshots carry all additive fields. An older 4d capture carries
+// Current snapshots carry all additive fields. An older capture carries
 // none and may use bandMs as S; a partial current snapshot is malformed.
 const THRESHOLD_FIELDS = Object.freeze([
   'actuatorAllowanceMs',
@@ -81,19 +81,19 @@ const PLANT_ASSERTED_FLOOR = 0.8;
 const RATE_EFFECTIVE = 0.5;
 /** Fraction below which the whole-window rate trend cannot discriminate a held error. */
 const RATE_INEFFECTIVE = 0.1;
-/** One sweep step of 4a's standing-error sweep — the resolution its reference figures have. */
+/** One sweep step of the standing-error sweep — the resolution its reference figures have. */
 const STANDING_LAG_MATCH_MS = 20;
-/** 3b's measured standing lag, as a band rather than a point (ms). */
+/** The measured standing lag, as a band rather than a point (ms). */
 const MEASURED_BAND_MIN_MS = 100;
 const MEASURED_BAND_MAX_MS = 240;
 /**
- * 4a's largest movement of the median between two consecutive 250ms polls (ms).
+ * The measured largest movement of the median between two consecutive 250ms polls (ms).
  * IT IS A BROWSER FIGURE, and the old name `PLANT_MEDIAN_MOVEMENT_MS` said the
- * opposite: 4a measured it in Chrome at task 0 — 1080 records over 45.0s from
+ * opposite: it was measured in Chrome at task 0 — 1080 records over 45.0s from
  * window A on the 180Hz development panel — and that capture was never retained.
- * 4a derives no per-poll movement from the simulated plant at all, so comparing a
+ * No per-poll movement was derived from the simulated plant at all, so comparing a
  * browser maximum against this one was browser against browser, and could never
- * have been the model check 4d D5 asks for (4d design.md D5, 2026-09-12).
+ * have been a check against the model.
  */
 export const TASK0_BROWSER_MOVEMENT_MS = 1.32;
 /** The population behind the browser figure above, carried so it is never printed bare. */
@@ -660,7 +660,7 @@ export function residualPpm(slope, commandedRate) {
 }
 
 /**
- * The standing lag this window opened with, against the figure 4a's sweep
+ * The standing lag this window opened with, against the figure the standing-error sweep
  * produced for it. Read from the first eight records — the controller's own
  * minimum — so it describes the client before any correction was applied.
  */
@@ -803,7 +803,7 @@ function recommendationOf(stats, plantMinimum) {
 // low here whatever its actuator is doing — on a plateau the trend is ~0 while the
 // command stays nonzero, a residual error being what produces it. Separating a
 // dead actuator from a held steady-state error needs the slope over a stretch
-// where the command is STEADY, filed under change 5 (4c design.md D2).
+// where the command is STEADY.
 function rateEffectivenessOf(fraction) {
   if (!Number.isFinite(fraction)) return 'unavailable (insufficient acting samples or zero commanded closure rate)';
   if (fraction >= RATE_EFFECTIVE) return `effective (>=${RATE_EFFECTIVE}; the whole-window trend tracks the command, so the rate does move the media clock)`;
@@ -871,7 +871,7 @@ export function windowVerdicts({ stats, refresh, plantMinimum }) {
  * never whether a failure counts. The T8 allowlist is untouched by it.
  */
 /**
- * THE ONE ASSERTION APPROVED FOR GATING, owner decision of 2026-09-12. The
+ * THE ONE ASSERTION APPROVED FOR GATING, decided on 2026-09-12. The
  * third outcome is a scope-limited permission, not a general facility: a
  * `not-exercised` that could be applied to any check is a way to retire a
  * failing test by declaring it irrelevant. Gating anything else is a scope

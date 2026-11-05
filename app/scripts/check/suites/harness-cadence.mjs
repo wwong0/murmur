@@ -1,6 +1,6 @@
 // scripts/check/suites/harness-cadence.mjs
 //
-// The cadence probe's arithmetic and the gate that acts on it (design.md D6).
+// The cadence probe's arithmetic and the gate that acts on it.
 //
 // A headless container has no monitor, so the question this covers is not "is
 // the number right" but "can the probe say it has no answer". The classifier
@@ -80,9 +80,9 @@ export default async function cadenceSuite() {
   });
 
   await check('harness-cadence: the probe shape is asserted before any figure is derived', async () => {
-    // 4c derived a whole hardware verdict from a probe that returned a
+    // An earlier pass derived a whole hardware verdict from a probe that returned a
     // function; `returnByValue` flattened it to {} and every figure printed
-    // null (CONSTRAINTS.md -> Verification).
+    // null.
     for (const bad of [undefined, {}, { rafTimestamps: [] }, { rafTimestamps: [0, Number.NaN], rvfcDisplayTimes: [] }]) {
       let threw = null;
       try {

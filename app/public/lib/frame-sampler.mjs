@@ -3,7 +3,7 @@
 // The driver: it arms `requestVideoFrameCallback`, reads the clock at each
 // displayed frame, and hands the derivation to the log. Everything with a
 // lifecycle lives here so frame-drift.mjs next door can stay a pure function of
-// its inputs — the same split as clock-filter and clock-sync (design.md D7).
+// its inputs — the same split as clock-filter and clock-sync.
 //
 // IT HOLDS NO TIMER. rVFC is the only thing that schedules it, and the callback
 // binding is an argument, which is what lets a manufactured source drive this

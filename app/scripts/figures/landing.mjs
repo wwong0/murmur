@@ -51,7 +51,7 @@ function holdValues(hold = {}) {
   };
 }
 
-/** The three wait parts and 11a-2 D9's threshold instants for each hold. */
+/** The three wait parts and the threshold instants for each hold. */
 export function waitParts({ holds = {}, viewerPolls = {}, declaredViewers = [], timebase } = {}) {
   const read = (hold) => {
     if (!hold) return null;
@@ -198,7 +198,7 @@ function landingRow({ hold, positionMs, content = {}, deltaMs = null, asks, clie
     segmentsNeeded: geometry.segmentsNeeded, hostCopies: null, traces, askDelays: delays };
 }
 
-/** Publish the landing geometry, host copies, 11a D6 trace and ask delay for a run. */
+/** Publish the landing geometry, host copies, ask trace and ask delay for a run. */
 export function landingReading({ holds = {}, seek = null, content = {}, hostResponses = [], clients = {}, asks = {},
   timebase, segmentSizes = content.segmentSizes ?? [] } = {}) {
   const build = (kind, hold, positionMs) => {

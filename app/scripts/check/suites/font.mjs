@@ -1,5 +1,4 @@
-// scripts/check/suites/font.mjs — the shipped face, served from this origin (12e design.md D2,
-// D3; tasks 2.1, 2.2).
+// scripts/check/suites/font.mjs — the shipped face, served from this origin.
 
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';

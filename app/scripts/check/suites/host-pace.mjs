@@ -1,4 +1,4 @@
-// T3 (design.md D2; tasks.md 2.3): the host's pace, against the fake clock and
+// The host's pace, against the fake clock and
 // fake channels. The shared bucket and the capacity estimate are exercised
 // through `createHostOrigin`, not directly — this suite proves what the host
 // publishes and delivers, not the bucket's own arithmetic (that is send-pace.mjs).
@@ -183,8 +183,8 @@ export default async function hostPaceSuite() {
       const relError = Math.abs(after.estimate.bytesPerSecond - 600_000) / 600_000;
       assert(relError <= 0.005, `estimate falls to within 0.5% of 600,000 B/s (got ${after.estimate.bytesPerSecond})`);
       assertEqual(after.paceBytesPerSecond, HEADROOM_DEFAULT * after.estimate.bytesPerSecond, 'pace is 0.85 × the fallen estimate');
-      // D1's F2 probe here (PACE_CAP_BYTES back to one chunk) no longer turns this
-      // case: since T15 the echo reads the fall, not the bucket's burst. Re-run
+      // The earlier probe here (PACE_CAP_BYTES back to one chunk) no longer turns this
+      // case: the echo now reads the fall, not the bucket's burst. Re-run
       // 2026-10-03, it turned only 'no probe ran in the window' above.
     } finally {
       cleanup();

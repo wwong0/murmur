@@ -1,6 +1,6 @@
 // public/lib/far-skip.mjs
 //
-// Pure dwell and repeat gate for D4. The entry supplies page-clock readings.
+// Pure dwell and repeat gate for a far skip. The entry supplies page-clock readings.
 
 export function createFarSkip({ dwellMs, repeatIntervalMs } = {}) {
   for (const [name, value] of [['dwellMs', dwellMs], ['repeatIntervalMs', repeatIntervalMs]]) {

@@ -200,7 +200,7 @@ function streamNames(tag, streams) {
 
 /**
  * The measure window is placed from the instant the last client was ready to
- * play, not from the instant this process started. D3's excluded prefix exists
+ * play, not from the instant this process started. The excluded prefix exists
  * to cover the controller's settling time, and settling begins at playback: a
  * prefix counted from process start is spent on `docker compose up` and the run
  * measures the convergence period it was declared to exclude. The declared
@@ -297,7 +297,7 @@ export function mergeVerifiedContext(manifest, seam = {}) {
 }
 
 // The ready merge keeps what prepare recorded: a host run's control-UDP drop and
-// default-route read-backs are manifest evidence (7a2 acceptance A7), and a host
+// default-route read-backs are manifest evidence, and a host
 // topology missing either aborts the run before any client starts.
 export function readyTopology(prepared, qdiscs, condition) {
   return armFor(condition).readyTopology({ ...prepared, status: 'ready', qdiscs: qdiscs ?? condition.qdiscs }, condition);
@@ -306,7 +306,7 @@ export function readyTopology(prepared, qdiscs, condition) {
 /**
  * How long a viewer's page may take to become ready. A host run's later viewers
  * load the bundle over a shaped link the earlier viewers already fill, and 30 s
- * aborted a capped arm (7a2 design.md D3). The wait is before `placeWindow`, so
+ * aborted a capped arm. The wait is before `placeWindow`, so
  * no figure sees it; each client's wait is recorded as `pageReadyMs`.
  */
 export function clientReadyTimeoutMs(condition) {
@@ -439,7 +439,7 @@ export function decideFinalization({ evaluation, recomputed, figureKinds, failur
   const writes = {
     writeByte: byteAllowed && byteEligible && publishedByte,
     // Refusal scopes, not the run's status, decide what is withheld: a byte-only
-    // run refusal leaves drift eligible (6a design.md D5; d1-findings.md F2).
+    // run refusal leaves drift eligible.
     writeDrift: driftAllowed && evaluation?.figures?.drift === true && publishedDrift,
     ...(behindAllowed ? { writeBehind: behindFigure !== null } : {}),
     // The churn readings are rows that carry their own refusals, as the behind rows do.
@@ -579,9 +579,9 @@ async function disposeSession(session) {
   if (session.dispose) await session.dispose();
 }
 
-// D8: the machine-side origin whose /app-settings every page reads. Under host delivery the
+// The machine-side origin whose /app-settings every page reads. Under host delivery the
 // host page's proxy listens inside its container and sends /app-settings to the server, which
-// is countersUrl (harness/origin-proxy.mjs; joint D1 F3).
+// is countersUrl (harness/origin-proxy.mjs).
 export function autoStartPinOrigins(topology, delivery) {
   const origins = delivery === 'host' ? [topology.countersUrl] : [topology.countersUrl, topology.hostPageUrl];
   return [...new Set(origins.filter((origin) => typeof origin === 'string' && origin.length > 0))];
@@ -717,7 +717,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
 
     // Before the measure window, and its failure ends the run: a regime whose
     // cadence cannot be established cannot produce a criterion-1 figure this
-    // project may quote (design.md D6).
+    // project may quote.
     await arm.openWindow({
       sessions: activeSessions(), condition, deadline, establishCadence, manifestFile, placeWindow,
       drainAll: () => Promise.all(activeSessions().map((session) => queuedDrain(session, ndjson, arm, Date.now()))),
@@ -767,7 +767,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       manifestFile.merge({ capacityStep: sequence.capacityStep });
       manifestFile.write();
     }
-    // The deep phase runs with the poll and drain loops already going (9b design.md D5).
+    // The deep phase runs with the poll and drain loops already going.
     const scheduled = () => recordSchedule({ condition, window: manifestFile.get().window, tags,
       viewerPolls: controlEvidence.viewerPolls, stepQdisc: (capacityStep) => topology.stepQdisc({ capacityStep }),
       viewerIds, clientIds, onEdge: edgeRosterEvent(issueEventOptions),
@@ -885,7 +885,7 @@ export async function runHarness({ conditionName, condition = conditionForName(c
       throw new Error(`retained evidence exceeds ${retainedCapBytes(condition)} bytes`);
     }
     // The recompute reads the manifest from disk; unwritten client fields would
-    // make the stored report differ from any later recompute (6b design.md D6).
+    // make the stored report differ from any later recompute.
     manifestFile.write();
     recomputed = recomputeRunDirectory(prepared.runDir);
     const publicationContext = { ...manifestFile.get(), ...recomputed.figures, declaredClientTags: tags };

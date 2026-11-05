@@ -1,4 +1,4 @@
-// 9b design.md D3, D4, D8: the reading of an arm registered under 9b — the drop
+// The reading of an arm registered under 9b — the drop
 // criterion, the comparison with a control arm, and what a run publishes beside them.
 
 import { assert, assertEqual, assertNear, check } from '../harness.mjs';
@@ -165,7 +165,7 @@ export default async function edgeReadingSuite() {
     assertEqual(sweepPositions([], conditions).map((position) => position.condition).join(' '), 'control-seek', '8b2\'s positions gain none of them');
   });
 
-  // F6, pinned (design.md D3): the cap leg's two readings.
+  // Pinned: the cap leg's two readings.
   await check('edge reading: a probe interval at its allowance reads a cap used of 1.0, and a span before any estimate is incomplete', async () => {
     const record = (seq, fields) => ({ seq, endWallMs: 100 + 1_000 * seq, durationMs: 1_000, paceBoundMs: 0, handedBytes: 300_000, wireBytes: 300_000,
       readingBytesPerSecond: null, linkBound: false, reason: 'no-queue', probe: false, headQueueMs: 0, tailQueueMs: 0, raised: false, climbing: true, ...fields });

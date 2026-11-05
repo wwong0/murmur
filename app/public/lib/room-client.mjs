@@ -5,20 +5,19 @@
 //
 // Two things in here are not conveniences and must not be refactored as such:
 //
-//  1. It stamps its own send and receive times AT THE WIRE (design.md D6).
+//  1. It stamps its own send and receive times AT THE WIRE.
 //     Moving either stamp to where a caller would naturally take it puts the
-//     event loop, JSON.parse and every subscriber for that type inside change
-//     2's offset estimate — as a one-directional bias, so averaging more
+//     event loop, JSON.parse and every subscriber for that type inside the
+//     clock's offset estimate — as a one-directional bias, so averaging more
 //     samples will not remove it.
 //
-//  2. It reports gaps in the room's order and does not repair them
-//     (design.md D5). Report, do not repair: no buffering, no replay, no
-//     requesting what was missed. Resumption is change 5's.
+//  2. It reports gaps in the room's order and does not repair them.
+//     Report, do not repair: no buffering, no replay, no requesting what was
+//     missed. Resuming is not this file's job.
 //
 // Constraints: under public/lib/, so it must never touch the DOM or read the
 // page's address. Every piece of configuration arrives as an argument, which
-// is what lets change 11b rewrite the page in React and reuse this file
-// unedited.
+// is what let the page be rewritten in React with this file unedited.
 
 import {
   ADDR_ROOM,
@@ -52,7 +51,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 
 /**
  * NOT budgets. The retry budget for a `tab-taken` refusal comes from the
- * refusal itself (1b design.md D13), because the server is the only party that
+ * refusal itself, because the server is the only party that
  * knows its own liveness interval.
  *
  * These two are the guard that keeps the "never retry forever" promise when
@@ -97,7 +96,7 @@ export function createRoomClient(config) {
     roster: /** @type {object[]} */ ([]),
     /**
      * The reclaim secret from the most recent `joined`. In memory only, for
-     * the life of the page (1b design.md D4), and never handed to a subscriber
+     * the life of the page, and never handed to a subscriber
      * or placed in any envelope but a `join`.
      *
      * REPLACE it on every `joined`; never accumulate. A reclaim mints a new
@@ -108,7 +107,7 @@ export function createRoomClient(config) {
     secret: /** @type {string|null} */ (null),
     /**
      * The role this client actually holds, read back from `joined` rather than
-     * assumed from the configured one (1b design.md D8).
+     * assumed from the configured one.
      */
     role: /** @type {'host'|'viewer'} */ (role),
     /**
@@ -228,11 +227,11 @@ export function createRoomClient(config) {
    * Correlation is on `id` alone and never on `type`, so a second envelope of
    * the same type cannot resolve the wrong call.
    *
-   * THE ADDRESS IS HALF THE CORRELATION KEY (change 2 design.md D11). Ids are
+   * THE ADDRESS IS HALF THE CORRELATION KEY. Ids are
    * sequential, and the server relays any directed envelope between members
    * with `type` and `replyTo` intact, so `replyTo` alone lets any member in the
    * room resolve any other member's outstanding call with an exchange that
-   * never happened. That is not a nuisance for the clock: change 2's probe is a
+   * never happened. That is not a nuisance for the clock: its probe is a
    * request, min-delay selection actively prefers a forged sample because a
    * forger can make the round trip look as short as it likes, and the
    * corruption is one-directional so averaging cannot remove it.
@@ -243,10 +242,9 @@ export function createRoomClient(config) {
    * `"server"`. Unguessable ids would be a second, weaker defence against a
    * threat this one already closes.
    *
-   * `to` IS A PARAMETER, and that is the point (design.md OQ1). The room's
-   * time reference is provisionally the server, but change 2 owns that
-   * decision, and if it moves to the host tab the probe becomes a request
-   * addressed to a member instead of to `"server"` — with no change to this
+   * `to` IS A PARAMETER, and that is the point. The room's time reference is
+   * the server today, and if it moves to the host tab the probe becomes a
+   * request addressed to a member instead of to `"server"` — with no change to this
    * module and none to the server.
    *
    * @param {{type: string, to?: string, payload?: unknown, timeoutMs?: number}} fields
@@ -270,7 +268,7 @@ export function createRoomClient(config) {
     });
   }
 
-  /** The round-trip probe change 2 builds on. Returns the reply, timestamps attached. */
+  /** The round-trip probe the clock builds on. Returns the reply, timestamps attached. */
   function echo(timeoutMs) {
     return request({ type: TYPE_ECHO, to: ADDR_SERVER, timeoutMs });
   }
@@ -282,7 +280,7 @@ export function createRoomClient(config) {
   function handleMessage(raw) {
     // T4, FIRST. Before JSON.parse, before the gap check, before any
     // subscriber runs. Everything after this line is work whose duration must
-    // not enter change 2's estimate, and the only way to guarantee that is to
+    // not enter the clock's estimate, and the only way to guarantee that is to
     // have already recorded the time.
     const t4 = clientNow();
 
@@ -316,7 +314,7 @@ export function createRoomClient(config) {
       checkOrder(env.seq);
     }
     // The roster is the latest one the server sent, not the join snapshot: a
-    // host resolves a later joiner's tag from it (7a2 design.md D1, observation).
+    // host resolves a later joiner's tag from it.
     // Only the server's own presence counts — a member can relay one.
     if (env.type === TYPE_PRESENCE && env.from === ADDR_SERVER) {
       const roster = readBody(env).roster;
@@ -405,7 +403,7 @@ export function createRoomClient(config) {
   /**
    * Decide what to do about a refused join.
    *
-   * TERMINAL BY CONSTRUCTION (change 2 design.md D12). `tab-taken` is the one
+   * TERMINAL BY CONSTRUCTION. `tab-taken` is the one
    * code carrying a retry policy; a refusal that does not match it stops the
    * client and is reported, whatever it says. The shape matters more than the
    * behaviour of any one code: an enumeration of handled codes falls out of
@@ -498,7 +496,7 @@ export function createRoomClient(config) {
       // The one close that must NOT be retried: a newer connection presenting
       // this membership's reclaim secret has taken its place. Honouring the
       // code is what makes this page stop cleanly and say why — rotation, not
-      // this branch, is what makes a retry harmless (1b design.md D5).
+      // this branch, is what makes a retry harmless.
       const superseded = code === CLOSE_SUPERSEDED;
       if (superseded) state.closing = true;
 

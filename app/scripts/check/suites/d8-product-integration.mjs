@@ -1,8 +1,7 @@
 // scripts/check/suites/d8-product-integration.mjs
 //
-// The adopted D8 policy in the product controller, on manufactured input only
-// (remedy-product-integration-spec.md section 4.2). Driven through the same rig
-// as d8-research.mjs, so a poll can sit exactly on S.
+// The adopted D8 policy in the product controller, on manufactured input only.
+// Driven through the same rig as d8-research.mjs, so a poll can sit exactly on S.
 //
 // Both kinds of assertion, on purpose: the product must equal the tested
 // research copy on one long positive-f history, AND the figures that history

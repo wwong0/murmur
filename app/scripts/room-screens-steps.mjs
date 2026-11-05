@@ -6,7 +6,7 @@ const failure = (error, deltas = null) => ({ ok: false, class: null, deltas, err
 
 // Reads the viewer's rejected counters either side of the host's end pause. It accepts a
 // notPermitted rejection, a stale one, or none issued, each with no malformed or
-// notApplicable rise, and fails everything else (change 12a F21, design.md D18).
+// notApplicable rise, and fails everything else.
 export function classifyEndPause(before, after) {
   if (!object(before) || !object(after)) return failure('viewer timeline absent');
   const bad = FIELDS.find((field) => !finite(before[field]) || !finite(after[field]));

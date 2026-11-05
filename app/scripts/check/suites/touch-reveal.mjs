@@ -1,4 +1,4 @@
-// The touch-reveal decision (design.md D7), as a table.
+// The touch-reveal decision, as a table.
 
 import { assertEqual, check } from '../harness.mjs';
 import { swallowTouch } from '../../../public/lib/touch-reveal.mjs';

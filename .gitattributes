@@ -1,4 +1,4 @@
-# LF everywhere. Development is on Windows; change 6 runs the same code on Linux
-# in containers (CONSTRAINTS.md -> Environment). A line ending that differs by
-# platform is a diff that differs by platform.
+# LF everywhere. Development is on Windows; the container harness runs the same
+# code on Linux. A line ending that differs by platform is a diff that differs by
+# platform.
 * text=auto eol=lf

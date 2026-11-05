@@ -1,6 +1,5 @@
-// The trap is using a harness timestamp or currentTime as evidence; D6 keeps
+// The trap is using a harness timestamp or currentTime as evidence; this keeps
 // instants in the page clock and uses currentTime only for the buffer check.
-// (6b design.md D6)
 const MARKER = '__HARNESS_DRIFT_DISTURBANCE__';
 
 export function disturbanceExpression(declared = {}) {

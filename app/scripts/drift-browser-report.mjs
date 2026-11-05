@@ -3,7 +3,7 @@
 // The browser pass's T9 figure block, as lines rather than as writes to stdout.
 //
 // This is the block a person copies out of a run, so its provenance qualifiers
-// are load-bearing: which population a figure was taken over, that 4a's 1.32ms
+// are load-bearing: which population a figure was taken over, that the measured 1.32ms
 // is a Chrome task-0 number and not the plant's, and that a predicted parking
 // distance is a prediction. While it lived inside the driver's one `try`, none
 // of that could be read back without Chrome, a server and five minutes — so the

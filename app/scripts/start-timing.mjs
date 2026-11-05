@@ -1,12 +1,12 @@
 // scripts/start-timing.mjs
 //
-// The scheduled-start diagnostic's arithmetic and its in-page probes
-// (executor-spec.md §11.3), split from the runner for the reason
+// The scheduled-start diagnostic's arithmetic and its in-page probes,
+// split from the runner for the reason
 // lead-measurement.mjs is: the figures and the page expressions are importable
 // and checkable with no Chrome, and the runner is only the sequence of windows
 // and waits.
 //
-// D11 IS FROZEN (R18). `startResidual` is imported and reused, never
+// THE START RESIDUAL IS FROZEN. `startResidual` is imported and reused, never
 // reimplemented, and nothing here touches its arithmetic or its population.
 
 import { median as medianOfSorted, percentile } from '../public/lib/frame-drift.mjs';
@@ -17,7 +17,7 @@ export { parseNdjson } from './lead-measurement.mjs';
 export const PHASES = Object.freeze([0, 0.25, 0.5, 0.75]);
 export const CONDITIONS = Object.freeze(['load', 'resume']);
 
-/** D11's population, and the joined frames one start must retain (§13 G0). */
+/** The residual's population, and the joined frames one start must retain. */
 export const RESIDUAL_POPULATION = 24;
 export const FRAMES_PER_START = 72;
 export const PLANNED_STARTS = 8;
@@ -114,7 +114,7 @@ function slopeOf(points) {
   return variance > 0 ? covariance / variance : null;
 }
 
-/** The display instant a frame carries, joined through ITS OWN offset (R17). */
+/** The display instant a frame carries, joined through ITS OWN offset. */
 function displaySharedOf(frame) {
   if (!frame || ![frame.timeOriginMs, frame.expectedDisplayTimeMs, frame.clockOffsetMs].every(finite)) return null;
   return frame.timeOriginMs + frame.expectedDisplayTimeMs + frame.clockOffsetMs;
@@ -139,7 +139,7 @@ function positiveMod(value, modulus) {
  * runs the moment the state is adopted. Its window therefore opens at sequence
  * zero and its start is its FIRST attempt, whatever was recorded before the
  * first read. The 2026-09-17 baseline refused two `load` starts for
- * `no-park-action` for exactly that reason (§11.4 C2 amendment).
+ * `no-park-action` for exactly that reason.
  */
 export function captureBoundary({ freshDocument = false, latestSeq = 0, startCount = 0, dropped = 0 } = {}) {
   if (freshDocument) return Object.freeze({ mode: 'document', cursor: 0, pick: 'first', startsRequired: 1, droppedBaseline: 0 });
@@ -474,13 +474,13 @@ export function reduceTreated(input) {
   gates.push(uGate);
   if (!uGate.held) return result('INCONCLUSIVE', 'S-CADENCE');
 
-  // 1 — every treated start meets D11's unchanged bar.
+  // 1 — every treated start meets the residual's unchanged bar.
   const missed = usable.filter((start) => start.residual.status !== 'met').map((start) => ({ label: start.label, status: start.residual.status, medianMs: start.residual.medianMs }));
   const c1 = gate('T1', missed.length === 0, { missed, statuses: usable.map((start) => start.residual.status) }, 'every treated start residual.status === met');
   gates.push(c1);
   if (!c1.held) return result('FAILED', 'S-RESIDUAL');
 
-  // 2a — the replacement for the original condition 2 (O2 option 1′).
+  // 2a — the replacement for the original condition 2.
   const worstMs = medians.length > 0 ? Math.max(...medians.map(Math.abs)) : null;
   const c2a = gate('T2a', finite(worstMs) && finite(frameIntervalMs) && worstMs <= frameIntervalMs, { worstMs, bar: frameIntervalMs }, 'max |treated median| <= frameIntervalMs');
   gates.push(c2a);
@@ -527,14 +527,14 @@ export function reduceTreated(input) {
 
 /**
  * The observed PTS lattice: where the content's frame timestamps actually sit
- * inside one frame interval. A guessed frame origin is what the brief forbids.
+ * inside one frame interval. The frame origin is observed, never guessed.
  *
  * MEASURED ON THE CIRCLE, not on [0, frameIntervalMs). Chrome reports
  * `mediaTime` quantised to microseconds, so a frame whose true PTS is exactly on
  * a lattice point arrives a hair BELOW it and its remainder wraps to nearly a
  * full interval. Taken linearly, a lattice that is tight to a thousandth of a
  * millisecond reads as a dispersion of one whole interval — which is what this
- * run's first attempt reported (C2 amendment to §11.4 step 4). The centre is the
+ * run's first attempt reported. The centre is the
  * circular mean; the dispersion is measured against it after unwrapping.
  */
 export function reduceLattice({ mediaTimeMs, frameIntervalMs, minimumFrames = 48 }) {
@@ -567,7 +567,7 @@ export function reduceLattice({ mediaTimeMs, frameIntervalMs, minimumFrames = 48
 // In-page expressions. Each returns a string for CDP `Runtime.evaluate`.
 // ---------------------------------------------------------------------------
 
-/** The raw-socket host page: a document on the right origin with no player (R8). */
+/** The raw-socket host page: a document on the right origin with no player. */
 export function probeHostExpression({ origin }) {
   return `(() => ({ origin: location.origin, matches: location.origin === ${JSON.stringify(origin)}, hasVideo: document.querySelector('video') !== null }))()`;
 }
@@ -587,7 +587,7 @@ const rawSocket = (room, tabId) => `
 /**
  * The answering member for the `load` condition. It has no clock of its own, so
  * the mapping's instant is built from the REQUEST's server stamp plus the lead
- * — never from a renderer instant joined to another page's offset (R17).
+ * — never from a renderer instant joined to another page's offset.
  */
 export function probeStateExpression({ room, lineage, mapping, tabId = 'H-state' }) {
   const { playing = true, mediaMs, leadMs } = mapping;

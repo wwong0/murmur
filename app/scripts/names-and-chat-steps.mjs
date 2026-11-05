@@ -1,4 +1,4 @@
-// What each NC row decides from the booleans and counts the driver read (12d D7, D9). Pure:
+// What each NC row decides from the booleans and counts the driver read. Pure:
 // no page, no clock. A row with no evidence, or with a field missing, reads EVIDENCE MISSING —
 // never a pass, and never a fail that blames the product.
 
@@ -32,7 +32,7 @@ const ROWS = {
   },
   NC3: {
     label: 'NC3 a reload shows no prompt, keeps the stored name, and both lists show it',
-    // The name it looks for is NC2's rename, so no rename means nothing to keep (d1-findings F10, post-result).
+    // The name it looks for is NC2's rename, so no rename means nothing to keep (post-result).
     keys: ['reloaded', 'renamed', 'promptSamplesShown', 'storagePresent', 'hostListHasName', 'viewerListHasName'],
     exercised: (e) => e.reloaded === true && e.renamed === true,
     ok: (e) => e.promptSamplesShown === 0 && e.storagePresent === true && e.hostListHasName === true && e.viewerListHasName === true,

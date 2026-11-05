@@ -1,6 +1,6 @@
 // scripts/check/suites/host-file-s7g.mjs
 //
-// S7g's evaluator (change 12c-2): two loads, one at 0 and one mid-title, report
+// S7g's evaluator: two loads, one at 0 and one mid-title, report
 // the same frame at the same media time. Every number is hand-computed on a
 // 24 fps grid, a frame being 1000/24 = 41.667 ms.
 

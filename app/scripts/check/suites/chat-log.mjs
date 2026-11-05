@@ -1,4 +1,4 @@
-// scripts/check/suites/chat-log.mjs — no name or message reaches the server's log (12d D7).
+// scripts/check/suites/chat-log.mjs — no name or message reaches the server's log.
 
 import crypto from 'node:crypto';
 

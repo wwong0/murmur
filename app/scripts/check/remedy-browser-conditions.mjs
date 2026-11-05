@@ -8,14 +8,14 @@
 // arm's `qualified` flag, the four seam proofs and the run's published status
 // are all derived from these rows and from nothing else.
 //
-// The rules the enumeration exists to hold (coordinator verification V1/V2):
+// The rules the enumeration exists to hold:
 //
 //  1. A COMPUTED JUDGEMENT THAT NOTHING READS IS NOT A JUDGEMENT. A condition
 //     that is measured but excluded from `qualified` lets a run publish a
 //     verdict it did not earn, which is exactly what happened to the callback
 //     qualification, the playback continuity and the delivery proofs.
 //  2. AN UNAVAILABLE OBSERVATION IS NOT A PASS AND NOT A FAILURE. `not-observed`
-//     and `unavailable` are their own statuses, carried to the owner by name.
+//     and `unavailable` are their own statuses, reported by name.
 //     `refused` is different again: the evidence needed to decide was absent, so
 //     nothing was established and the arm does not qualify.
 //  3. A POPULATION IS PART OF THE VERDICT. Each row carries the count it was
@@ -191,7 +191,7 @@ export function necessaryConditions({
   }
 
   // At f = 0 an accepted threshold above the ceiling is not a refused contract
-  // (`design.md` D8 → *Ceiling and refusal* states the hold for f > 0 only), so
+  // (the ceiling's hold applies for f > 0 only), so
   // it is carried as an observation on a met row instead of counted as a failure.
   const zeroFloorAbove = ceiling.aboveCeilingAtZeroFloor?.length ?? 0;
   const ceilingPopulation = {
@@ -233,8 +233,8 @@ export function necessaryConditions({
     : failed('native-write-readback', { writes: writes.writes }, writes.failures.join(', ')));
 
   // AN UNAVAILABLE ACTUATOR PROOF IS ITS OWN STATUS. A 20 second window was
-  // never required to contain a correction, so its absence is reported to the
-  // owner rather than counted against the arm.
+  // never required to contain a correction, so its absence is reported
+  // rather than counted against the arm.
   if (writes.nativeWriteProof === 'established') {
     rows.push(met('native-non-unity-write', { nonUnityWrites: writes.nonUnityWrites }));
   } else if (writes.nativeWriteProof === 'unavailable') {

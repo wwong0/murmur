@@ -1,13 +1,12 @@
 // scripts/check/suites/start-treated.mjs
 //
-// The treated condition (executor-spec.md §13.1, as O2 option 1' replaced its
-// condition 2) and its negative control (task 13.3). Pure — no server, no
+// The treated condition and its negative control. Pure — no server, no
 // browser, no Chrome.
 //
 // The control runs against the RETAINED baseline `summary.json` on disk, not
-// against a fixture: task 13.3 requires it to be green, with the real frozen
-// figures, before any treated start is run. The gate pairs below are fixtures
-// differing in the one figure their gate reads (R6).
+// against a fixture: it must be green, with the real frozen figures, before
+// any treated start is run. The gate pairs below are fixtures
+// differing in the one figure their gate reads.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -149,17 +148,17 @@ export default async function startTreatedSuite() {
       ['T-G0', { medians: spreadAround(0, 14), starts: { 3: { unusable: ['advance-not-applied'] } } }, 'INCONCLUSIVE', 'S-DIAG-EVIDENCE'],
       ['T-U', { medians: spreadAround(0, 14), displayCadenceMs: 200 }, 'INCONCLUSIVE', 'S-CADENCE'],
       ['T1', { medians: spreadAround(0, 14), starts: { 2: { residual: { status: 'missed', medianMs: -3.5, count: 24 } } } }, 'FAILED', 'S-RESIDUAL'],
-      // T2a coincides with T1 on a well-formed population — D11's `met` IS
+      // T2a coincides with T1 on a well-formed population — the residual's `met` IS
       // `|median| <= frameIntervalMs`. What it independently catches is a
       // summary that contradicts itself: a status of `met` beside a median the
       // bar refuses. That, and nothing weaker, is why it is asserted separately.
       ['T2a', { medians: spreadAround(0, 14), starts: { 1: { residual: { status: 'met', medianMs: -45, count: 24 } } } }, 'FAILED', 'S-ADVANCE-SPREAD'],
       // Centred on the room but spread half a frame either side: every start
-      // meets D11's bar and the aggregate improved, yet one start is running a
+      // meets the residual bar and the aggregate improved, yet one start is running a
       // quarter-frame AHEAD. That is what this bar exists for.
       ['T-LEAD-BAR', { medians: spreadAround(0, 50) }, 'FAILED', 'S-LEAD'],
       ['T3', { medians: spreadAround(0, 14), leads: { 5: { status: 'lead' } } }, 'FAILED', 'S-LEAD'],
-      // The population landed well inside D11's bar and improved — but not by
+      // The population landed well inside the residual bar and improved — but not by
       // the advance. A quieter machine or a different park phase would look
       // like this, and it is not a pass.
       ['T4', { medians: spreadAround(-10, 6), baselineOverrides: { medians: spreadAround(-40, 6), aggregate: -40 } }, 'INCONCLUSIVE', 'S-ADVANCE-UNRESOLVED'],

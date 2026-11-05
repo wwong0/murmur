@@ -1,4 +1,4 @@
-// Constructed D2 cases keep floor arithmetic visible (6b design.md D2).
+// Constructed cases keep floor arithmetic visible.
 
 import { pairwiseDrift } from '../../figures/pairwise-drift.mjs';
 import { assert, assertEqual, check } from '../harness.mjs';

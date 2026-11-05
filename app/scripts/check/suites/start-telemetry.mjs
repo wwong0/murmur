@@ -1,6 +1,6 @@
 // scripts/check/suites/start-telemetry.mjs
 //
-// The start telemetry ring and the frame observer (executor-spec.md §11.1).
+// The start telemetry ring and the frame observer.
 // Pure: the ring's `now` is scripted and the frames are manufactured by
 // check/fake-frames.mjs, so nothing here costs wall-clock time or a browser.
 
@@ -115,7 +115,7 @@ export default async function startTelemetrySuite() {
     const telemetry = telemetryWith();
     const complete = metadata();
     const broken = metadata({ processingDuration: undefined, presentationTime: Number.NaN });
-    // R6: the pair differs in exactly the two fields under test.
+    // The pair differs in exactly the two fields under test.
     assertEqual(json(Object.keys(complete).filter((key) => json(complete[key]) !== json(broken[key]))), json(['presentationTime', 'processingDuration']), 'the fixture pair differs in two keys');
     const fields = (source) => ({
       paused: false, callbackNowMs: 4000, localNowMs: 4001, timeOriginMs: 1_756_000_000_000, commandedRate: 1, placementMs: 0,

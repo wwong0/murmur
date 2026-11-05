@@ -38,7 +38,7 @@ export default async function mediaSuite() {
     // semantics `..\CLAUDE.md` is a single ordinary filename inside the media
     // root, so the guard rightly admits it and the handler answers 404 — and
     // demanding 403 there fails for a reason that has nothing to do with
-    // containment. Change 6 runs this app in Linux containers, and a check that
+    // containment. The container harness runs this app on Linux, and a check that
     // only passes on one platform is a check that stops being run.
     const SEPARATOR_IS_BACKSLASH = path.sep === '\\';
     for (const [attempt, guarded] of [

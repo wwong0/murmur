@@ -1,4 +1,4 @@
-// 9b design.md D4, D6: the 8b control declared and checked on every page, and a
+// The 8b control declared and checked on every page, and a
 // slow viewer's own qdisc row applied, read back and published as its own rate.
 
 import { assert, assertEqual, check } from '../harness.mjs';
@@ -72,7 +72,7 @@ export default async function assignmentControlSuite() {
       .find((entry) => entry.reason === 'assignment-control-changed');
     assertEqual(`${changed.page}:${changed.before.control}>${changed.after.control}`, 'c09:8b>product', 'two readings that differ name the page and both values');
     assertEqual(controlRefusals(DECLARING, [])[0].reason, 'assignment-control-unread', 'a run that kept no reading is refused');
-    // 10b: a joiner is absent from the first reading and a leaver from the last, and only they may be.
+    // A joiner is absent from the first reading and a leaver from the last, and only they may be.
     const joined = readings(EIGHT_B);
     delete joined[0].byPage.c05;
     assertEqual(named(controlRefusals(DECLARING, joined)), 'assignment-control-changed:c05', 'a page in one reading only is a change');

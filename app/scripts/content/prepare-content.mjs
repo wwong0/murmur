@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // scripts/content/prepare-content.mjs — `npm run content`
 //
-// Produces the HLS content the app serves, in app/content/ (14d design.md D1).
+// Produces the HLS content the app serves, in app/content/.
 // Two modes:
 //   --synth          synthesize a deterministic test video of CONTENT_SECONDS
 //                    via ffmpeg lavfi sources and encode it. It must outlast the
@@ -12,9 +12,9 @@
 //
 // Output: master.m3u8, init.mp4, seg-XXXXX.m4s, content-manifest.json. The
 // directory is cleaned and recreated each run, so the clean refuses a directory
-// this generator did not write — the legacy content above all (D1).
+// this generator did not write — the legacy content above all.
 // Needs ffmpeg and ffprobe on the path. APP_CONTENT_FONT names the burned-in
-// timecode's font file (D2).
+// timecode's font file.
 
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -31,7 +31,7 @@ const ROOT = path.dirname(CONTENT_DIR);
 export const SEGMENT_SECONDS = 4;
 export const CONTENT_SECONDS = 7_200;
 // What a fresh generation calls itself: new content, never the legacy identity,
-// which is known by its numbers (D2).
+// which is known by its numbers.
 export const CONTENT_IDENTITY = Object.freeze({ synth: 'app-content-synth-v1', input: 'app-content-remux-v1' });
 
 const SYNTH_TARGET_BITRATE_KBPS = 2500; // ~2.5 Mbps -> ~4s segments ~1.2MB
@@ -207,7 +207,7 @@ async function cleanContentDir() {
   await fs.mkdir(CONTENT_DIR, { recursive: true });
 }
 
-// The drawtext font option (D2). APP_CONTENT_FONT names a file; unset, Windows
+// The drawtext font option. APP_CONTENT_FONT names a file; unset, Windows
 // takes Arial from its font directory and elsewhere fontconfig resolves Sans.
 // A drive-letter colon collides with the filter's option separator: quoting and
 // backslash-escaping the colon together survive the filtergraph parser.
@@ -218,7 +218,7 @@ export function drawtextFont({ platform = process.platform, env = process.env } 
   return `fontfile='${toFfmpegPath(file).replace(/:/g, '\\:')}'`;
 }
 
-// The manifest a run writes: its identity beside its measured bytes (D2).
+// The manifest a run writes: its identity beside its measured bytes.
 export function contentManifest({ mode, mediaDuration, segmentSeconds, sizes, startedAt, ffmpegVersion }) {
   return {
     identity: CONTENT_IDENTITY[mode],

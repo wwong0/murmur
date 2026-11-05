@@ -1,7 +1,7 @@
 // public/lib/tick-steps.mjs
 //
-// The page tick's step isolation (change 5 design.md D10): a throwing step is
-// reported under its own name and never skips the steps after it. Pure.
+// The page tick's step isolation: a throwing step is reported under its own
+// name and never skips the steps after it. Pure.
 
 /**
  * @param {Array<[string, () => void]>} steps

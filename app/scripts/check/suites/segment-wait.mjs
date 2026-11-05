@@ -84,7 +84,7 @@ export default async function segmentWaitSuite() {
     assertEqual(parts.start.parts.loadingMs, 2_250, 'loading arithmetic');
     assertEqual(parts.start.parts.readyToIssueMs, 150, 'ready-to-issue arithmetic');
     assertEqual(parts.start.parts.leadMs, 300, 'lead arithmetic');
-    // 11a-2 D9's latest polls are 1,250, 2,250 and 2,750; subtract transition 1,000.
+    // 11a-2's latest polls are 1,250, 2,250 and 2,750; subtract transition 1,000.
     assertEqual(JSON.stringify(Object.values(parts.start.perViewer).map((entry) => [entry.thresholds[1000].waitMs,
       entry.thresholds[2000].waitMs, entry.thresholds[3000].waitMs])), '[[250,750,1250],[250,1250,1750]]', 'D9 waits');
   });

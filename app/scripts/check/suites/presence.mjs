@@ -47,10 +47,9 @@ export default async function presenceSuite() {
     assert(!server.rooms.has(room), 'the room is reaped when the last member goes');
   });
 
-  // The two properties of a roster entry's join time the room timeline rests on
-  // (change 3a design.md D8). Both are already true of change 1's server and
-  // neither was stated, which is how a later change breaks one with every
-  // assertion still green.
+  // The two properties of a roster entry's join time the room timeline rests on.
+  // Both are already true of the server and neither was stated, which is how a
+  // later change breaks one with every assertion still green.
   await check('presence: a new membership’s join time is stamped in the room timebase, and a reclaim keeps the one it had', async ({ room, peer }) => {
     // Sized against the event, not against the worst machine: `joinedAt` and
     // `ts.recv` are taken inside one synchronous join handler, so anything this
@@ -70,7 +69,7 @@ export default async function presenceSuite() {
     // NOT PROVE: which function produced it. The room timebase is
     // `performance.timeOrigin + performance.now()`, equal to `Date.now()` to
     // within a few milliseconds, so nothing observable from a client can tell
-    // those two apart over a short run (D8).
+    // those two apart over a short run.
     assert(Number.isFinite(mine.joinedAt), `the join time is a finite number, got ${mine.joinedAt}`);
     assert(
       Math.abs(mine.joinedAt - joined.ts.recv) <= STAMP_WINDOW_MS,

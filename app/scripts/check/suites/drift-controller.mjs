@@ -305,7 +305,7 @@ export default async function driftControllerSuite() {
   await check('drift-controller: a band wider than the error declines forever and never latches settled', async () => {
     // `settled` is a claim that the controller CLOSED the error. A client whose
     // band covers its error never corrected at all, and reporting that as
-    // settled would let change 4b's browser bar -- both windows settled, rate
+    // settled would let the browser pass's bar -- both windows settled, rate
     // exactly 1.0 -- pass on a client that did nothing. The converse, that a
     // client which does correct still reaches settled, is the convergence
     // checks above; this assertion is only sound alongside them.

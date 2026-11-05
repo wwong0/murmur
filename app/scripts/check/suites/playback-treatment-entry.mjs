@@ -36,7 +36,7 @@ async function sourceFiles(dir) {
 }
 
 // One scripted frame sequence, and the drift records it must produce whatever
-// the instrument is doing (executor-spec.md §11.2). Every number is arithmetic
+// the instrument is doing. Every number is arithmetic
 // on the fixture: displayShared = timeOrigin + expectedDisplayTime + offset,
 // scheduled = displayShared − epoch, drift = media − scheduled. The epoch is the
 // sole creation's, `sharedNow + TRANSITION_LEAD_MS` at mediaMs 0.
@@ -110,7 +110,7 @@ export default async function playbackTreatmentEntrySuite() {
     const { presentationAdvanceMs } = constructed.detail ?? {};
     // Two-sided: the exact compiled constant, and positive. A zero would leave
     // every EPOCH label agreeing by coincidence and every residual untreated,
-    // with nothing else in this suite able to tell (d1-findings.md R2).
+    // with nothing else in this suite able to tell.
     assert(Object.is(presentationAdvanceMs, PRESENTATION_ADVANCE_MS),
       `the page passed the compiled advance, got ${presentationAdvanceMs}`);
     assert(presentationAdvanceMs > 0, `the advance the page passed is positive, got ${presentationAdvanceMs}`);

@@ -58,7 +58,7 @@ export function buildOptions(buildId) {
     jsx: 'automatic',
     define: {
       __BUILD_ID__: JSON.stringify(buildId),
-      // React's entry branches on it and throws in a browser without it (design.md D1).
+      // React's entry branches on it and throws in a browser without it.
       'process.env.NODE_ENV': '"production"',
     },
     plugins: [enginePatchPlugin()],

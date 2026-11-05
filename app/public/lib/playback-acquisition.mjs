@@ -40,9 +40,9 @@ export function createPlaybackAcquisition({
   const maxFutureMs = settings.maxFutureMs ?? 0;
   const requestTimeoutMs = settings.requestTimeoutMs ?? ACQUISITION_REQUEST_TIMEOUT_MS;
   const backoffMs = settings.backoffMs ?? ACQUISITION_BACKOFF_MS;
-  // T5 (design.md D3/D4): whether the room has peer exchange, read at creation
-  // and at issue — not cached, since T10's single derivation may not have
-  // settled the first time `poll()` runs.
+  // Whether the room has peer exchange, read at creation and at issue — not
+  // cached, since its derivation may not have settled the first time `poll()`
+  // runs.
   const holds = settings.holds ?? (() => false);
   const autoStart = settings.autoStart ?? (() => false);
   if (![transitionLeadMs, maxFutureMs, requestTimeoutMs, backoffMs].every(validNumber)
@@ -193,7 +193,7 @@ export function createPlaybackAcquisition({
       || holder.state || !holder.awaitingCreation) return;
     let current;
     if (proposal) {
-      // T5: a rejoin's proposal carries its mappings, `held` included — a room
+      // A rejoin's proposal carries its mappings, `held` included — a room
       // that was held stays held across the sole member's own reconnect.
       current = {
         playing: proposal.current.playing,
@@ -466,7 +466,7 @@ export function createPlaybackAcquisition({
         ...payload,
         atSharedMs: now + transitionLeadMs,
         positionMs: args.positionMs,
-        // D14: a playing or held room with peer exchange holds at the landing; a
+        // A playing or held room with peer exchange holds at the landing; a
         // paused, unheld one must not, or a seek while paused would start it.
         ...(holds() && (holder.state.current.playing || holder.state.current.held === true) ? { hold: true } : {}),
       };
@@ -513,9 +513,8 @@ export function createPlaybackAcquisition({
         resolved: state !== null,
         identity: stateIdentity(state),
         playing: state?.current.playing ?? null,
-        // T5: `held` is `true`/`false` with a state, `null` without one — the
-        // three-value shape `docs/constraints/measurement.md` requires for "no
-        // value" against a real false.
+        // `held` is `true`/`false` with a state, `null` without one — three
+        // values, so "no value" is never read as a real false.
         held: state ? state.current.held === true : null,
         controlMode: state?.controlMode ?? null,
         rejected: holder.counters.rejected,

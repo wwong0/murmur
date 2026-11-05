@@ -1,5 +1,5 @@
 // Pure comparison measurements and classifications.
-// CONSTRAINTS.md -> Verification: absent observations refuse; they never pass.
+// Absent observations refuse; they never pass.
 
 import {
   MAX_STOPPING_THRESHOLD_MS,
@@ -210,8 +210,8 @@ export function t5Observations({ seamRows, legacyPlaybackStartMs, observedStartM
   // and disagree by construction: the legacy seam observation is taken on the
   // 250 ms seam and the recorder's observed start is bracketed to 125 ms, so
   // the recorder's is at or after the seam's whenever capture begins before
-  // playback does. Running the deadline from the legacy origin is what the
-  // brief requires, and it is the earlier of the two -- so what has to be
+  // playback does. Running the deadline from the legacy origin is what is
+  // required, and it is the earlier of the two -- so what has to be
   // refused is an origin EARLIER than the one the deadline used, which would
   // mean the wait had been started at a later observation. A later origin is
   // the ordinary case and is reported, not refused.
@@ -452,7 +452,7 @@ function reading(source, name) {
  *
  * DESCRIPTIVE, AND NEVER A FAILURE. The product log keeps `DEFAULT_CAPACITY`
  * records and forgets older ones; a reader that already drained them has lost
- * nothing, and the brief says so explicitly. `null` where the capture carries no
+ * nothing. `null` where the capture carries no
  * accepted offer to count.
  */
 function acceptedSequenceGrowth(analysis) {
@@ -468,11 +468,11 @@ function acceptedSequenceGrowth(analysis) {
 }
 
 /**
- * The evidence bar of the decision brief, over one `analyseArm()` result.
+ * The comparison's evidence bar, over one `analyseArm()` result.
  *
  * The necessary-condition enumeration is REUSED rather than recomputed, so the
- * value that qualifies a client here is the one the published record shows. The
- * four counters below are the brief's own list, each read from the single field
+ * value that qualifies a client here is the one the published record shows. Each
+ * of the four counters below is read from the single field
  * that carries it: the collector's `lost` is the whole of the research queue's
  * loss, overflow and eviction accounting — the queue drops on capacity, counts
  * it there and latches `fatal.reason`, and there is no second counter to find.

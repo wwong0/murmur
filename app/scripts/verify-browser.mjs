@@ -5,18 +5,18 @@
 // form a browser can actually produce.
 // A dev aid, not part of `npm run check` — it needs Chrome, a running server
 // and about five and a half minutes, where the protocol check needs none of
-// those. It cost ninety seconds until change 4c added the settle wait, the
-// converged span and the observation window; the length is the price of a bar
-// the controller can fail (4c design.md D2).
+// those. It cost ninety seconds until the settle wait, the converged span and
+// the observation window were added; the length is the price of a bar the
+// controller can fail.
 //
-// T8 AND ITS OFFLINE ROUTE ARE GONE (change 5 design.md D11): the fresh-join
+// T8 AND ITS OFFLINE ROUTE ARE GONE: the fresh-join
 // re-open it forced no longer exists, and CDP's offline emulation never fired it.
 // A window may finish T5 without a correction; the labels that then make no
 // claim print NOT EXERCISED from the two approved lists below, never PASS.
 //
-// It exists because CLAUDE.md records that every defect in the host-origin
-// spike was found by attaching over CDP and reading the console, and because
-// design.md D10 settles that the developer here does not look at the page. A
+// It exists because every defect in the host-origin spike was found by
+// attaching over CDP and reading the console, and because the developer here
+// does not look at the page. A
 // verification that requires someone to watch two tabs is a verification that
 // stops being run.
 //
@@ -31,14 +31,14 @@
 //    cleanly even when the renderer is killed outright, so closing or crashing
 //    a tab is an ordinary departure and never reaches the reclaim path.
 //
-//    7.3a is a SECOND LIVE window carrying the same tab id. Under change 1 it
-//    reclaimed the host role, because presenting the same `tabId` was the whole
-//    requirement. Change 1b keys the reclaim on a secret the server issues in
-//    one directed reply, so that window is now a stranger holding a published
-//    label and is refused — which is the point of the change, and is why this
+//    7.3a is a SECOND LIVE window carrying the same tab id. It used to reclaim
+//    the host role, because presenting the same `tabId` was the whole
+//    requirement. The reclaim is now keyed on a secret the server issues in
+//    one directed reply, so that window is a stranger holding a published
+//    label and is refused — which is the point of the secret, and is why this
 //    expectation reads the opposite way to the way it used to.
 //
-//    It is also SLOW on purpose (D13). The refusal carries the time the server
+//    It is also SLOW on purpose. The refusal carries the time the server
 //    would need to free that name, ~15s at the 5000ms default, and the newcomer
 //    retries across it rather than guessing. So 7.3a checks two phases — that
 //    it is visibly retrying, and that it later gives up — and that costs the
@@ -117,7 +117,7 @@ const RUN_DIR = RUN_DIR_ARGUMENT === null
   : path.resolve(APP_DIR, RUN_DIR_ARGUMENT);
 // Containment is `prepareRunDirectory`'s, below, and only its. A second copy
 // here would trip on the same input, and two guards at one threshold cannot be
-// told apart by a probe (CONSTRAINTS.md -> Verification).
+// told apart by a probe.
 const RUN_DIRECTORY_NAME = path.relative(RESULTS_DIR, RUN_DIR).split(path.sep).join('/');
 const MEDIA_DIR = mediaDirFrom();
 const WINDOW_STATE = 'visible, non-occluded (Chrome automation flags)';
@@ -133,7 +133,7 @@ const WINDOW_GAP_MS = 10000;
  * How far apart the two windows' converged medians may be — the pairwise
  * question. Read after settling over the span T6 anchors, never off the ring's
  * whole history. NOT criterion 1: two clients on a healthy network are an early
- * signal, not change 6's five-client figure under loss. A failure is a plan
+ * signal, not the container harness's five-client figure under loss. A failure is a plan
  * finding, never a reason to loosen this constant.
  */
 const POSITION_TOLERANCE_MS = 50;
@@ -141,46 +141,46 @@ const POSITION_TOLERANCE_MS = 50;
 /**
  * One window against the room, over the same converged span — the looser
  * question of the two, and the one the standing lag used to decide. At the 400ms
- * it was sized to before change 4c it passed with the controller deleted, which
+ * it was first sized to it passed with the controller deleted, which
  * is what tightening it to the controller's own target ends.
  */
 const DRIFT_TOLERANCE_MS = 40;
 
-// T5 settle wait from each window's own playback start (design.md D2).
+// T5 settle wait from each window's own playback start.
 const SETTLE_DEADLINE_MS = 120_000;
 const SETTLING_BUDGET_MS = 75_000;
 const SETTLE_POLL_MS = 250;
 // Recorder cadence: half the controller's 250 ms poll, so every evaluation is observable.
 const CAPTURE_POLL_MS = 125;
-// T6 converged span for tightened tolerances (tasks.md 2.4b).
+// T6 converged span for tightened tolerances.
 const CONVERGED_WINDOW_MS = 10_000;
-// T7 excursion observation (design.md D4). Every threshold the samples are
+// T7 excursion observation. Every threshold the samples are
 // JUDGED against lives in drift-figures.mjs; these are the driver's cadence.
 const OBSERVE_MS = 60_000;
 const OBSERVE_POLL_MS = 125;
 const OBSERVE_PROGRESS_MS = 10_000;
 const SETTLE_PROGRESS_MS = 4_000;
-// 4a's sweep produced a standing lag per window, and the run says whether this
+// The measured sweep produced a standing lag per window, and the run says whether this
 // hardware reproduces it.
 const REFERENCE_LAG_MS = [-308, -104];
-// T6b line read-back (design.md D1).
+// T6b line read-back.
 const LINE_READ_DEADLINE_MS = 3_000;
 const LINE_READ_POLL_MS = 250;
-// The in-sync settle path and the start residual (change 5 design.md D11).
+// The in-sync settle path and the start residual.
 const SETTLED_FOR_MS = 5_000;
 const SETTLE_BARS = Object.freeze({ minRecords: MIN_RECORDS, settledForMs: SETTLED_FOR_MS, rateEpsilon: RATE_EPSILON });
 const RESIDUAL_POPULATION = 24;
 const RESIDUAL_DEADLINE_MS = 30_000;
 /**
- * T5 label stems a window done by the in-sync path makes no claim on (D11,
- * owner-approved). Printed NOT EXERCISED with their values, never PASS.
+ * T5 label stems a window done by the in-sync path makes no claim on.
+ * Printed NOT EXERCISED with their values, never PASS.
  */
 const SETTLE_WITHOUT_CORRECTION_ASSERTIONS = Object.freeze([
   'recorded a correction',
   'applied a rate write',
   `settled within ${SETTLING_BUDGET_MS}ms`,
 ]);
-/** Owner decision O1 option 1 (tasks.md Current status): the same cause, two more labels. */
+/** The same cause, two more labels. */
 const O1_WITHOUT_CORRECTION_ASSERTIONS = Object.freeze([
   'retains a qualifying saturated stretch',
   'followed the adopted refusal and dwell policy',
@@ -226,7 +226,7 @@ const URL_A = `${ORIGIN}/room.html?room=demo&role=host&tab=A`;
 const URL_B = `${ORIGIN}/room.html?room=demo&role=viewer&tab=B`;
 const URL_C = `${ORIGIN}/room.html?room=demo&role=viewer&tab=C`;
 const URL_D = `${ORIGIN}/room.html?room=demo&role=viewer&tab=D`;
-// E7's viewer under the earlier control and E8's offset viewer (change 9 executor-spec T8).
+// E7's viewer under the earlier control and E8's offset viewer.
 const URL_X = `${ORIGIN}/room.html?room=demo&role=viewer&tab=X`;
 const URL_O = `${ORIGIN}/room.html?room=demo&role=viewer&tab=O`;
 const URL_V = `${ORIGIN}/room.html?room=demo&role=viewer&tab=V`;
@@ -296,7 +296,7 @@ function attachWithUrgentDelay(label, url, delayMs) {
 
 // `currentTime` appears here and NOWHERE ELSE IN THIS FILE, for two questions it
 // can answer: is this element playing, and has it advanced. It is not a drift
-// primitive and is not used as one (`CONSTRAINTS.md` → *Playback measurement*):
+// primitive and is not used as one:
 // every figure below about WHERE a window is — the two-window agreement of 3.5
 // included — is read from the drift records, which come from
 // `requestVideoFrameCallback`.
@@ -333,7 +333,7 @@ const RAF_STAMPS = `(() => new Promise((resolve) => {
 }))()`;
 
 /**
- * The harness seam (3b design.md D2), as change 6 will read it: values, not text
+ * The harness seam, as the container harness reads it: values, not text
  * scraped back out of a string formatted for a person. `latest` is the newest
  * drift record — one client against the room timeline, NOT criterion 1's
  * pairwise figure.
@@ -381,7 +381,7 @@ const HOLD_SEAM = `(() => {
   };
 })()`;
 
-/** The page surface change 5 pass 2 adds: controls, invite, URL, and the state they act on. */
+/** The page surface: controls, invite, URL, and the state they act on. */
 const PAGE = `(() => {
   const app = window.__app;
   if (!app) return { present: false };
@@ -411,9 +411,9 @@ async function pageOf(tab) {
 
 /**
  * A trusted click through Chrome's input pipeline at the element's centre —
- * never `element.click()`, which no user can do to a disabled button (D11).
+ * never `element.click()`, which no user can do to a disabled button.
  * The pointer moves to the element first, and a target inside `#control-bar`
- * waits for the bar's reveal before its box is read (design.md D7).
+ * waits for the bar's reveal before its box is read.
  * `enableFirst` clears `disabled` in the same evaluation that reads the final
  * box, just before the click, so the page's next enablement pass has no time
  * to restore it.
@@ -532,7 +532,7 @@ let chromeBrowser = null;
 /**
  * The RES labels for one window's latest start: the residual from the page's
  * records, retained to `<label>.starts.json`, then re-derived from the retained
- * NDJSON (D11). `retainedRecords` is read only after the first figure exists.
+ * NDJSON. `retainedRecords` is read only after the first figure exists.
  */
 function evaluateResidual({ label, fileStem = label, seam, records, retainedRecords, frameIntervalMs, start, startIndex = null }) {
   const selectedStart = start ?? latestStart(seam);
@@ -636,7 +636,7 @@ async function verifySocketRecovery(viewer) {
       signal: AbortSignal.timeout(3000),
     });
   } catch (error) {
-    // Asked for and not delivered: a row, so the exit rule sees it (11a-3 d1-findings F10).
+    // Asked for and not delivered: a row, so the exit rule sees it.
     rowNotExercised('10b socket recovery', `control unreachable (${error.message})`);
     return false;
   }
@@ -756,7 +756,7 @@ async function waitForSettle(tabs) {
   // Pump-only turns reuse these persisted latches; checking them twice as often
   // does not require another tab evaluation.
   // The in-sync path is re-evaluated over every read each turn, not latched: a
-  // run broken after it first qualified keeps the wait going (D11).
+  // run broken after it first qualified keeps the wait going.
   const settledOrOutOfTime = (state) => state.firstSettledAt !== null
     || inSyncWithoutCorrection(state.reads, SETTLE_BARS).done
     || (state.firstPlaybackAt !== null && Date.now() >= state.firstPlaybackAt + SETTLE_DEADLINE_MS);
@@ -914,17 +914,16 @@ try {
 
   console.log('\n--- 7.1 / 7.2: two windows, one room after held creation ---');
   const a = await attach('A/host', 'about:blank', true);
-  // Without Page.enable the script is accepted and never runs (C2's probe, 8b).
+  // Without Page.enable the script is accepted and never runs.
   await a.send('Page.enable');
   await a.send('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.__waHarnessSeek = true;' });
   await a.send('Page.navigate', { url: URL_A_MEASURED });
   recorderA = createRecorder({ label: 'A', tab: a, dir: RUN_DIR, treatment: true });
 
   console.log('\n--- 3.1: which build is this run talking to? ---');
-  // A 200 on /room.html proves something is answering, not what it is
-  // (`CONSTRAINTS.md` → *Reachable is not fresh*). This detects a page running a
-  // DIFFERENT build, not a page misreporting its own — do not read it as more
-  // than that (3b design.md D3).
+  // A 200 on /room.html proves something is answering, not what it is. This
+  // detects a page running a DIFFERENT build, not a page misreporting its own —
+  // do not read it as more than that.
   const seamEarly = await seamOf(a);
   expect('3.1 the page publishes the harness seam', seamEarly.present === true, JSON.stringify(seamEarly).slice(0, 120));
   const bundle = await assertServedBundle({ origin: ORIGIN, bundlePath: BUNDLE_PATH, pageBuildId: seamEarly.buildId });
@@ -1030,7 +1029,7 @@ try {
     // (drift-controller.mjs:309); `mode` and `rate` drop on a believed excursion
     // (:285-296). So a red on those two beside three green ones is an excursion,
     // not a failure to converge — read them together or the run cannot tell the
-    // two apart. Change 4c design.md D2.
+    // two apart.
     console.log(`  ${state.label}: done by path ${state.path}; in-sync ${JSON.stringify(state.inSync)}`);
     const corrected = state.path !== 'in-sync';
     const inSyncQualifier = `${state.label} finished T5 inside the threshold with no correction (D11 in-sync path), so this label makes no claim`;
@@ -1064,9 +1063,8 @@ try {
   const barB = await b.evaluate(SEAM);
   const barSeqA = barA.latest?.seq ?? 0;
   const barSeqB = barB.latest?.seq ?? 0;
-  // THE ANCHOR IS ASSERTED BEFORE ANY FIGURE IS DERIVED FROM IT (`CONSTRAINTS.md`
-  // → *A probe that reports its own failure as `null`*). Sequence numbers start
-  // at 1 (frame-drift.mjs:139), so a seam read that came back absent leaves the
+  // THE ANCHOR IS ASSERTED BEFORE ANY FIGURE IS DERIVED FROM IT. Sequence
+  // numbers start at 1 (frame-drift.mjs:139), so a seam read that came back absent leaves the
   // anchor at the 0 sentinel — and every record in the ring is then past it,
   // which silently turns the converged median back into the whole-run median
   // this span exists to replace. The record-count guard below cannot catch that:
@@ -1201,7 +1199,7 @@ try {
   expect('5.1 closing the late joiner returns the room to two members', rosterBack.members.length === 2, JSON.stringify(rosterBack.members));
 
   console.log('\n--- T12 / E1–E6: three viewers at one position, one held seek, one host copy (change 9) ---');
-  // Change 9 executor-spec T8. Under the product's control the fixed urgent delays
+  // Under the product's control the fixed urgent delays
   // decide nothing: the first fetcher is whoever ranks 0 for the segment. The
   // fixture stays so C and D open as B did. C and D join after the late joiner
   // has closed.
@@ -1231,7 +1229,7 @@ try {
   }
 
   // A waiter sees the first fetcher only over a peer connection. Without all
-  // three connected, a second host copy is the fallback working, not D2 failing.
+  // three connected, a second host copy is the fallback working, not the one-copy rule failing.
   const openPeersOf = (reading) => {
     const open = new Set();
     for (const record of reading?.records ?? []) {
@@ -1275,7 +1273,7 @@ try {
   );
   const resumeSeqBefore = Math.max(0, ...(edgeBefore.resumes?.records ?? []).map((record) => record.seq));
 
-  // +600 s, as 8a's trap seek: past every viewer's 60 s windows, so none holds
+  // +600 s, as the trap seek: past every viewer's 60 s windows, so none holds
   // the landing and all three need it at once. A +10 s seek lands inside B's buffer.
   const socketCounters = (playback) => Object.fromEntries(SOCKET_COUNTERS.map((field) => [field, playback?.[field] ?? null]));
   const countersBeforeSeek = socketDropped ? socketCounters(await b.evaluate('__app.playback()')) : null;
@@ -1323,7 +1321,7 @@ try {
   }
 
   // Counters are read as a change across the seek, never as a total: the host
-  // link's counts include the page's own player (CONSTRAINTS.md → P2P delivery).
+  // link's counts include the page's own player.
   const retainedByPath = (reading, cursor) => {
     const attempts = new Map(reading.records
       .filter((record) => record.seq > cursor.latestSeq && record.kind === 'attempt')
@@ -1378,7 +1376,7 @@ try {
     const fromPeer = row.viewers.filter((viewer) => viewer.sources === 'p2p');
     const detail = JSON.stringify(row);
     expect(`T12 / E2 ${row.path}: the host's hits for the path rise by exactly 1`, row.hostHitsRise === 1, detail);
-    // Restated after the 2026-10-05 pass (executor-spec E2, post-result): a first
+    // Restated after the 2026-10-05 pass: a first
     // fetcher over 250 ms late hands its turn on, and the room still gets one copy.
     const hostAsk = fromHost.length === 1 && fromHost[0].asks.length === 1 ? fromHost[0].asks[0] : null;
     expect(
@@ -1529,7 +1527,7 @@ try {
     JSON.stringify({ offset: oReading.offset, control: oReading.control, viewers: viewerMembers }),
   );
   expect('E8 the ask and receipt readings have their shape', asksShaped(oReading.asks) && receiptsShaped(oReading.receipts), JSON.stringify({ asks: oReading.asks?.latestSeq ?? null, receipts: oReading.receipts?.latestSeq ?? null }));
-  // Added 2026-10-05 (design.md D4, C2's observation): a page's first asks were
+  // Added 2026-10-05: a page's first asks were
   // published at rank 0 with no order. The roster holds B, C, D and O for all of E8.
   const idOf = (member) => / · (c-[0-9a-f]+)$/.exec(member)?.[1] ?? null;
   const orderAtO = viewerMembers.map(idOf).sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
@@ -1563,7 +1561,7 @@ try {
   const rosterAfterUrgent = (await pollUntil(() => a.evaluate(PROBE), (probe) => probe.members.length === 2, { everyMs: 500, deadlineAt: Date.now() + 15_000 })).value;
   expect('T12 closing C, D and the offset viewer returns the measured room to two members', rosterAfterUrgent.members.length === 2, JSON.stringify(rosterAfterUrgent.members));
 
-  // T14 (design.md D2, reversed): a real Chrome's wire reading advances while bodies drain.
+  // T14: a real Chrome's wire reading advances while bodies drain.
   console.log('\n--- T14: the host reads its wire ---');
   const hostPace = await a.evaluate('window.__app.hostPace()');
   const draining = (hostPace?.intervals ?? []).filter((interval) => interval.handedBytes > 0);
@@ -1577,7 +1575,7 @@ try {
     linkBound: (hostPace?.intervals ?? []).filter((interval) => interval.linkBound).length,
     probes: (hostPace?.intervals ?? []).filter((interval) => interval.probe).length,
   }));
-  // T15 (design.md D2, the echo): a real viewer page answers the host's echo.
+  // T15: a real viewer page answers the host's echo.
   const echoed = (hostPace?.intervals ?? []).filter((interval) => interval.queueMs !== null && interval.queueMs !== undefined);
   const queueValues = echoed.map((interval) => interval.queueMs).sort((left, right) => left - right);
   expect('T15 the host reads an echo round trip from its viewers', echoed.length > 0, JSON.stringify({
@@ -1605,7 +1603,7 @@ try {
     const refresh = refreshRates[i].rate;
 
     // Every figure here is printed once, in T9's block; collecting them keeps the
-    // run's numbers in one place a person can copy into design.md. THE GROUPS GO
+    // run's numbers in one place a person can copy from. THE GROUPS GO
     // IN WHOLE — a field-by-field copy of `stats` is a second place for every one
     // of those names to go stale, and it silently drops the one the copy forgets.
     t7Figures.push({
@@ -1712,7 +1710,7 @@ try {
     const settle = settleStates.find((state) => state.label === window.label);
     expect(`T10 ${window.label} retained the record minimum with no missed polls`, window.missed === 0 && window.recordMinimumMet, `missed ${window.missed} · ${window.records} records`);
     expect(`T10 ${window.label} retains a qualifying plateau stretch`, window.qualifyingPlateau > 0, `${window.qualifyingPlateau} plateau · ${window.stretches} stretches`);
-    // O1 as widened by the owner after pass 1: a window whose retained captures
+    // O1 as widened after the first pass: a window whose retained captures
     // never HELD the saturated rate (no steady stretch at it, qualifying or not)
     // has no saturated fit to make, whether it corrected gently or not at all.
     const heldSaturated = saturatedStretchesHeld(window.label, sufficiencyBars);
@@ -1793,7 +1791,7 @@ try {
 
   const startsBeforeResume = pausedPages.map((page) => page.playback?.starts?.length ?? 0);
   // `room-paused` is published while the pause is still pending, and a pending
-  // transition disables every issuing button (C1-11): click only once B's play is live.
+  // transition disables every issuing button: click only once B's play is live.
   const playEnabled = await pollUntil(() => pageOf(b), (page) => page.buttons?.play?.disabled === false, { everyMs: 100, deadlineAt: Date.now() + TRANSITION_LEAD_MS + 2000 });
   expect("9.1 B's play is enabled once the pause has taken effect", playEnabled.ok, JSON.stringify(playEnabled.value.buttons?.play));
   const resumeClickedAt = Date.now();
@@ -1815,7 +1813,7 @@ try {
   console.log('\n--- 7.1: closing one updates the other ---');
   // The roster WITH `joinedAt`, which the page renders without: read off A's own
   // socket frames from here, after every measured span, for the late-join
-  // precondition at 7.3b (D11). Every membership change after this reaches A.
+  // precondition at 7.3b. Every membership change after this reaches A.
   let rosterSeenByA = null;
   a.on('Network.webSocketFrameReceived', ({ response }) => {
     let env;
@@ -1829,8 +1827,8 @@ try {
   expect("7.1 closing B shrinks A's roster", pa3.members.length === 1, JSON.stringify(pa3.members));
 
   console.log('\n--- 7.3a: a second live window carrying the same tab id ---');
-  // CHANGED BY change 1b, and this is the change in one place. Under change 1
-  // this window reclaimed the host role, because presenting the same `tabId`
+  // CHANGED BY the reclaim secret, and this is the change in one place. Before
+  // it, this window reclaimed the host role, because presenting the same `tabId`
   // was the entire requirement — which is exactly why any member holding the
   // roster could do the same. It now holds no reclaim secret, so it is not the
   // same tab as far as the server is concerned: it is refused `tab-taken`,
@@ -1842,8 +1840,7 @@ try {
 
   const a2 = await attach('A2/host', URL_A);
 
-  // TWO PHASES NOW, because of D13. Under D11 this window gave up in about a
-  // second, on a boolean saying the holder looked alive. That boolean could not
+  // TWO PHASES NOW. This window used to give up in about a second, on a boolean saying the holder looked alive. That boolean could not
   // be read in time at this server's 5000ms interval, so the budget now comes
   // from the refusal itself: the server reports ~15s (three sweep ticks) and
   // the newcomer retries across it before giving up at ~18s, one backoff step
@@ -1879,9 +1876,9 @@ try {
   console.log('  A (incumbent) roster:', JSON.stringify(pa1.members));
 
   // NAMES THE CODE, not merely the word "refused". The bare /refused:/ this
-  // read before went red the moment change 2 made the page say `refused
-  // (tab-taken):`, and stayed red for two changes because nobody runs this file
-  // mid-change (CONSTRAINTS.md → *A check outside `npm run check`*).
+  // read before went red the moment the page began to say `refused
+  // (tab-taken):`, and stayed red unnoticed because this file is outside
+  // `npm run check` and nobody runs it mid-change.
   const REFUSED_RE = /^refused \(tab-taken\): .*in use/i;
   expect('7.3a the newcomer eventually gives up, and says which name is in use', REFUSED_RE.test(pa4.status ?? ''), pa4.status);
   expect('7.3a the incumbent still holds the role', pa1.members.some((m) => /host/.test(m) && /^A /.test(m)), JSON.stringify(pa1.members));
@@ -1940,7 +1937,7 @@ try {
   evaluateRetainedResidual({ label: 'A3', fileStem: 'A3', ready: a3Ready, frameIntervalMs });
 
   console.log('\n--- 7.3c: reloading the host tab (change 1b task 4.3) ---');
-  // The case design.md D4 names as the accepted hole: a reload throws the
+  // The accepted hole: a reload throws the
   // reclaim secret away, so the new page is a stranger holding the old page's
   // label. It is normally invisible — a reloading tab produces a clean close,
   // so the room has no host by the time the new page joins — but if the join
@@ -2020,7 +2017,7 @@ try {
   console.log('\n--- 9.1: a page with no room creates one, and invites ---');
   const n = await attach('N/creator', `${ORIGIN}/room.html`);
   await acceptLeaveDialogs(n);
-  // D4: a room-less page makes no room until Host is pressed; the front page mounts after attach.
+  // A room-less page makes no room until Host is pressed; the front page mounts after attach.
   await pollUntil(() => n.evaluate(`document.querySelector('#host') !== null`), (present) => present === true, { everyMs: 250, deadlineAt: Date.now() + 15_000 });
   await clickElement(n, '#host');
   console.log(`name prompt N/creator: ${JSON.stringify(await closeNamePrompt(n))}`);
@@ -2037,7 +2034,7 @@ try {
   await n.send('Page.reload', { ignoreCache: false });
   await sleep(1000);
   await n.send('Runtime.enable');
-  // D4's reload race may refuse the new page first; it retries in (7.3c).
+  // The reload race may refuse the new page first; it retries in (7.3c).
   const reloaded = await pollUntil(() => pageOf(n), (page) => page.present && page.members.some((member) => member.startsWith(`${createdTab} · host`)), { everyMs: 500, deadlineAt: Date.now() + 25_000 });
   const reloadedQuery = new URLSearchParams(reloaded.value.search ?? '');
   expect('9.1 the reloaded creator keeps its room and tab', reloadedQuery.get('room') === createdRoom && reloadedQuery.get('tab') === createdTab && reloadedQuery.get('role') === 'host', reloaded.value.search);

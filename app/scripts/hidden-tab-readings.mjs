@@ -1,12 +1,12 @@
 // scripts/hidden-tab-readings.mjs
 //
-// 13a's hidden-tab probe, read: the run's validity, what each hide stopped, and D7's pass rule.
+// The hidden-tab probe, read: the run's validity, what each hide stopped, and the pass rule.
 // Pure — the driver (`probe-hidden-tab.mjs`) hands it samples, page events and its own marks.
-// Rules fixed before the first run: executor-spec.md → "The probe".
+// Rules fixed before the first run.
 //
 // Clocks: `atWallMs` and marks are the driver's Date.now(); `pageMs` and event times are the
 // page's timeOrigin + now(). Element positions are currentTime-based observations of whether the
-// element advanced, never a drift figure (CONSTRAINTS.md → *Playback*).
+// element advanced, never a drift figure.
 
 export const HIDDEN_TICK_RATIO_MAX = 0.5;
 export const MIN_HIDDEN_SPAN_MS = 3000;
@@ -53,12 +53,12 @@ function callbackRate(list) {
 }
 
 /**
- * D1's validity rule. The subject's own visibility log reads hidden for the whole hide and visible
+ * The validity rule. The subject's own visibility log reads hidden for the whole hide and visible
  * outside it, the other page never changes, and the subject's hidden tick rate is at most
  * HIDDEN_TICK_RATIO_MAX of its visible rate over the steady stretch before the first hide.
  */
 //
-// `audible` (H2, coordinator under owner delegation, post-result): Chrome keeps an audible page's
+// `audible` (H2, post-result): Chrome keeps an audible page's
 // timers, so the tick condition becomes "no frame callback while hidden"; Q and H1 prove the regime.
 export function validateRun({ samples, events, windows, steadyFromMs, subject, other, audible = false }) {
   const reasons = [];
@@ -188,7 +188,7 @@ export function readHide({ samples, events, window: w, subject, other, untilMs }
   };
 }
 
-/** A whole run, from what the driver retains: validity, readings per hide, and D7 on the right side. */
+/** A whole run, from what the driver retains: validity, readings per hide, and the pass rule on the right side. */
 export function evaluateRun({ samples, events, marks, subject, other, side, mustSkipReturn = null, audible = false }) {
   const windows = hideWindows(marks);
   const steadyFromMs = marks.find((m) => m.name === 'steady')?.atWallMs ?? null;
@@ -202,7 +202,7 @@ export function evaluateRun({ samples, events, marks, subject, other, side, must
 }
 
 /**
- * D7 for one return: landed within REACH_WINDOW_MS of becoming visible, at most one skip.
+ * The pass rule for one return: landed within REACH_WINDOW_MS of becoming visible, at most one skip.
  * `mustSkip` is H3's second return, which must skip where the left side's did not.
  */
 export function d7Return(reading, { mustSkip = false } = {}) {

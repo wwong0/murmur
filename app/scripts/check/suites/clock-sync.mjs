@@ -5,7 +5,7 @@
 //
 // Split from suites/clock.mjs on purpose. That file is the filter, and its
 // checks cost no wall-clock time at all; these ones run timers and sockets, and
-// CLAUDE.md's rule is not to grow a suite past a few hundred lines.
+// a suite should not grow past a few hundred lines.
 //
 // §3 proves the arithmetic on a manufactured path and the ordering assertion
 // proves four ordered numbers come out of a real one. NEITHER OF THOSE CATCHES
@@ -26,7 +26,7 @@ import { createClockSync, websocketProbe } from '../../../public/lib/clock-sync.
  * by default. A sample built there is about twenty years old the moment it
  * arrives, so the age term alone reports a half-width near 71,000,000ms and
  * EVERY CONTAINMENT ASSERTION IN THIS FILE PASSES FOR ANY OFFSET WHATSOEVER.
- * Found in the session D review, 2026-08-22; the assertions that pair with a
+ * Found in review, 2026-08-22; the assertions that pair with a
  * containment check now also bound the half-width, so an interval wide enough to
  * hide an error fails as readily as one too narrow.
  *
@@ -115,7 +115,7 @@ export default async function clockSyncSuite() {
   });
 
   await check('clock-sync: a rejoin bursts without discarding the window', async () => {
-    // D8. The offset is a property of two timebases, not of a connection, and a
+    // The offset is a property of two timebases, not of a connection, and a
     // client that resets on every transient drop throws away a good estimate at
     // exactly the moment new samples are least trustworthy.
     const hub = joinedHub();
@@ -138,7 +138,7 @@ export default async function clockSyncSuite() {
     // Long enough that probes are ACTUALLY ISSUED AND LOST while disconnected.
     // At a 300ms cadence this window held no probe at all, so "the window
     // survived" was a statement about a driver that had not been asked to do
-    // anything (session D, 2026-08-22).
+    // anything.
     connected = false;
     await sleep(250);
     const during = sync.read();
@@ -167,8 +167,8 @@ export default async function clockSyncSuite() {
     // probe in flight that only a superseded generation will ever resolve — so
     // `burst()` declines to arm a timer, nothing ever arms one again, and the
     // driver reports itself running while its clock quietly stops advancing.
-    // That is D9's failure with the estimate merely going stale instead of
-    // absent. Shown red before the fix: 0 probes after the restart.
+    // That is the no-estimate failure with the estimate merely going stale
+    // instead of absent. Shown red before the fix: 0 probes after the restart.
     const source = realTimebaseProbe({ trueOffsetMs: 75, outMs: 5, backMs: 5 });
     let calls = 0;
     const probe = async () => {
@@ -321,7 +321,7 @@ export default async function clockSyncSuite() {
     );
     assert(record.halfWidthMs < 5, `and that half-width is a loopback figure, not a wide one hiding an error (${record.halfWidthMs.toFixed(4)}ms)`);
     // The cheapest available check that the timestamps are still taken where
-    // change 1 put them. It goes red if a later change moves a stamp somewhere
+    // they belong. It goes red if a later change moves a stamp somewhere
     // more convenient.
     assertEqual(record.counters.impossible, 0, 'no real sample was physically impossible');
   });

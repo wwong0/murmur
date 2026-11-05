@@ -1,4 +1,4 @@
-// 12c-1 D5: the three conditions are copies of 11a-2's, differing in the enumerated keys alone.
+// The three conditions are copies of 11a-2's, differing in the enumerated keys alone.
 
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';

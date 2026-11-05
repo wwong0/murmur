@@ -1,8 +1,8 @@
 // public/lib/clock-filter.mjs
 //
 // A cut-down NTP clock filter: four timestamps in, an offset against the room
-// reference out, with an error bound the caller can act on. Every rule below is
-// argued in change 2 design.md, D2 through D7. Three must survive any edit:
+// reference out, with an error bound the caller can act on. Three rules must
+// survive any edit:
 //
 //  1. PURE — no timers, transport, DOM, or clock of its own; the caller passes
 //     the instant it reads at, which is what makes every branch reachable
@@ -17,8 +17,8 @@
 
 /**
  * How fast two clocks may pull apart: 40ppm, i.e. 2.4ms per minute. AN
- * ASSUMPTION ABOUT HARDWARE, not something this system derives — named so change
- * 6 can measure it and replace it.
+ * ASSUMPTION ABOUT HARDWARE, not something this system derives — named so a
+ * measurement can replace it.
  */
 export const DEFAULT_DRIFT_RATE = 40e-6;
 
@@ -97,7 +97,7 @@ export function createClockFilter(config = {}) {
    * server restart — indistinguishable in shape from a corrupt one — is
    * published the instant it lands, inside a bound that cannot see it is wrong.
    * With NOTHING eligible, fall back to the whole window: nothing there is
-   * trustworthy, and `null` is not available to mean that (D9).
+   * trustworthy, and `null` is not available to mean that.
    */
   function select() {
     return minDelay(samples.filter((s) => s.eligible)) ?? minDelay(samples);
@@ -106,7 +106,7 @@ export function createClockFilter(config = {}) {
   /**
    * Two samples measuring the same offset each lie within their own delay/2 of
    * it, and may have drifted apart since. Exceeding that is a contradiction, not
-   * noise. No tuned constant, and the reported estimate is never consulted (D7).
+   * noise. No tuned constant, and the reported estimate is never consulted.
    */
   function contradicts(a, b) {
     const allowed = a.delayMs / 2 + b.delayMs / 2 + driftRate * Math.abs(a.atMs - b.atMs);
@@ -126,8 +126,8 @@ export function createClockFilter(config = {}) {
    * Feed one exchange; `null` is a lost one, counted rather than an error.
    *
    * An impossible sample is COUNTED AND DROPPED, NEVER THROWN — a throw here is
-   * a correctness assertion inside shipped code, on a measured path
-   * (CONSTRAINTS.md → *Verification*) — and never silently dropped, because the
+   * a correctness assertion inside shipped code, on a measured path — and never
+   * silently dropped, because the
    * counter is the seam the check reads to tell the two apart.
    *
    * @param {{t1: number, t2: number, t3: number, t4: number}|null} sample
@@ -190,7 +190,7 @@ export function createClockFilter(config = {}) {
    *
    * `offsetMs` IS NULL, NOT ZERO, before the first accepted sample: zero claims
    * this client is already aligned with the room, which is indistinguishable
-   * from success in every number downstream (D9).
+   * from success in every number downstream.
    *
    * `halfWidthMs` is a bound, not a score. `delayTermMs` is delay/2 because both
    * one-way legs are non-negative — that single assumption is the whole proof.

@@ -1,4 +1,4 @@
-// 9b design.md D7: the host asks are drained by cursor and their loss is
+// The host asks are drained by cursor and their loss is
 // recorded per viewer; the host's response counts are read at both boundaries.
 
 import fs from 'node:fs';

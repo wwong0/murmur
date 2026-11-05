@@ -288,7 +288,7 @@ function clientFigures(tag, client, origin, window, content, receipt, { bytes = 
     }
   }
   const presentation = notPresenting(client.polls, window);
-  // A counted viewer's frame-quality factor does not need two records (13e-2 design.md D3 rule 4).
+  // A counted viewer's frame-quality factor does not need two records.
   if (records.length >= 2 || presentation.counted) {
     const fromFrameQuality = frameQualityFactor(polls, window, content);
     if (finite(fromFrameQuality)) result.realtimeFactorFromFrameQualityByClient = fromFrameQuality;
@@ -319,7 +319,7 @@ function clientFigures(tag, client, origin, window, content, receipt, { bytes = 
 }
 
 // An echo probe is placed by its send instant: a lost probe has no t4, and
-// placing by eventTime dropped every one of them (d1-findings.md Q2).
+// placing by eventTime dropped every one of them.
 function echoRecordsInWindow(records, window) {
   const source = Array.isArray(records) ? records : [];
   if (!window || !finite(window.startMs) || !finite(window.endMs)) return source;
@@ -373,7 +373,7 @@ function echoFigures(records) {
   const issued = cumulativeDelta(records, (record) => record.probes?.issued ?? record.echo?.probes?.issued);
   const lost = cumulativeDelta(records, (record) => record.counters?.lost ?? record.echo?.counters?.lost);
   // echo-probe.mjs writes a per-probe `lost` flag and no counter; the counters
-  // here serve only the legacy fixtures (6a design.md D10).
+  // here serve only the legacy fixtures.
   const flagged = records.filter((record) => typeof record.lost === 'boolean');
   return {
     ...percentileFields(roundTrips, 'echoRoundTripMs'),
@@ -488,7 +488,7 @@ export function computeFigures(input = {}) {
   }
 
   Object.assign(result, linkFigures(input.linkSamples ?? input.utilisation?.samples ?? [], window, input.capacityBitsPerSecond ?? input.condition?.capacityBitsPerSecond));
-  // The receipt cohort is the no-P2P arm's (D5); the peer arm's one viewing is peer-figures.mjs's.
+  // The receipt cohort is the no-P2P arm's; the peer arm's one viewing is peer-figures.mjs's.
   if (input.multiplierDenominator === 'one-viewing' && cohort) {
     const tagsForSteady = tagsFrom(input, clients);
     const offsets = input.condition?.positionOffsetMsByClient ?? input.declaredOffsetMsByClient ?? {};
@@ -555,7 +555,7 @@ function peerAuxiliaryFigures(input) {
 
 /**
  * The room a leave left behind. The member it removed is in neither boundary, so the
- * peer checks are made among the others, with its peer id still a member's (10b design.md D7).
+ * peer checks are made among the others, with its peer id still a member's.
  */
 export function remainingRoom(input = {}) {
   const departed = removesMember(input.condition?.rosterEvent?.kind) ? input.rosterEvent?.client : null;

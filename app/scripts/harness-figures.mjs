@@ -51,7 +51,7 @@ function readContentManifest(manifest, runDir) {
   return manifest.content?.identity === LEGACY_CONTENT_IDENTITY ? readLegacyContentManifest() : null;
 }
 
-// The re-read's rule override (design.md D1): a copy of the manifest condition,
+// The re-read's rule override: a copy of the manifest condition,
 // never the manifest. Absent rules the condition is the registered one.
 export function conditionWithRules(condition, rules) {
   if (rules === undefined) return condition;
@@ -72,7 +72,7 @@ export function conditionWithRules(condition, rules) {
 }
 
 export function capacityBitsForManifest(manifest = {}) {
-  // A schedule's figures are read after its rise, at the rise's rate (9b design.md D5).
+  // A schedule's figures are read after its rise, at the rise's rate.
   const step = manifest.condition?.capacitySchedule?.rise ?? manifest.condition?.capacityStep;
   return step
     ? parseRate(step.params?.rate)
@@ -258,7 +258,7 @@ export function recomputeRunDirectory(runDir, options = {}) {
       : pairwise;
     // The context is the drift fields alone: the manifest's lifecycle keys are
     // written after this recompute, so a figure carrying them could not equal a
-    // later one. Publication reads the assembled figure (d1-findings.md F1).
+    // later one. Publication reads the assembled figure.
     const drift = driftFigure({
       figures,
       pairwise: pairwiseForPublication,

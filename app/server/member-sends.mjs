@@ -1,4 +1,4 @@
-// The two member sends the server reads, `name` and `chat` (change 12d), and the allowance
+// The two member sends the server reads, `name` and `chat`, and the allowance
 // both spend. Each is checked for address, then shape, then rate, so a refused shape spends
 // nothing. Detail text is fixed: nothing the sender wrote is quoted or logged.
 
@@ -96,7 +96,7 @@ export function spend(allowance, rule, now) {
 // Tokens the bucket would hold at `now` if it were spent then.
 const tokensAt = (allowance, rule, now) => allowance.tokens + Math.max(0, Math.floor((now - allowance.atMs) / rule.refillMs));
 
-/** One allowance per key (13 D5: per client address), each from a full burst; `sweep` forgets full ones. */
+/** One allowance per key (per client address), each from a full burst; `sweep` forgets full ones. */
 export function createKeyedAllowances(rule) {
   const allowances = new Map();
   return {

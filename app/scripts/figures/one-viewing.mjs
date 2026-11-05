@@ -61,7 +61,7 @@ export function roomPositionAt({ clients = {}, tags = Object.keys(clients), inst
   return { positionMs: median(positions), spreadMs: positions.at(-1) - positions[0], byClient, excluded };
 }
 
-/** A viewer's media position at a boundary: interpolated, or held at its nearest record (13f D5). */
+/** A viewer's media position at a boundary: interpolated, or held at its nearest record. */
 function playedPositionAt(client, tag, instant) {
   if (!finite(instant)) throw new Error(`media instant is not finite:${tag}`);
   const records = orderedRecords(client);

@@ -1,4 +1,4 @@
-// public/lib/theatre-flip.mjs — the player's move into and out of theatre (12e design.md D11).
+// public/lib/theatre-flip.mjs — the player's move into and out of theatre.
 // Pure: the caller reads the two boxes; this returns the keyframes that play the new box from
 // the old one, or null when there is nothing to animate.
 

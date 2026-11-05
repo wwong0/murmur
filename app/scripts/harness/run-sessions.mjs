@@ -79,7 +79,7 @@ export async function setupSessions({ sessions, heldTag, room, clientOriginUrl, 
     }
     if (!arm.qualifyAfterJoins) await startEcho(session);
   }
-  // 8b design.md D3 (i): the host arm's room starts once its roster has been still
+  // The host arm's room starts once its roster has been still
   // for 2 s, so its viewers all join before the first's qualification is collected.
   if (arm.qualifyAfterJoins) {
     state.lastJoinAtMs = Date.now();

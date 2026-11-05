@@ -81,7 +81,7 @@ const priorityOf = (kind) => EVENT_ORDER.indexOf(kind);
  * Run one case to `durationMs` of local elapsed time.
  *
  * `command` is either `{ kind: 'closed-loop' }` — the controller's rate reaches
- * the player — or `{ kind: 'open-loop', rateAt(elapsedMs) }`, which is D7's rig:
+ * the player — or `{ kind: 'open-loop', rateAt(elapsedMs) }`, which is the open-loop rig:
  * the controller still polls and still publishes, and its writes are recorded
  * and discarded, so the loop is open at the actuator and nowhere else.
  *
@@ -305,7 +305,7 @@ export function runMechanismCase(config, { createController = createDriftControl
     history,
     applied,
     // `missed` from seq 0 IS the eviction count: a ring shorter than the run
-    // loses evidence silently otherwise (`CONSTRAINTS.md` → *Measurement*).
+    // loses evidence silently otherwise.
     counters: { ...counters, ...log.counters, logEvictions: log.read({ afterSeq: 0 }).missed },
     audioModeCounts,
     events: traceEvents ? events : null,

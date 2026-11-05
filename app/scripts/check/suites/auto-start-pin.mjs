@@ -31,7 +31,7 @@ export default async function autoStartPinSuite() {
     }
   });
 
-  // Joint D1 F3: under host delivery the host page's proxy listens inside its container, so the
+  // Under host delivery the host page's proxy listens inside its container, so the
   // pin reads the server, from which that proxy serves /app-settings.
   await check('auto-start pin: the harness reads machine-side origins for each delivery', async () => {
     const host = autoStartPinOrigins(urlsForDelivery('host'), 'host');

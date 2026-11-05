@@ -1,6 +1,6 @@
-// Tailwind v3 for the room page (design.md D1). Preflight is off so the page's own
+// Tailwind v3 for the room page. Preflight is off so the page's own
 // CSS, moved verbatim into styles/room.css, keeps the geometry the drivers click by.
-// Every value is a var(--…) reference: the tokens live once, in room.css (design.md D3).
+// Every value is a var(--…) reference: the tokens live once, in room.css.
 module.exports = {
   content: ['./public/room.html', './public/room/**/*.jsx'],
   corePlugins: { preflight: false },

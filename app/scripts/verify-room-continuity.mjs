@@ -207,7 +207,7 @@ function safeError(error) {
   return text.replaceAll(TITLE_A, FIXTURE_NAMES.a).replaceAll(TITLE_B, FIXTURE_NAMES.b).replaceAll(REFUSED, 'refuse-audio-codec.mp4');
 }
 
-// post-result diagnostic (12b C2, T10)
+// A diagnostic, added after the result.
 const RC7_PLAY_READ = `(() => {
   const play = document.querySelector('#play');
   const box = play?.getBoundingClientRect() ?? null;
@@ -530,7 +530,7 @@ async function main(runDir) {
       && value.v1.hostPreparing?.state === 'choosing' && value.v2.hostPreparing?.state === 'choosing', ROOM_WAIT_MS);
     await setHostFile(host2.tab, TITLE_B);
     const bMark = { v1: null, v2: null };
-    // A viewer adopts title B a step before it loads it, so wait for the swarm id too (12e F2).
+    // A viewer adopts title B a step before it loads it, so wait for the swarm id too.
     const bReady = await waitUntil('title B', async () => {
       const pre = { v1: v1.frames.length, v2: v2.frames.length };
       const value = { host: await read(host2, 'RC7'), v1: await read(v1, 'RC7'), v2: await read(v2, 'RC7') };
@@ -559,7 +559,7 @@ async function main(runDir) {
       console.log(`RC7 play diagnostic: ${JSON.stringify({ before: playRead, after: afterRead })}`);
       throw error;
     }
-    // peerId stays the first engine's; the current (title B) engine is the last of peerIds (12a D1 F4).
+    // peerId stays the first engine's; the current (title B) engine is the last of peerIds.
     const bPeer = [v1, v2].map((page) => ({ peerId: page.polls.at(-1)?.snapshot?.peerBytes?.peerIds?.at(-1) ?? null, priorPeerIds: leaveLatest[page.tag].peerBytes?.peerIds ?? null, records: page.polls.filter((entry) => entry.phase === 'B-load-mark' || entry.phase === 'RC7-play').flatMap((entry) => entry.snapshot?.peerBytes?.records ?? []).filter((record) => typeof record.source === 'string').filter((record, index, all) => all.findIndex((candidate) => candidate.seq === record.seq) === index) }));
     record(evaluate(rc7, {
       precondition: { noOldFrame: (leaveLatest.v1.state?.positionMs ?? 0) >= 20_000 },
@@ -579,7 +579,7 @@ async function main(runDir) {
     await sleep(1_000);
     const created = await waitUntil('D viewer', () => read(v1, 'RC8'), (value) => value.present && value.state !== null && value.forwardDisabled === false, ROOM_WAIT_MS);
     for (const positionMs of [10_000, 20_000, 30_000]) {
-      // A seek disables forward-10 until it lands; a click before then does nothing (12a D1 F6).
+      // A seek disables forward-10 until it lands; a click before then does nothing.
       await waitUntil('D forward enabled', () => read(v1, 'RC8-seek'), (value) => value.forwardDisabled === false, 5_000);
       await clickElement(v1.tab, '#forward-10');
       await waitUntil('D forward seek', () => read(v1, 'RC8-seek'), (value) => value.state?.playing === false && value.state.positionMs === positionMs, 5_000);

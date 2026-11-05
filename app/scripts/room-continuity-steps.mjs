@@ -102,7 +102,7 @@ export function rc2(reading) {
   return pass('RC2', 'the refused fixture leaves both viewers choosing without media requests');
 }
 
-// titleName is #title-name's text: R-Name reads the element, not the seam (12a D1 F5).
+// titleName is #title-name's text: R-Name reads the element, not the seam.
 function member(value) {
   return object(value) && title(value.title) && state(value.state) && typeof value.titleName === 'string';
 }
@@ -172,8 +172,8 @@ function graceShape(value) {
     && typeof value.playDisabled === 'boolean';
 }
 
-// Post-result (12a C2, coordinator 2026-10-18): state.version is the envelope seq, so the spec's +1 clause
-// is kept and reported, and this one-operation reading is added beside it for D1.
+// Post-result (2026-10-18): state.version is the envelope seq, so the original +1 clause
+// is kept and reported, and this one-operation reading is added beside it.
 function oneOperation(versions, before) {
   return Array.isArray(versions) && versions.length === 2 && versions[0] === before && versions[1] > before;
 }
@@ -255,7 +255,7 @@ export function rc7(reading) {
   let peer = 'NOT EXERCISED';
   if (peerRecordsSeen) {
     const ids = reading.peerBytes.map((value) => value.records.filter((record) => record.source === 'p2p').map((record) => record.peerId));
-    // peerId is the other viewer's current (title B) engine, which must be new since RC6 (12a D1 F4).
+    // peerId is the other viewer's current (title B) engine, which must be new since RC6.
     const other = (index) => reading.peerBytes[1 - index];
     if (ids.some((values, index) => other(index).priorPeerIds.includes(other(index).peerId)
       || values.some((peerId) => peerId !== other(index).peerId))) peer = 'FAIL';

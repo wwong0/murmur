@@ -57,11 +57,10 @@ export const PROPOSED_COVERAGE_RATIO = 0.95;
  * claimed a usable 999 ms threshold in a window that never settled passed
  * unexamined. This looks at all of them.
  *
- * THE CEILING IS A REFUSAL ONLY WHERE A FLOOR WAS ACCEPTED. `design.md` D8 →
- * *Ceiling and refusal* states the hold for f > 0: measurement plus allowance
- * needing more room than the owner allowed leaves no threshold to accept. At
- * f = 0 the shipped controller has no such branch, and an accepted S above
- * 20 ms is a poll that
+ * THE CEILING IS A REFUSAL ONLY WHERE A FLOOR WAS ACCEPTED. For f > 0,
+ * measurement plus allowance needing more room than the ceiling allows leaves
+ * no threshold to accept. At f = 0 the shipped controller has no such branch,
+ * and an accepted S above 20 ms is a poll that
  * cannot count toward a dwell — which `dwellEligibility()` already says —
  * rather than a broken contract. Counting it as one here would manufacture a
  * failure out of the approved design, so those polls are reported separately

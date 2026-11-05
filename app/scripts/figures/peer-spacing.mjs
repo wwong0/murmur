@@ -1,5 +1,5 @@
 // Each viewer's declared offset, the lateness of the start in force when the
-// window opens, and the spacing they leave (design.md D4, task 4.7).
+// window opens, and the spacing they leave.
 
 function startInForce(starts, window) {
   const before = (Array.isArray(starts) ? starts : [])

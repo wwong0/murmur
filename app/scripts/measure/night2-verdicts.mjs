@@ -14,7 +14,7 @@ function tagsOf(entry, run, figures = figuresOf(run)) {
     ?? Object.keys(figures.realtimeFactorByClient ?? {});
 }
 
-// 13d's clauses 1 and 2; R2 only with peer exchange, R4 only for K (design D2).
+// Validity clauses 1 and 2; the byte inventory only with peer exchange, the catch-up only for K.
 export function night2Validity(entry = {}, run = {}) {
   const { reasons, playbackRefused } = statusValidity(entry, run);
   for (const name of ['lab-drift', 'gap-count']) {

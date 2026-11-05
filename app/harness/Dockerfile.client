@@ -4,8 +4,8 @@
 # Chromium.** The content is H.264 and a Chromium built without the proprietary
 # codecs decodes none of it — which arrives as a client that joins, plays
 # nothing and reports zero frames, i.e. as a result rather than as a missing
-# dependency (executor-spec.md §3.2). The version string is read back at run
-# time and written into the manifest.
+# dependency. The version string is read back at run time and written into the
+# manifest.
 #
 # ffmpeg is here for `ffprobe` only: `verify-frames.mjs` reads the content's
 # frame rate from the media every run rather than trusting a constant.

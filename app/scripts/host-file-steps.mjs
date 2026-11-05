@@ -378,7 +378,7 @@ export function s7b(reading) {
 }
 
 // S7c and S7d read the element's `ended` attribute; the `ended` event count stays in the
-// record as a diagnostic (change 12d D10).
+// record as a diagnostic.
 function endedElement(element) {
   return object(element) && finite(element.currentTime) && finite(element.duration) && typeof element.ended === 'boolean';
 }
@@ -403,7 +403,7 @@ export function s7c(reading) {
 }
 
 /**
- * A diagnostic, added after S7c's result (change 11-2 tasks.md -> Decisions, 2026-10-12): the
+ * A diagnostic, added after S7c's result on 2026-10-12: the
  * same reading from a play that starts at least 4 s before the end. It says which
  * side an S7c failure lies on and earns the matrix nothing.
  */
@@ -422,7 +422,7 @@ export function s7d(reading) {
 }
 
 /**
- * A diagnostic, added after S7a's result (change 11-2 tasks.md -> Decisions, 2026-10-12): S7a's
+ * A diagnostic, added after S7a's result on 2026-10-12: S7a's
  * request clause, with the seek made to the segment's first PRESENTED frame, which
  * sits `offset` after the playlist's cumulative time. Earns the matrix nothing.
  */
@@ -530,7 +530,7 @@ export function s13(reading) {
   return verdict(reasons.length ? 'fail' : 'pass', reading, reasons.length ? reasons : ['browser storage wiring refusal was observed']);
 }
 
-// The `--held-lock` pass's rows (design.md D15, F10): the id is the row's, the text its label.
+// The `--held-lock` pass's rows: the id is the row's, the text its label.
 export const F10_ROWS = Object.freeze({
   'F10-1': "the chooser is disabled while another tab holds the remembered title's lock",
   'F10-2': 'the chooser enables once the lock is released',

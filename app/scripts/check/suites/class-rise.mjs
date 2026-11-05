@@ -1,4 +1,4 @@
-// 12c-1 D2: a request whose class rises is told to the host, the host moves the rest
+// A request whose class rises is told to the host, the host moves the rest
 // of the body, and the receipt keeps each rise. Pure: a fake clock and fake channels.
 
 import { assert, assertEqual, check } from '../harness.mjs';

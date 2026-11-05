@@ -4,7 +4,7 @@
 // and a described path. It is the only party in the check that knows the answer,
 // and every filter assertion compares the filter's output against it. It exists
 // because a real network cannot be asked for a 200ms/5ms path, a step, or a
-// physically impossible sample on demand (design.md D10).
+// physically impossible sample on demand.
 //
 // TEST MACHINERY — under scripts/, so it cannot reach the browser bundle.
 //
@@ -36,7 +36,7 @@ function mulberry32(seed) {
  *   t4 = (t3 - theta) + back        client receives, in ITS timebase
  *
  * `service` cancels out of the derived delay by construction, which is what
- * makes `delay` offset-free and D6's impossibility test meaningful.
+ * makes `delay` offset-free and the filter's impossibility test meaningful.
  */
 function buildSample({ t1, theta, outMs, backMs, serviceMs }) {
   const t2 = t1 + outMs + theta;

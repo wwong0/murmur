@@ -1,4 +1,4 @@
-// T13 (design.md D2 re-read, D9): fair turns at the host's shared bucket, and the
+// Fair turns at the host's shared bucket, and the
 // urgent class served ahead of prefetch — across channels through the arbiter,
 // and within one channel through the sender's own selection.
 

@@ -1,4 +1,4 @@
-// Where each viewer is at a lab instant, shared by R1, R4 and R5 (design D2).
+// Where each viewer is at a lab instant, shared by the readers.
 import { median } from './stats.mjs';
 
 const finite = (value) => Number.isFinite(value);
@@ -26,7 +26,7 @@ export function labRecords(evidence, tag) {
 
 /**
  * The frame on screen at `atMs`, projected to it. `mediaMs` moves in whole frames, so comparing it
- * unprojected reads two in-sync viewers a frame apart by vsync phase (13c `d1-findings.md` F1).
+ * unprojected reads two in-sync viewers a frame apart by vsync phase.
  */
 export function positionAt(rows, atMs, step) {
   let low = 0;
@@ -68,7 +68,7 @@ export function gapToOthers(rows, tag, others) {
 
 /**
  * The first row from which `|g| ≤ 40` holds for 5 s: every row in [L, L + 5000] within it, and rows
- * present at 90% of that span's grid points (`executor-spec.md` §1, the hold rule).
+ * present at 90% of that span's grid points: the hold rule.
  */
 export function holdFrom(rows, fromMs, thresholdMs = 40, holdMs = 5_000) {
   if (!rows?.length) return null;
@@ -86,7 +86,7 @@ export function holdFrom(rows, fromMs, thresholdMs = 40, holdMs = 5_000) {
   return null;
 }
 
-/** Frame gaps over 250 ms on the shared clock, the stall definition (`executor-spec.md` §1). */
+/** Frame gaps over 250 ms on the shared clock, the stall definition. */
 export function frameGaps(records) {
   const values = (records ?? []).map((record) => record?.displaySharedMs).filter(finite).sort((a, b) => a - b);
   return values.slice(0, -1).map((startMs, index) => ({ startMs, gapMs: values[index + 1] - startMs }))

@@ -1,4 +1,4 @@
-// scripts/check/suites/time-echo.mjs — the round-trip probe change 2 builds on,
+// scripts/check/suites/time-echo.mjs — the round-trip probe the clock builds on,
 // and the monotonicity of the room's time reference.
 
 import { check, assert, assertEqual, sleep } from '../harness.mjs';

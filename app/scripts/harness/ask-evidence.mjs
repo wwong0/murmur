@@ -1,4 +1,4 @@
-// 9b design.md D7: each viewer's host asks, drained by cursor from its join to
+// Each viewer's host asks, drained by cursor from its join to
 // the end of the run, and the host's response counts at both boundaries.
 
 import fs from 'node:fs';

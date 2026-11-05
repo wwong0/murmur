@@ -1,4 +1,4 @@
-// D2-D4 return wiring through the standard vm fakes and the real controller.
+// The tab-return wiring through the standard vm fakes and the real controller.
 
 import { check, assert, assertEqual } from '../harness.mjs';
 import { bundleProductEntry } from '../entry-harness.mjs';
@@ -52,7 +52,7 @@ export default async function tabReturnEntrySuite() {
     const page = playingPage(product.code);
     page.harness.acceptSkip = true;
     // The entry's guard reads playing first and sees a paused room; the fake skip() reads it second and
-    // would accept, so dropping the guard re-parks (M2.2b). Reordering those reads makes this unfailable.
+    // would accept, so dropping the guard re-parks. Reordering those reads makes this unfailable.
     let playingReads = 0;
     Object.defineProperty(page.harness, 'playing', {
       configurable: true,

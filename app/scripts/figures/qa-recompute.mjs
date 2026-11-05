@@ -244,7 +244,7 @@ export function recomputeQaRun(input, directory = undefined) {
   };
 }
 
-/** Combine the six registered runs and apply D5's registered outcome. */
+/** Combine the six registered runs and apply the registered outcome. */
 export function recomputeQaReport(runs) {
   if (!Array.isArray(runs) || !runs.length) throw new Error('qa runs are unavailable');
   const results = runs.map(({ directory, input }) => recomputeQaRun(input, directory));

@@ -1,4 +1,4 @@
-// 12c-2 D2: the settled-drift reader, hand-computed on a zero-offset timebase.
+// The settled-drift reader, hand-computed on a zero-offset timebase.
 
 import { assert, assertEqual, check } from '../harness.mjs';
 import { decideFinalization } from '../../harness-run.mjs';

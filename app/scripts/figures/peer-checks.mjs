@@ -289,7 +289,7 @@ function responseAgreement(input, tolerances, pairing) {
         continue;
       }
       if (!pair.host) {
-        // design.md D3: no byte moved either way. Dropping a clause excuses a
+        // Excused only where no byte moved either way. Dropping a clause excuses a
         // receipt that carried evidence.
         const eligible = excusalInForce && receipt.canceled === true && receipt.finished !== true && !finite(receipt.headMs)
           && receipt.bodyBytes === 0 && (receipt.originResponseId === null || receipt.originResponseId === undefined);

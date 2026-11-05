@@ -1,4 +1,4 @@
-// Names and chat through the real entry (12d D1, D2, D5, D6, D7): the rename line, the stored name,
+// Names and chat through the real entry: the rename line, the stored name,
 // the chat entries and the refusals, over scripted envelopes.
 
 import { assert, assertEqual, check } from '../harness.mjs';
@@ -192,6 +192,6 @@ export default async function namesChatEntrySuite() {
     assertEqual(page.view().namePromptRequest, 2, 'each request counts');
   });
 
-  // Guarded (12d T9): widening the `event === 'join'` guard in notePresence to accept `name`
+  // Guarded: widening the `event === 'join'` guard in notePresence to accept `name`
   // turns the first check's "no join line" assertions red.
 }

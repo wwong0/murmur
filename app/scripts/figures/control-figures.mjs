@@ -227,8 +227,8 @@ function spanLegs({ input, window, tags, bars, edgeSegments, segmentSeconds, hos
     && tags.every((tag) => finite(realtime[tag]) && realtime[tag] >= widened.realtimeMin);
   const utilisationValue = linkFigure(input.linkSamples, window, input.capacityBitsPerSecond).uplinkUtilisationMean;
   const utilisation = leg(utilisationValue, widened.utilisationMax);
-  // The cap leg is in force only where declared (design.md D2); otherwise the
-  // pace-bound leg is exactly the registered one, so 8b2's figures recompute.
+  // The cap leg is in force only where declared; otherwise the pace-bound leg
+  // is exactly the registered one, so earlier runs' figures recompute.
   const capDeclared = finite(widened.capUsedMax);
   if (capDeclared && finite(widened.paceBoundMax)) throw new Error('steady-pace-bars-conflict');
   const paced = finite(input.headroom?.fraction);
@@ -258,13 +258,13 @@ function spanLegs({ input, window, tags, bars, edgeSegments, segmentSeconds, hos
     paceBound: { value: pace.value, pacedMs: pace.pacedMs, reason: pace.reason },
   } : null;
   // The host's polls are tested only where the condition declares it, so a run
-  // registered before 9b recomputes as it read.
+  // registered before that reading existed recomputes as it read.
   const edgeDeclared = edgeReading(input.condition?.reading);
   const hostGap = edgeDeclared && coverageGap(input.hostPoll, window) > 1_000;
   const incomplete = hostGap || tags.some((tag) => coverageGap(input.viewerPolls?.[tag], window) > 1_000)
     || Boolean((capDeclared ? capLeg : pace)?.reason);
   const pass = !incomplete && Object.values(legs).every((entry) => entry.pass === true);
-  // Published beside the legs and never counted with them (9b design.md D7).
+  // Published beside the legs and never counted with them.
   const beside = edgeDeclared ? { downloadRatioMediaTime: { byClient: mediaTimeRatio(figures, tags, segmentSeconds) },
     heldAheadMsByClient: heldAheadAt(input.viewerPolls, tags, window.endMs) } : {};
   return { window, bars: widened, legs, ...beside, ...(paceSummary ? { pace: paceSummary } : {}), incomplete, pass,

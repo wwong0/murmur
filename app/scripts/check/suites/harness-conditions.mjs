@@ -105,7 +105,7 @@ export default async function harnessConditionsSuite() {
   });
 
   // A shallow clone or a rewritten history cannot read the base: a counted skip,
-  // never a PASS that compared nothing (14d design.md D6).
+  // never a PASS that compared nothing.
   const base = baseConditions();
   if (!base) skip('harness conditions: every existing condition only gains delivery http', 'base commit 3e1583b is unreadable');
   else await check('harness conditions: every existing condition only gains delivery http', async () => {
@@ -126,9 +126,9 @@ export default async function harnessConditionsSuite() {
     const registeredBy10b = ['baseline-join', 'baseline-leave-clean', 'baseline-leave-silent', 'join', 'leave-clean', 'leave-silent', 'leave-first',
       'drop-socket', 'drop-recover', 'shakedown/churn-join', 'shakedown/churn-leave-clean', 'shakedown/churn-leave-silent',
       'shakedown/churn-drop-socket', 'shakedown/churn-leave-first'];
-    // 11a-2's, by prefix as 9b's; registered after its image build (its tasks.md Decisions).
+    // The 11a2- conditions, by prefix like 9b's; registered after their image build.
     const registeredBy11a2 = (name) => name.startsWith('11a2-') || name.startsWith('shakedown/11a2-');
-    // 12c-1's copy 11a-2's arms (its executor spec T10).
+    // The 12c1- conditions copy the 11a2- arms.
     const registeredBy12c1 = (name) => name.startsWith('12c1-') || name.startsWith('shakedown/12c1-');
     const registeredBy12c2 = (name) => name.startsWith('12c2-') || name.startsWith('shakedown/12c2-');
     const added = [...currentEntries.keys()].filter((name) => !baseEntries.has(name) && !registeredBy8b2.includes(name) && !registeredBy9b(name)

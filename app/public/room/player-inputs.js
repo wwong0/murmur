@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef } from 'react';
 import { playerKey } from '../lib/player-keys.mjs';
 import { clickActs } from '../lib/player-click.mjs';
 
-// The player's own inputs (12e design.md D10): the keys, a click on the video and the context
+// The player's own inputs: the keys, a click on the video and the context
 // menu. Each acts through the control's own action and enabled state, as the bar's button does.
 
 // The `focus` playerKey reads. An open popup is a dialog or menu role, not `[data-open]`: Base UI

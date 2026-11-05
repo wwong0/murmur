@@ -89,7 +89,7 @@ export function rulesOf(ruleSet) {
   return { bars, removeBars, excusals };
 }
 
-// design.md D4: a run refused only by D3's receipts becomes accepted under the
+// A run refused only by the response-agreement check becomes accepted under the
 // re-read, never accepted as registered. The registered recompute must reproduce
 // the live refusal first, or the excusal would be excusing something unseen.
 export function rereadAcceptance({ entry, liveReasons = [], registeredReport, rereadReport } = {}) {
@@ -111,8 +111,8 @@ export function rereadAcceptance({ entry, liveReasons = [], registeredReport, re
     : { acceptedAsRegistered, acceptedUnderReread: true, refusedUnderReread: [] };
 }
 
-// ---- The equality check (design.md D6, tasks.md 3.4) ----
-// 8b2's file stays as published, so the registered side must still say what it
+// ---- The equality check ----
+// The registered report stays as published, so the registered side must still say what it
 // says. `permitted` is the whole list of what may differ; anything else is returned.
 const ABSENT = Symbol('absent');
 const ADDED_KEYS = new Set(['pace', 'capUsed', 'matchedOn', 'buildMatch']);
@@ -122,8 +122,8 @@ const NEWLY_READ_KEYS = new Set(['reading', 'readingKey', 'reasons', 'criteria',
 function permitted(path, fileValue, recomputedValue, file) {
   const last = path.at(-1);
   const added = fileValue === ABSENT;
-  // 1. Keys this change adds: both pace values (D2), the build match (D6), 8a's
-  //    class on a seek run, 8a's reading and the sweep positions on the report.
+  // 1. Keys the re-read adds: both pace values, the build match, the trap class
+  //    on a seek run, the trap reading and the sweep positions on the report.
   if (added && ADDED_KEYS.has(last)) return true;
   if (added && path[0] === 'runs' && path.length === 3 && last === 'trapClass') return true;
   if (added && path.length === 1 && (last === 'trapReading' || last === 'sweep')) return true;
@@ -197,7 +197,7 @@ function labelledEntries(report) {
   return entries;
 }
 
-// design.md D5. The expected labels are the rule set's, not the report's own copy:
+// The expected labels are the rule set's, not the report's own copy:
 // a report whose labels were all altered alike would otherwise agree with itself.
 export function labelFaults(report) {
   const expected = report?.ruleSet?.labels;

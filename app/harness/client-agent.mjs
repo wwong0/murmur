@@ -6,9 +6,8 @@
 // signalled, exited, killed, profileRemoved (runner/browser-platform.mjs). A
 // report only exists if something in the container held the child handle, so
 // the launcher lives here and the driver reads its answer over HTTP. The
-// qualification case that kills Chrome out from under the driver
-// (executor-spec.md §11.2) is exactly the case where that report is the
-// evidence.
+// qualification case that kills Chrome out from under the driver is exactly
+// the case where that report is the evidence.
 //
 // The control API is on `wa-control`, so ending a browser and reading its
 // version are never shaped by a qdisc attached to the media interface.
@@ -33,7 +32,7 @@ const WINDOW_SIZE = process.env.APP_WINDOW_SIZE ?? '1280,720';
 const TAG = process.env.APP_TAG ?? 'client';
 
 // Part of the regime, so every one of them is reported to the manifest rather
-// than only passed to the process (executor-spec.md §3.3). `--no-sandbox`
+// than only passed to the process. `--no-sandbox`
 // because the container is the sandbox; the alternative, `--cap-add=SYS_ADMIN`,
 // is wider. Shared memory is sized in compose (`shm_size`) instead of moved
 // with `--disable-dev-shm-usage`, because the flag changes where Chrome puts

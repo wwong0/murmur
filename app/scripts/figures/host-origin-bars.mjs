@@ -53,7 +53,7 @@ function clientFactors(figure) {
 // The figures an arm is judged on. The uncapped arm declares no capacity, so its
 // byte publication is always refused and `publishedByte` holds only that
 // refusal; its realtime factors are in the recomputed figures. Only that arm
-// falls back: a capped arm refused publication is refused (7a d1-findings D1-3).
+// falls back: a capped arm refused publication is refused.
 export function armFigures(recomputed, arm) {
   if (arm !== 'capped' && arm !== 'uncapped') throw new TypeError('armFigures: arm must be capped or uncapped');
   const published = recomputed?.publishedByte;

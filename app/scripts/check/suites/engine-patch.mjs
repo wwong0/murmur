@@ -16,7 +16,7 @@ import * as esbuild from 'esbuild';
 
 const json = (value) => JSON.stringify(value);
 // A string only the carried loader's code contains. Not the plugin's banner: that
-// is written whether or not the loader redirect took (8b d1-findings.md F1).
+// is written whether or not the loader redirect took.
 const PATCHED_CODE = '"urgentWaits"';
 const PATCHED_EDGE_CONTROL = '"edgeControl"';
 let patchedBundle;
@@ -76,10 +76,10 @@ export default async function enginePatchSuite() {
     const productBranch = block.slice(start, end);
     assert(!productBranch.includes('loadThroughP2P'), 'product engine branch does not call stock loadThroughP2P');
     assert(!productBranch.includes('edgeDecision('), 'product engine branch does not decide privately');
-    // Prevention proof under CONSTRAINTS.md → Verification: opportunity is the
+    // Prevention proof: opportunity is the
     // product engine branch in the carried source. Mutation: restore stock
-    // loadThroughP2P in that branch → the named assertion is red; restoration
-    // and the green check run are recorded in the worker report.
+    // loadThroughP2P in that branch → the named assertion is red; restored,
+    // the check ran green.
   });
 
   await check('engine-patch: the installed engine is the pinned 3.0.1 source', async () => {

@@ -1,5 +1,5 @@
-// T14 (design.md D2, reversed): the host's cumulative bytes on the wire, read from
-// its peer connections' stats. Handed its connections, so it reads no page global.
+// The host's cumulative bytes on the wire, read from its peer connections'
+// stats. Handed its connections, so it reads no page global.
 
 // Every candidate pair's count, summed: the selected pair can change, and a
 // superseded pair keeps what it sent.

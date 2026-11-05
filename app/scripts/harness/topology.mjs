@@ -7,7 +7,7 @@
 // published port this process fetches counters and health over; `clientOriginUrl`
 // is the name the browsers resolve on the media network. Giving a browser the
 // host URL would put every media byte through the port forwarder instead of the
-// shaped interface (design.md D1).
+// shaped interface.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -92,7 +92,7 @@ export function readTopology({ containers, exec = defaultExec } = {}) {
 const MEDIA_COUNTERS_SCRIPT = "fetch('http://127.0.0.1:8102/harness/counters').then(async (response) => { if (!response.ok) throw new Error('HTTP ' + response.status); process.stdout.write(await response.text()); })";
 
 // The boundary's forms: one `docker exec` at a time, each awaited, so the poll
-// loops keep running through a read-back (9b design.md D1, J16).
+// loops keep running through a read-back.
 export async function readTopologyAsync({ containers, exec = asyncExec } = {}) {
   const raw = { containers: {} };
   for (const name of Object.keys(containers ?? {})) {
@@ -201,7 +201,7 @@ function networkGateway(networkName, exec, project) {
 
 // Chrome without media permission gathers host candidates on the default-route
 // interface only, so a host run points every browser container's default route at
-// wa-media (7a2 design.md D3, observation). A read-back that differs aborts the run.
+// wa-media. A read-back that differs aborts the run.
 function mediaDefaultRoute({ container, subnet, gateway, exec = defaultExec }) {
   const { ifName } = resolveInterface(container, subnet, exec);
   const argv = ['ip', 'route', 'replace', 'default', 'via', gateway, 'dev', ifName];
@@ -239,7 +239,7 @@ export function imageDigests(exec = defaultExec) {
 /**
  * The content's frame rate, read from the media every run. No constant is
  * substituted: an absent reading aborts rather than publishing a figure whose
- * denominator was assumed (executor-spec.md §10).
+ * denominator was assumed.
  */
 export function readContentFrameRate(container, exec = defaultExec) {
   // The init segment alone reports a meaningless `12288/1` — it carries no
@@ -376,7 +376,7 @@ function running(container, pattern, exec) {
 }
 
 // The sender writes its report on SIGTERM, but compose down kills it with the
-// container, so teardown waits for it to exit first (6b design.md D1).
+// container, so teardown waits for it to exit first.
 async function waitForExit(container, pattern, exec, timeoutMs = 5000) {
   const startedAt = Date.now();
   try {
@@ -409,7 +409,7 @@ export function readSinkCount({ container, exec = defaultExec } = {}) {
  * The topology object the driver takes. `prepare` is everything that must exist
  * before a client opens a page; `applyQdiscs` is separate because the driver
  * records the read-back between the two and a failed read-back must stop the
- * run before any client starts (executor-spec.md §3, Boundaries).
+ * run before any client starts.
  */
 export function createComposeTopology({ project = PROJECT, exec = defaultExec, execAsync = asyncExec, originUrl = ORIGIN_HOST_URL, samplerIntervalMs = 125, down = true } = {}) {
   const state = { containers: {}, origin: null, control: null, controlUdpDrop: null, sampler: null, backgroundLoad: null, subnets: new Map(), runDir: null, urls: urlsForDelivery('http'), boundaries: {} };

@@ -1,6 +1,6 @@
 // Lead measurement arithmetic and browser probes. The runner owns timing and
 // publication; these functions keep its figures and in-page observations
-// independently testable (executor-spec.md §7).
+// independently testable.
 
 import { median as medianOfSorted } from '../public/lib/frame-drift.mjs';
 
@@ -18,7 +18,7 @@ export function ceil50(value) {
 /**
  * The one sorting median every script here reads. The middle of an even set is
  * `frame-drift.mjs`'s and nobody else's: a second definition is how the page and
- * the browser pass came to disagree once already (app/CLAUDE.md).
+ * the browser pass came to disagree once already.
  */
 export function median(values) {
   if (!Array.isArray(values) || values.length === 0) return null;

@@ -17,8 +17,8 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * The Windows Chrome path and the Windows disposal, re-exported from the
- * platform adapter that now owns both (`runner/browser-platform.mjs`, design.md
- * D9). A re-export, not a second definition: runners that were not converted
+ * platform adapter that now owns both (`runner/browser-platform.mjs`). A
+ * re-export, not a second definition: runners that were not converted
  * import these and must get byte-identical behaviour. Nothing here chooses
  * between this and the container's adapter.
  */
@@ -78,7 +78,7 @@ export async function cdpHttp(port, pathname) {
 
 /**
  * One page target. Give it a `label` to forward that page's console and
- * exceptions to this one's — CLAUDE.md records that every defect in the
+ * exceptions to this one's — every defect in the
  * host-origin spike was found that way. Without a label it stays quiet.
  */
 export class Tab {
@@ -168,7 +168,7 @@ const BAR_REVEAL_POLL_MS = 50;
 /**
  * Wait until `#control-bar` is shown and its transition has ended. A faded bar keeps its controls
  * in the player's box, but they sit a slide's distance from where the reveal puts them, so a box
- * read before the reveal is a box the control then leaves (design.md D7). `getAnimations` omits
+ * read before the reveal is a box the control then leaves. `getAnimations` omits
  * finished animations, so an empty list is an ended transition.
  */
 export async function waitBarRevealed(tab) {
@@ -247,7 +247,7 @@ export async function attach(port, url, { label = null, exclude = null } = {}) {
 
 /**
  * Accept every leave warning `tab` shows from now on, and count them. A playing host page asks
- * before it unloads (12e design.md D13), and Chrome holds a reload or a navigation on that
+ * before it unloads, and Chrome holds a reload or a navigation on that
  * question until it is answered; a driver whose step reloads such a page installs this first.
  * Other dialogs are left alone. `stop()` removes the listener; `count` stays readable.
  */

@@ -1,6 +1,6 @@
-// The seek bar's drag (11b-2 D10): moves only hold the thumb and the release issues one seek.
+// The seek bar's drag: moves only hold the thumb and the release issues one seek.
 // After the release the thumb stays where it was dropped until the room's position comes near
-// it or the hold runs out, so it does not snap back while the seek lands (12e design.md D7).
+// it or the hold runs out, so it does not snap back while the seek lands.
 export function createSeekScrub({ seek, holdWithinMs = 1000, holdForMs = 1500 }) {
   let dragging = false;
   let committed = null;

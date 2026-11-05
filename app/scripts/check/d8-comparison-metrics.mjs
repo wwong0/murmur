@@ -32,7 +32,7 @@
 import { POLL_INTERVAL_MS } from './mechanism-driver.mjs';
 
 /** The floor for a plateau that counts toward the overlap diagnostic. Shorter
- *  runs are computed and available, but do not qualify (owner instruction). */
+ *  runs are computed and available, but do not qualify. */
 export const PLATEAU_MIN_MS = 5000;
 /** Polls whose input never reached the estimator. They end a plateau. */
 export const PLATEAU_BREAKING_MODES = Object.freeze(['waiting', 'stale']);

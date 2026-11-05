@@ -1,7 +1,7 @@
 // public/lib/drift-readout.mjs
 //
 // One line of text: where this client is against the room, or — when the log has
-// stopped producing records — WHICH INPUT WENT MISSING (change 3b design.md D2).
+// stopped producing records — WHICH INPUT WENT MISSING.
 //
 // It reads the log and the load rule and writes to neither, which is what lets
 // the line the browser pass asserts be checked WITHOUT a browser — the no-record
@@ -22,11 +22,10 @@ import {
 } from './playback-start.mjs';
 
 /**
- * The scheduled start's status as words (change 5 design.md D6): a missing
- * input first. T9 (design.md D6): a held room names the viewer's held-ahead,
- * never "room paused" — `heldAheadValue` is `null` before the reader has a
- * value, which covers the host's page (never a value) and a viewer before its
- * first one, so the line has nothing optional either way.
+ * The scheduled start's status as words: a missing input first. A held room
+ * names the viewer's held-ahead, never "room paused" — `heldAheadValue` is
+ * `null` before the reader has a value, which covers the host's page (never a
+ * value) and a viewer before its first one, so the line has nothing optional either way.
  */
 function notPlayingReason({ missing, waiting, retargets }, heldAheadValue) {
   if (missing) return `waiting for ${missing}`;
@@ -111,9 +110,9 @@ export function createDriftReadout({ log, playback, heldAhead = () => null }) {
     cursor = read.latestSeq;
     const latest = read.records[read.records.length - 1];
     const s = log.summary();
-    // A ROLLING WINDOW, NEVER "median drift": change 6 computes a median over
+    // A ROLLING WINDOW, NEVER "median drift": the harness computes a median over
     // the whole run, and two different numbers under one name guarantee a false
-    // conclusion (D2).
+    // conclusion.
     return (
       `drift: ${signed(latest.driftMs)} · rolling window over the last ${s.framesHeld} frames: ` +
       `median ${signed(s.medianDriftMs)}, p99 ${signed(s.p99DriftMs)}`

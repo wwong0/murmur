@@ -10,8 +10,7 @@
 // reach, and the figures inside one are the ones ITS arithmetic would produce
 // together — `fastestCloseMs` is `(|estimate| - deadband) / MAX_RATE_DEVIATION`
 // and the rate follows from the same excess. A fixture free to combine figures
-// the controller never combines can assert a line the page can never paint
-// (CONSTRAINTS.md → *Verification*).
+// the controller never combines can assert a line the page can never paint.
 
 import { assert, assertEqual, check } from '../harness.mjs';
 import { recordRig } from '../drift-plant.mjs';
@@ -136,8 +135,8 @@ const controllerCases = [
     // EVERY FIELD BUT THE REASON AGREES WITH THE no-clock CASE ABOVE, and must:
     // let this one differ in its frame count or carry figures the other nulls,
     // and the two lines differ by THAT instead — so the uniqueness check below
-    // passes against a builder that renders no reason at all (CONSTRAINTS.md →
-    // *Verification*). The agreement is faithful: an empty window leaves the
+    // passes against a builder that renders no reason at all. The agreement is
+    // faithful: an empty window leaves the
     // controller no estimate to have counted.
     name: 'diagnostics overlay: waiting with too few records names its reason',
     state: makeHeldState({ mode: 'waiting', reason: 'too-few-records', windowRecords: 0 }),

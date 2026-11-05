@@ -1,4 +1,4 @@
-// 12c-1 D2: the page tick re-evaluates each unfinished host request, and the near
+// The page tick re-evaluates each unfinished host request, and the near
 // span is the window handed to the class rule.
 
 import { assertEqual, check } from '../harness.mjs';

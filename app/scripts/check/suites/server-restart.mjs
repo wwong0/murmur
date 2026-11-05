@@ -86,7 +86,7 @@ export default async function serverRestartSuite() {
       assertEqual(hostState.controlMode, s0.controlMode, 'recreation preserves control mode');
       assertEqual(hostState.current.playing, s0.current.playing, 'recreation preserves playing state');
       // Both servers run in one process and therefore share this timebase; this
-      // check proves protocol continuity, not D4's cross-process clock argument.
+      // check proves protocol continuity, not the cross-process clock argument.
       const now = performance.timeOrigin + performance.now();
       const instants = [now, now + 5000, now + 10000];
       const mappings = [];

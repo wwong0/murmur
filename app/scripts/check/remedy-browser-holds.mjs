@@ -201,7 +201,7 @@ export function holdPolicyAudit({ rows, arm = null, horizonMs, evidenceComplete 
       safetyFailures.length > 0 ? safetyFailures[0] : null,
     ),
     // THE OFFLINE AUDIT REPORTS ONE `unavailable` FOR TWO DIFFERENT THINGS: a
-    // run that never settled, and evidence too incomplete to say. The D8 study
+    // run that never settled, and evidence too incomplete to say. The positive-floor study
     // never exercised the first, because its candidate always settled. Both
     // facts are known separately here -- incomplete evidence returned above, and
     // `firstSettledIndex` is computed from the same rows -- so the never-settled

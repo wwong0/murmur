@@ -1,4 +1,4 @@
-// T4 (design.md D2; tasks.md 2.4; `measurement` delta): the harness-supplied
+// The harness-supplied
 // headroom fraction — the page's reading, the harness's injection and refusal,
 // and the fraction in force actually driving the host's pace (not merely the
 // product default it happens to equal for an undeclared run).

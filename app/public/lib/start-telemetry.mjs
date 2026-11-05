@@ -1,13 +1,12 @@
 // public/lib/start-telemetry.mjs
 //
-// Deliberate measurement instrumentation for the scheduled start
-// (executor-spec.md §11.1): a bounded ring of timing events, and a second rVFC
-// observer that records raw frame metadata beside the product sampler instead
-// of editing it.
+// Deliberate measurement instrumentation for the scheduled start: a bounded
+// ring of timing events, and a second rVFC observer that records raw frame
+// metadata beside the product sampler instead of editing it.
 //
 // OPT-IN AND INERT. `enabled: false` is one early return in `record`, so every
-// call site is unconditional and the product keeps one code path either way
-// (executor-spec.md R15). Nothing here decides anything — no assertion, no
+// call site is unconditional and the product keeps one code path either way.
+// Nothing here decides anything — no assertion, no
 // self-check, and no product branch may read what it holds.
 //
 // Under public/lib/: no DOM, no page access, and NO CLOCK READ — every shared
@@ -20,7 +19,7 @@ export const EVENT_KINDS = Object.freeze(['poll', 'action', 'element-event', 'pl
 /**
  * The client's timebase, the SAME CONSTRUCTION frame-sampler and clock-sync use
  * — a stamp joined to a shared instant through an offset measured against a
- * different one is not a measurement (executor-spec.md R17).
+ * different one is not a measurement.
  */
 const defaultNow = () => performance.timeOrigin + performance.now();
 
@@ -67,7 +66,7 @@ const KIND_FIELDS = Object.freeze({
 
 // A frame field names the rVFC METADATA KEY it came from, not its own name:
 // `processingDuration` is optional in the specification, and a reducer refusing
-// a record has to name the key it went looking for (executor-spec.md §11.3).
+// a record has to name the key it went looking for.
 const METADATA_KEYS = Object.freeze({
   mediaTimeMs: 'mediaTime',
   presentationTimeMs: 'presentationTime',
@@ -172,7 +171,7 @@ const toMs = (seconds) => (Number.isFinite(seconds) ? seconds * 1000 : seconds);
  * It holds no log, no timeline and no clock: it sees the same frames the
  * product sampler sees, independently, and the two streams are joined offline
  * on `presentedFrames` — which is why `frame-sampler.mjs` is not edited and
- * D11's population cannot move (executor-spec.md R18).
+ * the product sampler's records cannot move.
  *
  * @param {{video?: object, telemetry: object, context?: () => object|null, now?: () => number,
  *   timeOriginMs?: number, placement?: () => number|null, paused?: () => boolean, commandedRate?: () => number,

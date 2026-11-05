@@ -4,7 +4,6 @@
 // Pure: results in, verdict out. No fs, no process, no clock — the runner supplies
 // the Chrome it ran. An unlisted failure, an unapproved NOT EXERCISED or any error
 // exits 1; a listed one prints as FAIL with its entry, never as PASS.
-// Why each entry is listed: openspec/changes/archive/2026-10-16-browser-check-repair (design.md D3).
 
 const T5_END = (w) => `T5 ${w} is settled at the end of the wait`;
 const INT_POLICY = (w) => `INT ${w} followed the adopted refusal and dwell policy`;

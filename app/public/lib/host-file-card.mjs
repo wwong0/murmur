@@ -6,8 +6,8 @@ const FAILED_NOTE = 'Choose it again, or pick another file. The details are in S
 const STORAGE_REFUSED_TITLE = 'Hosting needs storage this browser has turned off';
 const STORAGE_REFUSED_NOTE = 'Private windows turn it off. Open this room in a normal window to host.';
 
-// What the host's file card shows for a source state (design.md D15): `kind` is `status` for a
-// card that reports and `choosing` for one that asks, `icon` is `warn`, `video` or null, and
+// What the host's file card shows for a source state: `kind` is `status` for a card that
+// reports and `choosing` for one that asks, `icon` is `warn`, `video` or null, and
 // `percent` is null except while preparing. Whether the button takes a press is the view's
 // `choosable`, not the card's. A state the card does not know reads as `starting`.
 export function fileCard(state, fraction) {

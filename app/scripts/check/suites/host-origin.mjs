@@ -153,7 +153,7 @@ export default async function hostOriginSuite() {
       for (let i = 0; i < 10; i += 1) await Promise.resolve();
       assertEqual(heads(2).length, 1, 'the head is handed to send in the turn its read resolves');
       assertEqual(heads(2)[0].sentAt, readAt, 'no clock time passed before the head');
-      // Mutation, C2 2026-09-23: deferring the head to a 20 ms clock timer turned
+      // Mutation, 2026-09-23: deferring the head to a 20 ms clock timer turned
       // 'the head is handed to send in the turn its read resolves' red; restored, green.
     } finally {
       detach();

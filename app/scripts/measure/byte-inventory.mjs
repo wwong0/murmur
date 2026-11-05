@@ -75,7 +75,7 @@ function finalFlush(evidence) {
   let unreadable = !finite(recordingEnd);
   for (const tag of evidence.tags) {
     const lastDrift = (evidence.clients[tag]?.drift ?? []).map(labInstant).filter(finite).at(-1);
-    // Raw page and harness wall ms: the same lab base as `window.endMs` and `L` (design D3).
+    // Raw page and harness wall ms: the same lab base as `window.endMs` and `L`.
     const lastPoll = (evidence.clients[tag]?.polls ?? []).map((poll) => poll?.atMs).filter(finite).at(-1);
     const driftLogMissed = evidence.manifest?.clients?.[tag]?.driftLogMissed;
     const peerLogMissed = evidence.manifest?.clients?.[tag]?.peerLogHealth?.missed ?? null;
@@ -128,7 +128,7 @@ export function byteInventory(evidence) {
     for (const index of watched.indexes) unionWatched.add(index);
     const completed = completedByIndex(client.peerBytes, content);
     const storedBytes = [...completed.keys()].reduce((sum, index) => sum + sizeOf(content, index), 0);
-    // A loop, not Math.max(...peaks): one argument per poll overflows the stack (13e F5).
+    // A loop, not Math.max(...peaks): one argument per poll overflows the stack.
     const peakStored = (client.polls ?? []).reduce((peak, poll) => (finite(poll?.store?.peakBytes)
       ? Math.max(peak ?? -Infinity, poll.store.peakBytes) : peak), null);
     const prefetchLeftBytes = watched.largest === null ? 0 : [...completed.values()]

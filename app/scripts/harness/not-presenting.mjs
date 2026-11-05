@@ -77,7 +77,7 @@ export function notPresenting(polls, window) {
 }
 
 // A counted viewer's realtime factor over its in-window records: the denominator runs to the
-// window's end, so the frames it did not show count against it (13e-2 design.md D3 rule 4).
+// window's end, so the frames it did not show count against it.
 export function countedRealtimeFactor(records, window) {
   if (records.length < 2) return 0;
   const first = records[0];

@@ -28,7 +28,7 @@ export const OLA_WINDOW_MS = 20;
 /**
  * `AudioTimestampHelper::TimeToFrames` — ROUND, not truncate. The descriptive
  * helper in `scripts/rate-observation-model.mjs` floors instead; that helper is
- * out of this brief's write scope and the two agree at every sample rate whose
+ * left unchanged here, and the two agree at every sample rate whose
  * 20 ms window is a whole number of samples, which is all three swept here.
  */
 export function timeToFrames(ms, sampleRate) {

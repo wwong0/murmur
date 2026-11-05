@@ -46,7 +46,7 @@ export function driftSvg(published) {
   const notDrawn = published.criterionVerdict?.verdict === 'not-drawn' && targetMs === undefined;
   if (!notDrawn && (!finite(targetMs) || targetMs < 0)) throw new Error('drift plot requires a non-negative criterion target');
   const targets = notDrawn ? [] : [targetMs, -targetMs];
-  // A loop, not a spread: an hour of five viewers' samples overflows the call stack (13e F5).
+  // A loop, not a spread: an hour of five viewers' samples overflows the call stack.
   let extent = Math.max(...targets, 1);
   for (const tag of tags) {
     for (const value of Array.isArray(series[tag]) ? series[tag] : []) if (finite(value)) extent = Math.max(extent, Math.abs(value));

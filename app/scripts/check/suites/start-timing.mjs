@@ -5,7 +5,7 @@
 // second copy of the code under test. Pure — no server, no browser.
 //
 // One pair per gate, differing in the single figure that gate reads, and the
-// keys that differ between each pair are asserted rather than assumed (R6).
+// keys that differ between each pair are asserted rather than assumed.
 
 import { check, assert, assertEqual, assertNear } from '../harness.mjs';
 import { createStartTelemetry } from '../../../public/lib/start-telemetry.mjs';
@@ -635,9 +635,9 @@ export default async function startTimingSuite() {
     assert(threw !== null && threw.includes('newest'), 'and an unknown pick is refused by name, never defaulted');
   });
 
-  // The treated run's own G0 clause (§13.1): a start that did not apply the
+  // The treated run's own G0 clause: a start that did not apply the
   // compiled advance is unusable, never a treated observation. The pairs below
-  // differ in the advance alone (R6).
+  // differ in the advance alone.
   await check('start timing: a treated start that did not apply the advance is unusable', async () => {
     const A = 1000 / 24;
     const untreated = buildStart({});

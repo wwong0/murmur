@@ -1,4 +1,4 @@
-// The people and activity view values, through the real entry (design.md D12, D13).
+// The people and activity view values, through the real entry.
 
 import { assert, assertEqual, check } from '../harness.mjs';
 import { bundleProductEntry, runEntry } from '../entry-harness.mjs';

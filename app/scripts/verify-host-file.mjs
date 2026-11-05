@@ -1,7 +1,6 @@
 // scripts/verify-host-file.mjs
 //
-// The browser pass for the `file` media source (change 11-2 design.md D9): a
-// host tab is handed a file over CDP, prepares it, and a viewer plays it. It
+// The browser pass for the `file` media source: a host tab is handed a file over CDP, prepares it, and a viewer plays it. It
 // owns its room server, its Chrome and its reference directory, and removes
 // all three. The verdicts are host-file-steps.mjs's; this file gathers the
 // readings and calls them.
@@ -326,7 +325,7 @@ async function runPass(options) {
   const listPrepared = (page) => page.tab.evaluate(LIST_PREPARED);
   const linkOf = (snapshot) => snapshot.hostLink ?? null;
 
-  // The held-lock pass (--held-lock; executor-spec T15): a host that remembers a title whose lock
+  // The held-lock pass (--held-lock): a host that remembers a title whose lock
   // another tab holds, then the same host once that tab is gone. A setup that fails leaves every
   // row without a reading, which is missing evidence and not a verdict on the chooser.
   async function heldLockRows(fileBytes) {

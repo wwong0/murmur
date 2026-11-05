@@ -77,7 +77,7 @@ export async function waitForAppliedSeek({ sessions = [], hostSession, before, t
       && Number.isInteger(host.version) && host.version > before.version;
     if (hostApplied) {
       // `held` is the host's own reading and is not matched against viewers:
-      // the control figures require it of a seek's held state (8b2 T3 item 8).
+      // the control figures require it of a seek's held state.
       const expected = { lineage: host.lineage, version: host.version, playing: host.playing, positionMs: host.positionMs, atSharedMs: host.atSharedMs,
         ...(typeof host.held === 'boolean' ? { held: host.held } : {}) };
       const applied = (reading) => reading?.lineage === expected.lineage && reading.version === expected.version

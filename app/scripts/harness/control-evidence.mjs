@@ -86,8 +86,8 @@ export function evidenceRefusals({ hostPace, resumes, hostPoll = [], seek = null
   }
   const resumeRecords = resumes?.records ?? resumes ?? [];
   // The resuming state is the first observed state of the held lineage at a higher
-  // version. Versions are the room's envelope seqs, not consecutive (8b2 executor-spec
-  // T3 item 9), so it must be read as the play itself: playing, and not held.
+  // version. Versions are the room's envelope seqs, not consecutive, so it must be
+  // read as the play itself: playing, and not held.
   for (const record of resumeRecords) {
     const resumed = hostPoll.find((poll) => poll.state?.lineage === record.identity?.lineage
       && finite(poll.state?.version) && poll.state.version > record.identity?.version);

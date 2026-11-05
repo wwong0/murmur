@@ -1,6 +1,6 @@
 // scripts/check/suites/tick-steps.mjs
 //
-// The tick's step isolation (D10). Pure: no server, no timer.
+// The tick's step isolation. Pure: no server, no timer.
 
 import { check, assertEqual } from '../harness.mjs';
 import { runTickSteps } from '../../../public/lib/tick-steps.mjs';

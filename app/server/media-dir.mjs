@@ -1,7 +1,7 @@
 // server/media-dir.mjs
 //
 // The one default for the media directory, imported by the server and every
-// script that serves or reads the content (14d design.md D3). `npm run content`
+// script that serves or reads the content. `npm run content`
 // writes there; `APP_MEDIA_DIR` overrides it, resolved against the working
 // directory.
 

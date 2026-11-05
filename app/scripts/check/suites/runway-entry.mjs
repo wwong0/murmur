@@ -1,4 +1,4 @@
-// 10b design.md D6: the page publishes its own position and the finished media
+// The page publishes its own position and the finished media
 // from it beside the figure it reports to the host. Entry level, on the fakes.
 
 import { assert, assertEqual, check } from '../harness.mjs';
@@ -49,10 +49,10 @@ export default async function runwayEntrySuite() {
     assertEqual(playing.positionMs, 130_000, 'the figure reported to the host stays anchored on the room');
     assertEqual(playing.ownPositionMs, 100_000, 'not held: the own position is the element\'s, 30 s behind the room');
     assertEqual(playing.ownPositionMs, page.app.urgentContext().ownMediaMs, 'not held: the two own positions agree');
-    // Prevention proof under CONSTRAINTS.md → Verification: the opportunity is a
+    // Prevention proof: the opportunity is a
     // viewer behind the room and not held, read after its timeupdate. Mutation:
     // publish `positionMs` as `ownPositionMs` in updateHeldAhead → the not-held
-    // assertions are red (130000, not 100000). Recorded in 10b design.md D6.
+    // assertions are red (130000, not 100000).
   });
 
   await check('runway: the edge index is the engine\'s index past the contiguous run', async () => {

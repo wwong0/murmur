@@ -1,4 +1,4 @@
-// Recompute the registered 7c runs and publish the D6 reading.
+// Recompute the registered regime runs and publish their reading.
 
 import fs from 'node:fs';
 import path from 'node:path';

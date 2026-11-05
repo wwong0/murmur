@@ -15,14 +15,14 @@ import {
   runMain,
 } from './registered-runs.mjs';
 
-// 8b3's offline re-read (design.md D1, D4, D5): the registered runs of 8b2 read
-// again under a committed post-result rule set, published beside 8b2's reading and
-// never over it. It reads run directories and writes its one output file.
+// The offline control re-read: the registered runs read again under a committed
+// post-result rule set, published beside their registered reading and never over
+// it. It reads run directories and writes its one output file.
 const DEFAULT_OUTPUT = 'results/8b3-control-reread.json';
 const RESPONSE_CHECK = 'response-agreement';
 const UNPACED = 'sweep-unpaced';
 
-// D1: the rule set is committed before anything is computed under it.
+// The rule set is committed before anything is computed under it.
 function ruleSetCommitOf(rulePath) {
   const cwd = path.dirname(rulePath);
   const git = (args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -65,8 +65,8 @@ function criterionResult(reading, classification, name) {
   return classification?.criteria?.[name]?.result ?? null;
 }
 
-// 8a's classifier publishes registered acceptance as `accepted`. The run entry
-// already carries both acceptance values by name (design.md D4), so it is dropped.
+// The trap classifier publishes registered acceptance as `accepted`. The run entry
+// already carries both acceptance values by name, so it is dropped.
 function rereadTrapClass(entry, condition, trapReading) {
   const { accepted: _asRegistered, ...trapClass } = trapClassForRun(entry, condition, trapReading);
   return trapClass;
@@ -118,7 +118,7 @@ export function buildControlRereadReport({ rulesPath } = {}) {
   if (!trapReading) throw new Error('trap-reading-condition-unavailable');
 
   // The registered side, as scripts/control-reading.mjs computes it, checked
-  // against 8b2's published file before anything is read under the new rules.
+  // against its published reading before anything is read under the new rules.
   const registryPath = appPath(ruleSet.registry);
   const raw = registryEntries(registryPath);
   const registered = raw.map(recomputeControlRun);

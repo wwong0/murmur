@@ -64,7 +64,7 @@ export default async function titleEndSuite() {
     assert(latch.take({ lineage: 'l', version: 2 }), 'a new version is accepted');
   });
 
-  // Joint D1 F1: a 14.016 s element over a 14 000 ms playlist parked at 14 000 never ended.
+  // A 14.016 s element over a 14 000 ms playlist parked at 14 000 never ended.
   await check('E9 title-end: the end pause names the element\'s own end, and Ended reads the playlist\'s', async () => {
     assertEqual(endPauseMs(14_000, 14.016), 14_017, 'an element past the playlist ends the room one millisecond past its own end');
     assertEqual(endPauseMs(14_000, 13.99), 14_000, 'an element short of the playlist keeps the playlist end');

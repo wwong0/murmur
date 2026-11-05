@@ -1,6 +1,6 @@
 // scripts/check/suites/fmp4-placement.mjs
 //
-// The placement module and its tracker (change 12c-2 D1). Pure: every box is
+// The placement module and its tracker. Pure: every box is
 // built here by hand, so no fixture file and no hls.js.
 
 import { check, assert, assertEqual, assertNear } from '../harness.mjs';

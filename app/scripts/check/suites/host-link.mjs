@@ -129,7 +129,7 @@ export default async function hostLinkSuite() {
     xhr.send();
     await settle(rig.clock);
     assertEqual(JSON.stringify(loads), '[200]', 'a listener added before open hears load');
-    // Mutation, D1 2026-09-23: `_use` copying the pending listeners onto the backing
+    // Mutation, 2026-09-23: `_use` copying the pending listeners onto the backing
     // as a `_listeners` field threw `target._listeners.get is not a function`; restored, green.
     rig.link.close();
   });
@@ -217,7 +217,7 @@ export default async function hostLinkSuite() {
     await flush();
     assertEqual(failures[0], 0, 'absent request fails status 0');
     link.close();
-    // Keep the fake channel connecting so this assertion observes D5's
+    // Keep the fake channel connecting so this assertion observes the
     // fail-fast state rather than an already-open test double.
     const rig = setup({ answer: false, open: false });
     const pending = [];
@@ -322,7 +322,7 @@ export default async function hostLinkSuite() {
     assert(abortReadAt !== null, 'the host read the abort');
     assertEqual(frames().filter((entry) => entry.sentAt >= abortReadAt).length, 0, 'the host hands no frame for the id after reading the abort');
     assertEqual(progress, progressAtAbort, 'the viewer sees no progress after abort');
-    // Mutation, C2 2026-09-23: host-origin skipping `sender.abort` on a read abort turned
+    // Mutation, 2026-09-23: host-origin skipping `sender.abort` on a read abort turned
     // 'the host hands no frame for the id after reading the abort' red (3 frames); restored, green.
     rig.link.close();
 
@@ -388,7 +388,7 @@ export default async function hostLinkSuite() {
     assertEqual(rig.link.snapshot().state, 'open', 'the link returns to open');
     assertEqual(rig.link.snapshot().hostClientId, 'host-2', 'the link names the new host');
 
-    // Without a rejoin a failed link stays failed: D5 names no retry timer.
+    // Without a rejoin a failed link stays failed: there is no retry timer.
     rig.rawLink.viewer.close();
     await flush();
     assertEqual(rig.link.snapshot().state, 'failed', 'a closed channel reads failed');
@@ -411,7 +411,7 @@ export default async function hostLinkSuite() {
     await flush();
     assertEqual(offersTo('host-2'), 3, 'the host dropping the departed viewer id re-links at once');
     assertEqual(rig.link.snapshot().state, 'open', 'the link is open again after the drop');
-    // Mutation, C2 2026-09-23: `fail` without its re-initiate line turned
+    // Mutation, 2026-09-23: `fail` without its re-initiate line turned
     // 'the host dropping the departed viewer id re-links at once' red; restored, green.
     rig.link.close();
   });
@@ -427,7 +427,7 @@ export default async function hostLinkSuite() {
     assert(!rig.client.sent.some((message) => message.to === 'viewer-9'), 'a forged presence draws no offer');
     assertEqual(rig.link.snapshot().linkId, linkId, 'a forged presence leaves the link in place');
     assertEqual(rig.link.snapshot().state, 'open', 'a forged presence leaves the link open');
-    // Mutation, D1 2026-09-23: the unguarded `client.on('presence', discover)`
+    // Mutation, 2026-09-23: the unguarded `client.on('presence', discover)`
     // turned 'a forged presence leaves the link in place' red; restored, green.
     rig.link.close();
   });
@@ -453,7 +453,7 @@ export default async function hostLinkSuite() {
   });
 
   await check('host-link: the viewer answers the host\'s echo with the same message, and the host reads a round trip', async () => {
-    // T15 (design.md D2). The fake link here does not answer an echo itself.
+    // The fake link here does not answer an echo itself.
     const rig = setup();
     await flush();
     await settle(rig.clock, 1100);

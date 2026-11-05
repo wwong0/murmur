@@ -1,4 +1,4 @@
-// 9b design.md D5: the deep drop, the rise at the room's edge or at the ceiling,
+// The deep drop, the rise at the room's edge or at the ceiling,
 // and the refusal of a step that is not in force. Fake clock, polls and stepQdisc.
 
 import { assert, assertEqual, check } from '../harness.mjs';
@@ -154,7 +154,7 @@ export default async function capacityScheduleSuite() {
     assertEqual(noEvent.exercised, false, 'the ceiling without an event is not exercised');
   });
 
-  // 11a-2's drop comparand: the edge of a condition with no rosterEvent issues nothing.
+  // The drop comparand: the edge of a condition with no rosterEvent issues nothing.
   // Mutation: edgeRosterEvent always returns the issuing closure; red on the null.
   await check('capacity schedule: the edge issues a roster event only when the condition declares one', async () => {
     const calls = [];

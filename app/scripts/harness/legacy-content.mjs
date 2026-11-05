@@ -2,8 +2,8 @@
 //
 // The legacy content: the 2.3 GB rendition the retained runs measured. Its
 // manifest carries no identity field, so it is known by its numbers. A tracked
-// byte copy of that manifest lets the retained runs recompute without the media
-// (14d design.md D4); it is read only through the check below, so no other
+// byte copy of that manifest lets the retained runs recompute without the media;
+// it is read only through the check below, so no other
 // manifest can hand its segment sizes to the old runs.
 
 import fs from 'node:fs';

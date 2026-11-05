@@ -1,8 +1,7 @@
 // scripts/check/suites/drift-placement.mjs
 //
-// A frame's reported media time is its element time less the load's placement
-// (change 12c-2 D1). Pure: the frame is hand-built and the callback binding is
-// an argument.
+// A frame's reported media time is its element time less the load's placement.
+// Pure: the frame is hand-built and the callback binding is an argument.
 
 import { check, assert, assertEqual, assertNear } from '../harness.mjs';
 import { createFakeClock, DEFAULT_CALLBACK_LEAD_MS, DEFAULT_TIME_ORIGIN_MS } from '../fake-frames.mjs';

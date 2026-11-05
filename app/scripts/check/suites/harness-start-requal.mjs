@@ -1,4 +1,4 @@
-// Constructed D6 figures; the plain-line trap is named G9 (6b design.md D6).
+// Constructed start-requalification figures; the plain-line trap is named G9.
 
 import { check, assert, assertEqual, assertNear } from '../harness.mjs';
 import { DEFAULT_BARS } from '../../drift-figures.mjs';

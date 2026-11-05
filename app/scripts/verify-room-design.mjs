@@ -1,6 +1,5 @@
 // Browser proof for the room design's inputs: the name prompt,
-// the settings menu, and the player bar and theatre mode (change 12b, design.md D7, D11 and
-// D19). It owns one default-paused server.
+// the settings menu, and the player bar and theatre mode. It owns one default-paused server.
 // Every row opens its own tabs, because the prompt's flag is per tab and a shared tab would
 // let one row's flag hide another row's prompt.
 
@@ -339,7 +338,7 @@ async function rowSettingsMenuControlMode() {
 }
 
 // The bar and theatre rows act on the host page. The room starts paused, so a row that needs it
-// playing presses #play and leaves no mouse movement until the bar has faded (design.md D7).
+// playing presses #play and leaves no mouse movement until the bar has faded.
 const PLAYBACK = '(window.__app?.playbackState?.() ?? null)';
 const FADED = "document.querySelector('#control-bar')?.dataset.faded ?? null";
 // Faded and at rest: `data-faded` flips at the fade's start, so a box read then sits partway
@@ -444,7 +443,7 @@ async function rowSyncDotShowsIdle() {
   if (!await setPlaying(false)) return { exercised: false, detail: 'the room would not pause' };
   const loaded = await until(host, SEEK_LOADED, Boolean);
   if (!loaded.ok) return { exercised: false, detail: 'the title did not load: #seek.max stayed 0' };
-  // The dot is hidden while the room holds one member (12e design.md D9), so a viewer joins.
+  // The dot is hidden while the room holds one member, so a viewer joins.
   return withTab(`${ORIGIN}/room.html?room=${ROOM}&role=viewer&tab=rd-d1`, 'D1/viewer', async () => {
     const joined = await until(host, "document.querySelectorAll('#roster li').length", (count) => count === 2, 15_000);
     const members = joined.value;
@@ -548,7 +547,7 @@ async function rowFirstTouchOnlyReveals() {
   }
 }
 
-// The player animates its theatre move (12e design.md D11) and #theatre moves with it, so each
+// The player animates its theatre move and #theatre moves with it, so each
 // toggle waits for the move to end before the next read or click.
 const PLAYER_STILL = "document.getElementById('player').getAnimations().length === 0";
 async function toggleTheatre(tab, wanted) {
@@ -598,7 +597,7 @@ async function rowTheatreIsRemembered() {
 
 // A `display: none` element has no client rects, so "mounted" and "displayed" read apart: theatre
 // must close the header and the Stats row without unmounting them. Theatre has no `#settings`
-// at all (owner, 8.5; executor-spec §0c), so its count is read, and the dot ends the top group.
+// at all, so its count is read, and the dot ends the top group.
 const THEATRE_SURFACE = `(() => {
   const state = (selector) => {
     const element = document.querySelector(selector);

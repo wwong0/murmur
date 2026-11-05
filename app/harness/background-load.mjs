@@ -10,7 +10,7 @@ export const UDP_PAYLOAD_BYTES = 1400;
 // The kernel holds a sender back once its send buffer is queued, and the default
 // 212 992 B is about 90 datagrams, ~10 ms at 100 Mbit. Asking for 4 MiB (the
 // container's wmem_max; Linux doubles it) leaves tbf's own limit to bound the
-// queue (6b design.md D1).
+// queue.
 export const UDP_SEND_BUFFER_BYTES = 4 * 1024 * 1024;
 
 export function parseArgs(argv) {
@@ -35,7 +35,7 @@ export function parseArgs(argv) {
   return { to: values.to, mbps, granularityMs, maxMs, protocol, report: values.report ?? null };
 }
 
-// Carrying sub-datagram bytes prevents paced UDP from underfilling each tick (6b design.md D1).
+// Carrying sub-datagram bytes prevents paced UDP from underfilling each tick.
 export function udpPacingTick({ mbps, granularityMs, remainderBytes = 0, payloadBytes = UDP_PAYLOAD_BYTES }) {
   if (!Number.isFinite(mbps) || mbps < 0) throw new RangeError('mbps must be a finite non-negative number');
   if (!Number.isFinite(granularityMs) || granularityMs <= 0) throw new RangeError('granularityMs must be greater than zero');

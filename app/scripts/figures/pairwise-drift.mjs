@@ -1,4 +1,4 @@
-// Pairwise drift arithmetic. Grid matching and floor terms follow 6b design.md D2.
+// Pairwise drift arithmetic: grid matching and floor terms.
 
 import { median, percentile } from '../../public/lib/frame-drift.mjs';
 

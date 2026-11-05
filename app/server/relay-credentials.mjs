@@ -21,7 +21,7 @@ function normalizeApiBase(value, name) {
   return value.replace(/\/$/, '');
 }
 
-/** The relay settings (13 D6), defaulted and validated under `names`; throws naming a bad one. */
+/** The relay settings, defaulted and validated under `names`; throws naming a bad one. */
 export function relaySettings(values, names = OPTION_NAMES) {
   const { keyId, token } = values;
   requireOptionalString(keyId, names.keyId);

@@ -4,12 +4,10 @@
 // only — every command with its argv, stdout, stderr and exit code. It asserts
 // nothing. `evaluateProbe()` runs on the host against that evidence, so a
 // container cannot pass the preflight by reporting its own verdict, and the
-// assertions stay where the session that owns the result can read them
-// (CONSTRAINTS.md -> Verification, "reachable is not fresh").
+// assertions stay on the host, where the result is read.
 //
 // Every path and interface name in this file is a container path. `npm run
-// check` runs on Windows and never runs this file (CONSTRAINTS.md ->
-// Verification, "a path assertion must say which platform it is about").
+// check` runs on Windows and never runs this file.
 
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -26,8 +24,7 @@ export const PROBE_STEPS = [
 
   // The discrimination control, and it runs on a link with no root qdisc yet.
   // Run after `tbf` is attached it would fail with "File exists" as readily as
-  // with "Unknown qdisc", and two reasons to fail cannot be told apart
-  // (CONSTRAINTS.md -> Verification).
+  // with "Unknown qdisc", and two reasons to fail cannot be told apart.
   { name: 'control-misspelled-add', argv: ['tc', 'qdisc', 'add', 'dev', PROBE_LINK, 'root', 'tbff', 'rate', '10mbit'] },
   { name: 'control-show', argv: ['tc', 'qdisc', 'show', 'dev', PROBE_LINK] },
 

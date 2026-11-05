@@ -1,13 +1,13 @@
 // scripts/check/suites/drift-reporting.mjs
 //
 // What the controller publishes, what it withholds, and which population a
-// consumer built on that snapshot is entitled to (design.md D3).
+// consumer built on that snapshot is entitled to.
 //
 // The threshold arithmetic is exercised at U=3, L=12, S=15 through the exported
 // pure functions, with every expected value computed here from the inputs. A
 // default-constructed controller runs at f=0, where L is 0 and S is U. A
-// positive f is the owner-adopted D8 value, passed in by the page only once the
-// pitch treatment holds (D7 still returned F3); its behaviour is in
+// positive f is the adopted D8 value, passed in by the page only once the
+// pitch treatment holds; its behaviour is in
 // d8-product-integration.mjs, and this file checks only what construction takes.
 //
 // Traps worth preserving:

@@ -1,7 +1,7 @@
 import { assert, assertEqual, check } from '../harness.mjs';
 import { createSeekScrub } from '../../../public/lib/seek-scrub.mjs';
 
-// Joint D1 F4: a drag of the seek bar seeks once, where it is released.
+// A drag of the seek bar seeks once, where it is released.
 export default async function seekScrubSuite() {
   await check('seek-scrub: a drag of many moves issues one seek, at its release', async () => {
     const seeks = [];

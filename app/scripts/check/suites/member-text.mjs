@@ -1,4 +1,4 @@
-// scripts/check/suites/member-text.mjs — the one text rule and its three readers (12d D3, D4).
+// scripts/check/suites/member-text.mjs — the one text rule and its three readers.
 
 import { check, assert, assertEqual } from '../harness.mjs';
 import {

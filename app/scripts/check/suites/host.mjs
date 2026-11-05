@@ -23,7 +23,7 @@ export default async function hostSuite() {
     const viewer = await member('V');
     const seenBefore = viewer.received.length;
 
-    // Change 1 reclaimed on the `tabId` alone. Change 1b keys it on the secret;
+    // An earlier version reclaimed on the `tabId` alone. It now keys on the secret;
     // everything this assertion guarantees about the reclaim itself is unchanged.
     const h2 = await peer('H2');
     const reclaimed = await h2.join({ room, tabId: 'A', role: 'host', secret: h1.secret });

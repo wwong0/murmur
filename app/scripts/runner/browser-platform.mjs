@@ -4,7 +4,7 @@
 // `taskkill` and a PowerShell sweep, neither of which exists in a container.
 // Cleanup failure is the path that orphans a profile directory, and the
 // retirement record holds one such profile at 92 MB, so the lifecycle is
-// injected rather than only the path (design.md D9).
+// injected rather than only the path.
 //
 // Nothing here imports `cdp.mjs`: `cdp.mjs` imports this and re-exports the
 // Windows pieces, so the runners this change does not convert see byte-

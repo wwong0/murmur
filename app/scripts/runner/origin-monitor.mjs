@@ -15,7 +15,7 @@ export const REQUEST_TIMEOUT_MS = 1000;
 export const POLL_INTERVAL_MS = 250;
 
 // A condition that fills the shaped queue on purpose declares a longer timeout,
-// because the host reaches the origin across that queue (6b design.md D1).
+// because the host reaches the origin across that queue.
 export function startOriginMonitor({ healthUrl, deadlineAt, maxWallMs, onFailure = () => {}, requestTimeoutMs = REQUEST_TIMEOUT_MS }) {
   let stopped = false;
   let controller = null;

@@ -1,5 +1,5 @@
-// Which of a viewer's host requests are urgent (design.md D9): the playlist, and
-// the segments from its own position across D3's ready runway. Pure: the page
+// Which of a viewer's host requests are urgent: the playlist, and the segments
+// from its own position across the ready runway. Pure: the page
 // supplies the position, and the playlist text the host link already carried.
 
 import { CONTROL_8B, CONTROL_PRODUCT } from './edge-control.mjs';
@@ -8,9 +8,9 @@ import { mediaMsAt } from './playback-state.mjs';
 const EXTINF_RE = /^#EXTINF:\s*([0-9.]+)/;
 
 /**
- * The viewer's own position for D9. A created state has no mapping in effect
+ * The viewer's own position for the urgent set. A created state has no mapping in effect
  * during its lead, and the page already loads: its position is then where that
- * state starts, the held creation's 0 (design.md D4, D9).
+ * state starts, the held creation's 0.
  */
 export function urgentPositionMs(state, sharedMs) {
   const positionMs = mediaMsAt(state, sharedMs);

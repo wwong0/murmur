@@ -13,7 +13,7 @@ const usable = (peerConnection) => peerConnection
   && peerConnection.connectionState !== 'closed'
   && peerConnection.iceConnectionState !== 'closed';
 
-// The links line's counts (13 design.md D17): one refresh at a time, read from each usable link's
+// The links line's counts: one refresh at a time, read from each usable link's
 // selected pair, counting only links still open when the reads return. `tick` refreshes at most
 // every `intervalMs`; `readStats` is absent until the host transport has loaded.
 export function createLinkKinds({ links, readStats, onChange, intervalMs = 2_000 }) {

@@ -3,13 +3,13 @@
 // The clock filter, against manufactured inputs whose true offset is known.
 //
 // NOTHING IN HERE TOUCHES A NETWORK OR A TIMER. The filter reads no clock — the
-// caller supplies the instant (design.md D2) — so every branch, including the
+// caller supplies the instant — so every branch, including the
 // ones about samples ageing for ten minutes, is reachable synchronously and
 // costs no wall-clock time. If a check in this file ever needs to wait for
 // something, something in the filter has grown a timer it must not have.
 //
 // The fake probe is the instrument, so §1 below checks the instrument before
-// anything is checked with it. CONSTRAINTS.md → *Measurement*: an
+// anything is checked with it: an
 // uninstrumented rig reports the builder's expectation.
 
 import { check, assert, assertEqual } from '../harness.mjs';
@@ -121,7 +121,7 @@ export default async function clockSuite() {
   await check('clock-filter: the half-width equals delay/2 + drift * age exactly', async () => {
     // Containment alone is one-sided: a filter reporting a half-width of one
     // million milliseconds satisfies every assertion above, in every regime,
-    // and change 4 would then decline to correct anything forever with the
+    // and the drift controller would then decline to correct anything forever with the
     // whole suite green. AN OVER-WIDE BOUND IS NOT A SAFE FAILURE.
     const probe = createFakeProbe({ trueOffsetMs: 500, outMs: 20, backMs: 20, serviceMs: 7, intervalMs: 1000 });
     const filter = createClockFilter();
@@ -141,7 +141,7 @@ export default async function clockSuite() {
       Math.abs(record.halfWidthMs - expected) < 1e-9,
       `the half-width is exactly the sum and no wider: expected ${expected}, got ${record.halfWidthMs}`
     );
-    // Reported separately as well as summed: change 6 has to tell a slow path
+    // Reported separately as well as summed: the harness has to tell a slow path
     // from a stalled one, and cannot do that from the total.
     assert(
       Math.abs(record.delayTermMs + record.ageTermMs - record.halfWidthMs) < 1e-9,
@@ -168,7 +168,7 @@ export default async function clockSuite() {
       );
     }
     // Ten minutes of silence is ~24ms of unknown, which is more than half the
-    // 40ms budget criterion 1 names. That is the number D8 rests on: keeping a
+    // 40ms budget. That is the number the reconnect rule rests on: keeping a
     // stale estimate is honest only while the uncertainty says it is stale.
     assert(filter.read(at + 600000).halfWidthMs > 24, 'a ten-minute-old sample reports at least the drift it could have accumulated');
 
@@ -399,7 +399,7 @@ export default async function clockSuite() {
     // sample, so a check that reads only at the end cannot see this at all —
     // and until 2026-08-22 that is exactly what this one did, while the filter
     // published 4000ms ± 10ms here and the suite stayed green. Every sample in
-    // this regime carries the same delay and ties go to the newest (D3), so
+    // this regime carries the same delay and ties go to the newest, so
     // nothing about selection keeps the outlier out: its ineligibility does.
     const during = filter.read(outlier.sample.t4);
     assert(
@@ -421,11 +421,10 @@ export default async function clockSuite() {
     // it, and the run can therefore never agree with itself again — the
     // detector is off permanently, not merely delayed.
     //
-    // Measured over this exact regime with the cap removed (session D,
-    // 2026-08-21): `reanchors` stayed 0 and the filter published
+    // Measured over this exact regime with the cap removed (2026-08-21): `reanchors` stayed 0 and the filter published
     // -9000ms ± 5ms for seven further samples, recovering only when window
     // turnover carried the old era out on its own. The cap is also the more
-    // faithful reading of D7, whose rule is about K CONSECUTIVE samples.
+    // faithful reading of the step rule, which is about K CONSECUTIVE samples.
     const STEP_AT = 10;
     const OUTLIER_AT = 9;
     const AFTER = 5000;
@@ -452,7 +451,7 @@ export default async function clockSuite() {
   });
 
   await check('clock-filter: a long gap is not a step, and the drift allowance is what makes it so', async () => {
-    // D8's reconnect case. Two samples ten minutes apart SHOULD differ by up to
+    // The reconnect case. Two samples ten minutes apart SHOULD differ by up to
     // the drift rate over that interval — 24ms — and a detector that called
     // that a server restart would mislead whoever later reads `reanchors`.
     const GAP_MS = 600000;
@@ -486,7 +485,7 @@ export default async function clockSuite() {
   // -------------------------------------------------------------------------
 
   await check('clock-filter: with re-anchoring off, tracking a step takes exactly the configured window length', async () => {
-    // The setting-discrimination task (openspec/config.yaml): this suite runs
+    // Setting discrimination: this suite runs
     // the window length away from its shipped default, so at least one
     // assertion has to be pinned to the SETTING rather than to a constant.
     //

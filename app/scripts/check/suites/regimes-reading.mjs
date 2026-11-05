@@ -112,7 +112,7 @@ export default async function regimesReadingSuite() {
     assertEqual(otherRig.reading, 'No reading', 'a control on another client image is rejected');
   });
 
-  // The recompute cannot see live refusals; the runner's retained verdict can (d1-findings.md F3).
+  // The recompute cannot see live refusals; the runner's retained verdict can.
   await check('regimes reading: a run the runner withheld does not vote, whatever the register says', async () => {
     const result = classify([run('a', 0.6, 1.2), run('b', 0.6, 1.2), run('withheld', 0.1, 3, { writeByte: false })]);
     assertEqual(result.eligibleCount, 2, 'the withheld run is not eligible');

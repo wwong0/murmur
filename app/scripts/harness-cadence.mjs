@@ -1,4 +1,4 @@
-// What display cadence a headless container actually has (design.md D6).
+// What display cadence a headless container actually has.
 //
 // rAF is the cadence reading and rVFC is not: rAF follows the compositor's
 // begin-frame source whether or not a video is playing, while rVFC is bounded
@@ -49,10 +49,9 @@ export function describeIntervals(timestamps) {
 const isRound = (value) => ROUND_INTERVALS.some((candidate) => Math.abs(value - candidate) <= ROUND_TOLERANCE_MS);
 
 /**
- * Assert the shape the probe returned before deriving anything from it. Change
- * 4c lost a whole hardware question to a probe whose closing parenthesis made
- * it return a function: every figure printed `null` and nothing threw
- * (CONSTRAINTS.md -> Verification).
+ * Assert the shape the probe returned before deriving anything from it. An
+ * earlier probe lost a whole hardware question to a closing parenthesis that made
+ * it return a function: every figure printed `null` and nothing threw.
  */
 export function assertProbeShape(raw, tag) {
   if (!raw || typeof raw !== 'object') throw new Error(`cadence probe for ${tag} returned ${typeof raw}, not an object`);
@@ -66,7 +65,7 @@ export function assertProbeShape(raw, tag) {
 }
 
 /**
- * `none` is the answer that stops the change and goes to the owner as OQ2, so
+ * `none` is the answer that halts this line of measurement, so
  * it carries the reason it was reached: too few callbacks, no video callbacks
  * at all, or intervals too dispersed to be one cadence.
  */

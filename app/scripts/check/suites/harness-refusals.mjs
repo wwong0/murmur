@@ -39,7 +39,7 @@ function polls(epochs = ['e1']) {
 
 // A cadence the run established: one value, tightly clustered, at 60Hz — so
 // `optimismVsSixtyHzMs` is zero and the fixture carries no hidden advantage
-// over a viewer on a 60Hz panel (design.md D6).
+// over a viewer on a 60Hz panel.
 function cadenceRecords(tags = ['c01'], override = {}) {
   return Object.fromEntries(tags.map((tag) => [tag, {
     tag,

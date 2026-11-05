@@ -1,4 +1,4 @@
-// D4 entry wiring through the standard vm fakes and the real controller.
+// Far-skip entry wiring through the standard vm fakes and the real controller.
 
 import { check, assert, assertEqual } from '../harness.mjs';
 import { bundleProductEntry } from '../entry-harness.mjs';

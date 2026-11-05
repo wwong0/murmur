@@ -1,4 +1,4 @@
-// The shared token bucket and the pace it derives (design.md D2). Pure: every
+// The shared token bucket and the pace it derives. Pure: every
 // instant is supplied by the caller; no timer, no clock read.
 
 export const HEADROOM_DEFAULT = 0.85;

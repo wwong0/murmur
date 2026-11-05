@@ -59,7 +59,7 @@ export default async function startResidualSuite() {
 
   // `startLead` is a separate export and asks a different question: after the
   // residual population has gone by, is the start running AHEAD of the room?
-  // D11's reducer above is frozen and nothing here touches it (R18).
+  // The residual reducer above is frozen and nothing here touches it.
   await check('start lead: one-sided against U, over the records after the residual population', async () => {
     const U = 30;
     // The first 24 are wildly ahead and must not count; only the tail does.
@@ -74,7 +74,7 @@ export default async function startResidualSuite() {
     assertEqual(lead({ records: tailed(48, U) }).status, 'held', 'a median exactly at +U is held');
     assertEqual(lead({ records: tailed(48, U) }).medianMs, U, 'and reports it');
     assertEqual(lead({ records: tailed(48, U + 0.001) }).status, 'lead', 'U + 0.001 ahead is a lead');
-    // One-sided on purpose: behind the room is D11's question, not this one.
+    // One-sided on purpose: behind the room is the residual's question, not this one.
     assertEqual(lead({ records: tailed(48, -U) }).status, 'held', 'the same magnitude behind the room is held');
     assertEqual(lead({ records: tailed(48, -9999) }).status, 'held', 'and so is far behind it');
   });
@@ -88,7 +88,7 @@ export default async function startResidualSuite() {
 
     assertEqual(lead({ records: tailed(47, 0) }).status, 'short', '23 records after the skip is short');
     assertEqual(lead({ records: tailed(47, 0) }).count, 23, 'and counts what it had');
-    // The pair differs in the seam alone (R6): the same 72 records, judged with
+    // The pair differs in the seam alone: the same 72 records, judged with
     // and without the 24 that belong to the next start.
     const acrossSeam = tailed(72, 0, 999);
     assertEqual(lead({ records: acrossSeam }).status, 'lead', 'records from the next seam drag the median over the bar');
@@ -130,7 +130,7 @@ export default async function startResidualSuite() {
     assertEqual(held.deltaMs, 0, 'with no gap between them');
     assertEqual(held.recordEpochMs, ROOM_EPOCH, 'and the first accepted record carries the same epoch');
 
-    // R6: this pair differs in the seam epoch alone.
+    // This pair differs in the seam epoch alone.
     const derived = agreement({ start: seam(S - (SCHEDULED + ADVANCE)) });
     assertEqual(derived.status, 'derived', 'a seam that derived its epoch from the advanced park is caught');
     assertNear(derived.deltaMs, -ADVANCE, 0.001, 'and the gap it reports is exactly the advance');

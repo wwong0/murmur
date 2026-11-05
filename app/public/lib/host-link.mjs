@@ -81,7 +81,7 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
   let missedReceipts = 0;
   const segmentTimes = new Map();
 
-  // design.md D2: a page's throw marks nothing rather than failing the load.
+  // A page's throw marks nothing rather than failing the load.
   function requestClassFor(path) {
     try {
       const value = typeof urgency === 'function' ? urgency(path) : null;
@@ -237,7 +237,7 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
       if (typeof event?.data === 'string') {
         const control = parseControl(event.data);
         if (!control) return;
-        // design.md D2: the host times this answer to see a queue below it.
+        // The host times this answer to see a queue below it.
         if (control.t === 'echo') {
           try { candidate.send(event.data); } catch { /* link close reports through teardown */ }
           return;
@@ -361,7 +361,7 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
   client.on('host-link-answer', incomingAnswer);
   client.on('host-link-ice', incomingIce);
   // Only the server's presence names the host: a member can relay an envelope
-  // typed `presence` (7a d1-findings D1-1).
+  // typed `presence`.
   client.on('presence', (env) => {
     if (env?.from === ADDR_SERVER) discover(env);
   });
@@ -446,7 +446,7 @@ export function createHostLink({ client, RTCPeerConnection, rtcConfig = {}, cloc
         },
       };
     },
-    // 12c-1 design.md D2: an unfinished request whose class has risen tells the host.
+    // An unfinished request whose class has risen tells the host.
     reclassify() {
       if (state.state !== 'open' || !channel || channel.readyState !== 'open') return 0;
       let sent = 0;

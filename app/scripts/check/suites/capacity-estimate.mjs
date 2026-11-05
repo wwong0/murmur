@@ -1,4 +1,4 @@
-// T2 (design.md D2; tasks.md 2.2): the host's uplink capacity estimate, over
+// The host's uplink capacity estimate, over
 // constructed intervals read at the wire. Pure module — no server, no clock.
 
 import { assert, assertEqual, check } from '../harness.mjs';
@@ -55,7 +55,7 @@ export default async function capacityEstimateSuite() {
   });
 
   await check('capacity-estimate: a round trip at its floor is not link-bound, whatever waits on the channels', async () => {
-    // The attempt-3 stall (design.md D2, remedy investigation): bytes waiting on every
+    // The attempt-3 stall: bytes waiting on every
     // channel throughout, a trickle on the wire, nothing handed down, no echo answered.
     const unanswered = { ...baseFixture(), wireBytes: 37_000, queueMs: null };
     const unansweredResult = classifyInterval(unanswered);
@@ -101,7 +101,7 @@ export default async function capacityEstimateSuite() {
       run.add({ wireBytes, durationMs: 1000, linkBound: true, headQueueMs: startMs, tailQueueMs: midMs });
       return run.add({ wireBytes, durationMs: 1000, linkBound: true, headQueueMs: nextMs, tailQueueMs: endMs });
     };
-    // Attempt 4's intervals 3 and 4 (design.md D2, start-hold repair): the echo read
+    // Attempt 4's intervals 3 and 4: the echo read
     // 65 ms, then 498 ms, and the pair's wire count read 1.43 x the 1.25 MB/s link.
     assertEqual(pair(1_793_765, [65, 65], [498, 498]), null, 'a pair the queue filled across is not the link');
     assertEqual(pair(1_250_000, [498, 500], [500, 498]).wireBytes, 2_500_000, 'the next pair, on a standing queue, is');

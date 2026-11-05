@@ -1,4 +1,4 @@
-// 12c-1 D1: a probe that raises the estimate restarts the climb, so a link that falls
+// A probe that raises the estimate restarts the climb, so a link that falls
 // and rises is followed up. The plan alone, then the host on the fake wire, then the
 // replay a retained run takes.
 

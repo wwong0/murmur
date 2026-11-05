@@ -1,4 +1,4 @@
-// 13a's probe readings on constructed runs: D1's validity rule, one hide's readings and D7's rule.
+// The hidden-tab probe readings on constructed runs: the validity rule, one hide's readings and D7's rule.
 
 import { check, assert, assertEqual } from '../harness.mjs';
 import { d7Return, hideWindows, landedAtMs, readHide, validateRun } from '../../hidden-tab-readings.mjs';

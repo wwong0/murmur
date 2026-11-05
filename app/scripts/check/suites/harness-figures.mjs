@@ -243,8 +243,8 @@ export default async function harnessFiguresSuite() {
   });
 
   // The records above carry cumulative probe counters. echo-probe.mjs writes
-  // exactly { seq, t1, t4, rttMs, lost } per probe, and a lost probe has no t4
-  // (d1-findings.md Q2). The edge probes separate placement by t1 from by t4.
+  // exactly { seq, t1, t4, rttMs, lost } per probe, and a lost probe has no t4.
+  // The edge probes separate placement by t1 from by t4.
   await check('harness figures: echo loss reads the flag echo-probe.mjs actually writes', async () => {
     const probe = (seq, t1, rttMs) => (rttMs === null
       ? { seq, t1, t4: null, rttMs: null, lost: true }

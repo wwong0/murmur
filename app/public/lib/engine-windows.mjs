@@ -10,7 +10,7 @@ export const ENGINE_WINDOW_DEFAULTS = Object.freeze({
   p2pDownloadTimeWindow: 6000,
 });
 
-// The product's own windows (design.md D1) — what a page builds when the harness
+// The product's own windows — what a page builds when the harness
 // supplies none. Distinct from ENGINE_WINDOW_DEFAULTS, which stays the library's set.
 export const PRODUCT_ENGINE_WINDOWS = Object.freeze({
   highDemandTimeWindow: 15,

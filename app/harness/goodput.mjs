@@ -2,7 +2,7 @@
 // container.
 //
 // The byte count is the file's size and the elapsed time is the client's own
-// monotonic clock (executor-spec.md §3.3). Both ends of that are deliberate:
+// monotonic clock. Both ends of that are deliberate:
 // a goodput computed from `Date.now()` would be a measurement of the container's
 // wall clock, and a byte count taken from the sender would be a measurement of
 // what the origin queued rather than of what arrived.

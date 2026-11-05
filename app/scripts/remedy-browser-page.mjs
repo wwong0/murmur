@@ -3,7 +3,7 @@
 // The research collector that runs INSIDE the page, and the three factory
 // wrappers the research build redirects the entry point's imports to.
 //
-// Rules that survive any edit (`remedy-browser-executor-spec.md` section 4):
+// Rules that survive any edit:
 //
 //  1. IT DOES NOT CONTROL PLAYBACK. Every wrapper forwards the original
 //     arguments to the original factory and returns what it returned. A rate is
@@ -308,7 +308,7 @@ export function createCollector({
 
   /** The product log, kept so the recorder can drain it on a cursor of its own
    *  — the controller's intake and this one are different readers and must not
-   *  share a count (`remedy-browser-executor-spec.md` section 4). */
+   *  share a count. */
   function attachLog(instance) {
     if (log === null) log = instance;
   }

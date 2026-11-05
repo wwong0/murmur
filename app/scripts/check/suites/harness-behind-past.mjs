@@ -1,4 +1,4 @@
-// Change 10a T6: the `behind-past` rows that need every viewer's streams — the
+// The `behind-past` rows that need every viewer's streams — the
 // skip's landing (B6), its resync (B7), the other viewers (B8) and the residual
 // table (B9) — on one constructed run with hand-computed expectations. Pure.
 

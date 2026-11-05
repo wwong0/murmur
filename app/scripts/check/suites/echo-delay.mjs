@@ -1,4 +1,4 @@
-// T15 (design.md D2, the echo round trip): the queue signal the host's estimate
+// The echo round trip: the queue signal the host's estimate
 // reads, and the two ends of the echo. No server, no timer.
 
 import { assert, assertEqual, check } from '../harness.mjs';

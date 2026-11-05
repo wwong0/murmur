@@ -192,7 +192,7 @@ export default async function titleEntrySuite() {
     assertEqual(page.app.title().loadedTitle, TITLE_B, 'the replacement load records title B');
   });
 
-  // 12a D1 F2: a rejoin adopts the room's state with no applied operation; the old title must still go.
+  // A rejoin adopts the room's state with no applied operation; the old title must still go.
   await check('title-entry: a state adopted with a new title discards the old media', async () => {
     const page = viewerPage(product.code);
     await preparePage(page);

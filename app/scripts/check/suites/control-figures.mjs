@@ -81,7 +81,7 @@ export default async function controlFiguresSuite() {
 
   // A condition with no steady bars (p2p-scattered) publishes its spans with
   // null bars and no passing leg. Widening the absent bars gave NaN, which
-  // withheld the run's byte figure (8b2 p2p-scattered attempt 1). The pair
+  // withheld the run's byte figure (p2p-scattered, attempt 1). The pair
   // differs only in bars. Red without the repair: both bars read NaN, not null.
   await check('control figures: a condition without steady bars publishes null recovery bars, never non-finite', async () => {
     const input = (bars) => baseInput({ condition: { peerExchange: true, bars }, declaredClientTags: ['c01'],

@@ -124,7 +124,7 @@ async function qualifyWith(unavailable, qualify) {
   try {
     return await qualify() ?? failedQualification('qualification-failed:no-result');
   } catch (error) {
-    // A starved fetch is a runner fault, not evidence to refuse on (9b design.md D1).
+    // A starved fetch is a runner fault, not evidence to refuse on.
     if (error?.code === QUALIFICATION_FETCH_TIMEOUT) throw error;
     return failedQualification(`qualification-error:${error?.message ?? String(error)}`);
   }
@@ -237,7 +237,7 @@ const oneViewing = (manifest) => manifest.multiplierDenominator === 'one-viewing
 const HOST_ARM = Object.freeze({
   ...baseArm({ hostTag: 'c00', runDirPrefix: '9b', readyTimeoutMs: 120_000 }),
   qualifyAfterJoins: true,
-  // D5's one viewing sizes the played stretch from the content, as the peer arm does.
+  // A one-viewing run sizes the played stretch from the content, as the peer arm does.
   recomputeContent: (manifest, runDir) => (oneViewing(manifest) ? recomputePeerContent(manifest, runDir) : manifest.content),
   recomputeSegmentSeconds: (manifest, runDir) => recomputePeerSegmentSeconds(manifest, runDir),
   async openWindow({ sessions, condition, deadline, establishCadence, manifestFile, placeWindow }) {
@@ -353,7 +353,7 @@ const HOST_ARM = Object.freeze({
     });
     return session;
   },
-  // Issued at the first viewer's join and collected after the last (9b design.md D1).
+  // Issued at the first viewer's join and collected after the last.
   beginQualification(sessions, { beginLinkQualification, segmentSeconds }) {
     const viewerTab = sessions[0]?.tab;
     return viewerTab ? beginLinkQualification(viewerTab, { segmentSeconds }) : null;
@@ -407,7 +407,7 @@ const HOST_ARM = Object.freeze({
     for (const refusal of evidenceRefusals({ ...input.controlEvidence, seek: input.seek, peerExchange: input.condition?.peerExchange === true })) {
       addReason(refusal.reason, REFUSAL_SCOPE.control, refusal.detail);
     }
-    // Absent only on evidence constructed or retained before 9b; a live run carries it.
+    // Absent only on hand-built or older retained evidence; a live run carries it.
     if (input.assignmentControl) {
       const rosterPage = changesMembership(condition.rosterEvent?.kind) ? input.rosterEvent?.client ?? null : null;
       for (const { reason, ...detail } of controlRefusals(condition, input.assignmentControl.readings, { rosterPage })) {
@@ -621,7 +621,7 @@ async function readEngineWindows(session, condition) {
   };
 }
 
-// T4 (design.md D2): the host's one reading, taken at the start boundary
+// The host's one reading, taken at the start boundary
 // alongside the host counter snapshot — the earliest common "ready" point a
 // single host session has, mirroring readEngineWindows above.
 async function readHeadroom(session) {
@@ -673,7 +673,7 @@ function viewerInterfaceRefusals(input, tags, addReason) {
   }
 }
 
-// Absent only on directories retained before 7c; a live run always carries the object.
+// Absent only on older retained directories; a live run always carries the object.
 function engineWindowRefusals(input, tags, addReason) {
   if (!input.engineWindows) return;
   const expected = declaredEngineWindows(input.condition ?? {}) ?? PRODUCT_ENGINE_WINDOWS;
@@ -760,7 +760,7 @@ const PEER_ARM = Object.freeze({
   async captureBoundaryExtras(kind, context) {
     const extras = await HOST_ARM.captureBoundaryExtras(kind, context);
     // Read at the boundary itself: the bypass check compares it with the peer
-    // upload read at the same boundary (7c d1-findings.md F2).
+    // upload read at the same boundary.
     const viewerLinks = await context.options.viewerLinkReader?.() ?? null;
     writeJson(path.join(context.runDir, `viewer-link-${kind}.json`), viewerLinks);
     const clients = {};

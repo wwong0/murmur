@@ -1,5 +1,5 @@
-// scripts/check/suites/theatre-flip.mjs — the player's theatre move as keyframes (12e design.md
-// D11; tasks 3.5). Pure: no server, no clock.
+// scripts/check/suites/theatre-flip.mjs — the player's theatre move as keyframes.
+// Pure: no server, no clock.
 
 import { check, assert, assertEqual } from '../harness.mjs';
 import { flipKeyframes } from '../../../public/lib/theatre-flip.mjs';

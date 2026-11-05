@@ -4,12 +4,12 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Secrets. Change 1b's host identity is a secret today; change 7a adds more.
+# Secrets, the host identity among them.
 .env
 .env.*
 !.env.example
 
-# OS junk. Development is on Windows, change 6 runs on Linux.
+# OS junk. Development is on Windows, the container harness runs on Linux.
 Thumbs.db
 desktop.ini
 .DS_Store
@@ -30,14 +30,13 @@ desktop.ini
 app/content/
 step0/content/
 
-# The owner's personal media, read by change 11's keyframe report. Never committed.
+# Personal test media, read by the keyframe report. Never committed.
 test_videos/
 
 # Scratch from the spike rig's runs.
 spike-host-origin/.tmp/
 
-# Session handoff notes — transient by construction; the durable record is the
-# change's artifacts.
+# Working notes — transient by construction, never a record.
 .claude/temp/
 
 # IDE workspace state. Per-machine and per-developer — module paths, code-style
@@ -47,14 +46,13 @@ spike-host-origin/.tmp/
 .vscode/
 
 # NOT ignored, deliberately:
-#   *.md anywhere — the docs are the review surface. Session D3 edits them, and
-#     they are inside the diff it reviews. An untracked doc is the one thing a
-#     subtractive review cannot undo.
+#   *.md anywhere — the docs are the review surface, and belong inside the diff
+#     a review reads. An untracked doc is the one thing a review cannot undo.
 #   step0/results/, spike-host-origin/results/ — measurement records, not build
 #     output. They are the evidence behind FINDINGS.md and RESULT.md.
-#   package-lock.json — the hls.js version is load-bearing (PLAN.md, change 7a).
+#   package-lock.json — the hls.js version is load-bearing.
 
-# Derived D7 analysis, regenerable from the raw channels beside it. One full
+# Derived rate-response analysis, regenerable from the raw channels beside it. One full
 # sweep writes ~130MB of these against ~25MB of irreplaceable capture, and
 # `node scripts/verify-rate-response.mjs --reanalyze <dir>` rebuilds every one of
 # them offline from frames/captures/commands — which is why the mode exists. The
@@ -74,6 +72,5 @@ app/results/4e-duration-*/console.log
 debug.log
 .tmp/
 
-# A coordinator chain's scratch: its state file, briefs and run logs. The durable
-# record is the change folder; docs/workflow/coordinator.md is how to coordinate.
+# Tooling scratch: a state file and run logs, never a record.
 .coordinator/

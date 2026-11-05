@@ -42,9 +42,8 @@ function freezeMapping(value) {
     playing: value.playing,
     atSharedMs: value.atSharedMs,
     mediaMs: value.mediaMs,
-    // T5 (design.md D3/D4): emitted only when true, so every non-held mapping's
-    // shape — and every existing suite's JSON comparison against it — is
-    // unchanged.
+    // Emitted only when true, so every non-held mapping's shape — and every
+    // existing suite's JSON comparison against it — is unchanged.
     ...(value.held === true ? { held: true } : {}),
   });
 }
@@ -135,7 +134,7 @@ function malformedEnvelope(env, maxFutureMs) {
   if (payload.kind === 'play' || payload.kind === 'pause' || payload.kind === 'seek') {
     if (!Number.isFinite(payload.atSharedMs)) return true;
     if (payload.kind === 'seek' && !Number.isFinite(payload.positionMs)) return true;
-    // T5: a seek's `hold` is absent or boolean; any other type is malformed.
+    // A seek's `hold` is absent or boolean; any other type is malformed.
     if (payload.kind === 'seek' && payload.hold !== undefined && typeof payload.hold !== 'boolean') return true;
     return payload.atSharedMs > env.ts.recv + maxFutureMs;
   }
@@ -185,7 +184,7 @@ export function createPlaybackStateHolder({ maxFutureMs }) {
       && rosterHasHost(roster) && role !== 'host') return reject('notPermitted');
 
     if (payload.kind !== 'create' && payload.kind !== 'control-mode') {
-      // T5: a pause is applicable when the state is playing, OR when it is held —
+      // A pause is applicable when the state is playing, OR when it is held —
       // a held mapping is a paused one, but ending the hold is still a pause.
       if ((payload.kind === 'play' && held.current.playing)
         || (payload.kind === 'pause' && !held.current.playing && !held.current.held)
@@ -214,7 +213,7 @@ export function createPlaybackStateHolder({ maxFutureMs }) {
       } else if (payload.kind === 'title') {
         current = { playing: false, atSharedMs: effective, mediaMs: 0 };
       } else if (payload.hold === true) {
-        // T5: a held seek pauses at the landing whatever the prior playing flag.
+        // A held seek pauses at the landing whatever the prior playing flag.
         current = { playing: false, atSharedMs: effective, mediaMs: Math.max(0, payload.positionMs), held: true };
       } else {
         current = {

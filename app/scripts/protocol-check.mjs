@@ -7,7 +7,7 @@
 // It needs no browser and no harness — KEEP IT CHEAP. A check that takes thirty
 // seconds is one you run occasionally, and a check run occasionally has stopped
 // catching things early. That is why the server takes its liveness interval as
-// a setting (design.md D8), and why the refusal-policy checks in the
+// a setting, and why the refusal-policy checks in the
 // room-client suite run as a concurrent group rather than in sequence.
 //
 // The servers are started IN THIS PROCESS on ephemeral ports, so their clocks
@@ -37,7 +37,7 @@ fs.mkdirSync(new URL('../.tmp/', import.meta.url), { recursive: true });
 
 // Order matters only for legibility: each suite takes rooms of its own, so none
 // of them can observe another. Every suite is imported before the first runs,
-// and one that throws is one failed check, not the end of the run (14d D7).
+// and one that throws is one failed check, not the end of the run.
 const SUITES = [
   'media',
   'byte-accounting',

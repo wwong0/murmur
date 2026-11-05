@@ -1,4 +1,4 @@
-// 9b design.md D1 (J6): the link qualification's fetch is issued when the first
+// The link qualification's fetch is issued when the first
 // viewer's link opens, collected after the joins, and a fault after 180 s.
 
 import { assert, assertEqual, check } from '../harness.mjs';

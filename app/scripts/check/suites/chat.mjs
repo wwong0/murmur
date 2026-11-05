@@ -1,4 +1,4 @@
-// scripts/check/suites/chat.mjs — the room relays chat and keeps none (12d D4).
+// scripts/check/suites/chat.mjs — the room relays chat and keeps none.
 
 import { check, assert, assertEqual } from '../harness.mjs';
 import {

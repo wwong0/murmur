@@ -1,7 +1,7 @@
 // The qdisc preflight: does this runtime's kernel carry `sch_tbf` and
 // `sch_netem`, and can a container attach them? It runs before any image is
-// built, because a rig that cannot impair is the one fact that ends change 6a
-// (design.md D1, OQ3).
+// built, because a rig that cannot impair is the one fact that ends the
+// container harness.
 
 import fs from 'node:fs';
 import path from 'node:path';

@@ -10,7 +10,7 @@ export const RATE_WINDOW_MS = 1000;
 const CONTROL_TYPES = new Set(['req', 'abort', 'head', 'end', 'err', 'echo', 'class']);
 const textEncoder = new TextEncoder();
 
-// 12c-1 design.md D2: a request's class only rises, urgent over near. `flags` carries
+// A request's class only rises, urgent over near. `flags` carries
 // `urgent` and `near`; any other class leaves them as they are.
 export function raiseClass(flags, cls) {
   if (cls === 'urgent') {
@@ -247,7 +247,7 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
     notifyWaiting();
   }
 
-  // The next body in turn among urgent, near, then normal bodies (design.md D2).
+  // The next body in turn among urgent, near, then normal bodies.
   function select() {
     let fallback = null;
     let nearFallback = null;
@@ -264,7 +264,7 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
 
   function offer() {
     if (closed || channel.bufferedAmount >= currentBound()) return null;
-    // design.md D2, the cap: the host holds a channel with too much unconfirmed.
+    // The cap: the host holds a channel with too much unconfirmed.
     if (held?.() === true) return null;
     const selected = select();
     if (!selected) return null;
@@ -360,7 +360,7 @@ export function createChannelSender({ channel, clock, settings = {}, onClosed = 
         if (sendControl({ t: 'end', id })) removeBody(id);
       }
     },
-    // 12c-1 design.md D2: a body's class only rises; bytes already framed stay framed.
+    // A body's class only rises; bytes already framed stay framed.
     raise(id, cls) {
       const body = bodies.get(id);
       if (!body) return false;

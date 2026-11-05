@@ -2,7 +2,7 @@ import { check, assert, assertEqual } from '../harness.mjs';
 import { peerEngineConfig } from '../../../public/lib/peer-engine-config.mjs';
 import { ENGINE_WINDOW_DEFAULTS, PRODUCT_ENGINE_WINDOWS } from '../../../public/lib/engine-windows.mjs';
 
-// Core keys are exact: since T1 (design.md D1) the core always carries the three
+// Core keys are exact: the core always carries the three
 // window keys, from the product's set when none is supplied.
 const CORE_KEYS = ['swarmId', 'announceTrackers', 'rtcConfig', 'highDemandTimeWindow', 'httpDownloadTimeWindow', 'p2pDownloadTimeWindow', 'segmentMemoryStorageLimit', 'httpNotReceivingBytesTimeoutMs'];
 

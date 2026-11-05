@@ -1,6 +1,6 @@
 // scripts/runner/page-driver.mjs
 //
-// The skeleton FP and PK share (change 12e): one default-paused room server, one Chrome, tabs
+// The skeleton FP and PK share: one default-paused room server, one Chrome, tabs
 // opened over the browser target, rows that read PASS, FAIL or NOT EXERCISED, and a report of
 // booleans, counts and positions. RD and NC carry their own copies of the same shape; this is
 // the first one written once.

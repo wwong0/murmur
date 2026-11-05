@@ -40,7 +40,7 @@ export default async function hostEntrySuite() {
     await drain();
     assertEqual(page.count('connect'), 0, 'a page without fetch does not connect');
     assert(page.notices().some((text) => text.includes('settings unavailable: fetch is unavailable')), 'a page without fetch says its settings are unavailable');
-    // Mutation, D1 2026-09-23: the `{ delivery: 'host' }` fallback restored turned
+    // Mutation, 2026-09-23: the `{ delivery: 'host' }` fallback restored turned
     // 'a page without fetch does not connect' red; restored, green.
   });
 
@@ -67,7 +67,7 @@ export default async function hostEntrySuite() {
     assertEqual(peers[0].closed, false, 'a member-relayed presence leaves the viewer peer open');
     page.deliver({ type: 'presence', from: 'server', payload: { event: 'leave', member: viewer, roster: [host] } });
     assertEqual(peers[0].closed, true, 'the server presence of the viewer leaving closes its peer');
-    // Mutation, D1 2026-09-23: the entry's presence handler without its
+    // Mutation, 2026-09-23: the entry's presence handler without its
     // `env.from === ADDR_SERVER` guard turned 'a member-relayed presence leaves
     // the viewer peer open' red; restored, green.
   });

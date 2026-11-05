@@ -1,6 +1,6 @@
-// T6 (design.md D5; tasks.md 3.2): the `ahead` envelope type and its relay to
+// The `ahead` envelope type and its relay to
 // the host. Nothing under `server/**` — the server blind-relays any directed
-// type the way it already relays `host-link-offer`/`host-link-ice` (7a).
+// type the way it already relays `host-link-offer`/`host-link-ice`.
 
 import { assert, assertEqual, check } from '../harness.mjs';
 import { TYPE_AHEAD, buildAheadEnvelope, readAheadReport } from '../../../public/lib/envelope.mjs';

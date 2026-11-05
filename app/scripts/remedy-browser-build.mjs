@@ -3,7 +3,7 @@
 // The two isolated research bundles, and the guards that make building them
 // safe to run in a tree that also holds the product's own bundle.
 //
-// Rules that survive any edit (`remedy-browser-executor-spec.md` section 3):
+// Rules that survive any edit:
 //
 //  1. NOTHING IS WRITTEN OUTSIDE THE RESEARCH ROOT. esbuild runs with
 //     `write: false`, the output root is resolved and checked BEFORE the build,

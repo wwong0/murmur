@@ -1,14 +1,14 @@
 // Attaching a condition's qdiscs, and refusing the run when the kernel reports
 // something other than what was asked for.
 //
-// Two rules from design.md D1 are operable here and nowhere else. **A qdisc is
+// Two rules are operable here and nowhere else. **A qdisc is
 // attached to one interface in one direction, and the condition says which** —
 // so nothing in this file guesses a container, an interface or a direction;
 // each is read out of the condition. And **the interface is resolved by its
 // IPv4 address on the declared network's subnet, never named `eth0`**: a
 // container on two networks receives them in an order Docker does not promise,
 // and shaping the control interface would shape the channel the measurement is
-// read over (executor-spec.md §3.1).
+// read over.
 //
 // The read-back is the proof, not the exit code. `tc qdisc add` can exit zero
 // and leave a discipline whose parameters the kernel rounded, replaced or
@@ -43,8 +43,8 @@ export function dockerExec(container, argv, exec = defaultExec) {
 
 const execFileAsync = promisify(execFile);
 
-// `defaultExec` without blocking the thread the poll loops run on (9b design.md
-// D1, J16). A non-zero exit throws with `status`, as `execFileSync` does.
+// `defaultExec` without blocking the thread the poll loops run on. A non-zero
+// exit throws with `status`, as `execFileSync` does.
 export async function asyncExec(argv) {
   try {
     const { stdout } = await execFileAsync(argv[0], argv.slice(1), { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
@@ -243,7 +243,7 @@ function paramArgv(params) {
  * The argv for one qdisc. `order` decides where it attaches: the first
  * discipline is the root, the second hangs under it. The two orders do not
  * shape identically, which is why the condition declares it and this function
- * never sorts (executor-spec.md §3.4).
+ * never sorts.
  */
 export function qdiscArgv({ ifName, discipline, params, order }) {
   const handle = `${order}0:`;
@@ -294,8 +294,8 @@ export function clearInterface(container, ifName, exec = defaultExec) {
  */
 /**
  * `container: "client"` in a condition means EVERY client, because loss is
- * applied symmetrically unless a condition records a reason not to (design.md
- * D1) and a room where one client is impaired and the rest are not is a
+ * applied symmetrically unless a condition records a reason not to, and a room
+ * where one client is impaired and the rest are not is a
  * different experiment. The expansion is explicit so the manifest records one
  * row per container actually shaped, not the word "client".
  */

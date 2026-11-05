@@ -1,6 +1,6 @@
-// 9b design.md D5: the host's capacity drops deep, and rises once every viewer
+// The host's capacity drops deep, and rises once every viewer
 // has published a held-ahead below the edge figure or the deep phase's ceiling
-// has passed. Each step is applied and read back as 8a's capacity step is.
+// has passed. Each step is applied and read back as a single capacity step is.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,7 +21,7 @@ const object = (value) => Boolean(value) && typeof value === 'object' && !Array.
 const keysOf = (value) => (object(value) ? Object.keys(value).sort().join(',') : '');
 const realSleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
-/** The shape 8a's `capacityStep` must have: the origin's tbf on the media network, three parsed parameters. */
+/** The shape `capacityStep` must have: the origin's tbf on the media network, three parsed parameters. */
 export function stepShapeValid(step) {
   const params = step?.params;
   if (keysOf(step) !== 'container,discipline,network,params' || keysOf(params) !== 'burst,latency,rate') return false;

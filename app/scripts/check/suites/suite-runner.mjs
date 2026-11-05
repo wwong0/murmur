@@ -1,4 +1,4 @@
-// The running order survives a suite that throws (14d design.md D7).
+// The running order survives a suite that throws.
 import { assertEqual, check } from '../harness.mjs';
 import { runSuites } from '../run-suites.mjs';
 

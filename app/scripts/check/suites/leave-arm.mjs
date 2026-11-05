@@ -1,4 +1,4 @@
-// 12c-1 D5: the leave arm passes on three exercised runs that each show the leave.
+// The leave arm passes on three exercised runs that each show the leave.
 
 import { assertEqual, check } from '../harness.mjs';
 import { leaveArmReading } from '../../figures/roster-event.mjs';

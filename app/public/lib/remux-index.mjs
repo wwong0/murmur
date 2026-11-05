@@ -129,7 +129,7 @@ function findBox(box, name) {
   return (box.boxes ?? []).some((child) => findBox(child, name));
 }
 
-// D13: each track's skip goes into its timestamps, plus one offset that is a whole number of
+// Each track's skip goes into its timestamps, plus one offset that is a whole number of
 // ticks in both timescales, so no decode time is negative and neither track moves on the other.
 function applyTimeline(video, audio) {
   const tracks = [video, audio].filter(Boolean);
@@ -143,9 +143,9 @@ function applyTimeline(video, audio) {
   return { commonTimescale: common, timelineUnits: units };
 }
 
-// The walk is ours (OQ8): the library parses only contiguous buffers, so it is handed every
+// The walk is ours: the library parses only contiguous buffers, so it is handed every
 // box whole except mdat, of which it gets the header. Reading 16 bytes for an 8-byte header
-// reads media data, and D11 decides every refusal before a media byte is read.
+// reads media data, and every refusal is decided before a media byte is read.
 export async function readSourceIndex(source) {
   if (!source || !Number.isSafeInteger(source.size) || source.size < 0) throw new Error('source size must be a non-negative safe integer');
   if (source.size < 8) refusal('not-mp4', 'not-mp4: file is shorter than an MP4 box header');
@@ -210,7 +210,7 @@ export async function readSourceIndex(source) {
   if (selected.some((track) => track.codec === 'encv' || track.codec === 'enca')) refusal('encrypted', 'encrypted: encryption is present in the media');
   if (!videoInfo.codec.startsWith('avc1.')) refusal('video-codec', `video-codec: found ${videoInfo.codec}`);
   if (audioInfo && !['mp4a.40.2', 'mp4a.40.5', 'mp4a.40.29'].includes(audioInfo.codec)) refusal('audio-codec', `audio-codec: found ${audioInfo.codec}`);
-  // Only the two tracks that are written are judged: D11 drops the rest, it does not refuse them.
+  // Only the two tracks that are written are judged: the rest are dropped, not refused.
   const sourceTracks = selected.map((track) => {
     try {
       return { info: track, source: mp4.getTrackById(track.id) };

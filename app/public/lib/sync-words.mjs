@@ -1,4 +1,4 @@
-// The sync dot's tooltip lines (design.md D10), from `sync-dot.mjs`'s state and the controller's
+// The sync dot's tooltip lines, from `sync-dot.mjs`'s state and the controller's
 // estimate. Positive is ahead of the room (`drift-readout.mjs`, `frame-drift.mjs`).
 
 const HEADLINE = { 'in-sync': 'In sync', correcting: 'Catching up' };

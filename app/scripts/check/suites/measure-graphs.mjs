@@ -126,7 +126,7 @@ export default async function measureGraphsSuite() {
       'excluded by an automatic check (x)',
       'unknown reason',
     );
-    // A refused run keeps its own reason beside the multiplier's, each phrase once (13g D1 F1).
+    // A refused run keeps its own reason beside the multiplier's, each phrase once.
     assertEqual(
       reasonText({
         valid: false,
@@ -300,7 +300,7 @@ export default async function measureGraphsSuite() {
       () => connection.data(fixture(rows.map((r) => r.condition === '13d-a-five' ? { ...r, uplink: 1 } : r))),
       'takeaway-unsupported:connection',
     );
-    // "in-step": 30 ms is more than one refresh past the 16.7 ms floor (13g D1 F4).
+    // "in-step": 30 ms is more than one refresh past the 16.7 ms floor.
     throws(
       () => connection.data(fixture(rows.map((r, i) => i === 0 ? { ...r, readings: lab(30) } : r))),
       'takeaway-unsupported:connection',

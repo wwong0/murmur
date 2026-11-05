@@ -78,7 +78,7 @@ export default async function roomContinuityStepsSuite() {
   await cases('RC5 host reload', rc5, rc5Good, { ...clone(rc5Good), reloads: rc5Good.reloads.map((entry, index) => index ? entry : { ...entry, polls: [{ viewers: [{ state: state() }, { state: state({ playing: true }) }] }] }) });
   await cases('RC6 grace pause', rc6, rc6Good, { ...clone(rc6Good), viewers: rc6Good.viewers.map((viewer, index) => index ? viewer : { ...viewer, paused: { ...viewer.paused, playing: true } }) });
   await cases('RC7 title B', rc7, rc7Good, { ...clone(rc7Good), members: [member(idB, 'title-b.mp4', { version: 6, positionMs: 1 }), ...rc7Good.members.slice(1)] });
-  // 12a D1 F4, F5: the element's name, and peer bytes from the other viewer's new engine.
+  // The element's name, and peer bytes from the other viewer's new engine.
   await check('room-continuity-steps: RC3 and RC7 read #title-name; RC7 peer bytes name the new engine', async () => {
     const wrongElement = (good) => ({ ...clone(good), members: good.members.map((entry, index) => (index === 1 ? { ...entry, titleName: '' } : entry)) });
     assertEqual(rc3(wrongElement(rc3Good)).verdict, 'FAIL', 'RC3 fails when #title-name is not the name');

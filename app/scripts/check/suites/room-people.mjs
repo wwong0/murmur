@@ -1,4 +1,4 @@
-// Member labels, activity lines and the media-time format (design.md D12, D13), pure.
+// Member labels, activity lines and the media-time format, pure.
 
 import { assert, assertEqual, check } from '../harness.mjs';
 import { formatMediaTime } from '../../../public/lib/media-time.mjs';

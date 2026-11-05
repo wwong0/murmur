@@ -108,7 +108,7 @@ export class Peer {
     this.cursor = 0;
     this.closed = false;
     this.closeCode = null;
-    // Liveness pings this socket has been sent. The D13 no-probe assertion runs
+    // Liveness pings this socket has been sent. The no-probe assertion runs
     // against a server whose sweep cannot fire during it, so any ping counted
     // there was sent for the refusal.
     this.pings = 0;
@@ -432,7 +432,7 @@ export async function checkGroup(entries) {
 
 /**
  * A suite that threw outside a `check()`, at import or in its body: one failed
- * check named for the suite, so the run goes on and says what it lost (14d D7).
+ * check named for the suite, so the run goes on and says what it lost.
  */
 export function suiteFailed(name, error) {
   record({ name: `suite ${name}: threw outside a check`, ok: false, error });
@@ -440,7 +440,7 @@ export function suiteFailed(name, error) {
 
 /**
  * A check that cannot run here, printed and counted apart from passes, never a
- * PASS: `assert(true)` in its place read as a guard that guarded nothing (14d D6).
+ * PASS: `assert(true)` in its place read as a guard that guarded nothing.
  */
 export const skipped = [];
 
@@ -449,7 +449,7 @@ export function skip(name, reason) {
   console.log(`  SKIP  ${name} — ${reason}`);
 }
 
-/** The retained evidence tree; a clone may not carry it (14b P1d). */
+/** The retained evidence tree; a clone may not carry it. */
 export const RESULTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'results');
 
 /** Skips the named suite, counted, when `app/results/` is absent; true when it did. */

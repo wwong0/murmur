@@ -1,8 +1,7 @@
 // scripts/check/suites/runner-core.mjs
 //
 // The run lifecycle in `scripts/runner/`, asserted here because a guard that
-// lives only inside a browser runner is never run (CONSTRAINTS.md ->
-// Verification).
+// lives only inside a browser runner is never run.
 //
 // No browser and no container. The two HTTP servers below are a few lines of
 // `node:http` each, on ephemeral ports, disposed in a `finally`.

@@ -16,7 +16,7 @@ function reasonValue(value) {
   return typeof value === 'string' ? value : value?.reason ?? null;
 }
 
-// D2 clauses 1 and 2: the exit was observed, and the manifest is complete or refused for playback only.
+// Validity clauses 1 and 2: the exit was observed, and the manifest is complete or refused for playback only.
 export function statusValidity(entry = {}, run = {}) {
   const reasons = [];
   if (!Number.isInteger(entry.exit)) reasons.push('exit-unobserved');

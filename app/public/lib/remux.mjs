@@ -24,7 +24,7 @@ function videoRanges(video, segments) {
   return ranges;
 }
 
-// D2: samples that touch in the file are read as one run, and nothing between runs is
+// Samples that touch in the file are read as one run, and nothing between runs is
 // read, so the bytes read for a segment are exactly its payload.
 async function readSegmentBytes(source, parts) {
   const samples = [];
@@ -100,8 +100,7 @@ export async function writePlanned({ index, segments, audioRanges, source, sink,
 }
 
 // The order is the contract: a bad target throws before any read, a refusal before any
-// write, and the manifest is written last because change 11-2 reads its presence as
-// "complete".
+// write, and the manifest is written last because its presence is read as "complete".
 export async function prepare({ source, sink, targetSeconds = DEFAULT_TARGET_SEGMENT_SECONDS, onProgress = null }) {
   const targetMs = targetMillis(targetSeconds);
   const index = await readSourceIndex(source);

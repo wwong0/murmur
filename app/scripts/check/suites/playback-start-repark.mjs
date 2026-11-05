@@ -1,6 +1,6 @@
 // scripts/check/suites/playback-start-repark.mjs
 //
-// The late-start re-park (7b2 executor-spec.md T10): the reducer with a fake
+// The late-start re-park: the reducer with a fake
 // element, then the entry's wiring and telemetry. No browser, no timer.
 
 import { check, assert, assertEqual } from '../harness.mjs';

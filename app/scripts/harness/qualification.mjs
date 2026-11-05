@@ -17,8 +17,8 @@ export const CDP_QUALIFICATION_REASON = 'cdp-byte-mapping-unqualified';
 export const LINK_RECEIPT_QUALIFICATION_REASON = 'link-receipt-mapping-unqualified';
 
 /**
- * The CDP byte mapping, against a file whose size the origin reports
- * (executor-spec.md §5.4). Until this passes, no figure derived from the CDP
+ * The CDP byte mapping, against a file whose size the origin reports. Until
+ * this passes, no figure derived from the CDP
  * request records may be published, and the gate fails closed. It lives here
  * rather than beside the impairment verifier because the run driver needs it
  * too, and the verifier already imports from the driver.
@@ -99,7 +99,7 @@ async function waitForOpen(tab, { timeoutMs = 30_000, now = Date.now, pause = sl
 }
 
 export const QUALIFICATION_FETCH_TIMEOUT = 'qualification-fetch-timeout';
-// 180 s since 2026-10-08, after 9b's first qualification attempt timed out at 30 s:
+// 180 s since 2026-10-08, after the first qualification attempt timed out at 30 s:
 // a far fetch waits behind every urgent and near request while the viewers fill.
 export const LINK_QUALIFICATION_TIMEOUT_MS = 180_000;
 const QUALIFICATION_SLOT = '__waLinkQualification';
@@ -117,7 +117,7 @@ function issueFetchExpression(segment) {
 
 /**
  * Issues the qualification fetch as soon as the viewer's host link is open, and
- * returns without awaiting its body (9b design.md D1, J6): at that point the host
+ * returns without awaiting its body: at that point the host
  * has no estimate and no pace to starve it behind.
  */
 export async function beginLinkQualification(viewerTab, { segmentSeconds, mediaPositionMs = QUALIFICATION_MEDIA_POSITION_MS, now = Date.now, pause = sleep } = {}) {
@@ -141,7 +141,7 @@ export function hostEstimateNear(readings = [], atMs) {
 /**
  * Collects the fetch `beginLinkQualification` issued. A body not complete
  * `timeoutMs` after it was issued is a runner fault and throws; the four-way
- * agreement is otherwise the one 8b2 qualified with.
+ * agreement is otherwise the one earlier runs qualified with.
  */
 export async function finishLinkQualification(handle, hostTab, { originContainer, timeoutMs = LINK_QUALIFICATION_TIMEOUT_MS, now = Date.now, pause = sleep, exec = defaultExec } = {}) {
   const { viewerTab, segment } = handle;

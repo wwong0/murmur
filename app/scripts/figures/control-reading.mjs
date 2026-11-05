@@ -46,7 +46,7 @@ const STEADY_LEGS = {
 };
 
 // The failed leg is the steady test's own reason, never the first failed leg in
-// object order (design.md D6). A per-viewer leg publishes each failing viewer.
+// object order. A per-viewer leg publishes each failing viewer.
 export function steadyFailure(steady) {
   if (steady?.steady === true) return null;
   const reason = steady?.reason;
@@ -250,7 +250,7 @@ export function classifyControlRun(entry, reading, isAccepted = accepted) {
     sweep: config.sweep === true ? (control?.sweep ?? null) : null,
     wait: control?.holds ?? null,
     recovery: control?.recovery ?? null,
-    // Only an arm registered under 9b carries these, so an 8b2 run reads as it did.
+    // Only an arm registered with the edge reading carries these, so an earlier run reads as it did.
     ...(edgeReading(config) ? { notExercised: dropNotExercised(entry, config), edge: publishedEdge(entry) } : {}),
   };
 }

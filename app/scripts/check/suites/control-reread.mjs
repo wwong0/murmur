@@ -220,7 +220,7 @@ export default async function controlRereadSuite() {
     assertEqual(result.bars.steadyCapUsedMax, 0.9, 'the cap-used bar is nine tenths');
     assertEqual(JSON.stringify(result.removeBars), JSON.stringify(['steadyPaceBoundMax']), 'the pace bar is removed');
     assertEqual(result.excusals.bytelessCancelledReceipt, true, 'the byteless excusal is in force');
-    // design.md D5: the report is checked against the rule set, so the rule set is checked here.
+    // The report is checked against the rule set, so the rule set is checked here.
     assertEqual(JSON.stringify(ruleSet.labels), JSON.stringify(LABELS), 'the committed labels are the three of design.md D5');
   });
 }

@@ -114,7 +114,7 @@ export default async function routingSuite() {
     const a = await member('A', 'host');
     const b = await member('B');
 
-    // This is change 2's fallback shape: if the room's time reference moves from
+    // This is the clock probe's fallback shape: if the room's time reference moves from
     // the server to the host tab, the probe becomes exactly this exchange — and
     // the server needs no change to carry it.
     a.send({ v: PROTOCOL_VERSION, type: 'peer-probe', to: b.clientId, id: 'probe-7', payload: { t1: 1 } });

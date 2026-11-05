@@ -1,4 +1,4 @@
-// T3 (design.md D2; tasks.md 2.3): the shared token bucket, over constructed
+// The shared token bucket, over constructed
 // instants. Pure module — no server, no clock, no channel.
 
 import { assert, assertEqual, check } from '../harness.mjs';

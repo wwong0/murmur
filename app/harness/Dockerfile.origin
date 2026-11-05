@@ -10,8 +10,8 @@
 #
 # ffmpeg is here for `ffprobe`, and it is here rather than only in the client
 # because this is the container that has `/media` mounted. The content's frame
-# rate is read from the media every run and no constant is substituted for it
-# (executor-spec.md §10), so the reader has to be where the file is.
+# rate is read from the media every run and no constant is substituted for it,
+# so the reader has to be where the file is.
 
 FROM wa6a-client:latest
 

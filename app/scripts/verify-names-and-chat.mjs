@@ -1,4 +1,4 @@
-// Browser proof for names and chat (change 12d, design.md D7 and D9). It owns one default-paused
+// Browser proof for names and chat. It owns one default-paused
 // server whose chat allowance refills in a minute, so the rate row does not depend on typing
 // speed, and it holds that server's output in memory only: the last row reads it for the run's
 // marker and nothing of it is written. Every name and text carries one random marker; the report
@@ -186,7 +186,7 @@ const SELF_HIT = "(() => { const self = document.querySelector('.participant-sel
 const PROMPT_STATE = "(() => { const field = document.querySelector('#name-prompt-field'); const active = document.activeElement; return { present: document.querySelector('#name-prompt') !== null, field: field !== null, fieldEnabled: field !== null && !field.disabled, activeIsField: field !== null && active === field, activeTag: active?.tagName ?? null, activeInPrompt: Boolean(document.querySelector('#name-prompt')?.contains(active)) }; })()";
 
 // The prompt is answerable once its field is enabled and focused; a type into a field that is
-// still opening lands nowhere (12d d1-findings F10). The answer names the step that missed,
+// still opening lands nowhere. The answer names the step that missed,
 // never the name.
 async function answerPrompt(tab, name) {
   if (!(await until(tab, present(PROMPT), Boolean)).ok) return { answered: false, missed: 'shown' };
@@ -313,7 +313,7 @@ const BOLD = "document.querySelectorAll('.room-activity b').length";
 const CHAT_LINES = "document.querySelectorAll('.room-activity .activity-chat').length";
 
 // Arrival is read as one more chat line on both pages, whatever it renders as, so a page that
-// turns the markup into an element reads FAIL, not unexercised (post-result, 12d tasks.md Q1).
+// turns the markup into an element reads FAIL, not unexercised.
 async function bothGrew(before) {
   const counts = async () => [await read(hostTab, CHAT_LINES), await read(viewerTab, CHAT_LINES)];
   return poll(counts, ([a, b]) => a === before[0] + 1 && b === before[1] + 1, SHORT_MS * 2);

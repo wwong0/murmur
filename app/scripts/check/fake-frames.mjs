@@ -2,7 +2,7 @@
 //
 // Manufactured `requestVideoFrameCallback` metadata, and the callback binding
 // that delivers it. The whole drift path — sampler included — runs off this with
-// no browser and no elapsed time (design.md D7).
+// no browser and no elapsed time.
 //
 // It builds FORWARDS from the quantities a player actually has: where the room
 // says the frame should be, and where the frame's media timestamp actually is.
@@ -20,7 +20,7 @@
 export const DEFAULT_TIME_ORIGIN_MS = 1_756_000_000_000;
 
 /**
- * rVFC fires shortly BEFORE the frame is displayed, which is why the D3 guard
+ * rVFC fires shortly BEFORE the frame is displayed, which is why the sampler's guard
  * has to admit a display instant in the near future. Exported so a check that
  * builds its own frame builds it against the same lead this file uses.
  */
@@ -76,7 +76,7 @@ export function createFakeFrames(spec = {}) {
     const displayLocalMs = displaySharedMs - offsetMs;
 
     let expectedDisplayTime = displayLocalMs - timeOriginMs;
-    // The domain error the D3 guard exists for: a user agent handing back an
+    // The domain error the sampler's guard exists for: a user agent handing back an
     // absolute instant where the specification says a `performance.now()` one.
     // Every field still looks like a number, and the drift is out by 55 years.
     if (foreignTimebaseAt[i] === true) expectedDisplayTime = displayLocalMs;
@@ -116,10 +116,10 @@ export function createFakeFrames(spec = {}) {
 }
 
 /**
- * The injected `requestVideoFrameCallback` binding (D7). Delivery is
+ * The injected `requestVideoFrameCallback` binding. Delivery is
  * synchronous and driven by the check, so a run of frames costs no wall-clock
  * time and the log can be read mid-run — which is the only way to see a
- * transient (`CONSTRAINTS.md` → *Verification*).
+ * transient.
  *
  * `now` is the reading the sampler takes INSIDE the callback, and it walks with
  * the frame being delivered. It is deliberately not derived from the metadata:
@@ -203,7 +203,7 @@ export function createFrameBinding(fake) {
  *
  * `reads` records the instant each read was taken at, which is how a check
  * proves the estimate was read at the FRAME's display instant rather than at
- * wall-clock now (D5).
+ * wall-clock now.
  *
  * `counters` IS PART OF THAT SHAPE, on both branches, exactly as the filter
  * reports it. A consumer that reads one — the drift controller watches

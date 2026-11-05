@@ -1,4 +1,4 @@
-// 13a's hidden-tab probe (design.md D1): one arm per run, in the owner's regime, not the harness's.
+// The hidden-tab probe: one arm per run, in real desktop windows, outside the harness.
 //
 //   node scripts/probe-hidden-tab.mjs --arm H1|H2|H3|H4|H5|H6|Q --side left|right [--must-skip-return 2]
 //
@@ -29,7 +29,7 @@ const BUNDLE_PATH = path.join(APP_DIR, 'public', 'room.bundle.js');
 const PORT = 8140;
 const TRACKER_PORT = 8141;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
-// The occlusion flag only: a covered window reads hidden without it, before any hide (D1, post-setup, pre-result).
+// The occlusion flag only: a covered window reads hidden without it, before any hide (post-setup, pre-result).
 const CHROME_FLAGS = ['--no-first-run', '--no-default-browser-check', '--disable-features=CalculateNativeWinOcclusion'];
 const WINDOW = { width: 1000, height: 700 };
 const BOUNDS = { host: { left: 0, top: 0, ...WINDOW }, viewer: { left: 1024, top: 0, ...WINDOW } };
@@ -40,7 +40,7 @@ const OBSERVE_MS = 30_000;
 const MIN_FREE_BYTES = 4 * 1024 ** 3;
 const PROMPT_SUBMIT = '#name-prompt button[type="submit"]';
 
-// The arms, D1's table. `subject` is the page hidden; `during` runs at an offset into a hide.
+// The arms. `subject` is the page hidden; `during` runs at an offset into a hide.
 const ARMS = {
   Q: { subject: 'viewer', script: [{ hideMs: 8000 }], observeMs: 10_000 },
   H1: { subject: 'viewer', script: [{ hideMs: 10_000 }] },
@@ -149,7 +149,7 @@ const recorder = (harnessSeek) => `(() => {
   ${harnessSeek ? 'window.__waHarnessSeek = true;' : ''}
 })()`;
 
-// One reading of D1's list. `cursor` is how far this page's event log and receipts were read.
+// One sample. `cursor` is how far this page's event log and receipts were read.
 const sampleExpression = (cursor) => `(() => {
   const pageMs = performance.timeOrigin + performance.now();
   const visibility = document.visibilityState;

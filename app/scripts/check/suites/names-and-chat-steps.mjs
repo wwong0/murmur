@@ -1,4 +1,4 @@
-// The NC row evaluator (12d D9): missing evidence is never a pass, and a row that did not happen is not a fail.
+// The NC row evaluator: missing evidence is never a pass, and a row that did not happen is not a fail.
 
 import { assertEqual, check } from '../harness.mjs';
 import { evaluateAll, evaluateRow, inOrder, ROW_IDS, STATUS } from '../../names-and-chat-steps.mjs';

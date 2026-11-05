@@ -21,7 +21,7 @@ export function reasonText(entry, value) {
   if (mark.filled) {
     return 'completed';
   }
-  // An invalid run's own reasons lead; a refused multiplier must not hide them (13g D1 F1).
+  // An invalid run's own reasons lead; a refused multiplier must not hide them.
   const refusal = value == null ? entry.figures?.hostUploadMultiplierRefusal?.reason : null;
   const own = !entry.valid && entry.reasons?.length ? entry.reasons : [];
   const reasons = [...own, ...(refusal ? [refusal] : [])];

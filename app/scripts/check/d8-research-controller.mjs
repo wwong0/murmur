@@ -1,6 +1,6 @@
 // scripts/check/d8-research-controller.mjs
 //
-// A RESEARCH COPY of `public/lib/drift-controller.mjs`, carrying the D8 stopping
+// A RESEARCH COPY of `public/lib/drift-controller.mjs`, carrying the positive-floor stopping
 // policy that the product controller refuses to construct. It is test machinery
 // under scripts/: nothing under public/ imports it, no product setting changes,
 // and the product's positive-floor construction refusal stands untouched.
@@ -30,7 +30,7 @@
 //     byte-identical applied streams and poll histories to the product.
 //
 // One further difference is SELECTED AT CONSTRUCTION and off by default
-// (`remedy-pitch-preserving-amendment.md`, owner-approved research only):
+// (research only):
 //
 //  6. `refusalPolicy: 'split-outside-required-threshold'` splits the refusal in
 //     2. A refused poll whose |estimate| is at or inside the REQUIRED S still
@@ -364,7 +364,7 @@ export function createD8ResearchController({ log, clock, apply, settings: overri
       hold(atMs, 'waiting', 'too-few-records');
     } else if (positiveFloor && requiredStoppingThresholdMs > settings.MAX_STOPPING_THRESHOLD_MS) {
       // THE INPUT WAS VALID AND THE ANSWER IS STILL A REFUSAL. Measurement plus
-      // allowance needs more room than the owner allowed a stopping threshold,
+      // allowance needs more room than the largest stopping threshold allowed,
       // so there is no threshold to accept and nothing to declare settled inside.
       // `hold` publishes exact unity, drops the accepted S and the close figure,
       // and clears the dwell in the same step — a latch surviving this would let

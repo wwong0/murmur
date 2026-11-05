@@ -1,4 +1,4 @@
-// Browser verification for the host-origin delivery path (change 7a, §8).
+// Browser verification for the host-origin delivery path.
 //
 // This runner owns the 8124 server and its Chrome processes.  It records every
 // acceptance bar in the manifest before teardown so a partial run is evidence,

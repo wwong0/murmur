@@ -1,6 +1,6 @@
 // public/lib/hold-resume.mjs
 //
-// T8 (design.md D3): the resume rule, pure — no timer, no clock read. It takes
+// The resume rule, pure — no timer, no clock read. It takes
 // every instant as an argument and keeps only the memory the rule itself needs
 // across calls: the viewer set's key, when it last changed, and when the
 // viewer count first went from zero to one.

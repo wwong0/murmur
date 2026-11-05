@@ -1,4 +1,4 @@
-// Per-attempt byte attribution read from the engine's own Request (change 7b design.md D4).
+// Per-attempt byte attribution read from the engine's own Request.
 // engineRequestLookup is the only reader of engine internals, pinned at 3.0.1 by the
 // peer-bytes suite: a renamed field there makes every attempt's bytes null, never 0.
 
@@ -59,7 +59,7 @@ export function createPeerBytes({ wallNow = () => Date.now(), capacity = 65536 }
   const uploadBytes = {};
   const kept = { hostBytes: 0, peerBytes: 0 };
   const errors = { count: 0, last: null };
-  // T7 (design.md D5): finished segments' media-time spans, outside the ring so
+  // Finished segments' media-time spans, outside the ring so
   // held-ahead can always see the whole run — the ring evicts, this must not.
   const finishedByRuntimeId = new Map();
   let finishedWithoutTimes = 0;
@@ -223,7 +223,7 @@ export function createPeerBytes({ wallNow = () => Date.now(), capacity = 65536 }
     const state = stateFor(request);
     const keptAttemptIds = attribution === 'engine-request' && state ? [...state.unclaimed] : [];
     const keptSumBytes = attribution === 'engine-request' && state ? state.unclaimedBytes : 0;
-    // T7: the engine's fragment carries startTime/endTime in seconds (3.0.1
+    // The engine's fragment carries startTime/endTime in seconds (3.0.1
     // hlsjs segment-manager.js); held-ahead reads media milliseconds.
     const mediaStartMs = Number(segment.startTime) * 1000;
     const mediaEndMs = Number(segment.endTime) * 1000;
@@ -334,7 +334,7 @@ export function createPeerBytes({ wallNow = () => Date.now(), capacity = 65536 }
     };
   }
 
-  // T7: outside the ring, so a segment's finished span survives eviction.
+  // Outside the ring, so a segment's finished span survives eviction.
   function finishedSegments() {
     return [...finishedByRuntimeId.values()].map((entry) => ({ ...entry }));
   }

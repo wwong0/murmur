@@ -1,4 +1,4 @@
-// 12c-1 D5, D7, D9: one reading of the run set, refused unless every run is on one build.
+// One reading of the run set, refused unless every run is on one build.
 
 import { assert, assertEqual, check } from '../harness.mjs';
 import { leaveRecoveryReading } from '../../figures/leave-recovery-reading.mjs';

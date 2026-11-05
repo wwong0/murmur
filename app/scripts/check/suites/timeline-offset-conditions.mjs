@@ -1,4 +1,4 @@
-// 12c-2 D2/D3: the measured condition is 11a-2's healthy arm with a criterion and two figure kinds.
+// The measured condition is 11a-2's healthy arm with a criterion and two figure kinds.
 
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';

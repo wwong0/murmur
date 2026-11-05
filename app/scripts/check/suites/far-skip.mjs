@@ -1,4 +1,4 @@
-// Pure D4 dwell and repeat checks. The gate reads no clock or timer.
+// Pure far-skip dwell and repeat checks. The gate reads no clock or timer.
 
 import { check, assert, assertEqual } from '../harness.mjs';
 import { createFarSkip } from '../../../public/lib/far-skip.mjs';

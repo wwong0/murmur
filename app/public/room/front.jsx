@@ -2,7 +2,7 @@ import { useRef } from 'react';
 import { Button, TextField } from './ui.jsx';
 import { useView } from './use-view.js';
 
-// The front page (12e design.md D1, D5, D6). The copy is the owner's, verbatim from D5; the two
+// The front page. Its copy is kept word for word; the two
 // drawings are decorative HTML and CSS with no name, message, film or file name in them. The
 // headline and both actions sit on the first screen at 1536x864 and 390x844 (FP1, FP2).
 const LEADS = [

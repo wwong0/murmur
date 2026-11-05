@@ -1,7 +1,7 @@
 // scripts/start-residual.mjs
 //
 // How far from the room a scheduled start landed: the median signed drift over
-// the first records after its `play()` (change 5 design.md D11), against one
+// the first records after its `play()`, against one
 // content frame interval. Pure — records and the start entry are arguments.
 
 import { median } from './lead-measurement.mjs';
@@ -33,10 +33,10 @@ export function startResidual({ records, start, nextAfterSeq = Infinity, frameIn
 
 /**
  * Whether a start that has settled is running AHEAD of the room, over the
- * records AFTER the residual population — a separate export, because D11's
- * residual is frozen and this asks a different question (executor-spec.md §12).
+ * records AFTER the residual population — a separate export, because the
+ * residual is frozen and this asks a different question.
  *
- * One-sided by construction: a start behind the room is what D11 judges, and a
+ * One-sided by construction: a start behind the room is what the residual judges, and a
  * compensated start that overshoots is what this exists to catch. `absent` on a
  * malformed start or a non-finite tolerance, never a pass.
  *
@@ -66,7 +66,7 @@ export function startLead({ records, start, nextAfterSeq = Infinity, skip = 24, 
 
 /**
  * Whether a start's seam epoch is the ROOM's mapping epoch, or a derivation
- * from the park the advance has moved (executor-spec.md §15 item 4).
+ * from the park the advance has moved.
  *
  * Three figures must agree: the seam's own `epochMs`, `startAtSharedMs −
  * scheduledPositionMs`, and the epoch on the first accepted record. With a zero
@@ -74,7 +74,7 @@ export function startLead({ records, start, nextAfterSeq = Infinity, skip = 24, 
  * discriminate; with a nonzero advance the two differ by exactly the advance,
  * which is what makes this label worth printing.
  *
- * `absent` on anything malformed or non-finite, never a pass (R8).
+ * `absent` on anything malformed or non-finite, never a pass.
  *
  * @param {{start: object, records: object[], toleranceMs?: number}} input
  * @returns {{status: 'agrees'|'derived'|'absent', epochMs: number|null, fromRoomMs: number|null, recordEpochMs: number|null, deltaMs: number|null}}

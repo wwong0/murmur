@@ -80,7 +80,7 @@ export function qualifyingFit(fit, minimumRecords, minimumSpanMs, standardErrorP
     && fit.endpointCrosscheck?.driftWithinBar === true;
 }
 
-/** Shared fit populations; D6 must not let its second filter drift from this one. */
+/** Shared fit populations; a second filter must not drift from this one. */
 export function qualifyingSaturatedAndPlateauFits({ fits = [], bars = DEFAULT_BARS } = {}) {
   const saturatedFits = fits.filter((fit) => qualifyingFit(
     fit,

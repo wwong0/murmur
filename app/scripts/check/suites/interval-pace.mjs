@@ -1,4 +1,4 @@
-// 12c-1 D6: each interval record publishes the estimate after its close and the pace
+// Each interval record publishes the estimate after its close and the pace
 // the sender held during it, set at the previous close.
 
 import { assert, assertEqual, check } from '../harness.mjs';

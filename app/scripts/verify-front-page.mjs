@@ -1,5 +1,4 @@
-// Browser proof for the front page and the room's header (change 12e, design.md D1–D3, D12,
-// D13): the first screen at two sizes, the font served from this origin, the name, the header
+// Browser proof for the front page and the room's header: the first screen at two sizes, the font served from this origin, the name, the header
 // link, and the Stats panel leaving the layout's widths alone. It owns one default-paused
 // server. Records carry booleans, counts and pixel boxes; nothing typed, no name.
 

@@ -1,13 +1,13 @@
 // scripts/verify-frames.mjs
 //
-// Does requestVideoFrameCallback actually fire in the window states change 6's
-// harness will use? A dev aid, like verify-browser.mjs — needs Chrome, a running
+// Does requestVideoFrameCallback actually fire in the window states the
+// container harness uses? A dev aid, like verify-browser.mjs — needs Chrome, a running
 // server and about ninety seconds, and is NOT part of `npm run check`.
 //
 // Usage: npm start (in another shell), then `node scripts/verify-frames.mjs`.
 //
 // The pass bar is decided BEFORE this file is run, never computed from what it
-// sees (change 3b design.md D4): recomputing it would make whatever happened
+// sees: recomputing it would make whatever happened
 // pass, and a state firing at a fraction of the frame rate — or firing and
 // refusing every frame — passes a bare callback count.
 
@@ -21,8 +21,8 @@ import { selectBrowserPlatform } from './runner/browser-platform.mjs';
 import { requireAutoStart } from './delivery-pin.mjs';
 import { mediaDirFrom } from '../server/media-dir.mjs';
 
-// The platform adapter rather than cdp.mjs's Windows re-exports (D9): change 6a
-// runs this same file inside the client container, where the Windows path does
+// The platform adapter rather than cdp.mjs's Windows re-exports: the container
+// harness runs this same file inside the client container, where the Windows path does
 // not exist and `taskkill` is not a command.
 const BROWSER = selectBrowserPlatform();
 const CHROME = BROWSER.locate();
@@ -40,11 +40,11 @@ const PLATFORM_FLAGS = BROWSER.name === 'linux' ? ['--no-sandbox', '--disable-gp
 // read from this directory and applied to whatever the server is serving, so the
 // two must name the same content: give this run the APP_MEDIA_DIR the server was
 // given. Resolved from the script, never from the cwd — a bar read out of a
-// different tree is exactly the silently-wrong bar D4 re-reads the frame rate to
+// different tree is exactly the silently-wrong bar the frame rate is re-read to
 // avoid.
 const MEDIA_DIR = mediaDirFrom();
 
-// Fixed before the first run (design.md D4) — not touched by what a run sees.
+// Fixed before the first run — not touched by what a run sees.
 const MEASURE_MS = 20000;
 const MIN_CALLBACK_RATIO = 0.9;
 const MIN_ACCEPT_RATIO = 0.95;
@@ -52,7 +52,7 @@ const MIN_ACCEPT_RATIO = 0.95;
 // The init segment ALONE reports a meaningless `12288/1` — it carries no video
 // samples. Concatenating it with one media segment is what makes ffprobe see
 // real frames, and this is re-read every run rather than hard-coded because
-// change 6 replaces this content with real remuxed media (D4).
+// the content can be swapped for real remuxed media.
 function readContentFrameRate() {
   const tmp = path.join(os.tmpdir(), `verify-frames-probe-${Date.now()}.mp4`);
   const init = fs.readFileSync(path.join(MEDIA_DIR, 'init.mp4'));
@@ -78,9 +78,8 @@ function readContentFrameRate() {
   }
 }
 
-// Values read through the harness seam (D2), never `video.currentTime` — this
-// project's measurement path is rVFC or nothing (CONSTRAINTS.md → *Playback
-// measurement*).
+// Values read through the harness seam, never `video.currentTime` — this
+// project's measurement path is rVFC or nothing.
 const SEAM = `(() => {
   const app = window.__app;
   if (!app) return { present: false };
@@ -256,8 +255,8 @@ if (isMain) try {
   const fps = readContentFrameRate();
   console.log(`content frame rate (ffprobe, init.mp4 + seg-00000.m4s): ${fps} fps`);
 
-  // ONE STATE'S FAILURE MUST NOT SKIP THE OTHERS. Headless is the state change 6
-  // actually runs in, and a minimized window that cannot be measured is a result
+  // ONE STATE'S FAILURE MUST NOT SKIP THE OTHERS. Headless is the state the
+  // container harness actually runs in, and a minimized window that cannot be measured is a result
   // about minimized windows, not a reason to learn nothing about headless.
   const results = [];
   for (const state of options.states) {
@@ -303,7 +302,7 @@ if (isMain) try {
   // Written even when the run failed, and carrying the failures: a report that
   // only exists for a passing run is a file whose presence is the verdict, and
   // the evidence for the state that could NOT be measured is the evidence this
-  // change most needs (CONSTRAINTS.md → *Artifacts*).
+  // check most needs.
   if (options.report) {
     fs.mkdirSync(path.dirname(path.resolve(options.report)), { recursive: true });
     fs.writeFileSync(path.resolve(options.report), `${JSON.stringify({ ...(report ?? { results: [] }), failures, ok: failures.length === 0 }, null, 2)}\n`);

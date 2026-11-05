@@ -1,5 +1,5 @@
-// 9b design.md D7: one block of a run's report, `figures.edge`, holding what is
-// published beside the criteria. Only a condition registered under 9b carries it,
+// One block of a run's report, `figures.edge`, holding what is published beside
+// the criteria. Only a condition registered with the edge reading carries it,
 // so a run retained before it recomputes to the bytes it gave.
 
 import fs from 'node:fs';

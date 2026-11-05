@@ -37,7 +37,7 @@ export default async function edgeControlSuite() {
       settings: { delivery: 'http', iceServers: [] },
       globals: { __waControl: CONTROL_8B },
     });
-    // Mutation (a) proof, D8: the pre-load __waControl='8b' opportunity reaches
+    // Mutation (a) proof: the pre-load __waControl='8b' opportunity reaches
     // this page assertion; returning product control for '8b' made it red
     // (1347/1349). `git checkout -- app/public/lib/edge-control.mjs` exited 0
     // and restored the staged copy; the rerun was green (1349/1349).
@@ -49,7 +49,7 @@ export default async function edgeControlSuite() {
       settings: { delivery: 'http', iceServers: [] },
       globals: { __waControl: 'x' },
     });
-    // Mutation (b) proof, D8: the pre-load invalid __waControl='x' opportunity
+    // Mutation (b) proof: the pre-load invalid __waControl='x' opportunity
     // reaches this page assertion; reporting supplied=false made it red
     // (1347/1349). `git checkout -- app/public/lib/edge-control.mjs` exited 0
     // and restored the staged copy; the rerun was green (1349/1349).

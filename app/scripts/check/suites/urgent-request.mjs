@@ -1,4 +1,4 @@
-// T13 (design.md D9): which host requests a viewer marks urgent, and that the
+// Which host requests a viewer marks urgent, and that the
 // mark crosses the host link into the `req` control and the receipt.
 
 import { assert, assertEqual, check } from '../harness.mjs';
@@ -120,19 +120,19 @@ export default async function urgentRequestSuite() {
     assertEqual(requestClass({ ...args, path: '/media/window.m4s', nearMs: 30_000 }), 'near', 'the zone follows the window in force');
     assertEqual(requestClass({ ...args, path: '/media/window.m4s' }), null, 'the default near window does not reach 20 000 ms ahead');
     assertEqual(requestClass({ ...args, control: '8b', path: '/media/near-1.m4s' }), null, 'the earlier control has no near class');
-    // Mutation (c) proof, T6: the opportunity is the same near segment under
+    // Mutation (c) proof: the opportunity is the same near segment under
     // product and 8b; the boundary is no near class under 8b. Allowing
     // requestClass to answer 'near' under 8b made the named assertion red
     // (expected null, got near). `git checkout -- app/public/lib/urgent-request.mjs`
     // restored the staged copy, and the rerun was green.
-    // Mutation (d) proof, T6: the opportunity is a segment 20 000 ms ahead; the
+    // Mutation (d) proof: the opportunity is a segment 20 000 ms ahead; the
     // boundary is supplied nearMs 30 000 versus 15 000. Replacing nearMs with a
     // constant 15 000 made the named assertion red (expected near, got null).
     // The same staged checkout restored the copy, and the rerun was green.
   });
 
   await check('urgent-request: a viewer that loads inside the held creation\'s lead marks its start segment urgent', async () => {
-    // 8b2's attempt 4: the first viewer asked for seg-00000 90 ms before the held
+    // A recorded attempt: the first viewer asked for seg-00000 90 ms before the held
     // creation took effect, with no mapping in effect and so no position.
     const segments = parseSegmentTimes(PLAYLIST, '/media/master.m3u8');
     const created = { lineage: 'room', version: 2, current: { playing: false, atSharedMs: 10_000, mediaMs: 0, held: true }, previous: null, controlMode: 'open' };
@@ -169,15 +169,15 @@ export default async function urgentRequestSuite() {
     const heldCreation = { ...held, current: { ...held.current, atSharedMs: 10_000 } };
     assertEqual(ownPositionMs({ control: 'product', state: heldCreation, sharedMs: 9_900, elementMs: 50_000 }), 80_000, 'a held creation lead uses its creation position');
     assertEqual(ownPositionMs({ control: 'product', state: playing, sharedMs: 0, elementMs: null }), 130_000, 'a playing viewer without an element sample uses state');
-    // The one case under the switch (D8): the first case's inputs, control alone changed.
+    // The one case under the switch: the first case's inputs, control alone changed.
     assertEqual(ownPositionMs({ control: '8b', state: playing, sharedMs: 0, elementMs: 100_000 }), 130_000, 'the earlier control restores the room position');
-    // Mutation (a) proof, D3: a playing viewer has an urgent segment at its
+    // Mutation (a) proof: a playing viewer has an urgent segment at its
     // sampled element position while the room position is elsewhere. Returning
     // the state position from step 1.3 turns the first assertion red (the result
     // is 130000, not 100000). Stage included app/public/lib/urgent-request.mjs;
     // `git checkout -- app/public/lib/urgent-request.mjs` restored the staged copy,
     // and the rerun was green.
-    // Mutation (b) proof, D3: a held viewer's element is parked away from its
+    // Mutation (b) proof: a held viewer's element is parked away from its
     // held state. Removing step 1.2 makes the held assertion red (50000, not
     // 80000). The same staged checkout restored it and the rerun was green.
   });

@@ -9,7 +9,7 @@
 //  - `driftMs` is media minus scheduled: positive means ahead of the room, so
 //    its correction is below 1.
 //  - The band's dispersion arm has no √n factor: display cadence is periodic, not
-//    independent noise (design.md D1). Reintroducing it makes the band too narrow.
+//    independent noise. Reintroducing it makes the band too narrow.
 //  - That arm is a range between quantiles and must never become a distance from
 //    the centre — a MAD or a standard deviation collapses on a cadence at exactly
 //    the poll where the estimate is furthest out. `spread` below says why.
@@ -21,8 +21,8 @@
 //  - The half-width comes from a fresh `clock.read()` at poll time, never records.
 //  - `snapshot().polls` is the monotonic evaluation count; `poll()` advances it
 //    before every branch, including no-clock and hold outcomes.
-//  - Records accumulate in one post-clock site and are trimmed in one place
-//    (design.md D4), so a no-clock poll leaves the log cursor untouched.
+//  - Records accumulate in one post-clock site and are trimmed in one place,
+//    so a no-clock poll leaves the log cursor untouched.
 //  - There is no integral term and no position input: this module can only adjust
 //    playback rate, never seek.
 //
@@ -38,9 +38,9 @@ export const CLOSE_BUDGET_MS = 60000;
 export const RATE_EPSILON = 1e-6;
 /**
  * f — the smallest command deviation the controller may write. The DEFAULT is
- * zero, which disables the floor. A positive f is not a calibration (D7 stays
- * F3): it is the owner-adopted D8 value below, and the page passes it in only
- * after the pitch treatment has been established (design.md D8).
+ * zero, which disables the floor. A positive f is not a calibration: it is the
+ * adopted value below, and the page passes it in only after the pitch treatment
+ * has been established.
  */
 export const MIN_COMMAND_DEVIATION = 0;
 /**
@@ -52,7 +52,7 @@ export const MIN_COMMAND_DEVIATION = 0;
 export const D8_COMMAND_THRESHOLD = 0.0011360737797956866;
 /** Floating-point slack near 1.0 for the command-range check. Never a ppm allowance. */
 export const COMMAND_TOLERANCE = 8 * Number.EPSILON;
-/** The owner-approved ceiling on an accepted stopping threshold. Fixed: an
+/** The ceiling on an accepted stopping threshold. Fixed: an
  *  override may not raise it, and may not lower it either (ms). */
 export const MAX_STOPPING_THRESHOLD_MS = 20;
 
@@ -87,8 +87,8 @@ export function quantile(sorted, p) {
 
 /**
  * The window's `p95 - p5`. A cadence puts its arms AT THE QUANTILES, so a range
- * between quantiles cannot be moved by which arm holds the majority (design.md
- * D1). No scale factor, so no constant: the quantity is the excursion itself.
+ * between quantiles cannot be moved by which arm holds the majority.
+ * No scale factor, so no constant: the quantity is the excursion itself.
  */
 function spread(sorted) {
   return quantile(sorted, 0.95) - quantile(sorted, 0.05);
@@ -254,7 +254,7 @@ export function createDriftController({ log, clock, apply, settings: overrides =
     // NO HOLD PUBLISHES AN ACCEPTED THRESHOLD OR A LIVE CLOSE. Measurement
     // components describe what was measured and a hold may keep them; an
     // accepted S and a close figure are answers about the error this poll would
-    // act on, and a poll that acted on nothing has none (design.md D3).
+    // act on, and a poll that acted on nothing has none.
     stoppingThresholdMs = null;
     thresholdUsable = false;
     fastestCloseMs = null;
@@ -457,7 +457,7 @@ export function createDriftController({ log, clock, apply, settings: overrides =
       // The one branch that acts on the measurement, so the one that accepts a
       // threshold. THE CORRECTION IS STILL MEASURED FROM U: S is where the
       // client may stop, not where the error is counted from, and at f = 0 the
-      // two are the same number anyway (design.md D3).
+      // two are the same number anyway.
       stoppingThresholdMs = requiredStoppingThresholdMs;
       thresholdUsable = true;
       fastestCloseMs = shortestCloseMs(estimateMs, stoppingThresholdMs, settings.MAX_RATE_DEVIATION);
@@ -468,13 +468,13 @@ export function createDriftController({ log, clock, apply, settings: overrides =
       // neither acted on nor believed until it has outlived one
       // ESTIMATE_WINDOW_MS — by which point every record in the window is new
       // and it cannot be composition. The horizon is that window, never a new
-      // constant, and the cost of the hold is bounded in design.md D3.
+      // constant, and the cost of the hold is bounded by it.
       if (inside) excursionAt = null;
       else if (settledLatched && excursionAt === null) excursionAt = atMs;
       const believed = !inside && (!settledLatched || atMs - excursionAt >= settings.ESTIMATE_WINDOW_MS);
       // The correction is held with the label: a composition artifact is not
       // drift, and a `settled` coexisting with a rate off 1.0 would contradict
-      // its own definition and 4b's browser bar with it.
+      // its own definition and the browser check's bar with it.
       applyRate(believed ? BASE_RATE + correction : BASE_RATE, atMs);
       if (believed) {
         insideBandAt = null;
@@ -492,7 +492,7 @@ export function createDriftController({ log, clock, apply, settings: overrides =
         // report. `correctionsApplied` counts returns to unity as well and is
         // not that event. The applied rate is no longer a conjunct here: it is
         // published beside the claim instead, and every path into this branch
-        // has already asked for exactly normal speed (design.md D3).
+        // has already asked for exactly normal speed.
         if (firstCorrectionAt !== null && atMs - insideBandAt >= settings.SETTLED_FOR_MS) {
           settledLatched = true;
           if (settlingMs === null) settlingMs = atMs - firstCorrectionAt;

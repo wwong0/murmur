@@ -6,8 +6,7 @@
 // properties and drops everything else. That step is the subject. A real run
 // polled 1440 times per client, recorded `"quality": {}` every time, refused on
 // missing dropped-frame evidence, and threw nothing — the counters are
-// prototype accessors on `VideoPlaybackQuality` and had never crossed
-// (`docs/constraints/verification.md`).
+// prototype accessors on `VideoPlaybackQuality` and had never crossed.
 //
 // No browser and no server: the stub is the point.
 

@@ -504,7 +504,7 @@ export function rosterEventReading({ condition = {}, event, presence, drift = {}
     result.push(runwayRow('J4', othersFor(condition, target), polls, eventTime,
       condition.churn?.stall?.afterMs, condition.churn?.runwayMinMs, timebase));
     result.unshift(k0Row(othersFor(condition, target), polls, eventTime - (condition.churn?.stall?.beforeMs ?? NaN), condition, timebase));
-    // D7's stall is every arm's: the viewers already in the room, either side of the join.
+    // The stall row is every arm's: the viewers already in the room, either side of the join.
     result.push(stallRow(condition, kind, eventTime, drift, stream(polls, 'host') ?? [], target));
     const ahead = aheadForGood({ condition, tags: tagsFor(condition), window, event, seek, capacitySchedule, drift, polls, pagePolls, timebase });
     result.push(ahead);

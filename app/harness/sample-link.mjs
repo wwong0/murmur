@@ -52,7 +52,7 @@ function readCounter(ifName, counter) {
 }
 
 // JSON, not text: text tc prints a size near a multiple of 1024 as Kb or Mb, which
-// the text parser cannot read, and a saturated queue lands there (6b design.md D1).
+// the text parser cannot read, and a saturated queue lands there.
 function readRootQdisc(ifName) {
   const text = execFileSync('tc', ['-s', '-j', 'qdisc', 'show', 'dev', ifName], {
     encoding: 'utf8',

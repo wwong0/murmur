@@ -9,7 +9,7 @@ import { LEGACY_CONTENT_MANIFEST, readLegacyContentManifest } from '../../harnes
 
 const suiteDir = path.dirname(fileURLToPath(import.meta.url));
 // A run directory that retains its own content manifest, so the recompute reads
-// constructed sizes and needs neither the media nor the legacy copy (14d D5).
+// constructed sizes and needs neither the media nor the legacy copy.
 const contentManifest = { segmentSeconds: 2, segmentSizes: [1_001, 2_002, 3_003] };
 const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-arm-recompute-'));
 fs.writeFileSync(path.join(runDir, 'content-manifest.json'), JSON.stringify(contentManifest));
@@ -68,7 +68,7 @@ export default async function harnessArmRecomputeSuite() {
     assertEqual(peer.trackerPort, '8101', 'peer supplies tracker port');
   });
 
-  // 8a's first baseline-nop2p-steady attempt aborted on 'segment sizes are unavailable'.
+  // The first baseline-nop2p-steady attempt aborted on 'segment sizes are unavailable'.
   await check('harness arm recompute: a one-viewing host run sizes its stretch from the content', async () => {
     const host = arms[1][1];
     const oneViewing = { ...manifest, multiplierDenominator: 'one-viewing' };
@@ -77,7 +77,7 @@ export default async function harnessArmRecomputeSuite() {
     assertEqual(host.recomputeSegmentSeconds(oneViewing, runDir), 2, 'one-viewing host segment seconds');
   });
 
-  // 14a d1-findings F2: the fallback once read any manifest at its path, unchecked.
+  // The fallback once read any manifest at its path, unchecked.
   await check('harness arm recompute: the legacy fallback reads the tracked copy and refuses other numbers', async () => {
     const bytes = fs.readFileSync(LEGACY_CONTENT_MANIFEST);
     assertEqual(bytes.length, LEGACY_BYTES, 'the tracked legacy manifest has its original length');

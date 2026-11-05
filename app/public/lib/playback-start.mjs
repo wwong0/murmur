@@ -1,12 +1,12 @@
 // public/lib/playback-start.mjs
 //
-// Pure scheduled-start reducer (D6). The entry supplies state, the shared
+// Pure scheduled-start reducer. The entry supplies state, the shared
 // instant and the returned actions; this module owns no timer, DOM or clock.
 
 import { epochMsAt, mediaMsAt } from './playback-state.mjs';
 import { edgeIndexAfter, heldAheadMs } from './held-ahead.mjs';
 
-/** The advance's accepted range (executor-spec.md §2.5 C1 amendment). */
+/** The advance's accepted range. */
 const ADVANCE_RANGE_MS = Object.freeze([0, 250]);
 
 export const MISSING_CLOCK = 'clock-estimate';
@@ -14,9 +14,8 @@ export const MISSING_STATE = 'playback-state';
 export const MISSING_HOST_LINK = 'host-link';
 export const MISSING_HOST_TITLE = 'host-title';
 export const WAITING_PAUSED = 'room-paused';
-// T9 (design.md D6): a held room is a paused mapping everywhere the timeline
-// reads it, but it is never reported as a paused room — checked before
-// WAITING_PAUSED below.
+// A held room is a paused mapping everywhere the timeline reads it, but it is
+// never reported as a paused room — checked before WAITING_PAUSED below.
 export const WAITING_HELD = 'room-held';
 export const WAITING_PREPARING = 'preparing';
 export const WAITING_REFUSED = 'play-refused';
@@ -56,7 +55,7 @@ export function createPlaybackStart({
   if (!Number.isFinite(presentationAdvanceMs) || presentationAdvanceMs < advanceLow || presentationAdvanceMs > advanceHigh) {
     throw new TypeError(`presentationAdvanceMs must be a finite number in [${advanceLow}, ${advanceHigh}]`);
   }
-  // Off by default: Infinity never re-parks, and the entry opts in (7b2 design.md D3).
+  // Off by default: Infinity never re-parks, and the entry opts in.
   if (typeof reparkAfterMs !== 'number' || Number.isNaN(reparkAfterMs) || reparkAfterMs < 0) {
     throw new TypeError('reparkAfterMs must be a non-negative number or Infinity');
   }
@@ -235,7 +234,7 @@ export function createPlaybackStart({
     return result(actions, S);
   }
 
-  /** A paused target parks at the state's position exactly: no advance, ever (D6). */
+  /** A paused target parks at the state's position exactly: no advance, ever. */
   const pausedMapping = (target) => ({
     positionMs: target.positionMs,
     scheduledPositionMs: target.positionMs,
@@ -272,7 +271,7 @@ export function createPlaybackStart({
     if (attempt.playDispatched) return result([], null);
     if (attempt.readyAtSharedMs !== null) {
       // Late beyond the bound: park again at the room's position for a fresh S
-      // rather than play from the stale park. Strict, and capped (7b2 design.md D3).
+      // rather than play from the stale park. Strict, and capped.
       if (nowSharedMs - attempt.S > reparkAfterMs && attempt.reparks < maxReparks) {
         const lineage = {
           reparkOf: attempt.id,
@@ -361,7 +360,7 @@ export function createPlaybackStart({
       refused = false;
       invalidateAttempt();
     }
-    // A refusal blocks only play(); a paused target still parks (D6).
+    // A refusal blocks only play(); a paused target still parks.
     if (refused && target.playing) return result([], null);
     if (!target.playing) refused = false;
 

@@ -45,7 +45,7 @@ export function createUsageCount({ file, now, log, flushMs, keepMs }) {
   let written = JSON.stringify(totals);
   if (!fs.existsSync(file)) writeUsageFile(file, totals);
   const live = new Set();
-  // A reaped room's counted tabs, by name, in memory for keepMs: a sole member's reload is not a new room or visit (D4).
+  // A reaped room's counted tabs, by name, in memory for keepMs: a sole member's reload is not a new room or visit.
   const kept = new Map();
   function write() {
     const current = JSON.stringify(totals);
@@ -67,7 +67,7 @@ export function createUsageCount({ file, now, log, flushMs, keepMs }) {
     let playing = false;
     let lastAt = now();
     let opened = prior !== undefined;
-    // The room's replicated playback state, applied as the pages apply it, so the count knows when it plays (D5).
+    // The room's replicated playback state, applied as the pages apply it, so the count knows when it plays.
     const holder = createPlaybackStateHolder({ maxFutureMs: MAX_FUTURE_MS });
     const tracker = {
       holder,

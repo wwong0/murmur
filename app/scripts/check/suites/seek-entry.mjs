@@ -50,7 +50,7 @@ export default async function seekEntrySuite() {
     current.app.harnessSeek(600);
     const seek = current.sent().find((entry) => entry.payload?.kind === 'seek');
     current.deliver({ ...seek, seq: 3, from: 'host-1', ts: { recv: 12_001 } });
-    // T5 (design.md D4): re-derived, not deleted. The premise changed — every
+    // Re-derived, not deleted. The premise changed — every
     // `playbackState()` reading now carries `held`, true or false, not only a
     // held one — so this page's own creation runs before its settings resolve
     // (no peer exchange in force yet) and seeks as a non-held room, unchanged.

@@ -32,7 +32,7 @@ export default async function livenessSuite() {
     // The slack is deliberately smaller than the old 2000ms. At a 120ms interval
     // that constant was eighteen intervals wide, so it dominated the
     // interval-scaled term completely and the bound could not tell the behaviour
-    // it named from any other: CONSTRAINTS.md's rule is that a check running a
+    // it named from any other: the rule is that a check running a
     // setting away from its default must pin behaviour to the setting rather
     // than to a constant.
     assert(

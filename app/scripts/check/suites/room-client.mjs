@@ -58,7 +58,7 @@ export default async function roomClientSuite() {
 
   // The assertion the check above USED to claim to make and did not. It issued
   // a third ordinary request and watched it get its own reply, which no forgery
-  // is involved in. Written honestly here (design.md D11): the envelope comes
+  // is involved in. Written honestly here: the envelope comes
   // from a second member, carries the outstanding correlation id, and must not
   // resolve the call.
   await check('room-client: a reply from a party the request was not addressed to does not resolve it', async ({ member, client }) => {
@@ -210,7 +210,7 @@ export default async function roomClientSuite() {
     assertEqual(joinsIn(wire)[0].payload.secret, undefined, 'a FIRST join presents no secret');
     const s1 = joinedIn(wire)[0].payload.secret;
     assertEqual(typeof s1, 'string', 'the joined reply carried a secret');
-    // D8's client half: the role reported is the one the server gave, read back
+    // The role reported is the one the server gave, read back
     // from the roster entry for this very clientId.
     assertEqual(firstJoin.role, 'viewer', 'the joined event reports the role the server assigned');
     assertEqual(c.role, 'viewer', 'and the client reports the same');
@@ -227,7 +227,7 @@ export default async function roomClientSuite() {
     const replies = joinedIn(wire);
     assertEqual(joins.length, 3, 'three joins were made');
     assertEqual(replies.length, 3, 'and three were answered');
-    // The heart of D2's client half: each rejoin presents the secret from the
+    // The heart of the reclaim's client half: each rejoin presents the secret from the
     // MOST RECENT reply, never the first. A client that kept its original secret
     // would be presenting a credential for a member that no longer exists.
     assertEqual(joins[1].payload.secret, replies[0].payload.secret, 'the second join presented the first reply’s secret');
@@ -269,7 +269,7 @@ export default async function roomClientSuite() {
     c.onEvent('gap', () => gapCount++);
 
     // Drop the connection without warning, then emit room traffic it cannot
-    // possibly see. This is the four-seconds-of-wifi scenario from design.md D5.
+    // possibly see. This is the four-seconds-of-wifi scenario.
     c.close();
     for (let i = 0; i < 3; i++) other.send({ v: PROTOCOL_VERSION, type: 'shout', to: ADDR_ROOM, payload: { n: i } });
     await sleep(30);
@@ -307,8 +307,8 @@ export default async function roomClientSuite() {
   await checkGroup([
     ['room-client: a join refusal it carries no policy for stops it and is reported', async ({ room, client }) => {
       // A page running an older bundle than the server, which is what a bumped
-      // PROTOCOL_VERSION produces and what CONSTRAINTS.md → *Reachable is not
-      // fresh* already names as reachable. Driven through room-client rather
+      // PROTOCOL_VERSION produces: a server that answers is not proof the
+      // two are on one version. Driven through room-client rather
       // than a raw peer: the server's refusal was never in doubt, the module's
       // handling of it was.
       const { Impl, wire } = recordingSocket({ rewrite: staleJoin });
@@ -330,7 +330,7 @@ export default async function roomClientSuite() {
     }],
 
     ['room-client: a name held by a dying connection is retried until the server frees it', async ({ member, client }) => {
-      // THIS ASSERTION USED TO PASS FOR THE WRONG REASON. Under D11's fixed ~1s
+      // THIS ASSERTION USED TO PASS FOR THE WRONG REASON. Under the old fixed ~1s
       // budget it only worked because this check runs the interval at 120ms, where
       // the name frees inside that second; at the default 5000ms it would have been
       // red. So it now runs at two intervals, and the second one is chosen so that
@@ -382,7 +382,7 @@ export default async function roomClientSuite() {
       let supersededEvents = 0;
       first.onEvent('superseded', () => supersededEvents++);
 
-      // Under change 1 a second room-client with the same tabId reclaimed the role.
+      // Once, a second room-client with the same tabId reclaimed the role.
       // It no longer can — it has no secret — so the replacement is driven by a
       // connection that holds the first client's secret, read off the wire.
       const second = await peer('second');
@@ -432,7 +432,7 @@ export default async function roomClientSuite() {
       assertEqual(typeof info.budgetMs, 'number', 'and the budget it had been working to');
       // Every attempt on the way is reported, so a page can say it is retrying
       // rather than going silent until the budget expires. That is what makes the
-      // longer give-up affordable (D13).
+      // longer give-up affordable.
       assert(retries.length >= 1, `each refused attempt was reported (${retries.length} of them)`);
       for (const r of retries) {
         assertEqual(typeof r.releaseWithinMs, 'number', 'each retry carries the server’s figure');

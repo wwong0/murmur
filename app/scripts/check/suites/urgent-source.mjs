@@ -68,7 +68,7 @@ export default async function urgentSourceSuite() {
     assertEqual(result({ loaders: 1, nowMs: PEER_WAIT_LIMIT_MS - 1 }).source, 'wait', 'loader waits before limit');
     assertEqual(result({ loaders: 1, nowMs: PEER_WAIT_LIMIT_MS - 1 }).untilMs, PEER_WAIT_LIMIT_MS, 'loader wait boundary');
     assertEqual(result({ loaders: 1, nowMs: PEER_WAIT_LIMIT_MS }).source, 'http', 'loader uses HTTP at limit');
-    // design.md D8 (m), 38ac6c6: the held room's budget, through the call the queue makes.
+    // 38ac6c6: the held room's budget, through the call the queue makes.
     assertEqual(PEER_WAIT_HELD_LIMIT_MS, 6_000, 'the held limit is 6 s');
     assertEqual(PEER_WAIT_LIMIT_MS, 3_000, 'the playing limit stays 3 s');
     setUrgentContext({ held: true, roomMediaMs: 0 });
@@ -103,7 +103,7 @@ export default async function urgentSourceSuite() {
     // switch without the budget (`nowMs >= spentAt`). Named red: `progressing
     // peer before budget`. Restored and rerun green before this suite was handed off.
 
-    // design.md D8 (l), 38ac6c6. Attempt 3's seek: the viewer waited 2 890 ms on a
+    // 38ac6c6. Attempt 3's seek: the viewer waited 2 890 ms on a
     // loader, its peer transfer began, and the budget cut it 110 ms later.
     const late = { p2pLoading: true, waitStartMs: 0, p2pStartMs: 2_890 };
     assertEqual(result({ ...late, nowMs: 3_000 }).source, 'p2p', 'a playing room does not charge the transfer for the wait before it');
@@ -122,7 +122,7 @@ export default async function urgentSourceSuite() {
   });
 
   await check('urgent-source: a transfer from a peer that holds the segment is never switched to the host', async () => {
-    // Joint D1 J1. A playing viewer at or behind the room has no budget; the rule
+    // A playing viewer at or behind the room has no budget; the rule
     // started its transfer from a holder and the next pass cut it for the host.
     const behind = { p2pLoading: true, holders: 1, budgetMs: 0, p2pStartMs: 10 };
     assertEqual(result({ ...behind, nowMs: 10 }).source, 'p2p', 'a holder is kept with no budget');
@@ -180,7 +180,7 @@ export default async function urgentSourceSuite() {
     setUrgentContext({ held: true, roomMediaMs: 2_000 });
     assertEqual(urgentBudgetMs(6_000), PEER_WAIT_HELD_LIMIT_MS, 'held room uses its fixed limit');
     setUrgentContext();
-    // Prevention proof (C2): opportunity is the patched queue's call, which
+    // Prevention proof: opportunity is the patched queue's call, which
     // passes only the segment's start. Action boundary: urgentBudgetMs. Mutation:
     // budget from the context alone, as first written. Named red: `playing room
     // budgets from the segment start` (it threw). Restored and read green.

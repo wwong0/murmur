@@ -26,7 +26,7 @@ function pollEvents(polls) {
   let previousStalls = null;
   for (const entry of values) {
     const playback = entry.poll.playback ?? {};
-    // The first only: after a seek the page carries the seek's start here (13c `d1-findings.md` F5).
+    // The first only: after a seek the page carries the seek's start here.
     if (finite(playback.startAtSharedMs) && !starts.length) starts.push(playback.startAtSharedMs);
     if (Number.isSafeInteger(playback.reparks) && previousReparks !== null && playback.reparks > previousReparks) reparks.push(entry.atMs);
     if (Number.isSafeInteger(entry.poll.stalls?.count) && previousStalls !== null && entry.poll.stalls.count > previousStalls) stalls.push(entry.atMs);

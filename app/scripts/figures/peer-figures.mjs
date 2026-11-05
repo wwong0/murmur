@@ -160,7 +160,7 @@ export function steadyState({ input, tags, figures, cohorts, oneViewing, hostPac
     : paceBar && paceResult ? { applies: true, value: paceResult.value, pacedMs: paceResult.pacedMs,
       coveredMs: paceResult.coveredMs, windowMs: paceResult.windowMs, bar: bars.steadyPaceBoundMax,
       pass: finite(paceResult.value) && paceResult.value <= bars.steadyPaceBoundMax, reason: paceResult.reason } : null;
-  // With pace evidence both values are read, whichever is tested (design.md D2).
+  // With pace evidence both values are read, whichever is tested.
   const pace = hasPaceEvidence ? {
     tested: capBar ? 'capUsed' : paceBar ? 'paceBound' : null,
     capUsed: { value: capResult.value, handedBytes: capResult.handedBytes,
@@ -192,8 +192,7 @@ export const BOUNDARY_RECORD_MISSING = /^(drift-record-(before|after)-boundary-u
 
 // A legacy directory without drift records publishes its distinct-completed figure alone.
 // A viewer that never started has no record at a boundary: refuse the multiplier and let
-// the start-wait and never-played refusals name it — a throw here skips them (7c
-// d1-findings.md F1).
+// the start-wait and never-played refusals name it — a throw here skips them.
 function oneViewingDetails(input, tags, multiplierDenominator) {
   const required = multiplierDenominator === 'one-viewing';
   if (!hasDriftEvidence(input, tags)) {

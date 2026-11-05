@@ -223,7 +223,7 @@ async function runRow(label, body) {
   }
 }
 
-// The title's end (joint D1 F1): one millisecond past the element's end where that lies past
+// The title's end: one millisecond past the element's end where that lies past
 // the playlist's, else the playlist's. Read from the host's element, as the end pause is.
 async function titleEndMs(tab, playlistEndMs) {
   const elementS = await read(tab, "document.querySelector('#video')?.duration ?? null");
@@ -303,7 +303,7 @@ async function runRows() {
   });
 
   // The host's create can land after the viewer's join, so a page may not hold the state yet
-  // when RS-F3 ends (change 12d d1-findings.md F1, post-result).
+  // when RS-F3 ends.
   await runRow(LABELS[3], async () => {
     const held = await waitRoomStates((states) => states.every((snapshot) => snapshot?.state != null));
     await sleep(3_000);
@@ -361,7 +361,7 @@ async function runRows() {
     return { exercised: paused, ok: paused && clicked && ['in-sync', 'correcting'].includes(dot.state) && dot.figure.endsWith(' ms'), detail: dot };
   });
 
-  // Joint D1 F4: a real pointer drag. Each move fires `input`; the release fires `change`.
+  // A real pointer drag. Each move fires `input`; the release fires `change`.
   await runRow(LABELS[9], async () => {
     if (!await setPlaying(false)) return { exercised: false };
     const track = await read(host, `(() => {
@@ -415,7 +415,7 @@ async function runRows() {
   });
 
   await runRow(LABELS[12], async () => {
-    // post-result diagnostic (12b C2, T10)
+    // A diagnostic, added after the result.
     const notExercised = (failed, observed) => ({ exercised: false, detail: detail({ failed, ...observed }) });
     const mode = await until(host, "window.__app.timeline()?.controlMode ?? null", (value) => value === 'open');
     if (!mode.ok) return notExercised('the initial control mode was not open', { mode: mode.value });

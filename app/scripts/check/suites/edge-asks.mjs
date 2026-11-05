@@ -77,7 +77,7 @@ export default async function edgeAsksSuite() {
     assertEqual(hostAskDecidedAtMs({ timeOriginMs: 1_700_000_000_000, atMs }), atMs, 'an archived 8b ask is not refused');
     const loader = fs.readFileSync(PATCHED_HYBRID_LOADER, 'utf8');
     assert(loader.includes('this.noteHostAsk(segment, urgent); // wa-patch: record the 8b urgent host load'), 'the 8b call site passes no pass instant');
-    // Joint D1 F1: the 8b call sites pass no passMs. Mutation: validate passMs
+    // The 8b call sites pass no passMs. Mutation: validate passMs
     // before the decisionMs test. Named red: `an archived 8b ask is not refused`.
   });
 

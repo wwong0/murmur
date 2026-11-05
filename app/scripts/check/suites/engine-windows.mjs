@@ -56,7 +56,7 @@ let product;
 export default async function engineWindowsSuite() {
   product = await bundleProductEntry();
 
-  // T1 (design.md D1): re-derived, not deleted. The premise changed — the core no
+  // Re-derived, not deleted. The premise changed — the core no
   // longer builds without window keys when none is supplied; it builds the product's
   // 15/60/60 instead. `__app.engineWindows()` (what the harness supplied) stays null.
   await check('engine-windows (a): absent global publishes null and the core holds the product windows', async () => {
@@ -209,26 +209,26 @@ export default async function engineWindowsSuite() {
     const conditionsPath = path.resolve(suiteDir, '../../../harness/conditions.json');
     const conditions = JSON.parse(await fs.readFile(conditionsPath, 'utf8'));
     const undeclared = [];
-    // 8b2's conditions run the product's own windows: declaring them is what
+    // The control conditions run the product's own windows: declaring them is what
     // their product-input refusal refuses, so they must not.
     const productInputs = ['shakedown/control-qual', 'control-five', 'control-ten', 'control-seek', 'sweep-070', 'sweep-095', 'sweep-unpaced',
-      // 9b's eleven copy them and run the product's windows as they do.
+      // The eleven edge conditions copy them and run the product's windows as they do.
       'shakedown/edge-qual', 'edge-five', 'edge-ten', 'edge-seek', 'edge-control-ten', 'edge-control-seek', 'edge-drop', 'edge-slow',
       'edge-sweep-070', 'edge-sweep-095', 'edge-sweep-unpaced',
-      // 10b's fourteen are edge-five and edge-drop, and judge the product as it ships.
+      // The fourteen churn conditions are edge-five and edge-drop, and judge the product as it ships.
       'baseline-join', 'baseline-leave-clean', 'baseline-leave-silent', 'join', 'leave-clean', 'leave-silent', 'leave-first',
       'drop-socket', 'drop-recover', 'shakedown/churn-join', 'shakedown/churn-leave-clean', 'shakedown/churn-leave-silent',
       'shakedown/churn-drop-socket', 'shakedown/churn-leave-first'];
-    // 11a-2's copy 9b's edge conditions and run the product's windows as they do.
+    // The 11a2- conditions copy the edge conditions and run the product's windows as they do.
     const registeredBy11a2 = (name) => (name.startsWith('11a2-') || name.startsWith('shakedown/11a2-'))
       && name !== '11a2-scattered-4s';
-    // 12c-1's copy 11a-2's arms (its executor spec T10).
+    // The 12c1- conditions copy the 11a2- arms.
     const registeredBy12c1 = (name) => name.startsWith('12c1-') || name.startsWith('shakedown/12c1-');
     const registeredBy12c2 = (name) => name.startsWith('12c2-') || name.startsWith('shakedown/12c2-');
-    // 13d's copy archived product arms and runs the product's windows.
+    // The 13d- conditions copy archived product arms and run the product's windows.
     const registeredBy13d = (name) => name.startsWith('13d-') || name.startsWith('shakedown/13d-');
     const registeredBy13e = (name) => name.startsWith('13e-') || name.startsWith('shakedown/13e-');
-    // 13f's copies run the product's windows.
+    // The 13f- copies run the product's windows.
     const registeredBy13f = (name) => name.startsWith('13f-') || name.startsWith('shakedown/13f-');
     const supplied = [];
     const walk = (group, label) => {

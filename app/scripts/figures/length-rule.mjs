@@ -1,4 +1,4 @@
-// D4's length decision reads one registered arm shape. Missing accepted runs
+// The length decision reads one registered arm shape. Missing accepted runs
 // are null; this reader does not infer them from aliases or nested run records.
 
 const finite = (value) => Number.isFinite(value);
@@ -50,7 +50,7 @@ function testAt(result, seconds, arm, output) {
   return false;
 }
 
-/** Apply D4's fixed 1s -> 2s -> 4s order and strict all-pairs waits. */
+/** Apply the fixed 1s -> 2s -> 4s order and strict all-pairs waits. */
 export function lengthRule({ arms = {} } = {}) {
   const baseline = arms['4s']?.five ? {
     accepted: arms['4s'].five.accepted === true,

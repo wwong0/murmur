@@ -1,4 +1,4 @@
-// Change 12c-1: read the registered run set once, on one build, and write the reading.
+// Read the registered run set once, on one build, and write the reading.
 
 import fs from 'node:fs';
 import path from 'node:path';

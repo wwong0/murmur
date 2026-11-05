@@ -1,4 +1,4 @@
-// 9b design.md D4: the 8b assignment control is declared by the condition,
+// The 8b assignment control is declared by the condition,
 // supplied to every page before it loads, read back from every page twice, and
 // a page that did not run what the condition declared refuses the run.
 
@@ -73,7 +73,7 @@ export function controlRefusals(condition = {}, readings = [], { rosterPage = nu
     for (const page of pages) {
       const before = first.byPage[page] ? assertControlReading(page, first.byPage[page]) : null;
       const after = reading.byPage[page] ? assertControlReading(page, reading.byPage[page]) : null;
-      // The page a roster event added or removed is in one reading only (10b design.md D7).
+      // The page a roster event added or removed is in one reading only.
       if (page === rosterPage && (before === null || after === null)) continue;
       if (JSON.stringify(before) !== JSON.stringify(after)) {
         refusals.push({ reason: 'assignment-control-changed', page, before, after });

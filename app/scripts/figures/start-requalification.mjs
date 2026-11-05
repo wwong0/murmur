@@ -1,5 +1,5 @@
 // Pure playback qualification figures. The traps are the second clock and the
-// plain-line false positive; see 6b design.md D6.
+// plain-line false positive.
 
 import { MAX_RATE_DEVIATION } from '../../public/lib/drift-controller.mjs';
 import { DEFAULT_BARS, MIN_RESIDUAL_RECORDS, steadyCommandStretches, stretchSlopes } from '../drift-figures.mjs';

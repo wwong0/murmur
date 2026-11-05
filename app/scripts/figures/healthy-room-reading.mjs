@@ -34,7 +34,7 @@ export function identityDifferences(run, build) {
 }
 
 function runReading({ entry, publishedDrift, settledDrift, aheadForGood, placement, roles, recomputeError }) {
-  // The host tab polls nothing, so only viewers are read (D1 F2).
+  // The host tab polls nothing, so only viewers are read.
   const viewers = Object.entries(placement ?? {}).filter(([tag]) => roles?.[tag] === 'viewer');
   const settled = settledDrift?.status === 'published' && typeof settledDrift.shown !== 'undefined' ? settledDrift : null;
   const reason = NOT_RUN.test(entry.outcome ?? '') ? `outcome:${entry.outcome}` : recomputeError ? `recompute:${recomputeError}`

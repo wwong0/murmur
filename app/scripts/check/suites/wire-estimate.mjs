@@ -1,4 +1,4 @@
-// T14, T15 (design.md D2): the host's estimate read at the wire over two queued
+// The host's estimate read at the wire over two queued
 // intervals, the queue seen by the echo round trip, lowered by a standing queue and
 // raised by a probe the round trip stayed flat through.
 
@@ -38,7 +38,7 @@ export default async function wireEstimateSuite() {
     const clock = createFakeClock();
     const { origin, cleanup } = await host({ clock, drainBytesPerMs: 600, queueBytesPerMs: 1250 });
     try {
-      // The cap (design.md D2) lets the queue fill for an interval and then stand,
+      // The cap lets the queue fill for an interval and then stand,
       // so the first reading that stands closes with the fifth.
       clock.advance(6000);
       const read = origin.pace();
@@ -75,7 +75,7 @@ export default async function wireEstimateSuite() {
   });
 
   await check('wire-estimate: a stalled interval is not read as the link', async () => {
-    // Attempt 3's intervals 3 and 4 (design.md D2, remedy investigation): the channels
+    // Attempt 3's intervals 3 and 4: the channels
     // hand nothing down for 2 s while the wire carries a trickle of what was queued.
     const clock = createFakeClock();
     const { origin, links, wire, cleanup } = await host({ clock, drainBytesPerMs: 600, queueBytesPerMs: 1250 });
@@ -143,7 +143,7 @@ export default async function wireEstimateSuite() {
   });
 
   await check('wire-estimate: before an estimate, the host holds a channel at what its echo answers confirmed, and the queue below stands', async () => {
-    // Attempt 4's start (design.md D2, start-hold repair): channels that empty at
+    // Attempt 4's start: channels that empty at
     // once into a queue the host cannot see, and a wire count taken above it. Unheld,
     // the host handed 13.73 MB in nine intervals to a link that carried 11.12 MB.
     const clock = createFakeClock();

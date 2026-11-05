@@ -1,4 +1,4 @@
-// 12c-2 D2/D3: one reading of the run set, refused unless every measured run is on build.json's build.
+// One reading of the run set, refused unless every measured run is on build.json's build.
 
 import { assert, assertEqual, check } from '../harness.mjs';
 import { healthyRoomReading, placementReading } from '../../figures/healthy-room-reading.mjs';

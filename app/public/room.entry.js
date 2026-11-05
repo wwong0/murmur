@@ -99,7 +99,7 @@ const suppliedEngineWindows = globalThis.__waEngineWindows;
 const engineWindows = suppliedEngineWindows === undefined
   ? { windows: null, error: null }
   : validateEngineWindows(suppliedEngineWindows);
-// T4 (design.md D2): read before load, as engineWindows is above. Absent gives
+// Read before load, as engineWindows is above. Absent gives
 // the product default, unsupplied; an invalid supply falls back to the same
 // default but is still marked supplied, and carries the error the harness reads
 // to refuse the run — the host still serves at the default (an invalid supply
@@ -114,7 +114,7 @@ const headroomFraction = (() => {
 console.log('[app] build', BUILD_ID);
 
 // ---------------------------------------------------------------------------
-// Config from the query string. The change 6 harness drives clients by URL,
+// Config from the query string. The container harness drives clients by URL,
 // so anything that lived in a form or in storage would become harness work
 // later — read it straight off location.search instead.
 // ---------------------------------------------------------------------------
@@ -168,7 +168,7 @@ const PREPARED_KEY_NAME = 'watchalong.prepared-key';
 const playbackStore = sessionKey('watchalong.playback-state');
 const preparedName = sessionKey(PREPARED_NAME_KEY);
 const nameStore = sessionKey('watchalong.name');
-// 13b D1: the front page forgets the tab's prepared copy too, so a room hosted from it starts empty.
+// The front page forgets the tab's prepared copy too, so a room hosted from it starts empty.
 if (route !== 'room') {
   playbackStore?.clear();
   sessionKey(PREPARED_KEY_NAME)?.clear();
@@ -181,7 +181,7 @@ function storedName() {
   return readMemberText(stored, NAME_MAX_CODE_POINTS) ?? undefined;
 }
 
-// Start-timing instrumentation (executor-spec.md §11.2), off unless asked for.
+// Start-timing instrumentation, off unless asked for.
 // `record` returns early when disabled, so every site below is unconditional
 // and the product keeps one code path either way.
 const startTiming = params.get('startTiming') === '1';
@@ -219,7 +219,7 @@ const INITIAL_VIEW = {
   // Whether this page's own source reports `hostStatus`: the host's file card shows it, and the
   // viewer's waiting card must not.
   hostSide: false,
-  // 'reconnecting' only while a lost connection is being retried (design.md D13, D16).
+  // 'reconnecting' only while a lost connection is being retried.
   connection: 'connecting',
   title: { name: null },
   overlay: { clock: '', drift: '', bytes: '', controller: '', startWait: '', links: '' },
@@ -236,11 +236,11 @@ const INITIAL_VIEW = {
     syncShown: false,
     syncPlaying: false,
   },
-  // Which of `#play`/`#pause` the bar shows (design.md D8); both stay mounted either way.
+  // Which of `#play`/`#pause` the bar shows; both stay mounted either way.
   playSlot: 'play',
-  // The card follows replicated playing state (design.md D1).
+  // The card follows replicated playing state.
   roomPlaying: false,
-  // The pill waits for a known shared grace end (design.md D1).
+  // The pill waits for a known shared grace end.
   graceLeftS: null,
   roster: [],
   people: [],
@@ -414,7 +414,7 @@ async function installHostSide() {
       clearTimeout: (handle) => clearTimeout(handle),
     },
     pace: { fraction: headroomFraction.fraction },
-    // T14 (design.md D2, reversed): the estimate reads the wire, not the channels' drain.
+    // The estimate reads the wire, not the channels' drain.
     wire: createWireMeter({ peers: () => hostAnswer.peerConnections() }),
   });
   hostAnswer = createHostAnswer({
@@ -436,7 +436,7 @@ async function installHostSide() {
   hostSideInstalled = true;
 }
 
-// T13 (design.md D2): the viewer's own start or resume segments, and the playlist,
+// The viewer's own start or resume segments, and the playlist,
 // go to the host marked urgent; the middle class follows the engine window.
 function urgentRequestFor(path) {
   try {
@@ -487,7 +487,7 @@ function installViewerLink() {
   void linkKinds.refresh();
 }
 
-// 11-2 D6: the host's own player reads the store. Imported here, as the host transport is.
+// The host's own player reads the store. Imported here, as the host transport is.
 async function installHostFileLink() {
   const { createPreparedMediaLink } = await import('./lib/prepared-media-link.mjs');
   const { createShimFetch, createShimXhr } = await import('./lib/host-link-shim.mjs');
@@ -510,7 +510,7 @@ function openHostLinks() {
 const eventSubscribers = new Map();
 const envelopeSubscribers = new Map();
 
-// D4: the front page has no room, so the client is made at Host or load; a
+// The front page has no room, so the client is made at Host or load; a
 // subscription made before it is replayed onto it, and its unsubscribe still detaches.
 function subscribe(map, method, type, listener) {
   const entry = { listener, off: activeClient?.[method](type, listener) };
@@ -563,11 +563,11 @@ if (route === 'room') activateClient();
 let delivery = 'host';
 let iceServers = [];
 let trackerUrl = null;
-// D8: on the page no creation precedes /app-settings (both connects follow it), so
+// On the page no creation precedes /app-settings (both connects follow it), so
 // only entry suites that create first read this; true keeps their start as it was.
 let autoStart = true;
 let peerExchange = null;
-// T10 (design.md D7): every reader of "does this room have peer exchange" reads
+// Every reader of "does this room have peer exchange" reads
 // this one value, derived once in startApp — not the delivery/trackerUrl pair
 // each reader used to re-check for itself.
 let roomHasPeerExchange = false;
@@ -594,7 +594,7 @@ let gracePauses = 0;
 const hostStatusBook = createHostStatusBook();
 let lastStatusSent = null;
 let statusSends = 0;
-// Design D10: the bar fades after this long without a pointer move over #player.
+// The bar fades after this long without a pointer move over #player.
 const FADE_AFTER_MS = 3000;
 let lastPointerMoveAt = null;
 const endLatch = createEndLatch();
@@ -632,7 +632,7 @@ function observeHostGrace() {
   hostGrace.observe({ hostPresent: rosterHasHost(), atSharedMs: clockSync.sharedNow() });
 }
 
-// 11-2 D5: under `file` this is the host's only route into the room.
+// Under `file` this is the host's only route into the room.
 function paintHostFile(snapshot) {
   const detail = snapshot.refusal?.message ?? snapshot.failure;
   const help = snapshot.refusal ? refusalHelp(snapshot.refusal) : null;
@@ -764,7 +764,7 @@ client.onEvent('refused', ({ code, detail }) => {
   // End of the line: refused, and this client will not ask again.
   //
   // NO CLOSED SET OF CODES HERE. room-client's refusal branch is terminal by
-  // construction (change 2 design.md D12), so any code the server has now or
+  // construction, so any code the server has now or
   // grows later arrives on this event — a two-branch ternary told a
   // `version-mismatch` it was a host collision. A code with a way out gets the
   // way out; everything else says what happened and stops.
@@ -791,7 +791,7 @@ function notePresence(body, labelsBefore) {
 
 client.on('presence', (env) => {
   const body = readBody(env);
-  // A member can relay an envelope typed `presence`; only the server's closes peers (7a d1-findings D1-1).
+  // A member can relay an envelope typed `presence`; only the server's closes peers.
   if (env.from === ADDR_SERVER && isHostSide()) hostAnswer?.closeDeparted(body.roster);
   if (env.from === ADDR_SERVER && isHostSide()) void linkKinds.refresh();
   if (env.from === ADDR_SERVER && body.event === 'join' && body.member?.clientId !== client.clientId) sendHostStatus(true);
@@ -878,9 +878,9 @@ const treatment = initializePlaybackTreatment({
   evidence: params.get('treatmentEvidence') === '1',
 });
 
-// Applied play, pause and seek, and this member's own refusal, as activity lines (design.md
-// D13). The title's end is "The film ended", not a member's pause; a pause with no host in the
-// roster is the grace pause, which "Host left" already says.
+// Applied play, pause and seek, and this member's own refusal, as activity lines. The title's
+// end is "The film ended", not a member's pause; a pause with no host in the roster is the
+// grace pause, which "Host left" already says.
 function noteOutcome(env, outcome, ownSystemPause) {
   const kind = env.payload?.kind;
   if (outcome === 'notPermitted' && env.from === client.clientId && !ownSystemPause) {
@@ -895,7 +895,7 @@ function noteOutcome(env, outcome, ownSystemPause) {
   else if (rosterHasHost()) addActivity({ kind: 'pause', from: env.from, positionMs: acquisition.state?.current.mediaMs });
 }
 
-// The replicated playback state (change 5 design.md D4). Built before connect
+// The replicated playback state. Built before connect
 // so its `joined` subscriber sees the first join.
 const acquisition = createPlaybackAcquisition({
   client,
@@ -912,7 +912,7 @@ const acquisition = createPlaybackAcquisition({
   },
   mintLineage: newReclaimSecret,
   onOutcome: ({ env, outcome }) => {
-    // D7: this member's end pause may be rejected as stale or by the control mode; no notice.
+    // This member's end pause may be rejected as stale or by the control mode; no notice.
     // The same holds for its grace pause.
     const ownSystemPause = env.payload?.kind === 'pause'
       && [lastEndPauseInstant, lastGracePauseInstant].includes(env.payload?.atSharedMs);
@@ -938,12 +938,12 @@ window.addEventListener('beforeunload', (event) => {
   }
 });
 
-// 13b D2: Back from a hosted room reaches the front page's entry; reloading it leaves the room.
+// Back from a hosted room reaches the front page's entry; reloading it leaves the room.
 window.addEventListener('popstate', () => {
   if (readRoute(location.search).room !== room) location.reload();
 });
 
-// T7/T8 (design.md D5, D3): the viewer's held-ahead, the reports the host has
+// The viewer's held-ahead, the reports the host has
 // seen, and the resume rule's own ring. Kept beside `acquisition`, not inside
 // it — held-ahead and the resume rule are both pure modules of their own.
 let heldAheadValue = null;
@@ -956,7 +956,7 @@ const holdResume = createHoldResume();
 const resumeRing = createResumeRing(256);
 
 function updateHeldAhead() {
-  // T7: never from `video.currentTime` (CONSTRAINTS.md → playback), and never
+  // Never from `video.currentTime`, which is coarse and names no frame, and never
   // on the host's page — the drift line's "not reported" arm covers exactly
   // this absence and a viewer's own before its first value.
   if (client.role === 'host') return;
@@ -1061,7 +1061,7 @@ function updateUrgentContext() {
   const held = current?.held === true;
   setUrgentContext({
     held,
-    // The held state's instant on the engine's clock, `performance.now()` (design.md D4).
+    // The held state's instant on the engine's clock, `performance.now()`.
     notBeforeMs: held && Number.isFinite(current.atSharedMs) ? Math.max(0, performance.now() + current.atSharedMs - nowSharedMs) : 0,
     roomMediaMs,
     ownMediaMs: ownMediaMs ?? roomMediaMs,
@@ -1116,12 +1116,12 @@ function renderControls() {
       disabled: preparing || (ended ? !ready('seek') : !(ready('play') && !state?.current.playing)),
       hidden: false,
     },
-    // T5 (design.md D3, "any member's own play or pause ends a hold"): a held
-    // state is paused, so pause is enabled to let a person end the hold.
+    // Any member's own play or pause ends a hold: a held state is paused, so
+    // pause is enabled to let a person end the hold.
     pause: { text: 'pause', disabled: !(ready('pause') && (state?.current.playing || state?.current.held)), hidden: false },
     'back-10': { text: 'back 10s', disabled: preparing || !ready('seek'), hidden: false },
     'forward-10': { text: 'forward 10s', disabled: preparing || !ready('seek'), hidden: false },
-    // Every member sees the settings menu; a viewer's group is disabled, not hidden (design.md D11).
+    // Every member sees the settings menu; a viewer's group is disabled, not hidden.
     'control-mode': { text: `mode: ${state?.controlMode === 'host' ? 'open' : 'host'}`, disabled: client.role !== 'host' || !ready('control-mode'), hidden: false },
     mute: { text: view.get().controls.mute.text, disabled: false, hidden: false },
   };
@@ -1159,7 +1159,7 @@ function renderBar() {
     // Beside `syncDot`, whose two fields `sync-dot.mjs` holds: the tooltip's figure needs the number.
     syncEstimateMs: Number.isFinite(controllerState.estimateMs) ? controllerState.estimateMs : null,
     // The dot shows once a title is loaded and someone else is in the room, so an idle one can
-    // say why it has no figure (11b design.md D10; 12e D9); `syncPlaying` picks which words.
+    // say why it has no figure; `syncPlaying` picks which words.
     syncShown: Number.isFinite(durationMs) && client.roster.length > 1,
     syncPlaying: playing,
   });
@@ -1171,7 +1171,7 @@ function issue(kind, args) {
   return issued;
 }
 
-// D8: a viewer holds one title's media. An adopted state changes the title with no
+// A viewer holds one title's media. An adopted state changes the title with no
 // applied operation, so the tick runs this as well as the outcome handler.
 function discardStaleTitle() {
   if (loadedTitle === undefined || (acquisition.state?.title ?? null) === loadedTitle) return;
@@ -1288,7 +1288,7 @@ const actions = {
   chooseHostFile: (file) => {
     if (!hostFileChooserOpen) return;
     if (file) {
-      // A pick the source ignores must not rename the title it is preparing (12a D8).
+      // A pick the source ignores must not rename the title it is preparing.
       if (!CHOOSABLE_STATES.includes(hostFile.snapshot().state)) return;
       if (isValidHostName(file.name)) preparedName?.set(file.name);
       else preparedName?.clear();
@@ -1318,7 +1318,7 @@ const sampler = createFrameSampler({ video, timeline, clock: clockSync, log: dri
 // A second observer on the same frames, never stopped, so the frame the park
 // presented is identifiable too. It holds no log and no timeline: the product
 // sampler above is untouched, and the two streams join offline on
-// `presentedFrames` (executor-spec.md §11.1).
+// `presentedFrames`.
 const frameObserver = startTiming
   ? createFrameObserver({ video, telemetry, context: telemetryContext, now: pageNow, placement: placementMs })
   : null;
@@ -1344,7 +1344,7 @@ const controller = createDriftController({
 const controllerView = () => treatment.view(controller.state());
 
 // ---------------------------------------------------------------------------
-// The scheduled start (D6) and the window drop at every start and park (D7)
+// The scheduled start and the window drop at every start and park
 // ---------------------------------------------------------------------------
 
 const start = createPlaybackStart({
@@ -1365,7 +1365,7 @@ const starts = [];
 let lastSkipAtSharedMs = null;
 let lastSkipAbandonedMs = null;
 let startTimer = null;
-// Readiness per executor-spec.md C1-7: an event after this attempt's load or
+// Readiness: an event after this attempt's load or
 // park, and for a park only from its `seeked` on; the tick re-checks readyState.
 let readiness = null;
 
@@ -1375,13 +1375,13 @@ function reportStep(name, error) {
 
 // The identity and the clock as this page holds them at this instant, read from
 // the same sources the product reads. Every value may be null, and a null is
-// named in the event rather than defaulted (executor-spec.md R17).
+// named in the event rather than defaulted.
 //
 // THE ONE PLACE THE INSTRUMENT COSTS ANYTHING IS GUARDED, so every call site
 // below stays unconditional and the product keeps one code path: `record`'s own
 // early return does not stop its third argument being built, and these four
 // reads would otherwise run four times a second on the shipped path with
-// nothing recorded (D1 R7, `docs/constraints/measurement.md`).
+// nothing recorded.
 function telemetryContext() {
   if (!startTiming) return null;
   const estimate = clockSync.read();
@@ -1449,8 +1449,7 @@ for (const type of ['timeupdate', 'seeking']) {
 
 /**
  * One `action` event per action, with `dispatchedAtLocalMs`/`returnedAtLocalMs`
- * bracketing the element or player call itself — not the step around it, which
- * is the measurement the repair brief names first.
+ * bracketing the element or player call itself, not the step around it.
  */
 function recordAction(action, fields, dispatch) {
   const elementPausedBefore = video.paused;
@@ -1496,7 +1495,7 @@ function recordAction(action, fields, dispatch) {
 
 function play(action) {
   // The room's own mapping, as the reducer computed it — never S minus the
-  // physical park, which differs from it by the advance (§12, C1-10).
+  // physical park, which differs from it by the advance.
   const seamEpochMs = action.seamEpochMs;
   markSeam(seamEpochMs, action.scheduledPositionMs);
   starts.push({
@@ -1561,7 +1560,7 @@ function execute(result) {
       sampler.stop();
       recordAction(action, {}, () => video.pause());
     } else if (action.kind === 'load' || action.kind === 'park') {
-      // C1-10: the reducer carries the mapping each action serves, playing or
+      // The reducer carries the mapping each action serves, playing or
       // paused, so nothing here derives an epoch from the physical park.
       const epochMs = action.seamEpochMs;
       readiness = { attemptId: action.attemptId, needsSeeked: action.kind === 'park', prerequisiteSeen: false };
@@ -1735,10 +1734,10 @@ function paintOverlay() {
   });
 }
 
-// Read by 13a's hidden-tab probe: a hidden page's timers slow, and this is how a run shows it.
+// Read by the hidden-tab probe: a hidden page's timers slow, and this is how a run shows it.
 let ticks = 0;
 
-// Each step in its own try (D10): the controller's stale rule is what returns
+// Each step in its own try: the controller's stale rule is what returns
 // the rate to 1.0 when frames stop, so a failing start must not skip it.
 function tickPlayback() {
   ticks += 1;
@@ -1751,7 +1750,7 @@ function tickPlayback() {
     ['playback-start', pollStart],
     ['title-end', () => {
       const state = acquisition.state;
-      // D7, joint D1 F1: the element's own end, or it parks short of it and never ends.
+      // The element's own end, or it parks short of it and never ends.
       const durationMs = endPauseMs(titleEndMs(), mediaDurationS());
       const instant = endInstant(state, durationMs);
       const nowSharedMs = clockSync.sharedNow();
@@ -1786,11 +1785,11 @@ tickPlayback();
 setInterval(tickPlayback, 250);
 
 // ---------------------------------------------------------------------------
-// The harness seam (D2)
+// The harness seam
 //
-// Change 6 reads these as values over CDP, `playing` above all: a client that
-// never played downloads nothing, which makes the host upload multiplier of
-// criteria 2 and 3 look BETTER (CONSTRAINTS.md → *Measurement*).
+// The container harness reads these as values over CDP, `playing` above all: a
+// client that never played downloads nothing, which makes the measured host
+// upload multiplier look BETTER.
 //
 // Functions, not values — a consumer evaluating this expression twice must get
 // two readings, not one frozen at load.
@@ -1908,7 +1907,7 @@ function unpreparedHostFile(state, failure) {
 
 async function startApp() {
   try {
-    // No fetch means no settings: the page does not guess a delivery (7a d1-findings D1-4).
+    // No fetch means no settings: the page does not guess a delivery.
     if (typeof window.fetch !== 'function') throw new Error('fetch is unavailable');
     const settingsResponse = await window.fetch('/app-settings', { cache: 'no-store' });
     if (!settingsResponse.ok) throw new Error(`HTTP ${settingsResponse.status}`);
@@ -1950,7 +1949,7 @@ async function startApp() {
       if (missing) {
         hostFile = unpreparedHostFile('failed', missing);
         // Not choosable although `failed` is a choosable state: the chooser never opens on this
-        // page, so an enabled input would take a pick and drop it (design.md D15).
+        // page, so an enabled input would take a pick and drop it.
         view.set('hostFile', { status: `failed: ${missing}`, inputHidden: true, state: 'failed', choosable: false });
         return;
       }
@@ -1976,7 +1975,7 @@ async function startApp() {
       client.connect();
       const openState = hostFile.snapshot().state;
       view.set('hostFile', { ...view.get().hostFile, inputHidden: false, state: openState, choosable: CHOOSABLE_STATES.includes(openState) });
-      // 11-2 D7: the page hands the File over and never reads its name.
+      // The page hands the File over and never reads its name.
       hostFileChooserOpen = true;
       await hostFile.start();
     } else if (delivery === 'host') {

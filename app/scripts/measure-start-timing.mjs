@@ -1,4 +1,4 @@
-// Bounded scheduled-start diagnostic runner (executor-spec.md §11.4). It owns
+// Bounded scheduled-start diagnostic runner.
 // External servers must run with APP_DELIVERY=http; the owned-server case sets
 // it too. One fresh Chrome profile drives eight starts over the two conditions,
 // publishes only what `reduceCapture` in start-timing.mjs decided.
@@ -11,8 +11,8 @@
 //
 // ZERO RETRIES AND ZERO ADAPTIVE EXTENSIONS. On timeout, missing evidence,
 // cleanup failure or an unusable start this retains everything, writes
-// `status: 'aborted'` and exits non-zero. Whether anything runs again is an
-// owner decision taken against that evidence, not a decision this makes.
+// `status: 'aborted'` and exits non-zero. Whether anything runs again is a
+// person's decision taken against that evidence, not a decision this makes.
 
 import { execFileSync, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -395,7 +395,7 @@ async function acquire() {
   const h = await bounded(attachTo(PORT, hostUrl, { label: 'H/probe-host' }), BROWSER_ATTACH_TIMEOUT_MS, 'H attach');
   tabs.push(h);
 
-  // R8: the shape before the figures. H must be a document on the measured
+  // The shape before the figures. H must be a document on the measured
   // origin with no player of its own, or nothing it sends means what it says.
   // Waited for rather than read once: a tab attached before its first
   // navigation commits is still on about:blank, whose origin serialises to the

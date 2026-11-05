@@ -1,15 +1,15 @@
-// Shared wire constructors (D2/D3).
+// Shared wire constructors.
 
 import { isFileIdentity, isValidHostName } from './title-fields.mjs';
 
-/** Protocol version; checked on join (D2). */
+/** Protocol version; checked on join. */
 export const PROTOCOL_VERSION = 1;
 
 /** Reserved routing addresses; other addresses are client ids. */
 export const ADDR_ROOM = 'room';
 export const ADDR_SERVER = 'server';
 
-/** Error codes shared by server and client (D2). */
+/** Error codes shared by server and client. */
 export const ERROR_CODES = Object.freeze({
   VERSION_MISMATCH: 'version-mismatch',
   BAD_ENVELOPE: 'bad-envelope',
@@ -21,10 +21,10 @@ export const ERROR_CODES = Object.freeze({
   RATE_LIMITED: 'rate-limited',
 });
 
-/** Replaced membership close code (1b design.md D5). */
+/** Replaced membership close code. */
 export const CLOSE_SUPERSEDED = 4000;
 
-/** Fresh secret; it is emitted only in the directed joined envelope (1b D1). */
+/** Fresh secret; it is emitted only in the directed joined envelope. */
 export function newReclaimSecret() {
   const bytes = new Uint8Array(16);
   globalThis.crypto.getRandomValues(bytes);
@@ -44,7 +44,7 @@ export const TYPE_JOINED = 'joined';
 export const TYPE_PRESENCE = 'presence';
 export const TYPE_ERROR = 'error';
 
-/** Types only the server emits. A member's envelope of one is refused, never relayed (12a D5). */
+/** Types only the server emits. A member's envelope of one is refused, never relayed. */
 export const SERVER_ONLY_TYPES = Object.freeze([
   TYPE_PRESENCE,
   TYPE_JOINED,
@@ -57,7 +57,7 @@ export const SERVER_OWNED_FIELDS = Object.freeze(['room', 'from', 'seq', 'ts']);
 
 // Client -> server. Correlation labels and payload are client-owned.
 
-/** Build a client envelope (D2/D3). @param {{type: string, to: string, id?: string, replyTo?: string, payload?: unknown}} fields */
+/** Build a client envelope. @param {{type: string, to: string, id?: string, replyTo?: string, payload?: unknown}} fields */
 export function buildClientEnvelope({ type, to, id, replyTo, payload }) {
   const env = {
     v: PROTOCOL_VERSION,
@@ -70,7 +70,7 @@ export function buildClientEnvelope({ type, to, id, replyTo, payload }) {
   return env;
 }
 
-/** Build join content; secret is the only reclaim field (1b D8/D10). */
+/** Build join content; secret is the only reclaim field. */
 export function buildJoinEnvelope({ room, tabId, role, secret, name }) {
   const body = { room, tabId, role };
   if (secret !== undefined) body.secret = secret;
@@ -101,17 +101,17 @@ export const TYPE_PLAYBACK_OPERATION = 'playback-operation';
 export const TYPE_PLAYBACK_STATE_REQUEST = 'playback-state-request';
 export const TYPE_PLAYBACK_STATE_ANSWER = 'playback-state-answer';
 
-/** Build a room-scoped playback operation (D12). */
+/** Build a room-scoped playback operation. */
 export function buildPlaybackOperationEnvelope(payload) {
   return buildClientEnvelope({ type: TYPE_PLAYBACK_OPERATION, to: ADDR_ROOM, payload });
 }
 
-/** Build a directed playback-state answer correlated to a request (D12). */
+/** Build a directed playback-state answer correlated to a request. */
 export function buildPlaybackStateAnswerEnvelope({ to, replyTo, payload }) {
   return buildClientEnvelope({ type: TYPE_PLAYBACK_STATE_ANSWER, to, replyTo, payload });
 }
 
-// T6 (design.md D5): a viewer's held-ahead report, relayed to the host over the
+// A viewer's held-ahead report, relayed to the host over the
 // room's own websocket — no server change (server/** carries no "payload").
 export const TYPE_AHEAD = 'ahead';
 
@@ -231,7 +231,7 @@ export function validateServerEnvelope(env) {
   return { ok: true };
 }
 
-// Server -> client. Constructors leave ts.send at 0; send stamps it late (D6).
+// Server -> client. Constructors leave ts.send at 0; send stamps it late.
 
 /** @typedef {{room:string, to:string, seq?:number|null, recv:number, from?:string, id?:string, replyTo?:string}} Routing */
 
@@ -252,7 +252,7 @@ function serverEnvelope(routing, type, body) {
   return env;
 }
 
-/** Spread first, then overwrite server-owned routing fields (D3). */
+/** Spread first, then overwrite server-owned routing fields. */
 export function relayEnvelope(clientEnv, routing) {
   return {
     ...clientEnv,
@@ -265,17 +265,17 @@ export function relayEnvelope(clientEnv, routing) {
   };
 }
 
-/** Directed join acknowledgement; the secret appears only here (1b D1/D12). */
+/** Directed join acknowledgement; the secret appears only here. */
 export function makeJoined(routing, { clientId, roster, roomSeq, serverTime, secret }) {
   return serverEnvelope(routing, TYPE_JOINED, { clientId, roster, seq: roomSeq, serverTime, secret });
 }
 
-/** Emit the full roster for a membership change (D7). */
+/** Emit the full roster for a membership change. */
 export function makePresence(routing, { event, member, roster }) {
   return serverEnvelope(routing, TYPE_PRESENCE, { event, member, roster });
 }
 
-/** Emit a non-closing refusal and optional reclaim release advice (1b D13). */
+/** Emit a non-closing refusal and optional reclaim release advice. */
 export function makeError(routing, { code, detail, expected, got, releaseWithinMs }) {
   const body = { code };
   if (detail !== undefined) body.detail = detail;
@@ -333,7 +333,7 @@ export function readChatMessage(env) {
   return text === null ? { ok: false } : { ok: true, text };
 }
 
-/** Read and validate join content; an unmatched secret is an ordinary join (1b D9). */
+/** Read and validate join content; an unmatched secret is an ordinary join. */
 export function readJoinRequest(env) {
   const body = env.payload;
   if (body === null || typeof body !== 'object' || Array.isArray(body)) {

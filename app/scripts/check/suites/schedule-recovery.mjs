@@ -1,4 +1,4 @@
-// 9b design.md D5: recovery counted from the rise's read-back, with the
+// Recovery counted from the rise's read-back, with the
 // held-ahead leg on every span, and no verdict for a run that was not exercised.
 
 import { assert, assertEqual, check } from '../harness.mjs';

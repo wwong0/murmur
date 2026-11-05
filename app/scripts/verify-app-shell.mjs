@@ -173,8 +173,8 @@ async function userGestureEvaluate(expression) {
   return response.result?.value;
 }
 
-// A held room shows #play in the bar's one slot and keeps #pause enabled under it for drivers
-// (design.md D8), so a pointer cannot reach it there; D18 moves that press (post-result, P2-R10).
+// A held room shows #play in the bar's one slot and keeps #pause enabled under it for drivers,
+// so a pointer cannot reach it there and the press is a script click under a user gesture.
 async function pressPause() {
   if (await read(tab, `document.querySelector('#pause')?.hidden === true`) !== true) return clickWhenEnabled('#pause');
   await userGestureEvaluate(`document.querySelector('#pause').click()`);
@@ -227,7 +227,7 @@ async function runS2() {
   const joined = await until(tab, `document.getElementById('status-line')?.textContent ?? ''`, (status) => status.startsWith('connected'));
   await recordIdentity('S2 the media element is unchanged after join', joined);
 
-  // Joint D1 F2: in a held room #play is enabled before the pause is pressed, so wait for the
+  // In a held room #play is enabled before the pause is pressed, so wait for the
   // pause itself to land (paused, unheld, a later version) before reading #play. The version is
   // read once #pause is enabled: before that the room may not have created its state.
   const pauseEnabled = await until(tab, `document.querySelector('#pause')?.disabled === false`, Boolean);
@@ -449,7 +449,7 @@ async function main() {
     report.failures = log.failures();
     report.endedAt = new Date().toISOString();
     report.notExercised = log.notExercised();
-    // Exit 0 only when every row passed: a NOT EXERCISED row earns nothing (executor-spec T8).
+    // Exit 0 only when every row passed: a NOT EXERCISED row earns nothing.
     report.outcome = report.failures.length === 0 && report.notExercised.length === 0 ? 'pass' : 'failed';
     fs.writeFileSync(path.join(RUN_DIR, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
     await disposeChrome(chrome, profile);

@@ -1,4 +1,4 @@
-// scripts/check/suites/chat-rate.mjs — the send allowance on the membership (12d D5).
+// scripts/check/suites/chat-rate.mjs — the send allowance on the membership.
 
 import { check, assert, assertEqual, sleep, Peer } from '../harness.mjs';
 import { server, mediaDir } from '../fixtures.mjs';

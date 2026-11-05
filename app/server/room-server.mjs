@@ -1,6 +1,6 @@
 // server/room-server.mjs
 //
-// One process, one origin (design.md D1): the room page, the pre-generated
+// One process, one origin: the room page, the pre-generated
 // media, and the websocket endpoint all live on http://127.0.0.1:8100.
 //
 // THE INVARIANT THIS FILE IS BUILT ON: the server routes; it does not
@@ -12,8 +12,8 @@
 // The invariant is defended structurally, not by good intentions: every
 // envelope this file emits is constructed in envelope.mjs, and
 // scripts/check-structure.mjs fails the build if this directory so much as
-// names the content field. Changes 2, 5, 7a and 10 add message types without
-// touching this file; if one needs to, that is a design failure to record.
+// names the content field. New message types arrive without touching this
+// file; one that needs to is a design failure.
 //
 // Node 24, ESM, node:http + node:fs + node:path + ws.
 
@@ -71,9 +71,9 @@ const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 8100;
 // Settable at start because the protocol check must prove a dead connection is
 // removed, and at the default that puts a multi-second floor on every run —
-// which turns a check you run constantly into one you run occasionally (D8).
-// The 5s default is sized against change 7a's saturated host; see 1b
-// design.md, "Challenged and left standing", before shortening it.
+// which turns a check you run constantly into one you run occasionally.
+// The 5s default is sized against a host whose uplink is saturated with media;
+// weigh that before shortening it.
 const DEFAULT_LIVENESS_MS = 5000;
 const DEFAULT_HOST_GRACE_MS = 10_000;
 const DEFAULT_FRAME_CAP_BYTES = 65_536;
@@ -141,11 +141,11 @@ const MIME = {
 
 /**
  * The room's time reference: a millisecond float on a monotonic base, so it
- * does not step when NTP corrects the OS clock (design.md D6).
+ * does not step when NTP corrects the OS clock.
  *
  * NOT `Date.now()`. A wall-clock step shows up as a simultaneous jump in
- * apparent offset at every client at once — precisely the input change 2's
- * filter is meant to treat as suspicious. The reference is deliberately not
+ * apparent offset at every client at once — precisely the input the clients'
+ * clock-offset filter is meant to treat as suspicious. The reference is deliberately not
  * UTC; positions are expressed in the room's own timebase.
  */
 function serverNow() {
@@ -181,7 +181,7 @@ function newClientId() {
 
 /**
  * The public view of a member — what goes out in a roster. No socket, no
- * internals, and DELIBERATELY no `secret` (1b design.md D1).
+ * internals, and DELIBERATELY no `secret`.
  *
  * Everything in here is broadcast to every member on every join and leave.
  * That is why `tabId` cannot be what proves a returning tab is itself.
@@ -206,7 +206,7 @@ function findHost(room) {
 
 /**
  * The membership a reclaim secret refers to, or null. THE ONE PLACE A SECRET
- * IS COMPARED — keep it that way (1b design.md D10). Keyed on the secret
+ * IS COMPARED — keep it that way. Keyed on the secret
  * alone; the `tabId` in the message is not consulted.
  */
 function findBySecret(room, secret) {
@@ -227,7 +227,7 @@ function findByTabId(room, tabId) {
 
 /**
  * The longest this member could keep holding its `tabId` if its connection
- * never answered another ping (1b design.md D13). A `tab-taken` refusal
+ * never answered another ping. A `tab-taken` refusal
  * reports it; the refused client uses it as its retry budget.
  *
  * Read straight out of the state the sweep already maintains. NO PROBE, no
@@ -244,7 +244,7 @@ function findByTabId(room, tabId) {
  * Ticks are counted rather than measured because the next tick can be anywhere
  * from an instant to a full interval away, and this has to be an upper bound.
  * Deliberately a MULTIPLE OF `livenessMs`, never a constant — a constant is
- * right at one setting and wrong at every other, which is the fault D13 fixed.
+ * right at one setting and wrong at every other.
  */
 function msUntilNameReleased(member, livenessMs) {
   const state = member.ws && member.ws._connState;
@@ -391,8 +391,8 @@ export function startRoomServer(opts = {}) {
   // The one place anything is written to a socket
   //
   // `ts.send` is stamped HERE, immediately before the write and after every
-  // other piece of work on this message (design.md D6). Stamp it any earlier
-  // and queueing delay lands inside change 2's offset estimate, where it is
+  // other piece of work on this message. Stamp it any earlier and queueing
+  // delay lands inside the clients' offset estimate, where it is
   // indistinguishable from an asymmetric network path.
   // -------------------------------------------------------------------------
   function emit(ws, env) {
@@ -414,7 +414,7 @@ export function startRoomServer(opts = {}) {
 
   /**
    * Deliver a room-scoped envelope to every member INCLUDING the sender
-   * (design.md D4) — change 5 needs the sender to learn the `seq` its own
+   * — replicated playback needs the sender to learn the `seq` its own
    * action was assigned.
    *
    * The envelope object is reused across members deliberately: each write gets
@@ -447,11 +447,10 @@ export function startRoomServer(opts = {}) {
   /**
    * The single point at which a response finishes, successfully or not.
    *
-   * Change 1 builds no accounting; change 6 owns it. What exists here is the
-   * SHAPE change 6 needs, and the shape is dictated by CONSTRAINTS.md: count
-   * DELIVERED bytes from a socket `bytesWritten` delta on close, clamped to
-   * the expected size, and identify the client from a HEADER, never the URL.
-   * Read both of those rules there before changing this function.
+   * No accounting is built here; the measurement harness does it. What exists
+   * here is the SHAPE it needs: count DELIVERED bytes from a socket
+   * `bytesWritten` delta on close, clamped to the expected size, and identify
+   * the client from a HEADER, never the URL.
    */
   function completeResponse(res, ctx) {
     res.on('close', () => {
@@ -554,7 +553,7 @@ export function startRoomServer(opts = {}) {
    * collapses a leading `..` against the URL root and hands this function an
    * already-innocent path: the traversal is silently rewritten into a
    * legitimate lookup rather than refused, and the guard becomes unreachable
-   * and therefore untestable. That was change 1's I3 defect.
+   * and therefore untestable.
    */
   function resolveWithin(root, urlPath) {
     let decoded;
@@ -577,11 +576,11 @@ export function startRoomServer(opts = {}) {
     // The RAW request target, split at the query string and otherwise
     // untouched. Deliberately NOT `new URL()`: the WHATWG parser resolves dot
     // segments, including percent-encoded ones, so the guard below would never
-    // be reached and could rot undetected (design.md I3).
+    // be reached and could rot undetected.
     const queryAt = req.url.indexOf('?');
     let pathname = queryAt === -1 ? req.url : req.url.slice(0, queryAt);
 
-    // Per-request client identity for change 6's attribution, taken from a
+    // Per-request client identity for the harness's byte attribution, taken from a
     // header so media URLs stay identical for every peer.
     const clientTag = typeof req.headers['x-app-tab'] === 'string' ? req.headers['x-app-tab'] : null;
 
@@ -840,7 +839,7 @@ export function startRoomServer(opts = {}) {
 
     // Directed envelopes carry seq: null and are outside the room's order. A
     // single counter across both would give each client an arbitrary
-    // subsequence, and "gapless" would stop meaning anything (design.md D5).
+    // subsequence, and "gapless" would stop meaning anything.
     const out = relayEnvelope(env, {
       room: room.name,
       from: conn.clientId,
@@ -861,7 +860,7 @@ export function startRoomServer(opts = {}) {
       return;
     }
 
-    // Version is checked HERE and nowhere else (design.md D2). A per-message
+    // Version is checked HERE and nowhere else. A per-message
     // check would cost every message for a condition that cannot change
     // mid-connection.
     if (env.v !== PROTOCOL_VERSION) {
@@ -882,7 +881,7 @@ export function startRoomServer(opts = {}) {
 
     // ---------------------------------------------------------------------
     // The whole join rule, in gate order: identity, then the name, then the
-    // host role (1b design.md D10, which has the decision table). Every join
+    // host role. Every join
     // lands in exactly one branch.
     //
     // IDENTITY FIRST, and identity is the secret alone — never the `tabId`,
@@ -890,19 +889,19 @@ export function startRoomServer(opts = {}) {
     //
     // NOTHING HERE CONSULTS LIVENESS, and nothing may: a tab does not need
     // protection from itself, so the server never has to decide whether the
-    // incumbent is dead. That is what removes change 1's D7 lockout.
+    // incumbent is dead. So a returning host never waits for its old tab to time out.
     // ---------------------------------------------------------------------
     const reclaimed = findBySecret(room, request.secret);
 
     if (!reclaimed) {
       // A NEW membership, and only now is the message read. The label must be
-      // free — `tabId` is unique per room for every role (1b design.md D3),
-      // because change 6 attributes bytes per tab and two members sharing a
+      // free — `tabId` is unique per room for every role, because the
+      // harness attributes bytes per tab and two members sharing a
       // label merge into one bucket with no "unknown" bucket to reveal it.
       const holder = findByTabId(room, request.tabId);
       if (holder) {
         refuse(ws, conn, recv, ERROR_CODES.TAB_TAKEN, `tabId "${request.tabId}" is in use in room "${room.name}"`, {
-          // Advice about retrying, never part of the decision (D13).
+          // Advice about retrying, never part of the decision.
           releaseWithinMs: msUntilNameReleased(holder, livenessMs),
         });
         return;
@@ -924,7 +923,7 @@ export function startRoomServer(opts = {}) {
     }
 
     const clientId = newClientId();
-    // Fresh on EVERY admitting join, a reclaim included (1b design.md D2).
+    // Fresh on EVERY admitting join, a reclaim included.
     // The previous member is deleted below, so its secret dies with it — which
     // is also why no server-side guard against the reclaim loop exists: a
     // replaced connection that rejoins presents a secret for a member that no
@@ -933,9 +932,9 @@ export function startRoomServer(opts = {}) {
     if (reclaimed) conn.envelopes = reclaimed.envelopes;
     const member = {
       clientId,
-      // A reclaim restores the MEMBERSHIP's label, join time and role (1b
-      // design.md D8). The role and label in a reclaiming join are not read at
-      // all — not read is stronger than checked.
+      // A reclaim restores the MEMBERSHIP's label, join time and role. The
+      // role and label in a reclaiming join are not read at all — not read is
+      // stronger than checked.
       tabId: reclaimed ? reclaimed.tabId : request.tabId,
       role: reclaimed ? reclaimed.role : request.role,
       joinedAt: reclaimed ? reclaimed.joinedAt : recv,
@@ -981,7 +980,7 @@ export function startRoomServer(opts = {}) {
     // `joined` is directed and outside the room order (seq: null). The room
     // counter it reports is the value at this instant, so the first
     // room-scoped envelope this client sees carries the next one. It is also
-    // the only envelope the secret is ever written into (1b design.md D12).
+    // the only envelope the secret is ever written into.
     emit(
       ws,
       makeJoined(directedRouting(conn, recv), {
@@ -995,7 +994,7 @@ export function startRoomServer(opts = {}) {
 
     // Tells the superseded client it was replaced rather than disconnected, so
     // it stops cleanly. Rotation, not this code, is what makes taking the role
-    // back impossible (1b design.md D5).
+    // back impossible.
     if (reclaimed) reclaimed.ws.close(CLOSE_SUPERSEDED, 'membership reclaimed by the same tab');
 
     announce(room, 'join', member, recv);
@@ -1003,10 +1002,10 @@ export function startRoomServer(opts = {}) {
   }
 
   /**
-   * Broadcast the FULL roster on every membership change, never a delta
-   * (design.md D7): a client that maintains no incremental presence state
-   * cannot drift out of agreement with the server about who is present, and
-   * change 10 measures churn against this roster.
+   * Broadcast the FULL roster on every membership change, never a delta: a
+   * client that maintains no incremental presence state cannot drift out of
+   * agreement with the server about who is present, and the churn
+   * measurement reads this roster.
    */
   function announce(room, event, member, recv) {
     room.seq += 1;
@@ -1039,7 +1038,7 @@ export function startRoomServer(opts = {}) {
   //
   // Three ticks from a healthy connection, not two: ping, count one missed
   // pong, terminate on the tick after. `msUntilNameReleased` above reports the
-  // same three. The sweep is deliberately PATIENT — change 7a's host saturates
+  // same three. The sweep is deliberately PATIENT — a host serving media saturates
   // its uplink and is routinely slow to pong, and dropping it takes every
   // peer's media source with it.
   // -------------------------------------------------------------------------
@@ -1136,7 +1135,7 @@ export function optionsFromEnv(env = process.env) {
     iceServers = JSON.parse(env.APP_ICE_SERVERS);
     if (!Array.isArray(iceServers)) throw new TypeError('APP_ICE_SERVERS must be a JSON array');
   }
-  // D8: unset is the product's start, paused at 0; drivers and the harness set 1.
+  // Unset is the product's start, paused at 0; drivers and the harness set 1.
   const autoStartText = env.APP_AUTO_START ?? '';
   if (autoStartText !== '' && autoStartText !== '1') throw new TypeError('APP_AUTO_START must be 1 or unset');
   const hostGraceText = env.APP_HOST_GRACE_MS;

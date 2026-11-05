@@ -243,7 +243,7 @@ export default async function hostPreparingEntrySuite() {
     assertEqual(preparing.bar.syncShown, false, 'the file host\'s sync dot is not shown before a title loads');
   });
 
-  // 12a D1 F1: the source ignores a pick while it prepares, so the page must not store that pick's name.
+  // The source ignores a pick while it prepares, so the page must not store that pick's name.
   await check('host-preparing-entry: a pick ignored while preparing keeps the first file name', async () => {
     const globals = browserGlobals({ lock: { request: async (name, options, callback) => callback({ name, options }) } });
     const page = hostPage(product.code, { globals });

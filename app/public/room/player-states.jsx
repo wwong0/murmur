@@ -4,8 +4,8 @@ import { inPlayer } from './in-player.js';
 import { Button } from './ui.jsx';
 import { useView } from './use-view.js';
 
-// The viewer's card over the video while the host has nothing to play (12b design.md D16), and,
-// for an absent host, only once the room is not playing (13h design.md D2). `#host-preparing`
+// The viewer's card over the video while the host has nothing to play, and, for an absent
+// host, only once the room is not playing. `#host-preparing`
 // keeps its own texts behind Stats. The layer takes no pointer event and sits under the bar, so
 // every control stays visible and disabled by the engine.
 export function ViewerWait({ view }) {
@@ -33,7 +33,7 @@ export function ViewerWait({ view }) {
   </div>);
 }
 
-// The countdown shares the reconnecting pill's position (design.md D1).
+// The countdown shares the reconnecting pill's position.
 export function HostLeftPill({ view }) {
   const hostStatus = useView(view, (snapshot) => snapshot.hostStatus);
   const hostSide = useView(view, (snapshot) => snapshot.hostSide);
@@ -61,8 +61,8 @@ export function ReconnectPill({ view }) {
 }
 
 // The centred button is a second element calling the action `#play` calls, and it follows
-// `#play`'s own disabled flag: a room the engine has blocked takes no second way in
-// (design.md D16). The veil sits under the strip and the bar.
+// `#play`'s own disabled flag: a room the engine has blocked takes no second way in. The veil
+// sits under the strip and the bar.
 export function EndedCard({ view, actions }) {
   const ended = useView(view, (snapshot) => snapshot.ended);
   const disabled = useView(view, (snapshot) => snapshot.controls.play.disabled);

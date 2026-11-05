@@ -8,13 +8,13 @@
 // found (not just the first) if anything trips, exits 0 with a short
 // summary otherwise.
 //
-// The rules (see PLAN.md / CLAUDE.md for the "why"):
+// The rules:
 //   1. No non-empty inline <script> in app/public/**/*.html — pages are
 //      shells, all behaviour lives in bundled modules.
 //   1b. Each page has one bundled script and at most one bundled stylesheet.
 //   2. DOM access (document./location./bare window.) only in
 //      public/room.entry.js and the component tree public/room/**; never in
-//      public/lib/**, whose modules take config as arguments (design.md D3).
+//      public/lib/**, whose modules take config as arguments.
 //   3. The string "payload" must never appear under app/server/** — the
 //      routing server is structurally forbidden from naming the
 //      message-content field, which is how it's kept from interpreting
@@ -45,7 +45,7 @@ const SERVER_DIR = path.join(APP_DIR, 'server');
  * Recursively list files under `dir` whose path satisfies `filter(absPath)`.
  * Skips node_modules and any *.bundle.js (generated output, not source).
  * Returns [] if `dir` doesn't exist yet — rules must not crash on a tree
- * that's still being scaffolded by a parallel worker.
+ * that's still being scaffolded.
  */
 function walk(dir, filter, out = []) {
   let entries;
@@ -177,13 +177,13 @@ function checkServerFile(file) {
 
 /**
  * A FLOOR, NOT A STANDARD. Counting lines cannot tell a trap from an essay, and
- * this rule does not try: it catches sprawl, and the session D review does the
- * judgement (WORKFLOW.md). It exists because CONSTRAINTS.md → *Artifacts* has
- * carried the rule in prose since change 1 and nothing enforced it, which is how
- * three files reached more comment lines than code lines without anyone noticing.
+ * this rule does not try: it catches sprawl, and review does the judgement. It
+ * exists because the rule was written down from the start and nothing enforced
+ * it, which is how three files reached more comment lines than code lines
+ * without anyone noticing.
  *
  * MAX_PROSE_RATIO is derived, not chosen, and is DELIBERATELY LOOSER THAN THE
- * NORM. CONSTRAINTS.md puts the house style at ~0.6; measured on 2026-08-22 the
+ * NORM. The house style sits at ~0.6; measured on 2026-08-22 the
  * app's files clustered at 0.73 and below with four outliers at 1.12 and above,
  * and the threshold sits in that gap. A gate set at the norm would police style
  * and start deleting traps worth keeping; set here it only catches sprawl.
@@ -193,9 +193,8 @@ function checkServerFile(file) {
  * 60 rather than 80 because 80 let a 77-line offender through.
  *
  * What a violation means: the comments are re-arguing decisions that belong in a
- * change's design.md, which is archived and immutable where a comment is neither.
- * Keep the trap ("stamp t1 here or queueing delay enters the estimate") and the
- * pointer ("clock-sync design.md D7"); cut the alternatives-considered.
+ * design document, not in code. Keep the trap ("stamp t1 here or queueing delay
+ * enters the estimate"); cut the alternatives-considered.
  */
 const MAX_PROSE_RATIO = 0.9;
 const MIN_CODE_LINES = 60;
@@ -240,18 +239,17 @@ function checkProse(file) {
 // ---------------------------------------------------------------------------
 
 /**
- * Session D3 is required to compute the prose ratio over the files in the diff
- * (CONSTRAINTS.md → *Artifacts*), and MIN_CODE_LINES suppresses exactly the files
- * that requirement exists for: change 3a shipped room-timeline.mjs at 1.32 —
- * 66 prose lines against 50 of code — with the gate reporting nothing, because
- * 50 is under the floor. So the check that runs on every build cannot be the
- * one D3 relies on.
+ * Review computes the prose ratio over the files in the diff, and MIN_CODE_LINES
+ * suppresses exactly the files that matter there: room-timeline.mjs once shipped
+ * at 1.32 — 66 prose lines against 50 of code — with the gate reporting nothing,
+ * because 50 is under the floor. So the check that runs on every build cannot be
+ * the one review relies on.
  *
- * Reports, never fails. There is no threshold here on purpose: a number D3 is
+ * Reports, never fails. There is no threshold here on purpose: a number the reviewer is
  * handed and must judge is the point, and a second gate would only teach the
  * same lesson rule 4 already teaches about deleting to satisfy a counter.
  */
-const RATIOS_RANGE = 'main...HEAD'; // the range D3 reviews; the label below must not drift from it
+const RATIOS_RANGE = 'main...HEAD'; // the range a review covers; the label below must not drift from it
 
 function reportRatios() {
   let files;
@@ -324,9 +322,9 @@ for (const file of proseFiles) checkProse(file);
 
 // WARNINGS DO NOT FAIL THE BUILD. Rule 4 is a judgement about prose, and a
 // judgement a line-counter cannot actually make: it cannot tell a trap worth
-// keeping from an essay that belongs in a design.md, so it must not be able to
+// keeping from an essay that belongs in a design document, so it must not be able to
 // stop anyone working. It is here to be visible on every run and to be acted on
-// by the session D review, not to be satisfied in a hurry by deleting whatever
+// in review, not to be satisfied in a hurry by deleting whatever
 // makes the number go down.
 for (const w of warnings) {
   console.warn(`${displayPath(w.file)}:${w.line}: ${w.text}`);

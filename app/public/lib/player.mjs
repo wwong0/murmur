@@ -58,7 +58,7 @@ export function createPlayer({ video, src = DEFAULT_SRC, hlsConfig = {}, clientT
   /**
    * Open the media at `startPositionMs`, which hls.js applies as it starts
    * loading. THIS IS NOT A SEEK: nothing here writes `currentTime`, and the
-   * position is chosen before anything is playing (3b design.md D1).
+   * position is chosen before anything is playing.
    *
    * @param {{startPositionMs?: number|null, p2p?: {core: object, onEngine: Function}|null}} [at]
    */

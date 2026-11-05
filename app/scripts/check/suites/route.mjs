@@ -62,7 +62,7 @@ export default async function routeSuite() {
     assertEqual(page.count('connect'), 1, 'an invited room connects at load');
   });
 
-  // The fakes replace the clock, so this is the only read of the probe's route (11b-2 R1).
+  // The fakes replace the clock, so this is the only read of the probe's route.
   await check('R7 route: the clock probe reaches the room client through the lazy wrapper', async () => {
     const page = runEntry(product.code, { search: '?room=demo&role=viewer&tab=t' });
     await page.settled();
@@ -72,7 +72,7 @@ export default async function routeSuite() {
     assertEqual(page.count('echo'), 1, 'the echo reaches the room client');
   });
 
-  // Joint D1 F12: the wrapper restates the client by hand, which is how `echo` once went missing.
+  // The wrapper restates the client by hand, which is how `echo` once went missing.
   await check('R8 route: the lazy wrapper restates every member of the room client', async () => {
     const page = runEntry(product.code, { search: '?room=demo&role=viewer&tab=t' });
     await page.settled();

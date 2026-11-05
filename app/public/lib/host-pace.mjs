@@ -1,6 +1,6 @@
 // What the host knows about its own uplink, and what it does with it: the one bucket
 // and capacity estimate every attached channel shares, the echo that reads the queue
-// below the host, and the interval sampler that feeds them (8b design.md D2).
+// below the host, and the interval sampler that feeds them.
 
 import { CHUNK_PAYLOAD_BYTES, DRAIN_POLL_MS, BUFFER_FLOOR_BYTES } from './segment-protocol.mjs';
 import { createSendPace } from './send-pace.mjs';
@@ -12,15 +12,15 @@ const INTERVAL_NOMINAL_MS = 1000;
 const INTERVAL_RING_CAPACITY = 3600;
 // Four chunks deep, not one: at one, two channels admitting within a chunk's refill
 // drove the level negative and every link-bound interval read pace-bound, so a paced
-// host never saw its capacity fall (8b d1-findings.md F2).
+// host never saw its capacity fall.
 export const PACE_CAP_BYTES = 4 * CHUNK_PAYLOAD_BYTES;
-// T14, T15 (design.md D2): a probe follows 10 pace-bound intervals, or each one
+// A probe follows 10 pace-bound intervals, or each one
 // while the estimate still climbs.
 export const PROBE_AFTER_INTERVALS = 10;
 export const PROBE_FACTOR = 1.1;
 
 /**
- * `fraction` is already validated. `queueCapMs` is design.md D2's cap: a channel is
+ * `fraction` is already validated. `queueCapMs` is the cap: a channel is
  * held while the bytes handed to it that no echo answer has confirmed pass what its
  * answers confirmed in the last of these. `inProgress(channelKey)` says whether the
  * channel has a response open or a source read pending.

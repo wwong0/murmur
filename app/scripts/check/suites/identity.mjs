@@ -1,8 +1,8 @@
-// scripts/check/suites/identity.mjs — the reclaim secret (change 1b).
+// scripts/check/suites/identity.mjs — the reclaim secret.
 //
 // Reclaim is keyed on a per-join secret returned only in the directed `joined`
 // reply, never on the `tabId` — which the server broadcasts to every member in
-// the presence roster. 1b design.md D1 has the defect this closed.
+// the presence roster.
 
 import {
   check,
@@ -83,9 +83,9 @@ export default async function identitySuite() {
 
     assert(issued.length >= 5, `the scene issued ${issued.length} secrets`);
 
-    // Assert over the OUTPUT, not over a list of message types (D12). Changes 5,
-    // 7a and 10 add types nobody has written yet, and this check inherits them
-    // without maintenance: it fails for placements nobody has imagined.
+    // Assert over the OUTPUT, not over a list of message types. This check
+    // inherits types added later without maintenance: it fails for placements
+    // nobody has imagined.
     const everyEnvelope = peers.flatMap((p) => p.received.map((env) => ({ label: p.label, env })));
     assert(everyEnvelope.length > 10, `the capture is non-trivial (${everyEnvelope.length} envelopes)`);
 
@@ -184,8 +184,8 @@ export default async function identitySuite() {
     const v1 = await peer('V1');
     const vj = await v1.join({ room, tabId: 'V', role: 'viewer' });
 
-    // A viewer reclaims its own membership exactly as a host does — change 1
-    // gated this on the host role, and change 6's per-tab byte attribution needs
+    // A viewer reclaims its own membership exactly as a host does — an earlier
+    // version gated this on the host role, and per-tab byte attribution needs
     // it not to be, because two viewers sharing a label merge into one bucket
     // with no "unknown" bucket to reveal it.
     const v2 = await peer('V2');
@@ -194,7 +194,7 @@ export default async function identitySuite() {
     assertEqual(await v1.waitClosed(), 4000, 'and its older connection is closed as a replacement');
     assertEqual(rosterOfRoom(room).filter((m) => m.tabId === 'V').length, 1, 'exactly one member holds that label');
 
-    // This is change 1's §2d probe, which admitted both. It must now refuse.
+    // An earlier version admitted both. It must now refuse.
     for (const role of ['viewer', 'host']) {
       const dup = await peer(`dup-${role}`);
       const refused = await dup.join({ room, tabId: 'V', role });
@@ -207,7 +207,7 @@ export default async function identitySuite() {
   });
 
   await check('identity: a tab-taken refusal reports how long the name could stay held', async ({ peer, member }) => {
-    // D13. The figure must be derived from the configured liveness interval, not
+    // The figure must be derived from the configured liveness interval, not
     // be a constant that happens to be right at one setting — which is exactly
     // how the boolean this replaced went unnoticed.
     const seen = [];
@@ -285,7 +285,7 @@ export default async function identitySuite() {
     const j1 = await a1.join({ room, tabId: 'A', role: 'host' });
 
     // The incumbent is answering pings normally: several sweeps pass and it is
-    // still healthy and still in the room. Change 1's D7 lockout was exactly this
+    // still healthy and still in the room. An earlier lockout was exactly this
     // situation resolved the other way.
     await sleep(LIVENESS_MS * 3);
     assertEqual(rosterOfRoom(room).length, 1, 'the incumbent is alive and still holds the membership');

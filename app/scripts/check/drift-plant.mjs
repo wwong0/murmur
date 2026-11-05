@@ -62,7 +62,7 @@ export function plant({
     // POSITIVE ppm MAKES MEDIA ADVANCE FASTER THAN THE ROOM at unity command.
     // The load is a physical media/reference rate mismatch, so it belongs on the
     // wall advance and not on the media advance or the commanded rate: put it on
-    // either of those and the controller cancels it in one poll (design.md D2).
+    // either of those and the controller cancels it in one poll.
     const effectiveRate = controllerRate * (1 + rateLoadPpm / 1e6);
     simulatedNowMs += intervalMs / effectiveRate;
     const displaySharedMs = quantisedDisplay();

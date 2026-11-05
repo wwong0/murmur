@@ -1,4 +1,4 @@
-// 12c-1 D5/D6/D7: the rise-recovery reader, one hand-computed case per measurement scenario.
+// The rise-recovery reader, one hand-computed case per measurement scenario.
 
 import { assert, assertEqual, check } from '../harness.mjs';
 import { riseRecovery } from '../../figures/rise-recovery.mjs';

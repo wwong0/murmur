@@ -1,4 +1,4 @@
-// The sync dot's tooltip lines (design.md D10), as a table.
+// The sync dot's tooltip lines, as a table.
 
 import { assertEqual, check } from '../harness.mjs';
 import { syncWords } from '../../../public/lib/sync-words.mjs';

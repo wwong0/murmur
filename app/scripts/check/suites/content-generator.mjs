@@ -1,4 +1,4 @@
-// The content generator's portability, identity and clean guard (14d design.md D1, D2).
+// The content generator's portability, identity and clean guard.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

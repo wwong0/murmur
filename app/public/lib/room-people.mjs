@@ -18,9 +18,9 @@ function numberRepeats(people) {
 
 /**
  * The roster as the room shows its members: the host first, then the rest in roster order with
- * the host skipped (design.md D12). A named member shows its name; an unnamed one "Host" or
+ * the host skipped. A named member shows its name; an unnamed one "Host" or
  * "Guest N". `tone` picks the chip colour: `'host'`, or a guest number cycling through the
- * guest palette in guest order (executor-spec §0a A4). The text carries no tab or client id.
+ * guest palette in guest order. The text carries no tab or client id.
  */
 export function memberLabels(roster) {
   const members = (Array.isArray(roster) ? roster : []).filter((member) => member !== null && typeof member === 'object');
@@ -48,7 +48,7 @@ export function labelMap(people) {
 }
 
 /**
- * One activity line, or null where the event says nothing (design.md D13). `labels` is the
+ * One activity line, or null where the event says nothing. `labels` is the
  * lookup for the roster the event names: a leaver is in the one held before the leave, a
  * joiner in the one after. A `rename` carries its own two labels.
  */

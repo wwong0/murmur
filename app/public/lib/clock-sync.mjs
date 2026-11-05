@@ -2,12 +2,11 @@
 //
 // The driver: it schedules probes, feeds the filter, and exposes the estimate.
 // Everything with a timer, a retry or a lifecycle lives here, so the filter next
-// door can stay a pure function of its inputs. The reasoning behind each rule
-// below is change 2 design.md D5, D8 and D9.
+// door can stay a pure function of its inputs.
 //
-// It also holds `websocketProbe`. THAT IS THE SEAM CHANGE 6 NEEDS: settling
-// whether the clock stays on the websocket or moves to a WebRTC data channel
-// must be a substitution here, not a rewrite of the filter (D2).
+// It also holds `websocketProbe`. THAT IS THE TRANSPORT SEAM: settling whether
+// the clock stays on the websocket or moves to a WebRTC data channel must be a
+// substitution here, not a rewrite of the filter.
 //
 // Under public/lib/: no DOM, no page access.
 
@@ -115,8 +114,8 @@ export function createClockSync(config) {
 
     // A PROBE MAY NOT OUTLIVE THE MOMENT ITS REPLACEMENT IS DUE, so the timeout
     // is the cadence and no new number is introduced. room-client's 5000ms
-    // request default would turn a two-second burst into a seven-second one at
-    // the loss rate criterion 1 names.
+    // request default would turn a two-second burst into a seven-second one
+    // under packet loss.
     const timeoutMs = schedule.steadyIntervalMs;
     probes.issued += 1;
     // Real elapsed time, not the injected `now`: that one is the estimate's
@@ -172,7 +171,7 @@ export function createClockSync(config) {
   function start() {
     if (running) return;
     running = true;
-    // A DISCONNECT DOES NOT RESET ANYTHING (D8) — the offset is a property of
+    // A DISCONNECT DOES NOT RESET ANYTHING — the offset is a property of
     // two timebases, not of a connection. Safe only because the age term keeps
     // widening the reported uncertainty while nothing new arrives.
     if (onJoined && !offJoined) offJoined = onJoined(() => burst());
@@ -187,7 +186,7 @@ export function createClockSync(config) {
    * next `start()` sees a probe that only a superseded generation will ever
    * resolve, so `burst()` declines to arm a timer and nothing ever arms one
    * again — a driver reporting itself running while its clock silently stops.
-   * The window and the estimate are NOT cleared; they survive by design (D8).
+   * The window and the estimate are NOT cleared; they survive by design.
    */
   function stop() {
     running = false;
@@ -203,7 +202,7 @@ export function createClockSync(config) {
   }
 
   /**
-   * The estimate AS DATA, not as text for a page (D5). Change 6 runs headless
+   * The estimate AS DATA, not as text for a page. The harness runs headless
    * clients and must log the uncertainty alongside every drift figure; a number
    * rendered into a string on a page nothing opens is unreachable.
    */
@@ -219,12 +218,12 @@ export function createClockSync(config) {
 
   /**
    * The room's time, or `null` while there is no estimate — never this client's
-   * own clock as a stand-in (D9).
+   * own clock as a stand-in.
    *
    * NOT MONOTONIC ACROSS AN ESTIMATE UPDATE: when the estimate moves this moves
    * with it, backwards included. Clamping would trade a visible discontinuity
-   * for an invisible accumulating lie. Change 4 owns what to do about a step,
-   * and has `reanchors` and the half-width to tell a step from drift.
+   * for an invisible accumulating lie. The drift controller decides what to do
+   * about a step, and has `reanchors` and the half-width to tell a step from drift.
    */
   function sharedNow(atMs = now()) {
     const record = filter.read(atMs);
@@ -235,7 +234,7 @@ export function createClockSync(config) {
 }
 
 /**
- * The websocket probe: `echo()` in, a sample out (D10).
+ * The websocket probe: `echo()` in, a sample out.
  *
  * `t1` and `t4` come from the stamps room-client takes AT THE WIRE. NOTHING HERE
  * MAY RECOMPUTE OR ADJUST ANY OF THEM: every millisecond between the true event

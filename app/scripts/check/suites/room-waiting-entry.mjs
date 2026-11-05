@@ -1,5 +1,5 @@
 // The view values behind the viewer's waiting card and the reconnecting pill, through the real
-// entry (design.md D13, D16). The card and the pill themselves are components the harness fakes.
+// entry. The card and the pill themselves are components the harness fakes.
 
 import { assert, assertEqual, check } from '../harness.mjs';
 import { bundleProductEntry, runEntry } from '../entry-harness.mjs';

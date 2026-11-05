@@ -1,5 +1,5 @@
 // The cap used over a declared harness-clock window: bytes the host handed out
-// over bytes its pace allowed (design.md D2). Pure. The pace in force is not
+// over bytes its pace allowed. Pure. The pace in force is not
 // stored, so the host's own estimate and probe plan are replayed over the
 // interval records; a replay that disagrees with the recorded flags reads no value.
 
@@ -20,7 +20,7 @@ function validate({ intervals, window, wallOffsetMs }) {
 }
 
 // A record missing a field the replay reads is missing evidence: a default would
-// replay a host that never existed (CONSTRAINTS.md → A null is never zero).
+// replay a host that never existed. A null is never zero.
 function replayable(record) {
   const nullable = (value) => value === null || finite(value);
   return finite(record.handedBytes) && nullable(record.wireBytes) && nullable(record.readingBytesPerSecond)

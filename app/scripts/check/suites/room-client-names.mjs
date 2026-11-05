@@ -1,4 +1,4 @@
-// scripts/check/suites/room-client-names.mjs — the room client's name and chat sends (12d D2).
+// scripts/check/suites/room-client-names.mjs — the room client's name and chat sends.
 
 import { check, assert, assertEqual, recordingSocket, joinsIn, waitEvent, sleep } from '../harness.mjs';
 import { TYPE_NAME, TYPE_CHAT, ERROR_CODES } from '../../../public/lib/envelope.mjs';

@@ -1,4 +1,4 @@
-// 9b design.md D5: recovery from a capacity schedule's rise. Spans run from the
+// Recovery from a capacity schedule's rise. Spans run from the
 // rise's read-back at the risen capacity, each on the steady test's legs and on
 // every viewer holding more than the registered figure ahead at the span's end.
 

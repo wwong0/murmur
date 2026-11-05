@@ -9,7 +9,7 @@ export function startWaitText(waitMs) {
   return `start wait: ${Math.round(waitMs)} ms`;
 }
 
-// One start per title (13 design.md D17): asked, then the drift sequence at its play(), then the
+// One start per title: asked, then the drift sequence at its play(), then the
 // first frame after that sequence. Each step is taken once until `reset`.
 export function createStartWait() {
   let askedAt = null;

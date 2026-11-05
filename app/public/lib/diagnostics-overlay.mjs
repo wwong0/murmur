@@ -18,7 +18,7 @@ export const CLOCK_LINE_RE =
   /^clock: [+-]\d+\.\d+ms ± \d+\.\d+ms \(\d+ samples\)$/;
 
 /**
- * TWO SHAPES, ONE PER ARM, AND NOTHING OPTIONAL INSIDE EITHER (design.md D1).
+ * TWO SHAPES, ONE PER ARM, AND NOTHING OPTIONAL INSIDE EITHER.
  * One pattern spanning both is satisfied by a page stuck in `waiting · no-clock`,
  * and a `?` around the figures admits a `correcting` line showing nothing it
  * corrected from. Neither is a state the controller can reach.
@@ -32,8 +32,8 @@ export const CONTROLLER_LINE_HELD_RE =
 // `actuatorAllowanceMs` is f*T with f >= 0 and T > 0, S = U + L, `shortestCloseMs`
 // divides a `Math.max(0, ...)`, and the close budget is a positive setting. One
 // signed token spanning both admitted `U -3.0ms` — the shape of a page whose
-// controller has come apart — which is the rule 4b's D1 bought: a pattern
-// spanning a healthy state and a broken one is satisfied by the broken one.
+// controller has come apart. The rule: a pattern spanning a healthy state and a
+// broken one is satisfied by the broken one.
 const CONTROLLER_NUM = '[+-]\\d+\\.\\d+';
 const CONTROLLER_MAGNITUDE = '\\d+\\.\\d+';
 const CONTROLLER_RATE = '\\d+\\.\\d{6}';
