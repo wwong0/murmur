@@ -423,8 +423,8 @@ try {
     console.log(`validity: ${result.validity.valid ? 'valid' : `INVALID — ${result.validity.reasons.join('; ')}`}`);
     console.log(`visible: ${JSON.stringify(result.visible)} · hidden tick rates: ${JSON.stringify(result.validity.hiddenTickRates)}`);
     result.readings.forEach((reading, index) => console.log(`hide ${index + 1}: ${JSON.stringify(reading)}`));
-    if (result.d7) console.log(`D7: ${result.d7Pass ? 'PASS' : 'FAIL'} ${JSON.stringify(result.d7)}`);
+    if (result.d7) console.log(`D7: ${result.returnsPass ? 'PASS' : 'FAIL'} ${JSON.stringify(result.d7)}`);
   }
   console.log(`run directory: ${path.relative(APP_DIR, runDir)}`);
-  process.exitCode = runnerFailure ? 2 : result && !result.validity.valid ? 3 : result?.d7Pass === false ? 1 : 0;
+  process.exitCode = runnerFailure ? 2 : result && !result.validity.valid ? 3 : result?.returnsPass === false ? 1 : 0;
 }

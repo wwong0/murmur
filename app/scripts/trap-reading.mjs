@@ -5,7 +5,7 @@ import {
   appPath, argument, CONDITIONS_PATH, isMain, readJson, recomputeRegisteredRun, registryEntries, runMain,
 } from './registered-runs.mjs';
 
-const D8_OUTPUT = 'results/8a-starved-recompute.json';
+const STARVED_RECOMPUTE_OUTPUT = 'results/8a-starved-recompute.json';
 
 function readingFromConditions(entries, conditions) {
   const trapEntries = entries.filter((entry) => conditions[entry.condition]?.reading?.kind === 'trap');
@@ -19,7 +19,7 @@ function readingFromConditions(entries, conditions) {
 }
 
 export function buildTrapReadingReport({ registerPath, conditionsPath = CONDITIONS_PATH,
-  diagnosticPath = D8_OUTPUT } = {}) {
+  diagnosticPath = STARVED_RECOMPUTE_OUTPUT } = {}) {
   const registered = registryEntries(registerPath);
   const conditions = readJson(conditionsPath);
   const reading = readingFromConditions(registered, conditions);

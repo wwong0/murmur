@@ -436,7 +436,7 @@ const SYNC_DOT = `(() => {
   return { hidden: dot.hidden, width: r.width, height: r.height, state: dot.getAttribute('data-state'), figure: dot.getAttribute('data-figure') };
 })()`;
 
-// Paused with a title loaded the dot is shown, idle and without a figure; RS-C4 reads the
+// Paused with a title loaded the dot is shown, idle and without a figure; RS-P4 reads the
 // playing side. A missing element or a zero box is a failed row, never a read that passes.
 async function rowSyncDotShowsIdle() {
   if (!await roomReady(host)) return { exercised: false, detail: 'the host did not render the room' };
@@ -444,7 +444,7 @@ async function rowSyncDotShowsIdle() {
   const loaded = await until(host, SEEK_LOADED, Boolean);
   if (!loaded.ok) return { exercised: false, detail: 'the title did not load: #seek.max stayed 0' };
   // The dot is hidden while the room holds one member, so a viewer joins.
-  return withTab(`${ORIGIN}/room.html?room=${ROOM}&role=viewer&tab=rd-d1`, 'D1/viewer', async () => {
+  return withTab(`${ORIGIN}/room.html?room=${ROOM}&role=viewer&tab=rd-s1`, 'S1/viewer', async () => {
     const joined = await until(host, "document.querySelectorAll('#roster li').length", (count) => count === 2, 15_000);
     const members = joined.value;
     // The page shows the dot on its next tick after the roster changes, so wait for it.
@@ -740,7 +740,7 @@ async function runRows() {
   await runRow('RD-N3 a role and tab URL shows no prompt', rowRoleAndTabShowNoPrompt);
   await runRow('RD-N4 a front-page host and a front-page join each show the name prompt', rowFrontHostAndJoinShowPrompt);
   await runRow('RD-M1 the settings menu changes the control mode for the host and is disabled for a viewer', rowSettingsMenuControlMode);
-  await runRow('RD-D1 the sync dot shows while paused, in its idle state', rowSyncDotShowsIdle);
+  await runRow('RD-S1 the sync dot shows while paused, in its idle state', rowSyncDotShowsIdle);
   await runRow("RD-B1 a faded control's box read before the reveal misses, and the shipped click lands", rowFadedBoxMisses);
   await runRow('RD-B2 a click outside the bar while faded does not wait', rowOutsideClickDoesNotWait);
   await runRow('RD-B3 a first touch on a faded bar only reveals it', rowFirstTouchOnlyReveals);

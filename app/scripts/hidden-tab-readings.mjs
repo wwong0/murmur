@@ -197,15 +197,15 @@ export function evaluateRun({ samples, events, marks, subject, other, side, must
   const readings = windows.map((w, index) => readHide({ samples, events, window: w, subject, other, untilMs: windows[index + 1]?.hideStartMs ?? endMs }));
   const span = okSamples(samples, subject).filter((s) => steadyFromMs !== null && windows[0] && s.atWallMs > steadyFromMs && s.atWallMs < windows[0].hideStartMs);
   const visible = { tickRate: tickRate(span), callbackRate: callbackRate(span) };
-  const d7 = side === 'right' ? readings.map((reading, index) => d7Return(reading, { mustSkip: mustSkipReturn === index + 1 })) : null;
-  return { windows, validity, visible, readings, d7, d7Pass: d7 ? d7.every((r) => r.pass) : null };
+  const d7 = side === 'right' ? readings.map((reading, index) => returnLanding(reading, { mustSkip: mustSkipReturn === index + 1 })) : null;
+  return { windows, validity, visible, readings, d7, returnsPass: d7 ? d7.every((r) => r.pass) : null };
 }
 
 /**
  * The pass rule for one return: landed within REACH_WINDOW_MS of becoming visible, at most one skip.
  * `mustSkip` is H3's second return, which must skip where the left side's did not.
  */
-export function d7Return(reading, { mustSkip = false } = {}) {
+export function returnLanding(reading, { mustSkip = false } = {}) {
   const reasons = [];
   const landed = reading.afterReturn.landedAfterVisibleMs;
   if (landed === null || landed > REACH_WINDOW_MS) reasons.push(`landed ${landed === null ? 'never' : `${landed} ms`} after visible`);

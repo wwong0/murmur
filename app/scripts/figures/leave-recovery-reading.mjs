@@ -7,13 +7,13 @@ const NOT_RUN = /^(refused|aborted|failed|not-)/;
 
 const CONSEQUENCE = Object.freeze({
   met: 'gate met',
-  causeRemains: 'D1 and D2 did not remove the cause; gate missed; design returns to the owner',
-  leaveStall: 'the stall is the leave\'s; D3\'s rules owed; owner decides',
-  notEstablished: 'change 13 quotes the limit, labelled not established',
-  stopped: 'stopped before leave-first; gate missed; returns to the owner',
+  causeRemains: 'the two repairs did not remove the cause; gate missed; the design needs revisiting',
+  leaveStall: 'the stall is the leave\'s; the leave rules are still owed; a decision is needed',
+  notEstablished: 'the write-up quotes the limit, labelled not established',
+  stopped: 'stopped before leave-first; gate missed; the design needs revisiting',
   leaveNotRun: 'leave-first not run; no reading of the gate',
-  comparandUnreadable: 'a comparand attempt is unreadable; stop and ask the coordinator',
-  repeatInterval: '10a\'s 60 s repeat interval is an Open Question for the owner',
+  comparandUnreadable: 'a comparand attempt is unreadable; stop and investigate',
+  repeatInterval: 'the 60 s repeat interval is an open question',
 });
 
 const inSet = (entry) => (entry?.condition === COMPARAND_CONDITION || entry?.condition === LEAVE_CONDITION)

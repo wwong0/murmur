@@ -10,8 +10,8 @@ import {
   summariseHolds,
   thresholdCeilingViolations,
   uncertifiedCorrectionViolations,
-} from './d8-recoverable-holds.mjs';
-import { D8_REFUSAL_MODES, D8_UNCERTIFIED_MODE } from './d8-research-controller.mjs';
+} from './stopping-recoverable-holds.mjs';
+import { STOPPING_REFUSAL_MODES, STOPPING_UNCERTIFIED_MODE } from './stopping-research-controller.mjs';
 
 const HOLD_MODE = BUDGET_HOLD_MODE;
 /** `hold-after-first-settling` keeps its published name and now counts BOTH
@@ -152,9 +152,9 @@ export function holdPolicyAudit({ rows, arm = null, horizonMs, evidenceComplete 
   // it is judged by its own clause for what the rate does, and counted with
   // the hold for what a refusal forbids: it interrupts a fresh dwell, and one
   // at or after first settling is a failure exactly as a hold there is.
-  const uncertifiedFailures = inputRows.filter((row) => row.mode === D8_UNCERTIFIED_MODE)
+  const uncertifiedFailures = inputRows.filter((row) => row.mode === STOPPING_UNCERTIFIED_MODE)
     .map((row) => ({ polls: row.polls, atMs: row.atMs, violations: uncertifiedCorrectionViolations(row, { maxStoppingThresholdMs: MAX_STOPPING_THRESHOLD_MS }), file: row.file }));
-  const isRefusal = (row) => D8_REFUSAL_MODES.includes(row.mode);
+  const isRefusal = (row) => STOPPING_REFUSAL_MODES.includes(row.mode);
   const firstSettledIndex = inputRows.findIndex((row) => row.mode === 'settled');
   const firstSettledAtMs = firstSettledIndex < 0 ? null : inputRows[firstSettledIndex].atMs;
   const preRefusals = inputRows.filter((row) => isRefusal(row) && (firstSettledAtMs === null || row.atMs < firstSettledAtMs));

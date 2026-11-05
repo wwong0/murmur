@@ -372,8 +372,8 @@ export default async function driftSuite() {
 
   await check('drift-log: the summary describes the records held, and a silent source is not zero drift', async () => {
     // Driven from a started sampler whose binding never fires, which is the
-    // shape a silent frame source actually has — an armed callback the user
-    // agent never calls, not a log nobody wrote to.
+    // shape a silent frame source actually has — an armed callback the
+    // user agent never calls, not a log nobody wrote to.
     const idle = rig({ count: 4 });
     idle.sampler.start();
     assertEqual(idle.sampler.callbacks, 0, 'a source that never fired delivered no callbacks');

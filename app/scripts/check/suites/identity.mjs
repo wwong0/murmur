@@ -73,7 +73,7 @@ export default async function identitySuite() {
     await sleep(50);
 
     await openAndJoin('A2', { tabId: 'A', role: 'host', secret: a.secret });
-    await openAndJoin('C2', { tabId: 'C', role: 'viewer', secret: c.secret });
+    await openAndJoin('C-rejoin', { tabId: 'C', role: 'viewer', secret: c.secret });
     // A refusal, so the error path is in the capture too.
     await openAndJoin('dup', { tabId: 'C', role: 'viewer' });
     // And a stranger with an invented secret under a free label.

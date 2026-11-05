@@ -1,4 +1,4 @@
-// scripts/check/d8-comparison-metrics.mjs
+// scripts/check/stopping-comparison-metrics.mjs
 //
 // The plateau and settling diagnostics `remedy-comparison-spec.md` freezes
 // before execution, and nothing else. Every function here reads a finished poll
@@ -215,7 +215,7 @@ export function subdivideByCommand(plateau, history) {
  * both tests and `noPlateau: true`, because the question was asked and answered.
  */
 export function classifySettlingQualification(history, plateaus, { settledForMs, minDurationMs = PLATEAU_MIN_MS } = {}) {
-  if (!Number.isFinite(settledForMs)) throw new TypeError('d8-comparison-metrics: settledForMs must be supplied from the controller settings, not defaulted here');
+  if (!Number.isFinite(settledForMs)) throw new TypeError('stopping-comparison-metrics: settledForMs must be supplied from the controller settings, not defaulted here');
   const retained = retainedPlateaus(plateaus, minDurationMs);
   const firstSettled = history.find((row) => row.mode === 'settled') ?? null;
   const base = { settledForMs, minDurationMs, plateauCount: retained.length, noPlateau: retained.length === 0 };

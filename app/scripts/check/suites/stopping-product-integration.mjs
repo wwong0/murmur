@@ -1,7 +1,7 @@
-// scripts/check/suites/d8-product-integration.mjs
+// scripts/check/suites/stopping-product-integration.mjs
 //
-// The adopted D8 policy in the product controller, on manufactured input only.
-// Driven through the same rig as d8-research.mjs, so a poll can sit exactly on S.
+// The adopted stopping policy in the product controller, on manufactured input only.
+// Driven through the same rig as stopping-research.mjs, so a poll can sit exactly on S.
 //
 // Both kinds of assertion, on purpose: the product must equal the tested
 // research copy on one long positive-f history, AND the figures that history
@@ -10,10 +10,10 @@
 
 import { check, assert, assertEqual, assertNear } from '../harness.mjs';
 import { BAND_MS, STEP_MS, rig } from '../controller-rig.mjs';
-import { createD8ResearchController, commandThresholdFor } from '../d8-research-controller.mjs';
+import { createStoppingResearchController, commandThresholdFor } from '../stopping-research-controller.mjs';
 import {
   COMMAND_TOLERANCE,
-  D8_COMMAND_THRESHOLD,
+  STOPPING_COMMAND_THRESHOLD,
   ESTIMATE_WINDOW_MS,
   MAX_RATE_DEVIATION,
   MAX_STOPPING_THRESHOLD_MS,
@@ -23,7 +23,7 @@ import {
   createDriftController,
 } from '../../../public/lib/drift-controller.mjs';
 
-const F = D8_COMMAND_THRESHOLD;
+const F = STOPPING_COMMAND_THRESHOLD;
 const ALLOWANCE = actuatorAllowanceMs(F, TIME_CONSTANT_MS);
 const STOP_MS = BAND_MS + ALLOWANCE;
 const EXACT_BAND_MS = MAX_STOPPING_THRESHOLD_MS - ALLOWANCE;
@@ -82,18 +82,18 @@ function positiveHistory(sim) {
   sim.run(0, 7);
 }
 
-export default async function d8ProductIntegrationSuite() {
-  await check('d8-product-integration: the product literal is the research formula, bit for bit', async () => {
-    assert(Object.is(D8_COMMAND_THRESHOLD, commandThresholdFor()), `D8_COMMAND_THRESHOLD ${D8_COMMAND_THRESHOLD} is not commandThresholdFor() ${commandThresholdFor()}`);
-    assertEqual(D8_COMMAND_THRESHOLD, 0.0011360737797956866, 'and it is the adopted value named in the spec');
+export default async function stoppingProductIntegrationSuite() {
+  await check('stopping-product-integration: the product literal is the research formula, bit for bit', async () => {
+    assert(Object.is(STOPPING_COMMAND_THRESHOLD, commandThresholdFor()), `STOPPING_COMMAND_THRESHOLD ${STOPPING_COMMAND_THRESHOLD} is not commandThresholdFor() ${commandThresholdFor()}`);
+    assertEqual(STOPPING_COMMAND_THRESHOLD, 0.0011360737797956866, 'and it is the adopted value named in the spec');
     assertNear(ALLOWANCE, F * 4000, 0, 'L is f times the 4000 ms time constant');
   });
 
   for (const epsilon of [undefined, 0.003]) {
     const label = epsilon === undefined ? 'the default write filter' : `a ${epsilon} write filter, wider than 2f`;
-    await check(`d8-product-integration: at the adopted f the product is the tested research controller, under ${label}`, async () => {
+    await check(`stopping-product-integration: at the adopted f the product is the tested research controller, under ${label}`, async () => {
       const settings = epsilon === undefined ? { MIN_COMMAND_DEVIATION: F } : { MIN_COMMAND_DEVIATION: F, RATE_EPSILON: epsilon };
-      const research = rig({ factory: createD8ResearchController, settings });
+      const research = rig({ factory: createStoppingResearchController, settings });
       const product = rig({ factory: createDriftController, settings });
       positiveHistory(research);
       positiveHistory(product);
@@ -144,7 +144,7 @@ export default async function d8ProductIntegrationSuite() {
     });
   }
 
-  await check('d8-product-integration: at the adopted f one outlying poll keeps settled and unity, and a sustained one resumes correction', async () => {
+  await check('stopping-product-integration: at the adopted f one outlying poll keeps settled and unity, and a sustained one resumes correction', async () => {
     assert(STEP_MS >= ESTIMATE_WINDOW_MS, 'a second consecutive poll is past the unchanged excursion delay');
     assert(EXCURSION_MS > STOP_MS, `the ${EXCURSION_MS} ms excursion lies outside S = ${STOP_MS} ms`);
     for (const sign of [1, -1]) {

@@ -21,9 +21,9 @@ import {
 } from './remedy-browser-metrics.mjs';
 export { HOLD_CLAUSE_NAMES, browserHoldRows, holdPolicyAudit } from './remedy-browser-holds.mjs';
 
-const LEGACY_T5_DEADLINE_MS = 120000;
-const LEGACY_T5_SETTLING_BUDGET_MS = 75000;
-const LEGACY_T5_SEAM_POLL_MS = 250;
+const LEGACY_SETTLE_DEADLINE_MS = 120000;
+const LEGACY_SETTLING_BUDGET_MS = 75000;
+const LEGACY_SEAM_POLL_MS = 250;
 const LEGACY_T6_SPAN_MS = 10000;
 const LEGACY_T6_CLIENT_ROOM_MS = 40;
 const LEGACY_T6_PAIR_MS = 50;
@@ -34,9 +34,9 @@ export const COMPARISON_CRITERIA = Object.freeze({
   captureMs: 240000,
   startupMs: 45000,
   viewerGapMs: 10000,
-  t5DeadlineMs: LEGACY_T5_DEADLINE_MS,
-  t5SettlingBudgetMs: LEGACY_T5_SETTLING_BUDGET_MS,
-  t5SeamPollMs: LEGACY_T5_SEAM_POLL_MS,
+  t5DeadlineMs: LEGACY_SETTLE_DEADLINE_MS,
+  t5SettlingBudgetMs: LEGACY_SETTLING_BUDGET_MS,
+  t5SeamPollMs: LEGACY_SEAM_POLL_MS,
   rateEpsilon: RATE_EPSILON,
   t6SpanMs: LEGACY_T6_SPAN_MS,
   t6MinRecords: MIN_CONVERGED_RECORDS,

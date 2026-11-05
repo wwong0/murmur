@@ -44,7 +44,7 @@ const WORKER_BUNDLE = path.join(APP_DIR, 'public', 'prepare.worker.bundle.js');
 const REFUSED_FIXTURE = path.join(APP_DIR, 'scripts', 'check', 'remux-fixtures', 'refuse-video-codec.mp4');
 const HARNESS_SEEK = 'globalThis.__waHarnessSeek = true;';
 const WIRING_HEADING = "wiring only — the browser's own verdict not exercised";
-const DIAGNOSTIC_HEADING = "diagnostic — added after S7a's and S7c's results (tasks.md → Decisions, 2026-10-12); earns the matrix nothing";
+const DIAGNOSTIC_HEADING = "diagnostic — added after S7a's and S7c's results, 2026-10-12; earns the matrix nothing";
 const WIRING = {
   codec: `${HARNESS_SEEK} (() => { const native = MediaSource.isTypeSupported.bind(MediaSource); MediaSource.isTypeSupported = (mime) => (mime.includes('avc1') ? false : native(mime)); })();`,
   storage: `${HARNESS_SEEK} navigator.storage.estimate = async () => ({ quota: 1000, usage: 0 });`,

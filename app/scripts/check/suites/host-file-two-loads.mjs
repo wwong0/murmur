@@ -1,4 +1,4 @@
-// scripts/check/suites/host-file-s7g.mjs
+// scripts/check/suites/host-file-two-loads.mjs
 //
 // S7g's evaluator: two loads, one at 0 and one mid-title, report
 // the same frame at the same media time. Every number is hand-computed on a
@@ -20,7 +20,7 @@ const reading = (viewerRecords, v2Records, edit = {}) => ({ frame: FRAME_S, view
 // k = 96..134 is 4 000.0 to 5 583.3 ms: 39 records, and k = 125 is 5 208.333 ms.
 const onGrid = () => series(96, 134);
 
-export default async function hostFileS7gSuite() {
+export default async function hostFileTwoLoadsSuite() {
   await check('S7g: two on-grid series pass and report frame 125', async () => {
     const result = s7g(reading(onGrid(), onGrid()));
     assertEqual(result.status, 'pass', result.reasons.join('; '));

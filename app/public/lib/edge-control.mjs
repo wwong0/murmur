@@ -1,11 +1,11 @@
 export const CONTROL_PRODUCT = 'product';
-export const CONTROL_8B = '8b';
+export const CONTROL_ARCHIVED = '8b';
 
 export function readControl(supplied) {
   const result = supplied === undefined
     ? { control: CONTROL_PRODUCT, supplied: false, error: null }
-    : supplied === CONTROL_8B
-      ? { control: CONTROL_8B, supplied: true, error: null }
+    : supplied === CONTROL_ARCHIVED
+      ? { control: CONTROL_ARCHIVED, supplied: true, error: null }
       : { control: CONTROL_PRODUCT, supplied: true, error: 'control-must-be-8b' };
   return Object.freeze(result);
 }

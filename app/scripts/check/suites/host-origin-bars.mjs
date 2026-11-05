@@ -45,9 +45,9 @@ export default async function hostOriginBarsSuite() {
     assertEqual(result.bars.B3.pass, false, 'the minimum fails B3');
   });
 
-  await check('host-origin bars: routing covers refusal, owner decision, ceiling and pass', async () => {
+  await check('host-origin bars: routing covers refusal, needs-decision, ceiling and pass', async () => {
     assertEqual(judgeHostOrigin({ baseline, capped: { ...baseline, status: 'refused' }, uncapped: fast }).routing, 'instrument-refusal', 'refusal route');
-    assertEqual(judgeHostOrigin({ baseline, capped: figure({ utilisation: 0.8 }), uncapped: fast }).routing, 'owner-decision', 'fast uncapped route');
+    assertEqual(judgeHostOrigin({ baseline, capped: figure({ utilisation: 0.8 }), uncapped: fast }).routing, 'needs-decision', 'fast uncapped route');
     assertEqual(judgeHostOrigin({ baseline, capped: figure({ utilisation: 0.8 }), uncapped: slow }).routing, 'transport-ceiling', 'slow uncapped route');
     assertEqual(judgeHostOrigin({ baseline, capped: baseline, uncapped: slow }).routing, 'capped-pass', 'passing capped route');
   });

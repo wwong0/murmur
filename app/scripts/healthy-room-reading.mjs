@@ -10,9 +10,7 @@ import {
 } from './registered-runs.mjs';
 
 const REGISTRY = 'results/RUNS-12c-2.json';
-const EVIDENCE_DIR = path.join(APP_DIR, '..', 'openspec', 'changes', 'archive', '2026-10-21-timeline-offset', 'evidence');
-const OUTPUT = path.join(EVIDENCE_DIR, 'reading-12c-2.json');
-const BUILD = path.join(EVIDENCE_DIR, 'build.json');
+const OUTPUT = path.join(APP_DIR, 'results', 'reading-12c-2.json');
 const RUN_DIRECTORY = /^12c2-(healthy-2s|shakedown)-/;
 const POLL_FILE = /^client-(c\d+)\.poll\.ndjson$/;
 
@@ -33,8 +31,15 @@ function readRun(entry) {
     aheadForGood: registered.report?.aheadForGood ?? null, placement, recomputeError: registered.recomputeError ?? null };
 }
 
+// The run set's build record, given as --build <build.json>.
+function requiredBuild() {
+  const build = argument('build', process.argv);
+  if (!build) throw new Error('--build <build.json> is required');
+  return build;
+}
+
 const main = () => writeRunSetReading({ registry: REGISTRY, output: OUTPUT, runDirectory: RUN_DIRECTORY, readRun,
-  read: (input) => healthyRoomReading({ ...input, build: readJson(appPath(argument('build', process.argv) ?? BUILD)) }),
+  read: (input) => healthyRoomReading({ ...input, build: readJson(appPath(requiredBuild())) }),
   summary: (reading) => ` (${reading.shownAnswer})` });
 
 if (isMain(import.meta.url)) runMain(main);

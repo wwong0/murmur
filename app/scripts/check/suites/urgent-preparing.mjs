@@ -1,6 +1,6 @@
 import { assert, assertEqual, check } from '../harness.mjs';
 import { bundleProductEntry, runEntry } from '../entry-harness.mjs';
-import { CONTROL_8B, CONTROL_PRODUCT } from '../../../public/lib/edge-control.mjs';
+import { CONTROL_ARCHIVED, CONTROL_PRODUCT } from '../../../public/lib/edge-control.mjs';
 import { parseSegmentTimes, requestClass } from '../../../public/lib/urgent-request.mjs';
 
 const PLAYLIST = [
@@ -26,7 +26,7 @@ export default async function urgentPreparingSuite() {
     assertEqual(requestClass({ ...base, preparing: false }), null, 'the same segment is not urgent when not preparing');
     assertEqual(requestClass({ ...base, preparing: undefined }), null, 'undefined preparing keeps today’s behavior');
     assertEqual(requestClass({ ...base, preparing: 'true' }), null, 'only boolean true enables preparing urgency');
-    assertEqual(requestClass({ ...base, control: CONTROL_8B, preparing: true }), null, '8b keeps its existing segment behavior');
+    assertEqual(requestClass({ ...base, control: CONTROL_ARCHIVED, preparing: true }), null, '8b keeps its existing segment behavior');
     assertEqual(requestClass({ ...base, path: '/media/seg-99999.m4s', preparing: true }), null, 'a path outside the playlist is not urgent');
     assertEqual(requestClass({ ...base, segments: null, preparing: true }), null, 'a segment is not urgent before the playlist exists');
     assertEqual(requestClass({ ...base, path: '/media/seg-00123.m4s', positionMs: 186_000, preparing: true }), 'urgent', 'a segment 60 seconds ahead is urgent while preparing');

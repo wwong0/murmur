@@ -1,4 +1,4 @@
-export function s1Data({ manifest, peerBytesByClient, binWidth = 10000 }) {
+export function peerBytesTrace({ manifest, peerBytesByClient, binWidth = 10000 }) {
   const attempts = Object.values(peerBytesByClient).flat().filter((r) =>
     r.kind === 'attempt' && Number.isFinite(r.endMs)
   ).sort((a, b) => a.endMs - b.endMs);

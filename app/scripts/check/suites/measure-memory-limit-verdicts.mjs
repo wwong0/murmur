@@ -54,7 +54,7 @@ export default async function measureMemoryLimitVerdictsSuite() {
     assertEqual(missing.gate, 'unestablished', 'missing store leaves gate unestablished');
     assertEqual(verdict(run(null)).reading.viewers.c01.status, 'unestablished', 'non-finite peak is unestablished');
     const baseline = { stallCountByClient: { c01: 2 }, realtimeFactorByClient: { c01: 0.8 }, peerFractionAggregate: 0.7, ignored: 1 };
-    const beside = verdict(run(), '13f-w-long', baseline).reading.beside13eW;
+    const beside = verdict(run(), '13f-w-long', baseline).reading.besideNightTwoW;
     assertEqual(beside.label, 'descriptive-invalid-run', 'baseline is labelled');
     assertEqual(beside.baseline.stallCountByClient.c01, 2, 'baseline figures carried');
     assertEqual(beside.baseline.ignored, undefined, 'only requested baseline fields carried');
@@ -105,7 +105,7 @@ export default async function measureMemoryLimitVerdictsSuite() {
       fs.writeFileSync(readings, JSON.stringify({ runs: { [runDir]: sample.readings } }));
       assertEqual(runCommand(['node', 'measure-night.mjs', '--night', '13f', '--registry', registry, '--readings', readings, '--out', out]), 0, '13f command succeeds');
       const result = JSON.parse(fs.readFileSync(path.join(out, 'verdicts.json'), 'utf8'));
-      assertEqual(result.runs[0].reading.beside13eW.baseline, null, 'absent baseline is null');
+      assertEqual(result.runs[0].reading.besideNightTwoW.baseline, null, 'absent baseline is null');
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 }

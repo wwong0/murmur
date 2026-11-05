@@ -1,7 +1,7 @@
 const MEDIA = /\.(mp4|m4s|m4v|mkv|webm|mov|avi|ts|mp3|m4a|aac|flac|wav|ogg|opus)$/i;
 const TEST = /(?:^|\/)test_videos(?:\/|$)/i;
 const SECRET_PATH = /(?:^|\/)(?:[^/]*\.env|[^/]*\.(?:pem|key)|id_[^/]+)$/i;
-const PERSONAL_PATH = /(?:^|\/)(?:\.scratch|\.coordinator|\.impeccable)(?:\/|$)/i;
+const PERSONAL_PATH = /(?:^|\/)(?:\.scratch|\.impeccable)(?:\/|$)/i;
 export const PROFILE = /(?:[A-Za-z]:(?:\\{1,2}|\/+)+Users(?:\\{1,2}|\/+)+|\/Users\/|\/home\/)([^\\/\r\n]+)/gi;
 const sample = (value) => `${value.slice(0, 4)}… (${value.length})`;
 const hit = (classNo, sub, extra = {}) => ({ class: classNo, sub, ...extra });

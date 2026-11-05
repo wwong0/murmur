@@ -55,15 +55,15 @@ export default async function measureNightVerdictsSuite() {
   await check('measurement night A: all three A5 criteria are required', async () => {
     const item = entry('a-pass', '13d-a-five');
     const result = nightVerdicts({ entries: [item], runs: maps([item]) }).tests.A.runs[0];
-    assertEqual(result.criteria.C1.status, 'met', 'A5 drift is met');
-    assertEqual(result.criteria.C2.status, 'met', 'A5 multiplier is met');
-    assertEqual(result.criteria.C3.status, 'met', 'A5 peer fraction is met');
+    assertEqual(result.criteria.drift.status, 'met', 'A5 drift is met');
+    assertEqual(result.criteria.multiplier.status, 'met', 'A5 multiplier is met');
+    assertEqual(result.criteria.peerFraction.status, 'met', 'A5 peer fraction is met');
     assertEqual(result.pass, true, 'A5 passes only with all criteria');
     const missItem = entry('a-miss', '13d-a-five');
     const missRun = run({ refusalReport: { figures: figures({ peerFractionAggregate: 0.59 }) } });
     const missed = nightVerdicts({ entries: [missItem], runs: { 'a-miss': missRun } }).tests.A.runs[0];
     assertEqual(missed.pass, false, 'A5 fails one missed criterion');
-    assertEqual(missed.criteria.C3.status, 'missed', 'the peer criterion is missed');
+    assertEqual(missed.criteria.peerFraction.status, 'missed', 'the peer criterion is missed');
   });
 
   await check('measurement night L: drift, realtime and coverage clauses are named', async () => {
@@ -149,7 +149,7 @@ export default async function measureNightVerdictsSuite() {
       cut: run({ readings: { ...run().readings, 'event-clocks': { supplierCut: { section: 'readable', victim: 'c02', victimVerified: true,
         stalls: { c01: { count: 0, stallCountDelta: 0 } } } } } }),
     } }).tests;
-    assertEqual(JSON.stringify(tests.A10.counts.C2), JSON.stringify({ valid: 1, met: 1, missed: 0, other: 0 }), 'A10 counts its multiplier bar');
+    assertEqual(JSON.stringify(tests.A10.counts.multiplier), JSON.stringify({ valid: 1, met: 1, missed: 0, other: 0 }), 'A10 counts its multiplier bar');
     assertEqual(tests.L.counts.pass.met, 1, 'L counts its passes');
     assertEqual(tests['J-join'].counts.entryUnder2s.missed, 1, 'a 3 s entry clock is counted over 2 s');
     assertEqual(tests['J-join'].counts.firstFrameUnder2s.met, 1, 'a 10 ms first-frame clock is counted under 2 s');

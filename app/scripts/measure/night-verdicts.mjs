@@ -96,7 +96,7 @@ function criterionValues(record, playbackRefused) {
   const c2 = multiplierVerdict(figures, record.multiplierBar);
   const c3 = peerVerdict(figures.peerFractionAggregate, 0.6);
   const c1 = driftCriterion(lab, 'absMedianMs', 40);
-  return playbackRefused ? { C1: refusalMissed(c1), C2: refusalMissed(c2), C3: refusalMissed(c3) } : { C1: c1, C2: c2, C3: c3 };
+  return playbackRefused ? { drift: refusalMissed(c1), multiplier: refusalMissed(c2), peerFraction: refusalMissed(c3) } : { drift: c1, multiplier: c2, peerFraction: c3 };
 }
 
 function validRecord(entry, run) {
@@ -143,7 +143,7 @@ function bRecord(entry, run) {
   record.reading.noFrameMs = Object.fromEntries(Object.entries(gap?.viewers ?? {}).map(([tag, value]) => [tag, value?.noFrameMs ?? null]));
   record.reading.hostMediaBytes = record.bytes?.host?.mediaBytes ?? null;
   if (entry.condition === '13d-b-product-20') {
-    record.criteria = { C2: record.playbackRefused ? refusalMissed(multiplierVerdict(figures, 1.5)) : multiplierVerdict(figures, 1.5) };
+    record.criteria = { multiplier: record.playbackRefused ? refusalMissed(multiplierVerdict(figures, 1.5)) : multiplierVerdict(figures, 1.5) };
   }
   return record;
 }
@@ -364,7 +364,7 @@ function perRun(matches, build, counts) {
 
 const TESTS = {
   A: perRun(named('13d-a-five'), (entry, run) => aRecord(entry, run, 1.5), (record) => ({ ...record.criteria, pass: outcome(record.pass) })),
-  A10: perRun(named('13d-a-ten'), a10Record, (record) => ({ C2: record.reading.multiplier })),
+  A10: perRun(named('13d-a-ten'), a10Record, (record) => ({ multiplier: record.reading.multiplier })),
   A2: perRun(prefixed('13d-a2-'), readingRecord, () => ({})),
   B: perRun(prefixed('13d-b-'), bRecord, (record) => record.criteria),
   D: perRun(named('13d-d-delay25'), dRecord, () => ({})),

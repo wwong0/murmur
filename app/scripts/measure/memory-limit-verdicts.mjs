@@ -35,8 +35,8 @@ function readingFor(entry, run, baseline) {
   return {
     viewers, gate, ...selected(figures), noFrameMsByClient: counting.published?.noFrameMsByClient ?? null,
     countedAsStall, coverageFromPollsByClient,
-    beside13eW: { baseline: baseline === null ? null : selected(baseline), label: 'descriptive-invalid-run',
-      buildDifference: "13f runs with 13e-2's D2 (a preparing viewer's requests are urgent); 13e's W did not" },
+    besideNightTwoW: { baseline: baseline === null ? null : selected(baseline), label: 'descriptive-invalid-run',
+      buildDifference: "13f runs with 13e-2's urgent requests for a preparing viewer; 13e's W did not" },
   };
 }
 

@@ -113,7 +113,7 @@ export default async function harnessRosterEventSuite() {
     assertEqual(rowOf(readJoin({ drift: { ...joinInput().drift, c05: [] } }), 'J1').status, 'missed', 'no frame is missed');
   });
 
-  await check('10b D1 B-1: a join reads the stall of the viewers already in the room, both windows', async () => {
+  await check('10b join B-1: a join reads the stall of the viewers already in the room, both windows', async () => {
     const read = (gapAt) => rowOf(readJoin({ polls: { ...joinInput().polls, host: hostPolls() },
       drift: Object.fromEntries(TAGS.map((tag) => [tag, tag === 'c05' ? denseFrames(E + 1_000, E + 60_000)
         : denseFrames(E - 60_000, E + 60_000, tag === 'c02' ? gapAt : null)])) }), 'K1');
@@ -127,7 +127,7 @@ export default async function harnessRosterEventSuite() {
     assertEqual(rowOf(readJoin(), 'K1').status, 'evidence-failure', 'no host polls is an evidence failure, not a pass');
   });
 
-  await check('10b D1 B-2: J1 publishes the delay to the landing segment\'s first ask', async () => {
+  await check('10b join B-2: J1 publishes the delay to the landing segment\'s first ask', async () => {
     const ask = (index, startMs) => ({ kind: 'attempt', attemptId: index, path: `/media/seg-${String(index).padStart(5, '0')}.m4s`,
       startMs, endMs: E + 1_000 + index, bytes: 100, peerId: 'c01-peer' });
     const segments = [1, 2, 3].map((index) => ({ kind: 'segment', path: `/media/seg-${String(index).padStart(5, '0')}.m4s`,

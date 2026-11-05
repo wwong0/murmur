@@ -36,8 +36,6 @@ test_videos/
 # Scratch from the spike rig's runs.
 spike-host-origin/.tmp/
 
-# Working notes — transient by construction, never a record.
-.claude/temp/
 
 # IDE workspace state. Per-machine and per-developer — module paths, code-style
 # defaults, VCS mappings — and it carries none of the project's reasoning.
@@ -72,5 +70,3 @@ app/results/4e-duration-*/console.log
 debug.log
 .tmp/
 
-# Tooling scratch: a state file and run logs, never a record.
-.coordinator/

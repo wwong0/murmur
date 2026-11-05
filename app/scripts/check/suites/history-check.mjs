@@ -30,21 +30,21 @@ export default async function historyCheckSuite() {
   await check('history check: pure rules detect and mask each planted shape', async () => {
     const text = (input) => scanText(input, terms);
     const pathname = (input) => scanPath(input, 0, terms);
-    one('owner term', text, 'ordinary words', `hello ${term}`, 1, 'term', term);
+    one('private term', text, 'ordinary words', `hello ${term}`, 1, 'term', term);
     one('private key', text, 'ordinary words', '-----BEGIN PRIVATE KEY-----', 3, 'private-key', '-----BEGIN PRIVATE KEY-----');
     one('secret assignment', text, 'name=value', `TURN_API_TOKEN=${secret}`, 3, 'assignment', secret);
     one('jwt', text, 'ordinary words', 'eyJabc.eyJdef.signature', 3, 'jwt', 'eyJabc.eyJdef.signature');
     one('uuid', text, 'ordinary words', '12345678-abcd-4321-abcd-123456789abc', 3, 'uuid', '12345678-abcd-4321-abcd-123456789abc');
-    one('secret path', pathname, 'docs/readme.txt', 'private/id_ed25519', 3, 'secret-path', 'private/id_ed25519');
+    one('secret path', pathname, 'notes/readme.txt', 'private/id_ed25519', 3, 'secret-path', 'private/id_ed25519');
     one('room link', text, 'https://example.org/', 'https://example.org/?room=private-room', 4, 'room-link', 'private-room');
-    one('media', pathname, 'docs/readme.txt', 'clips/movie.mp4', 5, 'media', 'movie.mp4');
-    one('test videos', pathname, 'docs/readme.txt', 'test_videos/hidden.dat', 5, 'test-videos', 'hidden.dat');
-    one('over 50MB', (size) => scanPath('docs/data.bin', size), 50_000_000, 50_000_001, 5, 'over-50MB', 'docs/data.bin');
-    one('over 100MB', (size) => scanPath('docs/data.bin', size), 50_000_000, 100_000_001, 5, 'over-100MB', 'docs/data.bin');
-    assertEqual(scanPath('docs/data.bin', 100_000_000).hits.filter((hit) => hit.sub === 'over-100MB').length, 0, '100MB boundary');
+    one('media', pathname, 'notes/readme.txt', 'clips/movie.mp4', 5, 'media', 'movie.mp4');
+    one('test videos', pathname, 'notes/readme.txt', 'test_videos/hidden.dat', 5, 'test-videos', 'hidden.dat');
+    one('over 50MB', (size) => scanPath('notes/data.bin', size), 50_000_000, 50_000_001, 5, 'over-50MB', 'notes/data.bin');
+    one('over 100MB', (size) => scanPath('notes/data.bin', size), 50_000_000, 100_000_001, 5, 'over-100MB', 'notes/data.bin');
+    assertEqual(scanPath('notes/data.bin', 100_000_000).hits.filter((hit) => hit.sub === 'over-100MB').length, 0, '100MB boundary');
     one('profile', text, 'ordinary words', someone, 6, 'profile', 'someone');
     one('profile with spaces', text, 'ordinary words', spaced, 6, 'profile', '?lise Example');
-    one('committed path', pathname, 'docs/readme.txt', '.scratch/note.md', 6, 'committed-path', '.scratch/note.md');
+    one('committed path', pathname, 'notes/readme.txt', '.scratch/note.md', 6, 'committed-path', '.scratch/note.md');
     assertEqual(scanText('https://example.org:8443/').hosts[0], 'example.org:8443', 'host retains port');
     const ids = identityCounts([{ email: address('a', 'example.org') }, { email: address('b', 'example.org') }, { email: address('3+x', 'users.noreply.github.com') }, { email: address('a', 'example.org') }]);
     assertEqual(ids.distinct, 3, 'distinct identities');
@@ -79,7 +79,7 @@ export default async function historyCheckSuite() {
       assertEqual(result.status, 0, `CLI completed: ${result.stderr}`);
       const data = JSON.parse(fs.readFileSync(json, 'utf8'));
       const detail = fs.readFileSync(report, 'utf8');
-      assertEqual(data.counts[1].all, 1, 'owner term found');
+      assertEqual(data.counts[1].all, 1, 'private term found');
       assertEqual(data.counts[2].all.distinct, 2, 'identity count');
       assert(data.counts[3].main >= 2, 'deleted blob secret assignment and key found');
       assertEqual(data.counts[4].all, 2, 'side branch room links found in all refs');

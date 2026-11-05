@@ -47,9 +47,9 @@ export const MIN_COMMAND_DEVIATION = 0;
  * The adopted f: 1/881 + 1e-6, the widest modelled copy region in
  * {44.1, 48, 96} kHz plus one ppm of headroom. A frozen literal, because the
  * formula (`commandThresholdFor`) lives in test machinery a product module may
- * not import; the d8-product-integration suite proves the two are one number.
+ * not import; the stopping-product-integration suite proves the two are one number.
  */
-export const D8_COMMAND_THRESHOLD = 0.0011360737797956866;
+export const STOPPING_COMMAND_THRESHOLD = 0.0011360737797956866;
 /** Floating-point slack near 1.0 for the command-range check. Never a ppm allowance. */
 export const COMMAND_TOLERANCE = 8 * Number.EPSILON;
 /** The ceiling on an accepted stopping threshold. Fixed: an

@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fakeVideo } from './entry-harness.mjs';
 import { rig } from './controller-rig.mjs';
 import { INTEGRATION_SCHEMA, pitchReference } from '../drift-capture.mjs';
-import { T8_INHERITED_ALLOWLIST, T8_ROUTE_SIGNATURE, auditClient, integrationSummary } from '../product-integration-evidence.mjs';
+import { OFFLINE_STEP_INHERITED_ALLOWLIST, OFFLINE_STEP_ROUTE_SIGNATURE, auditClient, integrationSummary } from '../product-integration-evidence.mjs';
 import { createDriftController } from '../../public/lib/drift-controller.mjs';
 import { initializePlaybackTreatment } from '../../public/lib/playback-treatment.mjs';
 
@@ -60,9 +60,9 @@ export function simulate({ preSettleHold = true, videoOptions = {}, after = () =
   return { label: 'A', startups, events: lines, samples, stream, missing: [] };
 }
 
-export const HEALTHY_ROUTE = clone({ ...T8_ROUTE_SIGNATURE, offlineSignature: { ...T8_ROUTE_SIGNATURE.offline, halfWidthWidened: true } });
+export const HEALTHY_ROUTE = clone({ ...OFFLINE_STEP_ROUTE_SIGNATURE, offlineSignature: { ...OFFLINE_STEP_ROUTE_SIGNATURE.offline, halfWidthWidened: true } });
 
-export function writeRun(dir, clients, { failures = [...T8_INHERITED_ALLOWLIST], route = HEALTHY_ROUTE, notExercised = [] } = {}) {
+export function writeRun(dir, clients, { failures = [...OFFLINE_STEP_INHERITED_ALLOWLIST], route = HEALTHY_ROUTE, notExercised = [] } = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const audited = clients.map((client) => ({ ...auditClient(client), label: client.label }));
   for (const client of clients) {
@@ -83,7 +83,7 @@ export function writeRun(dir, clients, { failures = [...T8_INHERITED_ALLOWLIST],
     outcome: failures.length === 0 ? 'pass' : 'failed',
     failures,
     notExercised,
-    t8Route: route,
+    offlineStepRoute: route,
   };
   fs.writeFileSync(path.join(dir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 }

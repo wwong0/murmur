@@ -2815,7 +2815,7 @@
     "monitorRequestTimeoutMs": 5000,
     "backgroundLoadCalibration": {
       "status": "no-rate-met",
-      "stoppedBy": "executor-spec 1.4 rule 4: realtime below 0.98 at a rate whose queue bar also failed",
+      "stoppedBy": "the stop rule: realtime below 0.98 at a rate whose queue bar also failed",
       "bars": {
         "standingQueueDelayMsP50NearestRankMin": 200,
         "uplinkUtilisationMeanMin": 0.95,

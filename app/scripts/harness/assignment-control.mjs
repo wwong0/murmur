@@ -4,7 +4,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { CONTROL_8B, CONTROL_PRODUCT } from '../../public/lib/edge-control.mjs';
+import { CONTROL_ARCHIVED, CONTROL_PRODUCT } from '../../public/lib/edge-control.mjs';
 
 export const CONTROL_FILE = 'assignment-control.json';
 
@@ -12,19 +12,19 @@ const declares = (condition) => Object.prototype.hasOwnProperty.call(condition ?
 
 export function assignmentControlReason(condition = {}) {
   if (!declares(condition)) return null;
-  return condition.assignmentControl === CONTROL_8B && condition.peerExchange === true
+  return condition.assignmentControl === CONTROL_ARCHIVED && condition.peerExchange === true
     ? null : 'assignment-control-invalid';
 }
 
 /** The pre-load script of a declaring condition, or null. No other value is ever supplied. */
 export function controlInjection(condition = {}) {
-  return condition?.assignmentControl === CONTROL_8B ? `globalThis.__waControl = ${JSON.stringify(CONTROL_8B)};` : null;
+  return condition?.assignmentControl === CONTROL_ARCHIVED ? `globalThis.__waControl = ${JSON.stringify(CONTROL_ARCHIVED)};` : null;
 }
 
 // The probe's shape is asserted before anything is derived from it.
 export function assertControlReading(page, reading) {
   const shaped = reading !== null && typeof reading === 'object'
-    && (reading.control === CONTROL_8B || reading.control === CONTROL_PRODUCT)
+    && (reading.control === CONTROL_ARCHIVED || reading.control === CONTROL_PRODUCT)
     && typeof reading.supplied === 'boolean'
     && (reading.error === null || typeof reading.error === 'string');
   if (!shaped) throw new Error(`assignment-control-reading-malformed: ${page}: ${JSON.stringify(reading ?? null)}`);

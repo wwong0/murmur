@@ -33,7 +33,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildOptions, ENTRY_POINT, OUT_FILE } from './build.mjs';
-import { commandThresholdFor } from './check/d8-research-controller.mjs';
+import { commandThresholdFor } from './check/stopping-research-controller.mjs';
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const PRODUCT_BUNDLE = OUT_FILE;
@@ -133,7 +133,7 @@ export const DEFAULT_TREATMENT = 'pitch-disabled';
 
 /**
  * The candidate treatments, by name. Each names the whole of what arm C runs
- * under beyond the frozen D8 controller; B is the product in every one.
+ * under beyond the frozen stopping-policy controller; B is the product in every one.
  *
  *  - `pitch-disabled` is the treatment `c5231da` ran and passed, kept as the
  *    default so the command that produced it still produces it.
@@ -170,7 +170,7 @@ export function writeWrapperModules({ root, arm, io = nodeBuildIo() }) {
   const from = (target) => path.relative(root, target).split(path.sep).join('/');
   const page = from(path.join(APP_DIR, 'scripts', 'remedy-browser-page.mjs'));
   const productController = from(path.join(APP_DIR, 'public', 'lib', 'drift-controller.mjs'));
-  const researchController = from(path.join(APP_DIR, 'scripts', 'check', 'd8-research-controller.mjs'));
+  const researchController = from(path.join(APP_DIR, 'scripts', 'check', 'stopping-research-controller.mjs'));
   const sampler = from(path.join(APP_DIR, 'public', 'lib', 'frame-sampler.mjs'));
   const log = from(path.join(APP_DIR, 'public', 'lib', 'frame-drift.mjs'));
 
@@ -192,7 +192,7 @@ export function writeWrapperModules({ root, arm, io = nodeBuildIo() }) {
   const controller = arm === 'C'
     ? [
       `import { collector } from './research-collector.mjs';`,
-      `import { createD8ResearchController, commandThresholdFor } from '${researchController}';`,
+      `import { createStoppingResearchController, commandThresholdFor } from '${researchController}';`,
       `import { wrapDriftController } from '${page}';`,
       '',
       '// f is CALLED here as well as in Node, and the run requires the two to be',
@@ -204,7 +204,7 @@ export function writeWrapperModules({ root, arm, io = nodeBuildIo() }) {
       '',
       'export const createDriftController = wrapDriftController({',
       '  collector,',
-      '  createController: createD8ResearchController,',
+      '  createController: createStoppingResearchController,',
       '  settings: { MIN_COMMAND_DEVIATION: f },',
       '  options: { refusalPolicy: __RESEARCH_REFUSAL_POLICY__ },',
       '});',

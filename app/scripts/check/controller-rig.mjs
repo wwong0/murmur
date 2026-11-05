@@ -1,14 +1,14 @@
 // scripts/check/controller-rig.mjs
 //
 // A hand-written log and clock for driving a drift controller one poll at a
-// time. Shared by d8-research.mjs and d8-product-integration.mjs so the product
+// time. Shared by stopping-research.mjs and stopping-product-integration.mjs so the product
 // and the research copy are driven by one rig, not two that could disagree.
 //
 // The rig feeds identical drift values per poll, so the window's `p95 - p5` is
 // exactly 0 and the band is the clock arm alone: U is a dial, and S = U + L a
 // consequence of it.
 
-import { createD8ResearchController } from './d8-research-controller.mjs';
+import { createStoppingResearchController } from './stopping-research-controller.mjs';
 
 export const BAND_MS = 4;
 
@@ -23,7 +23,7 @@ export const BAND_MS = 4;
 export const STEP_MS = 1000;
 
 /** The controller reads `log.read`, `log.latestSeq` and `clock.read()` and nothing else. */
-export function rig({ factory = createD8ResearchController, settings = {}, halfWidthMs = BAND_MS, options = {} } = {}) {
+export function rig({ factory = createStoppingResearchController, settings = {}, halfWidthMs = BAND_MS, options = {} } = {}) {
   const rows = [];
   const state = { nowMs: 0, offsetMs: 0, halfWidthMs, reanchors: 0, present: true };
   const applied = [];

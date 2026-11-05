@@ -6,7 +6,7 @@ import { assert, assertEqual, assertNear, check } from '../harness.mjs';
 import { driftLabel, pct, runMark } from '../../graphs/rules.mjs';
 import { HOUR, normaliseVerdicts } from '../../graphs/sources.mjs';
 import { BANNED, conditionWords, reasonText, setupLines } from '../../graphs/plain.mjs';
-import { s1Data } from '../../graphs/s1-bytes.mjs';
+import { peerBytesTrace } from '../../graphs/peer-bytes-trace.mjs';
 import * as sharing from '../../graphs/fig-sharing.mjs';
 import * as room from '../../graphs/fig-room-size.mjs';
 import * as sync from '../../graphs/fig-sync.mjs';
@@ -358,7 +358,7 @@ export default async function measureGraphsSuite() {
   });
   await check('graphs: hour bins and command refusals', async () => {
     // 100 and 50 bytes end in the same minute; aborted bytes do not count.
-    const t = s1Data({
+    const t = peerBytesTrace({
       manifest: { window: {} },
       binWidth: 60000,
       peerBytesByClient: {
@@ -375,7 +375,7 @@ export default async function measureGraphsSuite() {
     assertEqual(t.bins.length, 1, 'one bin');
     assertEqual(t.bins[0].hostBytes, 100, 'host');
     assertEqual(t.bins[0].peerBytesBySender['peer 1'], 50, 'peer');
-    const short = s1Data({
+    const short = peerBytesTrace({
       manifest: { window: {} },
       binWidth: 10000,
       peerBytesByClient: {

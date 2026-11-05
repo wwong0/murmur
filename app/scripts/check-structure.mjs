@@ -230,7 +230,7 @@ function checkProse(file) {
     file,
     1,
     `${prose} prose lines against ${code} of code`,
-    `rule 4: prose ratio ${ratio.toFixed(2)} exceeds ${MAX_PROSE_RATIO} — comments are re-arguing decisions that belong in the change's design.md (CONSTRAINTS.md → *Artifacts*)`
+    `rule 4: prose ratio ${ratio.toFixed(2)} exceeds ${MAX_PROSE_RATIO} — comments are re-arguing decisions instead of stating what the code does`
   );
 }
 

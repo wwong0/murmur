@@ -120,7 +120,7 @@ export default async function playbackStartCoverSuite() {
     assertEqual(json(withLast.actions), json(without.actions), 'a position past the end projects as before');
   });
 
-  await check('playback-start-cover C1: coverage after the candidate still starts at P', async () => {
+  await check('playback-start-cover case 1: coverage after the candidate still starts at P', async () => {
     const r = rig({ margin: 1000, projection: 1500, projectionMax: 30000 });
     const first = r.poll({ nowSharedMs: 0, finished: [] });
     assertEqual(first.startAtSharedMs, null, 'uncovered media leaves S unchosen');
@@ -135,7 +135,7 @@ export default async function playbackStartCoverSuite() {
     assertEqual(json(r.element.writes.map((write) => write.kind)), json(['load']), 'one load serves the start');
   });
 
-  await check('playback-start-cover C2: late coverage makes one re-projection', async () => {
+  await check('playback-start-cover case 2: late coverage makes one re-projection', async () => {
     const r = rig({ margin: 1000, projection: 1500, projectionMax: 30000 });
     const first = r.poll({ nowSharedMs: 0, finished: [] });
     r.start.ready(first.attemptId, 500);
@@ -148,7 +148,7 @@ export default async function playbackStartCoverSuite() {
     assertEqual(missed.actions[0].projectionMs, 1500, 'the park reports the replaced projection');
   });
 
-  await check('playback-start-cover C3: passing P while uncovered does nothing until coverage', async () => {
+  await check('playback-start-cover case 3: passing P while uncovered does nothing until coverage', async () => {
     const r = rig({ margin: 1000, projection: 1500, projectionMax: 30000 });
     const first = r.poll({ nowSharedMs: 0, finished: [] });
     r.start.ready(first.attemptId, 1000);
@@ -162,7 +162,7 @@ export default async function playbackStartCoverSuite() {
     assertEqual(json(covered.actions.map((action) => action.kind)), json(['park']), 'the covered late poll parks the new attempt');
   });
 
-  await check('playback-start-cover C4: margin edges and the product setting discriminate', async () => {
+  await check('playback-start-cover case 4: margin edges and the product setting discriminate', async () => {
     const justShort = rig({ margin: 2500, projection: 1500 }).poll({ nowSharedMs: 0, finished: segments(2849) });
     const exact = rig({ margin: 2500, projection: 1500 }).poll({ nowSharedMs: 0, finished: segments(2850) });
     const productMargin = rig({ margin: 3000, projection: 1500 }).poll({ nowSharedMs: 0, finished: segments(2850) });
@@ -183,14 +183,14 @@ export default async function playbackStartCoverSuite() {
     assertEqual(page.harness.finishedHandlers.length, 1, 'the entry subscribes to finished fragments');
   });
 
-  await check('playback-start-cover C5: already covered at S0 is unchanged from margin zero', async () => {
+  await check('playback-start-cover case 5: already covered at S0 is unchanged from margin zero', async () => {
     const covered = rig({ margin: 2500, projection: 1500 }).poll({ nowSharedMs: 0, finished: segments(3000) });
     const zero = rig({ margin: 0, projection: 1500 }).poll({ nowSharedMs: 0, finished: [] });
     assertEqual(json(covered.actions), json(zero.actions), 'covered media has identical actions');
     assertEqual(covered.nextAtSharedMs, zero.nextAtSharedMs, 'covered media has the same deadline');
   });
 
-  await check('playback-start-cover C6: missed coverage doubles elapsed time and respects the cap', async () => {
+  await check('playback-start-cover case 6: missed coverage doubles elapsed time and respects the cap', async () => {
     for (const [elapsedMs, expectedProjectionMs] of [[1200, 3000], [10_000, 20_000], [40_000, 30_000]]) {
       const { r, result } = await coverAt(elapsedMs);
       assertEqual(result.reprojections, 1, `elapsed ${elapsedMs} makes one re-projection`);
@@ -200,7 +200,7 @@ export default async function playbackStartCoverSuite() {
     }
   });
 
-  await check('playback-start-cover C7: a late re-park uses the same preparation routine', async () => {
+  await check('playback-start-cover case 7: a late re-park uses the same preparation routine', async () => {
     const repark = rig({ margin: 3000, projection: 1500, projectionMax: 30000, reparkAfterMs: 600, maxReparks: 1 });
     const prepared = repark.poll({ nowSharedMs: 0, finished: segments(3350) });
     repark.start.ready(prepared.attemptId, 1000);
@@ -211,7 +211,7 @@ export default async function playbackStartCoverSuite() {
     assertEqual(json(result.actions.map((action) => action.kind)), json(['park']), 'the re-park writes one park');
   });
 
-  await check('playback-start-cover C8: native null coverage equals margin zero, empty coverage does not', async () => {
+  await check('playback-start-cover case 8: native null coverage equals margin zero, empty coverage does not', async () => {
     const native = rig({ margin: 2500, projection: 1500 }).poll({ nowSharedMs: 0, finished: null });
     const empty = rig({ margin: 2500, projection: 1500 }).poll({ nowSharedMs: 0, finished: [] });
     assertEqual(native.startAtSharedMs, 350, 'null coverage keeps the existing start');
@@ -220,7 +220,7 @@ export default async function playbackStartCoverSuite() {
     assertEqual(empty.actions[0].positionMs, 1500, 'empty coverage loads at P');
   });
 
-  await check('playback-start-cover C9: every covered-start write is paused and once per attempt', async () => {
+  await check('playback-start-cover case 9: every covered-start write is paused and once per attempt', async () => {
     const cases = [
       () => { const r = rig({ margin: 1000, projection: 1500 }); r.poll({ nowSharedMs: 0, finished: [] }); return r; },
       () => { const r = rig({ margin: 1000, projection: 1500 }); r.poll({ nowSharedMs: 0, finished: [] }); r.poll({ nowSharedMs: 1200, finished: segments(2500) }); return r; },

@@ -68,7 +68,7 @@ function filePage(code, search) {
 export default async function hostNewRoomSuite() {
   const product = await bundleProductEntry();
 
-  await check('host-new-room D1: Host from a front page whose tab held a prepared copy starts empty', async () => {
+  await check('host-new-room prepared copy: Host from a front page whose tab held a prepared copy starts empty', async () => {
     const { page, session } = filePage(product.code, '');
     page.screens().actions.host();
     await drain();
@@ -78,7 +78,7 @@ export default async function hostNewRoomSuite() {
   });
 
   // The other half of the pair: the same storage, loaded as the room it belongs to.
-  await check('host-new-room D1: a reloaded host room keeps and serves its prepared copy', async () => {
+  await check('host-new-room prepared copy: a reloaded host room keeps and serves its prepared copy', async () => {
     const { page, session, key } = filePage(product.code, '?room=r&role=host&tab=h');
     await drain();
     assertEqual(page.app.hostFile().state, 'ready', 'the reloaded host serves its copy');
@@ -86,7 +86,7 @@ export default async function hostNewRoomSuite() {
     assertEqual(session.map.get(NAME_NAME), 'title-a.mp4', 'the prepared name is kept');
   });
 
-  await check('host-new-room D2: Host adds a history entry and replaces none', async () => {
+  await check('host-new-room history: Host adds a history entry and replaces none', async () => {
     const page = runEntry(product.code, { search: '' });
     page.screens().actions.host();
     await page.settled();
@@ -94,7 +94,7 @@ export default async function hostNewRoomSuite() {
     assertEqual(page.history.replacements.length, 0, 'Host keeps the front page entry');
   });
 
-  await check('host-new-room D2: Back to the front page reloads, and a popstate within the room does not', async () => {
+  await check('host-new-room history: Back to the front page reloads, and a popstate within the room does not', async () => {
     const page = runEntry(product.code, { search: '' });
     page.screens().actions.host();
     await page.settled();

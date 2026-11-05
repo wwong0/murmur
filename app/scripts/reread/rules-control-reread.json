@@ -14,7 +14,7 @@
     {
       "id": "cap-used",
       "rule": "the steady test's pace leg is the cap used, at most 0.90",
-      "replaces": "8b2 design.md D3: pace-bound time at most 0.10 of the window",
+      "replaces": "8b2's rule: pace-bound time at most 0.10 of the window",
       "bars": { "steadyCapUsedMax": 0.9 },
       "removeBars": ["steadyPaceBoundMax"]
     },

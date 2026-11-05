@@ -35,7 +35,7 @@ export default async function mediaSuite() {
     // passes while the guard is broken, which is why it is worth the socket.
     //
     // The backslash spelling is a traversal on WINDOWS ONLY. Under POSIX
-    // semantics `..\CLAUDE.md` is a single ordinary filename inside the media
+    // semantics `..\README.md` is a single ordinary filename inside the media
     // root, so the guard rightly admits it and the handler answers 404 — and
     // demanding 403 there fails for a reason that has nothing to do with
     // containment. The container harness runs this app on Linux, and a check that
@@ -44,8 +44,8 @@ export default async function mediaSuite() {
     for (const [attempt, guarded] of [
       ['/media/../outside-the-media-root.txt', true],
       ['/media/%2e%2e/outside-the-media-root.txt', true],
-      ['/media/..%2f..%2fCLAUDE.md', true],
-      ['/media/..%5cCLAUDE.md', SEPARATOR_IS_BACKSLASH],
+      ['/media/..%2f..%2fREADME.md', true],
+      ['/media/..%5cREADME.md', SEPARATOR_IS_BACKSLASH],
     ]) {
       const refused = await rawGet(attempt);
       if (guarded) {

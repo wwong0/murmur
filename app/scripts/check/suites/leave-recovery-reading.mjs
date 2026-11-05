@@ -79,14 +79,14 @@ export default async function leaveRecoveryReadingSuite() {
     const met = read([...refilledPair(), leaveRun(1), leaveRun(2), leaveRun(3)]);
     assertEqual(met.consequence, 'gate met', 'three shown leaves: gate met');
     const remains = read([comparand(1, true), comparand(2, false), leaveRun(1, 'met', 'missed')]);
-    assertEqual(remains.consequence, 'D1 and D2 did not remove the cause; gate missed; design returns to the owner', 'a miss beside a comparand that did not refill twice');
+    assertEqual(remains.consequence, 'the two repairs did not remove the cause; gate missed; the design needs revisiting', 'a miss beside a comparand that did not refill twice');
     assertEqual(read([comparand(1, false), comparand(2, false), leaveRun(1, 'missed', 'met')]).consequence, remains.consequence, 'and beside one that never refilled');
-    assertEqual(read([...refilledPair(), leaveRun(1, 'missed', 'met')]).consequence, 'the stall is the leave\'s; D3\'s rules owed; owner decides',
+    assertEqual(read([...refilledPair(), leaveRun(1, 'missed', 'met')]).consequence, 'the stall is the leave\'s; the leave rules are still owed; a decision is needed',
       'a miss beside a refilled comparand is the leave\'s');
     const unread = read([...refilledPair(), leaveRun(1), leaveRun(2), leaveRun(3, 'unreadable', 'met')]);
-    assertEqual(unread.consequence, 'change 13 quotes the limit, labelled not established', 'two shown and one unread is not established');
+    assertEqual(unread.consequence, 'the write-up quotes the limit, labelled not established', 'two shown and one unread is not established');
     assertEqual(unread.leave.unread, 1, 'the unread run is counted');
-    assertEqual(read([comparand(1, false), comparand(2, false)]).consequence, 'stopped before leave-first; gate missed; returns to the owner',
+    assertEqual(read([comparand(1, false), comparand(2, false)]).consequence, 'stopped before leave-first; gate missed; the design needs revisiting',
       'a comparand that never refilled with no leave run stops');
     assertEqual(read(refilledPair()).consequence, 'leave-first not run; no reading of the gate', 'a refilled comparand with no leave run has no reading');
   });
@@ -95,7 +95,7 @@ export default async function leaveRecoveryReadingSuite() {
     const pair = { first: {}, second: {}, distanceMs: 16_000, skippedBetween: { count: 1, evidence: 'measured' } };
     const triggered = read([comparand(1, true, { pairs: [pair] }), comparand(2, true), leaveRun(1)]);
     assertEqual(triggered.repeatInterval.triggered, true, 'one pair with a skip triggers');
-    assertEqual(triggered.repeatInterval.consequence, '10a\'s 60 s repeat interval is an Open Question for the owner', 'the registered consequence');
+    assertEqual(triggered.repeatInterval.consequence, 'the 60 s repeat interval is an open question', 'the registered consequence');
     assertEqual(triggered.repeatInterval.pairs[0].distanceMs, 16_000, 'the pair is named');
     const noSkip = { ...pair, skippedBetween: { count: 0, evidence: 'measured' } };
     assertEqual(read([comparand(1, true, { pairs: [noSkip] }), comparand(2, true)]).repeatInterval.triggered, false, 'a pair without a skip does not');

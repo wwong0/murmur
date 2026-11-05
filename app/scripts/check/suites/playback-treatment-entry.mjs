@@ -14,10 +14,10 @@ import * as esbuild from 'esbuild';
 
 import { check, assert, assertEqual } from '../harness.mjs';
 import { FAKED_SPECIFIERS, bundleProductEntry, researchEsbuild, runEntry, withTempDir } from '../entry-harness.mjs';
-import { commandThresholdFor } from '../d8-research-controller.mjs';
+import { commandThresholdFor } from '../stopping-research-controller.mjs';
 import { buildResearchBundle } from '../../remedy-browser-build.mjs';
 import { buildOptions } from '../../build.mjs';
-import { D8_COMMAND_THRESHOLD } from '../../../public/lib/drift-controller.mjs';
+import { STOPPING_COMMAND_THRESHOLD } from '../../../public/lib/drift-controller.mjs';
 import { seamEpochAgreement } from '../../start-residual.mjs';
 import { PRESENTATION_ADVANCE_MS } from '../../../public/lib/playback-leads.mjs';
 import { CONTROLLER_LINE_TREATMENT_FAULT_RE } from '../../../public/lib/diagnostics-overlay.mjs';
@@ -91,7 +91,7 @@ export default async function playbackTreatmentEntrySuite() {
       assert(at(order[index - 1]) >= 0 && at(order[index - 1]) < at(order[index]), `${order[index - 1]} precedes ${order[index]}: ${kinds.join(', ')}`);
     }
     const constructed = page.events.find((event) => event.kind === 'controller-created');
-    assert(Object.is(constructed.detail.f, D8_COMMAND_THRESHOLD), `the controller was constructed at exactly the adopted f, got ${constructed.detail.f}`);
+    assert(Object.is(constructed.detail.f, STOPPING_COMMAND_THRESHOLD), `the controller was constructed at exactly the adopted f, got ${constructed.detail.f}`);
     page.open({});
     assert(at('pitch-write') < page.kinds().indexOf('load'), 'the write precedes the load');
     assertEqual(page.count('pitch-write'), 1, 'one pitch write in the page lifetime');

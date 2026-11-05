@@ -9,9 +9,9 @@
 import { check, assert, assertEqual } from '../harness.mjs';
 import { fakeVideo } from '../entry-harness.mjs';
 import { rig } from '../controller-rig.mjs';
-import { createDriftController, D8_COMMAND_THRESHOLD } from '../../../public/lib/drift-controller.mjs';
+import { createDriftController, STOPPING_COMMAND_THRESHOLD } from '../../../public/lib/drift-controller.mjs';
 import {
-  D8_TREATMENT,
+  PITCH_DISABLED_TREATMENT,
   FALLBACK_TREATMENT,
   TREATMENT_FAULT_MODE,
   TreatmentFaultError,
@@ -50,8 +50,8 @@ const FALLBACKS = [
 export default async function playbackTreatmentSuite() {
   await check('playback-treatment: a supported pre-playback write that reads back false selects exactly the adopted f', async () => {
     const { control, notices, treatment } = setup();
-    assert(Object.is(treatment.settings.MIN_COMMAND_DEVIATION, D8_COMMAND_THRESHOLD), `f is ${treatment.settings.MIN_COMMAND_DEVIATION}`);
-    assertEqual(treatment.treatment, D8_TREATMENT, 'the adopted treatment is named');
+    assert(Object.is(treatment.settings.MIN_COMMAND_DEVIATION, STOPPING_COMMAND_THRESHOLD), `f is ${treatment.settings.MIN_COMMAND_DEVIATION}`);
+    assertEqual(treatment.treatment, PITCH_DISABLED_TREATMENT, 'the adopted treatment is named');
     assert(Object.isFrozen(treatment.settings) && Object.isFrozen(treatment.startup), 'the settings and the startup record cannot be edited afterwards');
     assertEqual(json(control.pitchWrites().map((entry) => entry.value)), json([false]), 'exactly one write, of false');
     const { startup } = treatment;
@@ -91,7 +91,7 @@ export default async function playbackTreatmentSuite() {
       assertEqual(polls, 2, 'the f = 0 controller keeps polling');
       assertEqual(treatment.pitch().fault, null, 'and nothing latches');
       // THE PAIRED CONTROL: the same fixture defaults, with the failure removed, establish.
-      assertEqual(setup().treatment.treatment, D8_TREATMENT, 'the control element establishes the treatment');
+      assertEqual(setup().treatment.treatment, PITCH_DISABLED_TREATMENT, 'the control element establishes the treatment');
     });
   }
 

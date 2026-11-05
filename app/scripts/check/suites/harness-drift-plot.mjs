@@ -107,7 +107,7 @@ export default async function harnessDriftPlotSuite() {
   await check('harness drift plot: a not-drawn criterion plots the series with no target lines', async () => {
     const published = publishedFixture();
     const notDrawn = publish('drift', { ...published, condition: { name: 'plot', capacityMbps: 10, runLengthMs: 2_000 },
-      criterionVerdict: { verdict: 'not-drawn', reason: 'design.md D5' } }, { declaredClientTags: TAGS });
+      criterionVerdict: { verdict: 'not-drawn', reason: 'no drift bar declared' } }, { declaredClientTags: TAGS });
     const svg = driftSvg(notDrawn);
     assertEqual((svg.match(/class="criterion"/g) ?? []).length, 0, 'no criterion line is drawn');
     assertEqual([...svg.matchAll(/<polyline\b/g)].length, 3, 'the three series are still drawn');

@@ -11,7 +11,7 @@ import { check, assert, assertEqual, assertNear } from '../harness.mjs';
 import { plant, recordRig, runUntil } from '../drift-plant.mjs';
 import { createClockFilter } from '../../../public/lib/clock-filter.mjs';
 import { createDriftLog, deriveDriftRecord } from '../../../public/lib/frame-drift.mjs';
-import { createDriftController, D8_COMMAND_THRESHOLD } from '../../../public/lib/drift-controller.mjs';
+import { createDriftController, STOPPING_COMMAND_THRESHOLD } from '../../../public/lib/drift-controller.mjs';
 
 const MILLISECONDS_TOLERANCE = 0.05;
 const RATE_TOLERANCE = 1e-12;
@@ -31,7 +31,7 @@ function sharedWideValues(medianMs) {
 }
 
 function rigForValues(values) {
-  const rig = recordRig({ halfWidthMs: 4, settings: { MIN_COMMAND_DEVIATION: D8_COMMAND_THRESHOLD } });
+  const rig = recordRig({ halfWidthMs: 4, settings: { MIN_COMMAND_DEVIATION: STOPPING_COMMAND_THRESHOLD } });
   for (const value of values) rig.add(value);
   return { rig, values, state: rig.controller.poll() };
 }
@@ -385,7 +385,7 @@ export default async function driftControllerSuite() {
       assertEqual(state.settlingMs, first.settlingMs, `poll ${index}: settling history is unchanged`);
       assertEqual(state.counters.budgetRefusals, first.counters.budgetRefusals, `poll ${index}: no budget refusal is counted`);
       assertNear(state.bandMs, WIDE_SPREAD_MS, 0.01, `poll ${index}: U is the 16.72 ms spread`);
-      assertNear(state.requiredStoppingThresholdMs, WIDE_SPREAD_MS + D8_COMMAND_THRESHOLD * 4000, 0.01, `poll ${index}: S is U plus the adopted allowance`);
+      assertNear(state.requiredStoppingThresholdMs, WIDE_SPREAD_MS + STOPPING_COMMAND_THRESHOLD * 4000, 0.01, `poll ${index}: S is U plus the adopted allowance`);
     }
   });
 
@@ -410,7 +410,7 @@ export default async function driftControllerSuite() {
 
   await check('drift-controller K3: a far outside estimate reports beyond-rate authority', async () => {
     const { state } = wideRig(-25_000);
-    assertNear(state.fastestCloseMs, (25_000 - (WIDE_SPREAD_MS + D8_COMMAND_THRESHOLD * 4000)) / 0.01, 1, 'the close lower bound uses the required threshold');
+    assertNear(state.fastestCloseMs, (25_000 - (WIDE_SPREAD_MS + STOPPING_COMMAND_THRESHOLD * 4000)) / 0.01, 1, 'the close lower bound uses the required threshold');
     assertEqual(state.mode, 'beyond-rate-authority', 'the far estimate exceeds the close budget');
     assertEqual(state.thresholdUsable, false, 'the required threshold remains unusable');
     assertEqual(state.reason, 'stopping-threshold-over-budget', 'the branch retains the budget reason');

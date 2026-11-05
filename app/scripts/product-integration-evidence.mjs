@@ -20,20 +20,20 @@ import path from 'node:path';
 
 import { browserHoldRows, holdPolicyAudit, pitchAudit } from './check/remedy-browser-comparison-metrics.mjs';
 import { dwellEligibility } from './check/remedy-browser-metrics.mjs';
-import { D8_REFUSAL_MODES } from './check/d8-research-controller.mjs';
+import { STOPPING_REFUSAL_MODES } from './check/stopping-research-controller.mjs';
 import { INTEGRATION_SCHEMA } from './drift-capture.mjs';
-import { D8_COMMAND_THRESHOLD, SETTLED_FOR_MS } from '../public/lib/drift-controller.mjs';
-import { D8_TREATMENT, TREATMENT_FAULT_MODE } from '../public/lib/playback-treatment.mjs';
+import { STOPPING_COMMAND_THRESHOLD, SETTLED_FOR_MS } from '../public/lib/drift-controller.mjs';
+import { PITCH_DISABLED_TREATMENT, TREATMENT_FAULT_MODE } from '../public/lib/playback-treatment.mjs';
 
 export const INTEGRATION_LABELS = Object.freeze({
   met: 'integration-met',
-  metWithKnownT8: 'integration-met-with-known-T8',
+  metWithKnownOfflineStep: 'integration-met-with-known-offline-step',
   treatmentNotHeld: 'treatment-not-held',
   notMet: 'integration-not-met',
 });
 
 /** Failed in all four of `.tmp/browser-run-{1..4}.log`, each run diagnosed "V never went offline". */
-export const T8_INHERITED_ALLOWLIST = Object.freeze([
+export const OFFLINE_STEP_INHERITED_ALLOWLIST = Object.freeze([
   'T8 V lost exchanges advanced by at least 3 while offline',
   'T8 A3 observed V departure before the deadline',
   'T8 V freshJoins advanced by exactly 1',
@@ -49,13 +49,13 @@ export const T8_INHERITED_ALLOWLIST = Object.freeze([
 ]);
 
 /** Labels the evidence does not support excusing; listed so the preflight names them. */
-export const T8_UNAPPROVED = Object.freeze([
+export const OFFLINE_STEP_UNAPPROVED = Object.freeze([
   { label: 'T8 V clock half-width grew between the two readings', basis: 'failed in run 1 only of 4; intermittent, not inherited' },
-  { label: 'T8 V controller did not re-settle during the 3s post-seam read', basis: 'passed in all 4 runs because V was correcting; D8 may leave V settled, so a failure here would be new' },
+  { label: 'T8 V controller did not re-settle during the 3s post-seam read', basis: 'passed in all 4 runs because V was correcting; the stopping policy may leave V settled, so a failure here would be new' },
 ]);
 
 /** The causal route signature every historical run showed. */
-export const T8_ROUTE_SIGNATURE = Object.freeze({
+export const OFFLINE_STEP_ROUTE_SIGNATURE = Object.freeze({
   diagnosis: 'V never went offline',
   departureObserved: false,
   offline: Object.freeze({ probesIssued: true, lost: false, sampleCountUnchanged: true, callbacksAdvanced: true }),
@@ -87,7 +87,7 @@ function sampleViolations(sample, { startupId, expectedF }) {
   const pitch = sample?.pitch ?? null;
   if (pitch === null) return [...reasons, 'pitch-absent'];
   if (startupId !== null && pitch.startupId !== startupId) reasons.push('startup-id-mismatch');
-  if (pitch.treatment !== D8_TREATMENT) reasons.push('treatment-not-adopted');
+  if (pitch.treatment !== PITCH_DISABLED_TREATMENT) reasons.push('treatment-not-adopted');
   if (!Object.is(pitch.f, expectedF)) reasons.push('f-not-adopted');
   if (pitch.controllerActive !== true) reasons.push('controller-inactive');
   if (pitch.fault !== null) reasons.push('lifecycle-fault');
@@ -115,7 +115,7 @@ function eventViolations(events) {
  * established startup at exactly `expectedF`, fresh reads all false, and no
  * fault, restore or refused write anywhere in the event stream.
  */
-export function treatmentAudit({ startups = [], events = [], samples = [], expectedF = D8_COMMAND_THRESHOLD } = {}) {
+export function treatmentAudit({ startups = [], events = [], samples = [], expectedF = STOPPING_COMMAND_THRESHOLD } = {}) {
   const failures = [];
   const distinct = [...new Map(startups.map((startup) => [startup?.id, startup])).values()];
   const startupEvents = events.filter((event) => event?.kind === 'startup');
@@ -127,7 +127,7 @@ export function treatmentAudit({ startups = [], events = [], samples = [], expec
     if (startup.attemptedWrites !== 1) failures.push('startup-write-count-not-one');
     const event = startupEvents[0];
     if (event && event.startup?.id !== startup.id) failures.push('startup-event-names-another-record');
-    if (event && (event.treatment !== D8_TREATMENT || !Object.is(event.f, expectedF))) failures.push('startup-event-not-the-adopted-treatment');
+    if (event && (event.treatment !== PITCH_DISABLED_TREATMENT || !Object.is(event.f, expectedF))) failures.push('startup-event-not-the-adopted-treatment');
   }
   const pitch = pitchAudit({ events: pitchEvents({ startups: distinct, samples }), declared: false });
   if (pitch.status !== 'met') failures.push(...pitch.failures.map((failure) => `pitch:${failure}`));
@@ -138,7 +138,7 @@ export function treatmentAudit({ startups = [], events = [], samples = [], expec
   failures.push(...unique(eventViolations(events)).map((reason) => `event:${reason}`));
   return {
     status: failures.length === 0 ? 'met' : INTEGRATION_LABELS.treatmentNotHeld,
-    requested: { treatment: D8_TREATMENT, f: expectedF, preservesPitch: false },
+    requested: { treatment: PITCH_DISABLED_TREATMENT, f: expectedF, preservesPitch: false },
     observed: {
       startupId: startup?.id ?? null,
       outcome: startup?.outcome ?? null,
@@ -232,7 +232,7 @@ export function settledEntryDwells(rows, { settledForMs = SETTLED_FOR_MS } = {})
  * unity with nothing qualified, a fresh >=5000 ms dwell before every settled
  * entry, no refusal after first settling, and no split mode at all.
  */
-export function refusalDwellAudit({ events = [], stream = null, expectedF = D8_COMMAND_THRESHOLD } = {}) {
+export function refusalDwellAudit({ events = [], stream = null, expectedF = STOPPING_COMMAND_THRESHOLD } = {}) {
   const { rows: polls, trailingWrites } = pollRows(events);
   const incomplete = completenessFailures(events, stream, polls, trailingWrites);
   const base = { polls: polls.length, firstPollId: polls[0]?.pollId ?? null, lastPollId: polls.at(-1)?.pollId ?? null, startAtMs: polls[0]?.atMs ?? null, endAtMs: polls.at(-1)?.atMs ?? null };
@@ -290,7 +290,7 @@ export function refusalAfterSettlingAudit(events) {
   const first = rows.findIndex((row) => row.snapshot?.mode === 'settled');
   if (first === -1) return { status: 'met', failures: [], polls: 0 };
   const firstSettlingMs = rows[first].snapshot.settlingMs;
-  const judged = rows.slice(first).filter((row) => D8_REFUSAL_MODES.includes(row.snapshot?.mode));
+  const judged = rows.slice(first).filter((row) => STOPPING_REFUSAL_MODES.includes(row.snapshot?.mode));
   const shapeOk = Number.isFinite(firstSettlingMs) && judged.every((row) => Number.isFinite(row.controllerNowMs) && afterSettlingShapeOk(row.snapshot));
   if (!shapeOk) return { status: 'refused', failures: ['shape'], polls: judged.length };
   const failures = AFTER_SETTLING_PREDICATES
@@ -314,7 +314,7 @@ export function intStepFailures(refusalDwell, after) {
 }
 
 /** `missing` names retained files that were absent; each refuses both audits. */
-export function auditClient({ label, startups, events, stream, samples, missing = [], expectedF = D8_COMMAND_THRESHOLD }) {
+export function auditClient({ label, startups, events, stream, samples, missing = [], expectedF = STOPPING_COMMAND_THRESHOLD }) {
   const treatment = treatmentAudit({ startups, events, samples, expectedF });
   const refusalDwell = refusalDwellAudit({ events, stream, expectedF });
   if (missing.length === 0) return { label, treatment, refusalDwell };
@@ -359,7 +359,7 @@ export function integrationSummary(clients) {
 }
 
 /** Re-derives both clients' audits from disk and compares them with the manifest's. */
-export function replayIntegration(runDir, { labels = ['A', 'B'], expectedF = D8_COMMAND_THRESHOLD } = {}) {
+export function replayIntegration(runDir, { labels = ['A', 'B'], expectedF = STOPPING_COMMAND_THRESHOLD } = {}) {
   const manifestPath = path.join(runDir, 'manifest.json');
   if (!fs.existsSync(manifestPath)) return { agreement: false, reason: 'manifest-absent', clients: [] };
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
@@ -375,7 +375,7 @@ export function replayIntegration(runDir, { labels = ['A', 'B'], expectedF = D8_
   return { agreement, reason: agreement ? null : !schemaOk ? 'integration-schema-absent' : recorded === null ? 'recorded-audit-absent' : 'replay-disagrees', clients, manifest };
 }
 
-export function routeSignatureMatches(route, signature = T8_ROUTE_SIGNATURE) {
+export function routeSignatureMatches(route, signature = OFFLINE_STEP_ROUTE_SIGNATURE) {
   if (route === null || typeof route !== 'object') return false;
   if (route.diagnosis !== signature.diagnosis || route.departureObserved !== signature.departureObserved) return false;
   const offlineOk = Object.entries(signature.offline).every(([key, value]) => route.offlineSignature?.[key] === value);
@@ -389,11 +389,11 @@ export function routeSignatureMatches(route, signature = T8_ROUTE_SIGNATURE) {
  * condition; a T8 failure is excused only if it is on the frozen list, that list
  * was accepted, and the route showed the same causal signature.
  */
-export function classifyIntegration({ clients = [], failures = [], exitCode = null, completed = false, route = null, replayAgreement = false, resources = null, t8Accepted = false } = {}) {
-  const knownT8 = failures.filter((label) => T8_INHERITED_ALLOWLIST.includes(label));
-  const unexpected = failures.filter((label) => !T8_INHERITED_ALLOWLIST.includes(label));
-  const disappeared = T8_INHERITED_ALLOWLIST.filter((label) => !failures.includes(label));
-  const common = { knownT8, unexpected, disappeared, exitCode };
+export function classifyIntegration({ clients = [], failures = [], exitCode = null, completed = false, route = null, replayAgreement = false, resources = null, offlineStepAccepted = false } = {}) {
+  const knownOfflineStep = failures.filter((label) => OFFLINE_STEP_INHERITED_ALLOWLIST.includes(label));
+  const unexpected = failures.filter((label) => !OFFLINE_STEP_INHERITED_ALLOWLIST.includes(label));
+  const disappeared = OFFLINE_STEP_INHERITED_ALLOWLIST.filter((label) => !failures.includes(label));
+  const common = { knownOfflineStep, unexpected, disappeared, exitCode };
   if (clients.length !== 2 || clients.some((client) => client.treatment?.status !== 'met')) {
     return { label: INTEGRATION_LABELS.treatmentNotHeld, reasons: ['treatment-not-held-in-both-clients'], ...common };
   }
@@ -401,11 +401,11 @@ export function classifyIntegration({ clients = [], failures = [], exitCode = nu
   if (!completed) reasons.push('verifier-did-not-complete');
   if (clients.some((client) => client.refusalDwell?.status !== 'met')) reasons.push('refusal-dwell-not-met');
   if (unexpected.length > 0) reasons.push('unexcused-failures');
-  if (knownT8.length > 0 && !t8Accepted) reasons.push('t8-exceptions-not-accepted');
-  if (knownT8.length > 0 && !routeSignatureMatches(route)) reasons.push('t8-route-signature-changed');
+  if (knownOfflineStep.length > 0 && !offlineStepAccepted) reasons.push('offline-step-exceptions-not-accepted');
+  if (knownOfflineStep.length > 0 && !routeSignatureMatches(route)) reasons.push('offline-step-route-signature-changed');
   if ((failures.length === 0) !== (exitCode === 0)) reasons.push('exit-status-disagrees-with-failures');
   if (replayAgreement !== true) reasons.push('disk-replay-disagrees');
   if (resources?.ok !== true) reasons.push('resource-bound-not-met');
-  const label = reasons.length > 0 ? INTEGRATION_LABELS.notMet : knownT8.length > 0 ? INTEGRATION_LABELS.metWithKnownT8 : INTEGRATION_LABELS.met;
+  const label = reasons.length > 0 ? INTEGRATION_LABELS.notMet : knownOfflineStep.length > 0 ? INTEGRATION_LABELS.metWithKnownOfflineStep : INTEGRATION_LABELS.met;
   return { label, reasons, ...common, note: 'never ALL PASS; an exception-free command does not declare change 5 fixed' };
 }

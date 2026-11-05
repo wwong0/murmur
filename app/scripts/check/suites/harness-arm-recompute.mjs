@@ -60,7 +60,7 @@ export default async function harnessArmRecomputeSuite() {
     assertEqual(peer.recomputeAccountingMethod(manifest), peer.byteAccountingMethod, 'peer accounting uses its arm method');
     assertEqual(JSON.stringify(peer.recomputeInputExtras(manifest)), JSON.stringify({ cdpQualification: manifest.cdpQualification }),
       'peer carries qualification input');
-    assertEqual(JSON.stringify(peer.driftCriterionWhenUndeclared), JSON.stringify({ verdict: 'not-drawn', reason: 'design.md D5' }),
+    assertEqual(JSON.stringify(peer.driftCriterionWhenUndeclared), JSON.stringify({ verdict: 'not-drawn', reason: 'no drift bar declared' }),
       'peer supplies undeclared drift criterion');
     assertEqual(JSON.stringify(peer.driftContextExtras(manifest)), JSON.stringify({ topology: manifest.topology }),
       'peer supplies topology drift context');

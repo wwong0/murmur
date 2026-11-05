@@ -1,9 +1,9 @@
-// scripts/check/d8-recoverable-holds.mjs
+// scripts/check/stopping-recoverable-holds.mjs
 //
 // The observations and the second acceptance rule that
 // `remedy-recoverable-holds-amendment.md` adds to the frozen comparison, and
 // nothing else. Every function here reads a finished case and returns numbers;
-// the original evaluator in `describe-d8-comparison.mjs` is untouched and the
+// the original evaluator in `describe-stopping-comparison.mjs` is untouched and the
 // controller is not edited at all.
 //
 // The distinctions this file exists to keep apart, each of which the amendment
@@ -47,9 +47,9 @@
 //
 // TEST MACHINERY — under scripts/. Pure: no clock, no randomness, no I/O.
 
-import { BUDGET_HOLD_MODE, PLATEAU_BREAKING_MODES, nearestRankP95 } from './d8-comparison-metrics.mjs';
+import { BUDGET_HOLD_MODE, PLATEAU_BREAKING_MODES, nearestRankP95 } from './stopping-comparison-metrics.mjs';
 import { POLL_INTERVAL_MS } from './mechanism-driver.mjs';
-import { D8_HOLD_REASON, D8_UNCERTIFIED_MODE } from './d8-research-controller.mjs';
+import { STOPPING_HOLD_REASON, STOPPING_UNCERTIFIED_MODE } from './stopping-research-controller.mjs';
 
 export { BUDGET_HOLD_MODE };
 /** The legacy rule, as published before this amendment, under an explicit name. */
@@ -241,7 +241,7 @@ function checkGrid(rows, { pollIntervalMs, horizonMs, pollPhaseMs }) {
  */
 export function holdSafetyViolations(row, { maxStoppingThresholdMs }) {
   const violations = [];
-  if (row.reason !== D8_HOLD_REASON) violations.push('hold-reason-not-budget-refusal');
+  if (row.reason !== STOPPING_HOLD_REASON) violations.push('hold-reason-not-budget-refusal');
   if (!Number.isFinite(row.requiredStoppingThresholdMs)) violations.push('required-threshold-not-finite');
   else if (!(row.requiredStoppingThresholdMs > maxStoppingThresholdMs)) violations.push('required-threshold-not-over-ceiling');
   if (row.thresholdUsable !== false) violations.push('threshold-usable-during-hold');
@@ -272,7 +272,7 @@ export const UNCERTIFIED_EVIDENCE_GAPS = Object.freeze(['command-settings-absent
  */
 export function uncertifiedCorrectionViolations(row, { maxStoppingThresholdMs }) {
   const violations = [];
-  if (row.reason !== D8_HOLD_REASON) violations.push('uncertified-reason-not-budget-refusal');
+  if (row.reason !== STOPPING_HOLD_REASON) violations.push('uncertified-reason-not-budget-refusal');
   if (!Number.isFinite(row.requiredStoppingThresholdMs)) violations.push('required-threshold-not-finite');
   else if (!(row.requiredStoppingThresholdMs > maxStoppingThresholdMs)) violations.push('required-threshold-not-over-ceiling');
   if (row.thresholdUsable !== false) violations.push('threshold-usable-during-refusal');
@@ -333,7 +333,7 @@ export function thresholdCeilingViolations(rows, { maxStoppingThresholdMs }) {
 function dwellEligible(row, { maxStoppingThresholdMs }) {
   if (PLATEAU_BREAKING_MODES.includes(row.mode)) return false;
   if (row.mode === BUDGET_HOLD_MODE) return false;
-  if (row.mode === D8_UNCERTIFIED_MODE) return false;
+  if (row.mode === STOPPING_UNCERTIFIED_MODE) return false;
   if (!Number.isFinite(row.estimateMs)) return false;
   if (!Number.isFinite(row.acceptedStoppingThresholdMs)) return false;
   if (row.thresholdUsable !== true) return false;

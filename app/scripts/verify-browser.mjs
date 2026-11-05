@@ -67,7 +67,7 @@ import { assertServedBundle, prepareRunDirectory } from './runner/core.mjs';
 import { INTEGRATION_SCHEMA, createRecorder, pitchReference } from './drift-capture.mjs';
 import { auditClient, integrationSummary, intStepFailures, readClientEvidence, refusalAfterSettlingAudit } from './product-integration-evidence.mjs';
 import { DRIFT_LINE_RE, driftLineForm } from '../public/lib/drift-readout.mjs';
-import { D8_COMMAND_THRESHOLD, MAX_RATE_DEVIATION, MIN_RECORDS, RATE_EPSILON } from '../public/lib/drift-controller.mjs';
+import { STOPPING_COMMAND_THRESHOLD, MAX_RATE_DEVIATION, MIN_RECORDS, RATE_EPSILON } from '../public/lib/drift-controller.mjs';
 import { CLOCK_LINE_RE, CONTROLLER_LINE_HELD_RE, CONTROLLER_LINE_ACTING_RE } from '../public/lib/diagnostics-overlay.mjs';
 // The arithmetic and the verdicts, next door and pure — this file is the
 // sequence of windows, waits and assertions, and nothing else.
@@ -355,7 +355,7 @@ const SEAM = `(() => {
     latest: drift.records[drift.records.length - 1] ?? null,
     // THE WHOLE ARRAY, not a figure derived from it. The sawtooth amplitude the
     // controller's simulated plant runs on is measured from these records and
-    // never chosen (change 4a design.md D8), and change 4c's model check reads
+    // never chosen, and the model check reads
     // Chrome's real scatter back beside the plant's. Deleting this line costs
     // the only route from a real player to that constant.
     records: drift.records,
@@ -1719,7 +1719,7 @@ try {
       !(window.qualifyingSaturated === 0 && heldSaturated === 0),
       window.qualifyingSaturated > 0,
       `${window.qualifyingSaturated} qualifying · ${heldSaturated} steady stretch(es) at rate ${1 + MAX_RATE_DEVIATION} · path ${settle?.path ?? 'null'} · correctionsApplied ${settle?.last?.seam?.controller?.correctionsApplied ?? 'null'}`,
-      `${window.label}'s retained captures never held the saturated rate, so no saturated stretch exists to fit (O1, widened by the owner after pass 1)`,
+      `${window.label}'s retained captures never held the saturated rate, so no saturated stretch exists to fit (O1, widened after pass 1)`,
     );
   }
 
@@ -1735,9 +1735,9 @@ try {
     label,
     ...readClientEvidence(RUN_DIR, label),
     stream: counts.treatment,
-    expectedF: D8_COMMAND_THRESHOLD,
+    expectedF: STOPPING_COMMAND_THRESHOLD,
   }));
-  manifest.integration = { schema: INTEGRATION_SCHEMA, expectedF: D8_COMMAND_THRESHOLD, clients: integrationClients, summary: integrationSummary(integrationClients) };
+  manifest.integration = { schema: INTEGRATION_SCHEMA, expectedF: STOPPING_COMMAND_THRESHOLD, clients: integrationClients, summary: integrationSummary(integrationClients) };
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   for (const client of integrationClients) {
     const { treatment, refusalDwell } = client;

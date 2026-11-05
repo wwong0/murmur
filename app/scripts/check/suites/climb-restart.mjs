@@ -99,7 +99,7 @@ export default async function climbRestartSuite() {
     };
     const window = { startMs: 0, endMs: 5000 };
     const read = (intervals) => capUsed({ intervals, window, wallOffsetMs: 0, fraction: PACE_FRACTION });
-    assert(read(fixture(false, false)).reason !== 'pace-replay-mismatch', 'a run without the field replays as the pre-D1 rule recorded it');
+    assert(read(fixture(false, false)).reason !== 'pace-replay-mismatch', 'a run without the field replays as the earlier rule recorded it');
     assert(read(fixture(true, true)).reason !== 'pace-replay-mismatch', 'a run with the field replays the restart');
     assertEqual(read(fixture(true, false)).reason, 'pace-replay-mismatch', 'a run with the field that recorded no restart is a mismatch');
   });

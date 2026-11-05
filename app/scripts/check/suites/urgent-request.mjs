@@ -91,7 +91,7 @@ export default async function urgentRequestSuite() {
     const segments = parseSegmentTimes(PLAYLIST, '/media/master.m3u8');
     const at = (positionMs, runwayMs = READY_HELD_AHEAD_MS) => ['/media/seg-00000.m4s', '/media/seg-00001.m4s', '/other/seg-00002.m4s']
       .filter((path) => requestIsUrgent({ path, positionMs, segments, runwayMs })).join(',');
-    assertEqual(READY_HELD_AHEAD_MS, 4000, 'the runway is D3\'s 4 000 ms');
+    assertEqual(READY_HELD_AHEAD_MS, 4000, 'the runway is 4 000 ms');
     assertEqual(at(5000), '/media/seg-00001.m4s,/other/seg-00002.m4s', 'inside segment 1: segments 1 and 2, not 0');
     assertEqual(at(4000), '/media/seg-00001.m4s', 'on a boundary: only the segment starting there');
     assertEqual(at(5000, 0), '/media/seg-00001.m4s', 'runway 0: only the containing segment');

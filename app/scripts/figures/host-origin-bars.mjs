@@ -92,7 +92,7 @@ export function judgeHostOrigin({ baseline, capped, uncapped } = {}) {
   const routing = refused(capped) || refused(uncapped)
     ? 'instrument-refusal'
     : cappedPass ? 'capped-pass'
-      : uncappedFast ? 'owner-decision'
+      : uncappedFast ? 'needs-decision'
         : 'transport-ceiling';
   return { baselineVerified, bars, uncappedFast, routing };
 }

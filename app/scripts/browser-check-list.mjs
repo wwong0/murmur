@@ -18,7 +18,7 @@ const L3 = Object.freeze({
   ],
   admits: ['fail', 'pass'],
   admission: 'always',
-  evidence: '10a d1-findings A-8; survey S9',
+  evidence: '10a review A-8; survey S9',
 });
 
 const L4 = Object.freeze({
@@ -44,7 +44,7 @@ export function t5Entries(admission) {
     ]),
     admits: ['fail', 'pass'],
     admission,
-    evidence: '11a d1-findings F2; tasks 1.2',
+    evidence: '11a review F2',
   };
   const int = windows.map((w) => ({
     id: 'int-after-t5',

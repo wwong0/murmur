@@ -1,4 +1,4 @@
-// scripts/check/d8-research-controller.mjs
+// scripts/check/stopping-research-controller.mjs
 //
 // A RESEARCH COPY of `public/lib/drift-controller.mjs`, carrying the positive-floor stopping
 // policy that the product controller refuses to construct. It is test machinery
@@ -65,19 +65,19 @@ import {
 import { olaWindowSamples } from './mechanism-audio.mjs';
 
 /** The declared positive-candidate model domain. NOT a claim about devices. */
-export const D8_MODEL_SAMPLE_RATES = Object.freeze([44100, 48000, 96000]);
+export const STOPPING_MODEL_SAMPLE_RATES = Object.freeze([44100, 48000, 96000]);
 /** Explicit experimental headroom past the copy boundary, not a fitted constant. */
-export const D8_THRESHOLD_HEADROOM = 0.000001;
-export const D8_HOLD_MODE = 'resolution-budget-hold';
-export const D8_HOLD_REASON = 'stopping-threshold-over-budget';
+export const STOPPING_THRESHOLD_HEADROOM = 0.000001;
+export const STOPPING_HOLD_MODE = 'resolution-budget-hold';
+export const STOPPING_HOLD_REASON = 'stopping-threshold-over-budget';
 /** The refused poll that keeps correcting. Same reason as the hold: the
  *  threshold was refused either way; only what the rate does differs. */
-export const D8_UNCERTIFIED_MODE = 'uncertified-correction';
-export const D8_REFUSAL_POLICIES = Object.freeze({
+export const STOPPING_UNCERTIFIED_MODE = 'uncertified-correction';
+export const STOPPING_REFUSAL_POLICIES = Object.freeze({
   unityHold: 'unity-hold',
   split: 'split-outside-required-threshold',
 });
-export const D8_REFUSAL_MODES = Object.freeze([D8_HOLD_MODE, D8_UNCERTIFIED_MODE]);
+export const STOPPING_REFUSAL_MODES = Object.freeze([STOPPING_HOLD_MODE, STOPPING_UNCERTIFIED_MODE]);
 /** The only slack allowed when checking an applied rate, and it is IEEE-754
  *  arithmetic slack near 1.0 — never a ppm acceptance allowance. */
 export const COMMAND_TOLERANCE = 8 * Number.EPSILON;
@@ -90,8 +90,8 @@ export const COMMAND_TOLERANCE = 8 * Number.EPSILON;
  * Computed from the formula every time it is needed; the printed ppm figure is
  * a rendering of this number and is never the input to anything.
  */
-export function commandThresholdFor(sampleRates = D8_MODEL_SAMPLE_RATES, headroom = D8_THRESHOLD_HEADROOM) {
-  if (!Array.isArray(sampleRates) || sampleRates.length === 0) throw new RangeError('d8-research-controller: the sample-rate domain must be a non-empty list');
+export function commandThresholdFor(sampleRates = STOPPING_MODEL_SAMPLE_RATES, headroom = STOPPING_THRESHOLD_HEADROOM) {
+  if (!Array.isArray(sampleRates) || sampleRates.length === 0) throw new RangeError('stopping-research-controller: the sample-rate domain must be a non-empty list');
   const bounds = sampleRates.map((sampleRate) => 1 / (olaWindowSamples(sampleRate) - 1));
   return Math.max(...bounds) + headroom;
 }
@@ -133,7 +133,7 @@ function displayLocalOf(record) {
  */
 function validateSettings(settings) {
   const floor = settings.MIN_COMMAND_DEVIATION;
-  const refuse = (message) => { throw new RangeError(`d8-research-controller: ${message}`); };
+  const refuse = (message) => { throw new RangeError(`stopping-research-controller: ${message}`); };
   const finite = ['MIN_COMMAND_DEVIATION', 'TIME_CONSTANT_MS', 'MAX_RATE_DEVIATION', 'RATE_EPSILON'];
   for (const name of finite) if (!Number.isFinite(settings[name])) refuse(`${name} must be a finite number, got ${settings[name]}`);
   if (floor < 0) refuse(`MIN_COMMAND_DEVIATION must not be negative, got ${floor}`);
@@ -144,13 +144,13 @@ function validateSettings(settings) {
   if (settings.MAX_STOPPING_THRESHOLD_MS !== MAX_STOPPING_THRESHOLD_MS) refuse(`MAX_STOPPING_THRESHOLD_MS is fixed at ${MAX_STOPPING_THRESHOLD_MS}, got ${settings.MAX_STOPPING_THRESHOLD_MS}`);
 }
 
-export function createD8ResearchController({ log, clock, apply, settings: overrides = {}, now, refusalPolicy = D8_REFUSAL_POLICIES.unityHold }) {
+export function createStoppingResearchController({ log, clock, apply, settings: overrides = {}, now, refusalPolicy = STOPPING_REFUSAL_POLICIES.unityHold }) {
   const settings = Object.freeze({ ...DEFAULT_SETTINGS, ...overrides });
   validateSettings(settings);
-  if (!Object.values(D8_REFUSAL_POLICIES).includes(refusalPolicy)) {
-    throw new RangeError(`d8-research-controller: refusalPolicy must be one of ${Object.values(D8_REFUSAL_POLICIES).join(', ')}, got ${refusalPolicy}`);
+  if (!Object.values(STOPPING_REFUSAL_POLICIES).includes(refusalPolicy)) {
+    throw new RangeError(`stopping-research-controller: refusalPolicy must be one of ${Object.values(STOPPING_REFUSAL_POLICIES).join(', ')}, got ${refusalPolicy}`);
   }
-  const splitRefusal = refusalPolicy === D8_REFUSAL_POLICIES.split;
+  const splitRefusal = refusalPolicy === STOPPING_REFUSAL_POLICIES.split;
   const allowanceMs = actuatorAllowanceMs(settings.MIN_COMMAND_DEVIATION, settings.TIME_CONSTANT_MS);
   const floorRate = settings.MIN_COMMAND_DEVIATION;
   const positiveFloor = floorRate > 0;
@@ -238,8 +238,8 @@ export function createD8ResearchController({ log, clock, apply, settings: overri
   function assertCommandInRange(nextRate) {
     const deviation = Math.abs(nextRate - BASE_RATE);
     if (deviation === 0) return;
-    if (deviation < floorRate - COMMAND_TOLERANCE) throw new RangeError(`d8-research-controller: applied deviation ${deviation} is below the command threshold ${floorRate}`);
-    if (deviation > settings.MAX_RATE_DEVIATION + COMMAND_TOLERANCE) throw new RangeError(`d8-research-controller: applied deviation ${deviation} exceeds the rate authority ${settings.MAX_RATE_DEVIATION}`);
+    if (deviation < floorRate - COMMAND_TOLERANCE) throw new RangeError(`stopping-research-controller: applied deviation ${deviation} is below the command threshold ${floorRate}`);
+    if (deviation > settings.MAX_RATE_DEVIATION + COMMAND_TOLERANCE) throw new RangeError(`stopping-research-controller: applied deviation ${deviation} exceeds the rate authority ${settings.MAX_RATE_DEVIATION}`);
   }
 
   /** The one command law, shared by the accepted branch and the split so the
@@ -383,10 +383,10 @@ export function createD8ResearchController({ log, clock, apply, settings: overri
         stoppingThresholdMs = null;
         thresholdUsable = false;
         fastestCloseMs = null;
-        mode = D8_UNCERTIFIED_MODE;
-        reason = D8_HOLD_REASON;
+        mode = STOPPING_UNCERTIFIED_MODE;
+        reason = STOPPING_HOLD_REASON;
       } else {
-        hold(atMs, D8_HOLD_MODE, D8_HOLD_REASON);
+        hold(atMs, STOPPING_HOLD_MODE, STOPPING_HOLD_REASON);
       }
     } else {
       stoppingThresholdMs = requiredStoppingThresholdMs;

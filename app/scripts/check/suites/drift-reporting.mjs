@@ -6,9 +6,9 @@
 // The threshold arithmetic is exercised at U=3, L=12, S=15 through the exported
 // pure functions, with every expected value computed here from the inputs. A
 // default-constructed controller runs at f=0, where L is 0 and S is U. A
-// positive f is the adopted D8 value, passed in by the page only once the
+// positive f is the adopted stopping value, passed in by the page only once the
 // pitch treatment holds; its behaviour is in
-// d8-product-integration.mjs, and this file checks only what construction takes.
+// stopping-product-integration.mjs, and this file checks only what construction takes.
 //
 // Traps worth preserving:
 //  - `recordRig` owns its simulated clock and does not publish it, so `timed`
@@ -24,7 +24,7 @@ import { timed } from '../drift-reporting-fixtures.mjs';
 import { createDriftLog } from '../../../public/lib/frame-drift.mjs';
 import { createDiagnosticsOverlay } from '../../../public/lib/diagnostics-overlay.mjs';
 import {
-  D8_COMMAND_THRESHOLD,
+  STOPPING_COMMAND_THRESHOLD,
   DECLINING_REASONS,
   MAX_STOPPING_THRESHOLD_MS,
   actuatorAllowanceMs,
@@ -162,7 +162,7 @@ export default async function driftReportingSuite() {
     assertEqual(shipped.MAX_STOPPING_THRESHOLD_MS, 20, 'and the ceiling is 20ms');
 
     for (const overrides of [{}, { MIN_COMMAND_DEVIATION: 0 }, { MAX_RATE_DEVIATION: 0 }, { RATE_EPSILON: 0.02 }, { MAX_STOPPING_THRESHOLD_MS: 20 }, { TIME_CONSTANT_MS: 1 },
-      { MIN_COMMAND_DEVIATION: HAND_FLOOR }, { MIN_COMMAND_DEVIATION: D8_COMMAND_THRESHOLD }, { MIN_COMMAND_DEVIATION: MAX_RATE_DEVIATION }]) {
+      { MIN_COMMAND_DEVIATION: HAND_FLOOR }, { MIN_COMMAND_DEVIATION: STOPPING_COMMAND_THRESHOLD }, { MIN_COMMAND_DEVIATION: MAX_RATE_DEVIATION }]) {
       assertEqual(refused(overrides).error, null, `${JSON.stringify(overrides)} is a settings set the controller accepts`);
     }
     const invalid = [

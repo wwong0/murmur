@@ -1,12 +1,12 @@
 import { HOUR } from './sources.mjs';
 import { C, document, gridY, linearScale, pct, run, select, setupLines, statusOf, text } from './public-common.mjs';
 import { stackedColumn, swatch } from './svg.mjs';
-import { s1Data } from './s1-bytes.mjs';
+import { peerBytesTrace } from './peer-bytes-trace.mjs';
 export const ID = 'hour', KIND = 'supporting', TITLE = 'Where does the video come from over an hour?';
 export function data(inputs) {
   const row = select(inputs, '13f-w-long').find((r) => r.entry.directory === HOUR),
     attempts = select(inputs, '13f-w-long'),
-    trace = s1Data({ manifest: row.run.manifest, peerBytesByClient: inputs.traces.hour, binWidth: 60000 });
+    trace = peerBytesTrace({ manifest: row.run.manifest, peerBytesByClient: inputs.traces.hour, binWidth: 60000 });
   const current = run(row, row.entry.figures?.peerFractionAggregate, 'hour-long test');
   if (current.stalls !== 0) {
     throw new Error('takeaway-unsupported:hour');

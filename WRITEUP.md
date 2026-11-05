@@ -68,10 +68,10 @@ and 3 viewers (13d "A2 (reading)"), 3 tests at 10 (13d "A10: multiplier ≤2.0 m
 ![Host upload by room size, beside the one copy per viewer that no sharing needs: 0.98 to 1.03 copies at 2, 3 and 5 viewers, 1.10 to 1.11 at 10. Main setup, night 1. Each column reaches the highest test and is labeled with the range.](app/results/13-3-figures-2026-11-03T11-46-15Z/fig-room-size.svg)
 
 **The same connection, with and without sharing.** With a 20 Mbit/s host and 5 viewers, the host
-sent 1.00 and 1.03 copies with sharing (night 1, 2 tests; 13d "product at 20 Mbit: C2 met in 2/2
-runs"). Without sharing it sent 5.00 copies (night 2, 1 test; 13e B2-n20 "valid, multiplier 5.00,
+sent 1.00 and 1.03 copies with sharing (night 1, 2 tests; 13d, product at 20 Mbit: multiplier ≤ 1.5 met in 2/2
+runs). Without sharing it sent 5.00 copies (night 2, 1 test; 13e B2-n20 "valid, multiplier 5.00,
 every viewer realtime 1.00, no stalls"). Two night-1 tests without sharing read 5.001 and 5.000,
-labelled "supplementary, post-result and outside D2". A 10 Mbit/s host cannot play 5 viewers
+labelled "supplementary, post-result". A 10 Mbit/s host cannot play 5 viewers
 without sharing at all: they played at 0.66–1.00 of real time with 11–43 freezes each (13d,
 supplementary). Five viewers need 5 × 2.64 = 13.2 Mbit/s, which is 132% of that uplink (arithmetic,
 not a measurement). So there is no 10 Mbit/s comparison, and none is quoted.

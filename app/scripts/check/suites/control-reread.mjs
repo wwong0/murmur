@@ -214,13 +214,13 @@ export default async function controlRereadSuite() {
   });
 
   await check('control reread: committed rules union their cap and excusal', async () => {
-    const file = path.resolve(process.cwd(), 'scripts/reread/rules-8b3.json');
+    const file = path.resolve(process.cwd(), 'scripts/reread/rules-control-reread.json');
     const ruleSet = JSON.parse(fs.readFileSync(file, 'utf8'));
     const result = rulesOf(ruleSet);
     assertEqual(result.bars.steadyCapUsedMax, 0.9, 'the cap-used bar is nine tenths');
     assertEqual(JSON.stringify(result.removeBars), JSON.stringify(['steadyPaceBoundMax']), 'the pace bar is removed');
     assertEqual(result.excusals.bytelessCancelledReceipt, true, 'the byteless excusal is in force');
     // The report is checked against the rule set, so the rule set is checked here.
-    assertEqual(JSON.stringify(ruleSet.labels), JSON.stringify(LABELS), 'the committed labels are the three of design.md D5');
+    assertEqual(JSON.stringify(ruleSet.labels), JSON.stringify(LABELS), 'the committed labels are the three registered ones');
   });
 }

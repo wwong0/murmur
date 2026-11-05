@@ -21,9 +21,9 @@
 // Under public/lib/: no element lookups, no globals, no timers. The element, the
 // clock and the notice port are arguments.
 
-import { D8_COMMAND_THRESHOLD } from './drift-controller.mjs';
+import { STOPPING_COMMAND_THRESHOLD } from './drift-controller.mjs';
 
-export const D8_TREATMENT = 'd8-pitch-disabled';
+export const PITCH_DISABLED_TREATMENT = 'd8-pitch-disabled';
 export const FALLBACK_TREATMENT = 'fallback-f0';
 export const TREATMENT_FAULT_MODE = 'treatment-fault';
 export const UNITY_RESTORE_FAILED = 'unity-restore-failed';
@@ -130,8 +130,8 @@ export function initializePlaybackTreatment({ video, opened, now, notify = () =>
   const atMs = now();
   const startup = establish({ video, opened, atMs, id: `pitch-setup-${atMs}-${Math.random().toString(36).slice(2, 8)}` });
   const positive = startup.outcome === 'treatment-established';
-  const treatment = positive ? D8_TREATMENT : FALLBACK_TREATMENT;
-  const settings = Object.freeze({ MIN_COMMAND_DEVIATION: positive ? D8_COMMAND_THRESHOLD : 0 });
+  const treatment = positive ? PITCH_DISABLED_TREATMENT : FALLBACK_TREATMENT;
+  const settings = Object.freeze({ MIN_COMMAND_DEVIATION: positive ? STOPPING_COMMAND_THRESHOLD : 0 });
   let fault = null;
 
   queue?.record('startup', { startup, treatment, f: settings.MIN_COMMAND_DEVIATION });

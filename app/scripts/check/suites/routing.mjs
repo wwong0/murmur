@@ -58,7 +58,7 @@ export default async function routingSuite() {
     assertEqual(orderOf(c), orderOf(a), 'C observed the same total order as A');
   });
 
-  await check('D3 invariant: an unregistered type with an arbitrary body is relayed byte-identically', async ({ member }) => {
+  await check('routing invariant: an unregistered type with an arbitrary body is relayed byte-identically', async ({ member }) => {
     const a = await member('A', 'host');
     const b = await member('B');
 
@@ -86,7 +86,7 @@ export default async function routingSuite() {
     assertEqual(got.seq, null, 'routing seq is the server’s, not the one in the body');
   });
 
-  await check('D2 anti-spoofing: a forged `from` is replaced with the true sender', async ({ room, member }) => {
+  await check('routing anti-spoofing: a forged `from` is replaced with the true sender', async ({ room, member }) => {
     const a = await member('A', 'host');
     const b = await member('B');
     const c = await member('C');

@@ -877,7 +877,7 @@ export function windowVerdicts({ stats, refresh, plantMinimum }) {
  * failing test by declaring it irrelevant. Gating anything else is a scope
  * violation, and the pass refuses it rather than treating it as a judgement.
  */
-export const T8_GATED_ASSERTIONS = Object.freeze([
+export const OFFLINE_STEP_GATED_ASSERTIONS = Object.freeze([
   'T8 V controller did not re-settle during the 3s post-seam read',
 ]);
 

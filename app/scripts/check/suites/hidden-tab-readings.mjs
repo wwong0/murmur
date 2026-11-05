@@ -1,7 +1,7 @@
 // The hidden-tab probe readings on constructed runs: the validity rule, one hide's readings and D7's rule.
 
 import { check, assert, assertEqual } from '../harness.mjs';
-import { d7Return, hideWindows, landedAtMs, readHide, validateRun } from '../../hidden-tab-readings.mjs';
+import { returnLanding, hideWindows, landedAtMs, readHide, validateRun } from '../../hidden-tab-readings.mjs';
 
 const T0 = 1_000_000;
 const HIDE = { start: T0 + 20_000, hidden: T0 + 20_100, back: T0 + 30_100, visible: T0 + 30_150 };
@@ -112,11 +112,11 @@ export default async function hiddenTabReadingsSuite() {
       const input = run(options);
       return readHide({ ...input, window: input.windows[0], untilMs: T0 + 50_001 });
     };
-    assertEqual(d7Return(read({ landAtMs: HIDE.visible + 9850 })).pass, true, 'landed 9850 ms after visible passes');
-    assertEqual(d7Return(read({ landAtMs: HIDE.visible + 10_850 })).pass, false, 'landed 10850 ms after visible fails');
-    assertEqual(d7Return(read({ skips: 2 })).pass, false, 'two skips after one return fail');
-    assertEqual(d7Return(read({ skips: 0 }), { mustSkip: true }).pass, false, 'a required skip that never came fails');
-    assertEqual(d7Return(read({ skips: 0 })).pass, true, 'no skip, landed, passes where none is required');
+    assertEqual(returnLanding(read({ landAtMs: HIDE.visible + 9850 })).pass, true, 'landed 9850 ms after visible passes');
+    assertEqual(returnLanding(read({ landAtMs: HIDE.visible + 10_850 })).pass, false, 'landed 10850 ms after visible fails');
+    assertEqual(returnLanding(read({ skips: 2 })).pass, false, 'two skips after one return fail');
+    assertEqual(returnLanding(read({ skips: 0 }), { mustSkip: true }).pass, false, 'a required skip that never came fails');
+    assertEqual(returnLanding(read({ skips: 0 })).pass, true, 'no skip, landed, passes where none is required');
   });
 
   await check('13a probe R6: in-reach samples without new frames never land', async () => {

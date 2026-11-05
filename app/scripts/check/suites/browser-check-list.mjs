@@ -91,7 +91,7 @@ export default async function browserCheckListSuite() {
     assertEqual(cases.errored.admitted.length, 1, 'G7 the row itself was admitted');
     assertEqual(cases.e7Unapproved.exitCode, 1, 'G8 unapproved not-exercised');
     assertEqual(cases.approvedStem.exitCode, 0, 'G8 approved stem');
-    assertEqual(cases.socketSkip.exitCode, 1, 'G8 a 10b socket recovery asked for and not delivered (d1-findings F10)');
+    assertEqual(cases.socketSkip.exitCode, 1, 'G8 a 10b socket recovery asked for and not delivered (review F10)');
     assertEqual(cases.versionOn39.exitCode, 1, 'G9 version on .39');
     assertEqual(cases.versionOnInstalled.exitCode, 0, 'G9 version on installed');
     assertEqual(cases.flavourOverride.exitCode, 1, 'G9 flavour with override');

@@ -717,7 +717,7 @@ const PEER_ARM = Object.freeze({
     const queues = peerLinkQueues(manifest);
     return { cdpQualification: manifest.cdpQualification, ...(queues ? { peerLinkQueues: queues } : {}) };
   },
-  driftCriterionWhenUndeclared: Object.freeze({ verdict: 'not-drawn', reason: 'design.md D5' }),
+  driftCriterionWhenUndeclared: Object.freeze({ verdict: 'not-drawn', reason: 'no drift bar declared' }),
   driftContextExtras: (manifest) => ({ topology: { probePaths: manifest.topology?.probePaths } }),
   driftRequiredFields: Object.freeze(['topology.probePaths']),
   trackerPort: '8101',

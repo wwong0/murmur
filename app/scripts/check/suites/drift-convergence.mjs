@@ -19,7 +19,7 @@
 import { check, assert, assertEqual } from '../harness.mjs';
 import { plant, runUntil } from '../drift-plant.mjs';
 import { acceptedStoppingThresholdMs } from '../../drift-figures.mjs';
-import { D8_COMMAND_THRESHOLD, MAX_RATE_DEVIATION, TIME_CONSTANT_MS } from '../../../public/lib/drift-controller.mjs';
+import { STOPPING_COMMAND_THRESHOLD, MAX_RATE_DEVIATION, TIME_CONSTANT_MS } from '../../../public/lib/drift-controller.mjs';
 
 const POLL_EVERY_FRAMES = 6;          // 250ms at 24fps — room.entry.js's interval
 const RUN_FRAMES = POLL_EVERY_FRAMES * 960;   // 240 simulated seconds
@@ -28,7 +28,7 @@ const LAST_ERROR_MS = -80;
 const ERROR_STEP_MS = 20;
 const REFRESH_RATES = [60, 180];
 /** The adopted floor, swept against the same bars as f = 0. */
-const ADOPTED = Object.freeze({ MIN_COMMAND_DEVIATION: D8_COMMAND_THRESHOLD });
+const ADOPTED = Object.freeze({ MIN_COMMAND_DEVIATION: STOPPING_COMMAND_THRESHOLD });
 
 /**
  * ONE EXPERIMENT, READ SIX TIMES. Every check below asserts a different property
@@ -195,7 +195,7 @@ export default async function driftConvergenceSuite() {
   await check('drift-convergence: at the adopted f, closing a step after settling never reverses the correction', async () => {
     // The isolated-excursion sweep is not repeated here: at f this sweep
     // produces none, so that check could not fail. Its fixture at f is in
-    // d8-product-integration.mjs.
+    // stopping-product-integration.mjs.
     closeSteps(ADOPTED, 'f: ');
   });
 

@@ -2,7 +2,7 @@
 // from its own position across the ready runway. Pure: the page
 // supplies the position, and the playlist text the host link already carried.
 
-import { CONTROL_8B, CONTROL_PRODUCT } from './edge-control.mjs';
+import { CONTROL_ARCHIVED, CONTROL_PRODUCT } from './edge-control.mjs';
 import { mediaMsAt } from './playback-state.mjs';
 
 const EXTINF_RE = /^#EXTINF:\s*([0-9.]+)/;
@@ -21,7 +21,7 @@ export function urgentPositionMs(state, sharedMs) {
 }
 
 export function ownPositionMs({ control, state, sharedMs, elementMs }) {
-  if (control === CONTROL_8B || state?.current?.held === true) return urgentPositionMs(state, sharedMs);
+  if (control === CONTROL_ARCHIVED || state?.current?.held === true) return urgentPositionMs(state, sharedMs);
   if (Number.isFinite(elementMs) && elementMs >= 0) return elementMs;
   return urgentPositionMs(state, sharedMs);
 }

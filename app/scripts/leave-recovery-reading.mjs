@@ -8,7 +8,7 @@ import { leaveRecoveryReading } from './figures/leave-recovery-reading.mjs';
 import { APP_DIR, isMain, recomputeRegisteredRun, runMain, runPath, writeRunSetReading } from './registered-runs.mjs';
 
 const REGISTRY = 'results/RUNS-12c-1.json';
-const OUTPUT = path.join(APP_DIR, '..', 'openspec', 'changes', 'archive', '2026-10-21-leave-recovery', 'evidence', 'reading-12c-1.json');
+const OUTPUT = path.join(APP_DIR, 'results', 'reading-12c-1.json');
 const RUN_DIRECTORY = /^12c1-(drop-comparand|leave-first|shakedown)/;
 
 function readRun(entry) {
