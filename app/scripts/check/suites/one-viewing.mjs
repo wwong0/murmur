@@ -1,30 +1,13 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { isDeepStrictEqual } from 'node:util';
-import { fileURLToPath } from 'node:url';
-import { assert, assertEqual, assertNear, check, skipWithoutResults } from '../harness.mjs';
-import { readRunDirectory, recomputeRunDirectory } from '../../harness-figures.mjs';
+import { assert, assertEqual, assertNear, check } from '../harness.mjs';
 import { bytesForStretch, computeOneViewing } from '../../figures/one-viewing.mjs';
 import { computePeerFigures, steadyState } from '../../figures/peer-figures.mjs';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
-const RESULTS = path.join(ROOT, 'app', 'results');
-const SCRATCH = path.join(ROOT, '.tmp', '7c-c2');
 const BARS = {
   steadyUtilisationMax: 0.90,
   steadyDownloadRatioMin: 0.95,
   steadyDownloadRatioMax: 1.25,
   steadyRealtimeMin: 0.98,
 };
-
-const EXPECTED_MULTIPLIERS = Object.freeze({
-  '7b2-p2p-naive-2026-09-25T08-15-37.387Z': 3.492,
-  '7b2-p2p-naive-2026-09-25T08-21-50.919Z': 3.544,
-  '7b2-p2p-naive-2026-09-25T08-34-42.650Z': 3.553,
-  '7b2-p2p-naive-2026-09-25T10-12-05.282Z': 3.481,
-  '7b2-p2p-naive-2026-09-25T10-18-48.535Z': 3.492,
-  '7b2-p2p-naive-2026-09-25T10-32-15.408Z': 3.574,
-});
 
 function drift(positionStart, positionEnd, displayStart = 0, displayEnd = 7_000) {
   return [
@@ -63,26 +46,7 @@ function state(overrides = {}) {
   return steadyState(fixture);
 }
 
-function acceptedEntries() {
-  const registry = JSON.parse(fs.readFileSync(path.join(RESULTS, 'RUNS-7b2.json'), 'utf8'));
-  return registry.runs.filter((run) => run.publishes === true && run.outcome === 'complete');
-}
-
-function oneViewingInput(input) {
-  const tags = input.declaredClientTags;
-  const offsets = input.condition?.positionOffsetMsByClient ?? {};
-  return computeOneViewing({
-    clients: input.clients,
-    tags,
-    window: input.window,
-    offsets,
-    segmentSizes: input.content.segmentSizes,
-    segmentSeconds: input.segmentSeconds,
-  });
-}
-
 export default async function oneViewingSuite() {
-  if (skipWithoutResults('one-viewing')) return;
   await check('one viewing: pro-rates both boundary segments', async () => {
     assertNear(bytesForStretch(2_000, 9_000, [1_000, 2_000, 3_000], 4), 3_250, 0, '2s to 9s is 3250 bytes');
   });
@@ -129,27 +93,6 @@ export default async function oneViewingSuite() {
     assertEqual(control.reason, 'steady-state-bars-undeclared', 'missing bars are named');
   });
 
-  await check('one viewing: recompute propagates denominator and publishes one multiplier outcome', async () => {
-    const source = path.join(RESULTS, '7b2-p2p-naive-2026-09-25T08-15-37.387Z');
-    fs.mkdirSync(SCRATCH, { recursive: true });
-    const runDir = fs.mkdtempSync(path.join(SCRATCH, 't7-pass-through-'));
-    try {
-      fs.cpSync(source, runDir, { recursive: true });
-      const manifestPath = path.join(runDir, 'manifest.json');
-      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-      manifest.multiplierDenominator = 'one-viewing';
-      manifest.condition.bars = { ...manifest.condition.bars, ...BARS };
-      fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-      const report = recomputeRunDirectory(runDir);
-      assertEqual(report.figures.multiplierDenominator, 'one-viewing', 'recompute keeps manifest denominator');
-      const outcomes = ['hostUploadMultiplier', 'hostUploadMultiplierRefusal']
-        .filter((key) => report.figures[key] !== undefined && report.figures[key] !== null);
-      assertEqual(outcomes.length, 1, 'recompute publishes exactly one multiplier outcome');
-    } finally {
-      fs.rmSync(runDir, { recursive: true, force: true });
-    }
-  });
-
   await check('one viewing: a viewer with no drift record at a boundary refuses the multiplier by name', async () => {
     const input = {
       byteAccountingMethod: 'peer-attempt-cohort-v1',
@@ -178,63 +121,5 @@ export default async function oneViewingSuite() {
     const legacy = computePeerFigures({ ...input, multiplierDenominator: 'distinct-completed' }, pairing);
     assertEqual(legacy.multiplierDenominator, 'distinct-completed', 'legacy denominator remains tolerant');
     assertEqual(legacy.hostUploadMultiplierRefusal, undefined, 'a legacy directory refuses nothing for one viewing');
-  });
-
-  await check('one viewing: retained 7b2 published keys reproduce (dirs and keys are counted)', async () => {
-    const entries = acceptedEntries();
-    let keyCount = 0;
-    for (const entry of entries) {
-      const runDir = path.join(RESULTS, entry.directory);
-      const retained = JSON.parse(fs.readFileSync(path.join(runDir, 'published-figures.json'), 'utf8'));
-      const report = recomputeRunDirectory(runDir);
-      assert(report.publishedByte && report.publishedByte.published !== false,
-        `${entry.directory} recompute publishes`);
-      for (const [key, value] of Object.entries(retained)) {
-        keyCount += 1;
-        assert(isDeepStrictEqual(report.publishedByte[key], value), `${entry.directory} retained key ${key} reproduces`);
-      }
-    }
-    assert(entries.length > 0, 'accepted registry is non-empty');
-    assert(keyCount > entries.length, `compared retained keys across ${entries.length} accepted directories`);
-  });
-
-  await check('one viewing: 7b2 six naive runs reproduce D3 multipliers and room spread', async () => {
-    const entries = acceptedEntries().filter((run) => run.condition === 'p2p-naive');
-    const values = entries.map((entry) => {
-      const runDir = path.join(RESULTS, entry.directory);
-      const { input } = readRunDirectory(runDir);
-      const report = recomputeRunDirectory(runDir);
-      const one = oneViewingInput(input);
-      const media = report.figures.mediaBytesDeliveredInWindow;
-      const multiplier = media / one.oneViewingBytesInWindow;
-      return {
-        directory: entry.directory,
-        mediaBytesDeliveredInWindow: media,
-        oneViewingBytesInWindow: one.oneViewingBytesInWindow,
-        multiplier,
-        roomStretchMs: one.roomStretchMs,
-        roomPositionSpreadMs: one.roomPositionSpreadMs,
-      };
-    });
-    fs.mkdirSync(SCRATCH, { recursive: true });
-    fs.writeFileSync(path.join(SCRATCH, 't7-54.json'), `${JSON.stringify(values, null, 2)}\n`);
-    assertEqual(values.length, 6, 'six accepted naive runs are measured');
-    for (const value of values) {
-      assertNear(value.multiplier, EXPECTED_MULTIPLIERS[value.directory], 0.0005,
-        `${value.directory} multiplier matches D3 to 3 decimals`);
-      assert(value.roomPositionSpreadMs.start <= 1 && value.roomPositionSpreadMs.end <= 1,
-        `${value.directory} room-position spread is within 1ms`);
-    }
-    const scattered = '7b2-p2p-scattered-2026-09-25T10-04-34.990Z';
-    const { input } = readRunDirectory(path.join(RESULTS, scattered));
-    const one = oneViewingInput(input);
-    const report = recomputeRunDirectory(path.join(RESULTS, scattered));
-    values.push({ directory: scattered, mediaBytesDeliveredInWindow: report.figures.mediaBytesDeliveredInWindow,
-      oneViewingBytesInWindow: one.oneViewingBytesInWindow,
-      multiplier: report.figures.mediaBytesDeliveredInWindow / one.oneViewingBytesInWindow,
-      roomStretchMs: one.roomStretchMs, roomPositionSpreadMs: one.roomPositionSpreadMs });
-    fs.writeFileSync(path.join(SCRATCH, 't7-54.json'), `${JSON.stringify(values, null, 2)}\n`);
-    assertNear(values.at(-1).roomStretchMs.end - values.at(-1).roomStretchMs.start, 180_009, 20,
-      'scattered stretch is C1 context');
   });
 }

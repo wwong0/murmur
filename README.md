@@ -82,13 +82,12 @@ link in a second window to join as a viewer.
 ## Run the tests
 
 ```bash
-cd step0 && npm install && npm run content   # once: generates the test video (needs ffmpeg, ~2.3 GB)
-cd ../app && mkdir -p .tmp
-npm run check                                # structural rules and every assertion suite, no browser
+cd app
+npm install
+npm run check   # structural rules and every assertion suite, no browser
 ```
 
-`npm run check` runs in seconds and needs no browser. Some of its assertions re-read retained
-measurement runs that are not part of this repository, and those fail here.
+`npm run check` runs in a minute or two and needs no browser.
 
 The measurement harness (Docker, one container per browser, `tc` shaping) is described in
 [`WRITEUP.md`](WRITEUP.md) → *Reproduce*.
@@ -104,9 +103,7 @@ app/                  the product
   deploy/             files for the hosted instance (nginx, systemd)
   patches/            the patch carried on p2p-media-loader
   listening/          a small listening test for playback-speed changes (bring your own audio)
-  results/            the summaries and charts WRITEUP.md cites
-step0/                the first experiment: do viewers in sync share without coordination? (no)
-spike-host-origin/    the experiment that showed a browser tab can serve as the video's source
+  results/            the summaries and charts WRITEUP.md cites, and three small inputs the tests read
 WRITEUP.md            what was measured, how, and its limits
 ```
 

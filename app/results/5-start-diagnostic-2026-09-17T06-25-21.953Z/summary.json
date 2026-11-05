@@ -1,0 +1,560 @@
+{
+  "schemaVersion": 1,
+  "nonAcceptance": true,
+  "qualification": false,
+  "condition": "baseline",
+  "verdict": "SPREAD",
+  "reason": "S-ADVANCE-SPREAD",
+  "advanceMs": null,
+  "aggregate": -46.34101708984372,
+  "medians": [
+    -41.5935175781251,
+    -59.10706347656287,
+    -54.8924560546875,
+    -46.81909960937537,
+    -45.86293457031206,
+    -52.73072460937692,
+    -29.15699414062692,
+    -31.263451171871566
+  ],
+  "U": 24.206180755208287,
+  "uncertainty": {
+    "displayCadenceMs": 5.599999999999909,
+    "frameIntervalMs": 41.666666666666664,
+    "maxHalfWidthMs": 0.572847421875
+  },
+  "Um": 14.975034667967975,
+  "UmSource": "this run",
+  "UmTerms": {
+    "medianSpanMs": 29.95006933593595,
+    "maxHalfWidthMs": 0.572847421875
+  },
+  "usableCount": 8,
+  "plannedStarts": 8,
+  "gates": [
+    {
+      "name": "G0",
+      "held": true,
+      "inputs": {
+        "planned": 8,
+        "retained": 8,
+        "usable": 8,
+        "unusable": []
+      },
+      "bar": "every planned start usable"
+    },
+    {
+      "name": "U",
+      "held": true,
+      "inputs": {
+        "U": 24.206180755208287,
+        "displayCadenceMs": 5.599999999999909,
+        "frameIntervalMs": 41.666666666666664,
+        "maxHalfWidthMs": 0.572847421875
+      },
+      "bar": "0 < U <= 60"
+    },
+    {
+      "name": "G1",
+      "held": true,
+      "inputs": {
+        "aggregate": -46.34101708984372,
+        "medians": [
+          -41.5935175781251,
+          -59.10706347656287,
+          -54.8924560546875,
+          -46.81909960937537,
+          -45.86293457031206,
+          -52.73072460937692,
+          -29.15699414062692,
+          -31.263451171871566
+        ]
+      },
+      "bar": "-60 <= aggregate <= -15"
+    },
+    {
+      "name": "G2",
+      "held": true,
+      "inputs": {
+        "dispatchMedian": 6.6429443359375,
+        "aggregate": -46.34101708984372,
+        "share": 0.14334912682340314
+      },
+      "bar": "dispatch/|aggregate| <= 0.5 with dispatch >= -5"
+    },
+    {
+      "name": "G3",
+      "held": false,
+      "inputs": {
+        "overall": 29.95006933593595,
+        "conditionGap": 12.292584960939621,
+        "phaseSpreads": {
+          "load": 23.57373046875,
+          "resume": 17.51354589843777
+        },
+        "byCondition": {
+          "load": [
+            -45.86293457031206,
+            -52.73072460937692,
+            -29.15699414062692,
+            -31.263451171871566
+          ],
+          "resume": [
+            -41.5935175781251,
+            -59.10706347656287,
+            -54.8924560546875,
+            -46.81909960937537
+          ]
+        }
+      },
+      "bar": "each spread <= frameIntervalMs / 2 = 20.833333333333332"
+    }
+  ],
+  "starts": [
+    {
+      "label": "resume-0",
+      "condition": "resume",
+      "phase": 0,
+      "requestedTargetMs": 5291.666333333334,
+      "requestedParkMs": 5291.666259765625,
+      "scheduledParkMs": 5291.666259765625,
+      "advanceMs": 0,
+      "S": 1789626328394.1106,
+      "latenessMs": 0.376708984375,
+      "dispatchMs": 0.476806640625,
+      "callDurationMs": 0.300048828125,
+      "settleMs": 0.199951171875,
+      "pausedFramePtsMs": 5291.666,
+      "firstPlayingFrame": 149,
+      "snapErrorMs": 41.66674023437463,
+      "pausedSnapErrorMs": -0.000259765624832653,
+      "mediaAdvanceMs": 41.66699999999946,
+      "achievedPhase": 0.9999982343750016,
+      "displayMinusSMs": 81.876708984375,
+      "identityResidualMs": 0,
+      "residual": {
+        "status": "met",
+        "medianMs": -41.5935175781251,
+        "count": 24,
+        "firstSeq": 90,
+        "lastSeq": 113
+      },
+      "earlyMs": -41.5935175781251,
+      "lateMs": -41.5935175781251,
+      "tailMs": -41.57704199218824,
+      "slope": 0.9999755873742237,
+      "maxHalfWidthMs": 0.43995541992187503,
+      "commandedRates": [
+        1.0093709141601563,
+        1.0093601800292966,
+        1.0093542385742187,
+        1.0093439921874998,
+        1.009337401953125,
+        1.0093456397460938,
+        1.0093439921875,
+        1.0093357543945314
+      ],
+      "nativeRateReadback": 1,
+      "joinedCount": 72,
+      "unjoined": [],
+      "duplicates": [],
+      "unusable": []
+    },
+    {
+      "label": "resume-0.25",
+      "condition": "resume",
+      "phase": 0.25,
+      "requestedTargetMs": 5802.0830000000005,
+      "requestedParkMs": 5802.0830078125,
+      "scheduledParkMs": 5802.0830078125,
+      "advanceMs": 0,
+      "S": 1789626332625.8303,
+      "latenessMs": 13.45703125,
+      "dispatchMs": 13.45703125,
+      "callDurationMs": 0.199951171875,
+      "settleMs": 0.300048828125,
+      "pausedFramePtsMs": 5791.666,
+      "firstPlayingFrame": 264,
+      "snapErrorMs": 31.24999218749963,
+      "pausedSnapErrorMs": -10.417007812499833,
+      "mediaAdvanceMs": 41.66699999999946,
+      "achievedPhase": 0.2500001875000022,
+      "displayMinusSMs": 89.05712890625,
+      "identityResidualMs": 0,
+      "residual": {
+        "status": "missed",
+        "medianMs": -59.10706347656287,
+        "count": 24,
+        "firstSeq": 166,
+        "lastSeq": 189
+      },
+      "earlyMs": -59.15711230468787,
+      "lateMs": -59.073490234375186,
+      "tailMs": -59.021248046874916,
+      "slope": 0.9999945433088288,
+      "maxHalfWidthMs": 0.572847421875,
+      "commandedRates": [
+        1.01
+      ],
+      "nativeRateReadback": 1,
+      "joinedCount": 72,
+      "unjoined": [],
+      "duplicates": [],
+      "unusable": []
+    },
+    {
+      "label": "resume-0.5",
+      "condition": "resume",
+      "phase": 0.5,
+      "requestedTargetMs": 6312.499666666667,
+      "requestedParkMs": 6312.499755859375,
+      "scheduledParkMs": 6312.499755859375,
+      "advanceMs": 0,
+      "S": 1789626336829.2231,
+      "latenessMs": 12.5927734375,
+      "dispatchMs": 12.792724609375,
+      "callDurationMs": 0.300048828125,
+      "settleMs": 0.5,
+      "pausedFramePtsMs": 6291.666,
+      "firstPlayingFrame": 370,
+      "snapErrorMs": 20.83324414062463,
+      "pausedSnapErrorMs": -20.833755859374833,
+      "mediaAdvanceMs": 41.66699999999946,
+      "achievedPhase": 0.5000021406250029,
+      "displayMinusSMs": 74.292724609375,
+      "identityResidualMs": 0,
+      "residual": {
+        "status": "missed",
+        "medianMs": -54.8924560546875,
+        "count": 24,
+        "firstSeq": 241,
+        "lastSeq": 264
+      },
+      "earlyMs": -54.87635839843733,
+      "lateMs": -54.875858398437686,
+      "tailMs": -54.85938281250037,
+      "slope": 0.9999727752074301,
+      "maxHalfWidthMs": 0.33828919921875,
+      "commandedRates": [
+        1.01
+      ],
+      "nativeRateReadback": 1,
+      "joinedCount": 72,
+      "unjoined": [],
+      "duplicates": [],
+      "unusable": []
+    },
+    {
+      "label": "resume-0.75",
+      "condition": "resume",
+      "phase": 0.75,
+      "requestedTargetMs": 6822.916333333334,
+      "requestedParkMs": 6822.916259765625,
+      "scheduledParkMs": 6822.916259765625,
+      "advanceMs": 0,
+      "S": 1789626341015.78,
+      "latenessMs": 4.835693359375,
+      "dispatchMs": 4.935791015625,
+      "callDurationMs": 0.300048828125,
+      "settleMs": 0.199951171875,
+      "pausedFramePtsMs": 6791.666,
+      "firstPlayingFrame": 477,
+      "snapErrorMs": 10.416740234374629,
+      "pausedSnapErrorMs": -31.250259765624833,
+      "mediaAdvanceMs": 41.66699999999946,
+      "achievedPhase": 0.7499982343750038,
+      "displayMinusSMs": 54.435791015625,
+      "identityResidualMs": 0,
+      "residual": {
+        "status": "missed",
+        "medianMs": -46.81909960937537,
+        "count": 24,
+        "firstSeq": 316,
+        "lastSeq": 339
+      },
+      "earlyMs": -46.785526367187686,
+      "lateMs": -48.1525996093751,
+      "tailMs": -48.13562402343723,
+      "slope": 0.9999034041663423,
+      "maxHalfWidthMs": 0.504953203125,
+      "commandedRates": [
+        1.01
+      ],
+      "nativeRateReadback": 1,
+      "joinedCount": 72,
+      "unjoined": [],
+      "duplicates": [],
+      "unusable": []
+    },
+    {
+      "label": "load-0",
+      "condition": "load",
+      "phase": 0,
+      "requestedTargetMs": 59999.99966666666,
+      "requestedParkMs": 59999.999755859375,
+      "scheduledParkMs": 59999.999755859375,
+      "advanceMs": 0,
+      "S": 1789626345716.2446,
+      "latenessMs": 4.845703125,
+      "dispatchMs": 4.945556640625,
+      "callDurationMs": 0.300048828125,
+      "settleMs": 0.5,
+      "pausedFramePtsMs": 59959.332,
+      "firstPlayingFrame": 16,
+      "snapErrorMs": 0.9992441406284343,
+      "pausedSnapErrorMs": -40.667755859372846,
+      "mediaAdvanceMs": 41.66700000000128,
+      "achievedPhase": 0.000002140625054323664,
+      "displayMinusSMs": 48.24560546875,
+      "identityResidualMs": 0,
+      "residual": {
+        "status": "missed",
+        "medianMs": -45.86293457031206,
+        "count": 24,
+        "firstSeq": 1,
+        "lastSeq": 24
+      },
+      "earlyMs": -45.846458984375204,
+      "lateMs": -45.879910156247206,
+      "tailMs": -45.829983398434706,
+      "slope": 1.0000424061329998,
+      "maxHalfWidthMs": 0.323557392578125,
+      "commandedRates": [
+        1.01
+      ],
+      "nativeRateReadback": 1,
+      "joinedCount": 72,
+      "unjoined": [],
+      "duplicates": [],
+      "unusable": []
+    },
+    {
+      "label": "load-0.25",
+      "condition": "load",
+      "phase": 0.25,
+      "requestedTargetMs": 60510.41633333333,
+      "requestedParkMs": 60510.416259765625,
+      "scheduledParkMs": 60510.416259765625,
+      "advanceMs": 0,
+      "S": 1789626350470.1118,
+      "latenessMs": 11.763671875,
+      "dispatchMs": 11.86376953125,
+      "callDurationMs": 0.300048828125,
+      "settleMs": 0.5,
+      "pausedFramePtsMs": 60469.999,
+      "firstPlayingFrame": 17,
+      "snapErrorMs": 1.2497402343724389,
+      "pausedSnapErrorMs": -40.417259765621566,
+      "mediaAdvanceMs": 41.666999999994005,
+      "achievedPhase": 0.24999823437505503,
+      "displayMinusSMs": 55.36376953125,
+      "identityResidualMs": 0,
+      "residual": {
+        "status": "missed",
+        "medianMs": -52.73072460937692,
+        "count": 24,
+        "firstSeq": 1,
+        "lastSeq": 24
+      },
+      "earlyMs": -52.71412695312392,
+      "lateMs": -52.69702929687628,
+      "tailMs": -52.69020117187756,
+      "slope": 1.0000401870851163,
+      "maxHalfWidthMs": 0.2647891015625,
+      "commandedRates": [
+        1.01
+      ],
+      "nativeRateReadback": 1,
+      "joinedCount": 72,
+      "unjoined": [],
+      "duplicates": [],
+      "unusable": []
+    },
+    {
+      "label": "load-0.5",
+      "condition": "load",
+      "phase": 0.5,
+      "requestedTargetMs": 61020.833,
+      "requestedParkMs": 61020.8330078125,
+      "scheduledParkMs": 61020.8330078125,
+      "advanceMs": 0,
+      "S": 1789626355224.9534,
+      "latenessMs": 5.273193359375,
+      "dispatchMs": 5.273193359375,
+      "callDurationMs": 0.400146484375,
+      "settleMs": 0.5,
+      "pausedFramePtsMs": 61011.666,
+      "firstPlayingFrame": 18,
+      "snapErrorMs": 32.49999218749872,
+      "pausedSnapErrorMs": -9.167007812502561,
+      "mediaAdvanceMs": 41.66700000000128,
+      "achievedPhase": 0.5000001875000557,
+      "displayMinusSMs": 61.673583984375,
+      "identityResidualMs": 0,
+      "residual": {
+        "status": "met",
+        "medianMs": -29.15699414062692,
+        "count": 24,
+        "firstSeq": 1,
+        "lastSeq": 24
+      },
+      "earlyMs": -27.82349414062628,
+      "lateMs": -30.540542968748923,
+      "tailMs": -30.523945312495925,
+      "slope": 0.9989481155272522,
+      "maxHalfWidthMs": 0.27895107421875,
+      "commandedRates": [
+        1.0062353951660157,
+        1.0062213726074216,
+        1.0058917992187506,
+        1.005911381445313,
+        1.0069277959960954,
+        1.0069225502929693,
+        1.0069154962890619
+      ],
+      "nativeRateReadback": 1,
+      "joinedCount": 72,
+      "unjoined": [],
+      "duplicates": [],
+      "unusable": []
+    },
+    {
+      "label": "load-0.75",
+      "condition": "load",
+      "phase": 0.75,
+      "requestedTargetMs": 61531.24966666666,
+      "requestedParkMs": 61531.249755859375,
+      "scheduledParkMs": 61531.249755859375,
+      "advanceMs": 0,
+      "S": 1789626359963.6284,
+      "latenessMs": 7.91259765625,
+      "dispatchMs": 8.0126953125,
+      "callDurationMs": 0.39990234375,
+      "settleMs": 0.5,
+      "pausedFramePtsMs": 61511.666,
+      "firstPlayingFrame": 16,
+      "snapErrorMs": 22.08324414062372,
+      "pausedSnapErrorMs": -19.58375585937756,
+      "mediaAdvanceMs": 41.66700000000128,
+      "achievedPhase": 0.7500021406250564,
+      "displayMinusSMs": 50.61279296875,
+      "identityResidualMs": 0,
+      "residual": {
+        "status": "met",
+        "medianMs": -31.263451171871566,
+        "count": 24,
+        "firstSeq": 1,
+        "lastSeq": 24
+      },
+      "earlyMs": -31.179951171874563,
+      "lateMs": -32.613304687496566,
+      "tailMs": -32.63233203125492,
+      "slope": 0.9997326797738304,
+      "maxHalfWidthMs": 0.273986474609375,
+      "commandedRates": [
+        1.0063969133789066,
+        1.0064136377929682,
+        1.006522904882811,
+        1.0074324389648437,
+        1.0074349478027342,
+        1.0074294895996097,
+        1.0074366523437492,
+        1.007429385839844,
+        1.0074628610839846
+      ],
+      "nativeRateReadback": 1,
+      "joinedCount": 72,
+      "unjoined": [],
+      "duplicates": [],
+      "unusable": []
+    }
+  ],
+  "plan": {
+    "resume": {
+      "room": "start-5-start-diagnostic-2026-09-17T06-25-21-953Z-resume",
+      "anchorMs": 5291.666333333334,
+      "targets": [
+        5291.666333333334,
+        5802.0830000000005,
+        6312.499666666667,
+        6822.916333333334
+      ],
+      "buffered": [
+        [
+          0,
+          35946.666
+        ]
+      ]
+    },
+    "load": {
+      "anchorMs": 59999.99966666666,
+      "targets": [
+        59999.99966666666,
+        60510.41633333333,
+        61020.833,
+        61531.24966666666
+      ],
+      "rooms": [
+        "start-5-start-diagnostic-2026-09-17T06-25-21-953Z-load-0",
+        "start-5-start-diagnostic-2026-09-17T06-25-21-953Z-load-0.25",
+        "start-5-start-diagnostic-2026-09-17T06-25-21-953Z-load-0.5",
+        "start-5-start-diagnostic-2026-09-17T06-25-21-953Z-load-0.75"
+      ]
+    }
+  },
+  "lattice": {
+    "latticeOffsetMs": 41.66633333333353,
+    "frameCount": 72,
+    "dispersionMs": 0.0006666666668415644,
+    "centreMs": 41.66633333333351,
+    "usable": true,
+    "frameIntervalMs": 41.666666666666664,
+    "minimumFrames": 48
+  },
+  "regime": {
+    "origin": "http://127.0.0.1:8100",
+    "windowState": "visible, non-occluded (Chrome automation flags)",
+    "flags": [
+      "--autoplay-policy=no-user-gesture-required",
+      "--disable-renderer-backgrounding",
+      "--disable-backgrounding-occluded-windows",
+      "--disable-background-timer-throttling",
+      "--disable-features=CalculateNativeWinOcclusion",
+      "--no-first-run",
+      "--no-default-browser-check"
+    ],
+    "windowSize": "700x500",
+    "windowPosition": "0,0",
+    "contentFps": 24,
+    "frameIntervalMs": 41.666666666666664,
+    "displayCadenceMs": 5.599999999999909,
+    "buildId": "2026-09-17T06:25:13.650Z-8a8093",
+    "servedBundleSha256": "90df83c72b719c06cf5e3d9276e71564051d0930b84f5eec327f6d6cf4517fe2",
+    "onDiskBundleSha256": "90df83c72b719c06cf5e3d9276e71564051d0930b84f5eec327f6d6cf4517fe2",
+    "mediaDir": "step0\\content",
+    "ownedServerPort": null,
+    "refreshRateHz": 178.57142857143148,
+    "refreshFrameCount": 121
+  },
+  "streams": {
+    "events": 879,
+    "records": 613,
+    "frames": 622
+  },
+  "handCalculation": {
+    "label": "resume-0",
+    "seq": 90,
+    "driftMs": -40.20996875000037,
+    "modelledDriftMs": -40.20996875000037,
+    "identityResidualMs": 0,
+    "scheduledParkMs": 5291.666259765625,
+    "S": 1789626328394.1106,
+    "verified": true
+  },
+  "recomputedFromDisk": {
+    "starts": 8,
+    "figures": 17,
+    "frames": 622,
+    "verified": true
+  }
+}

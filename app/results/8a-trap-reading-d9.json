@@ -1,0 +1,725 @@
+{
+  "diagnostic": false,
+  "criterion": true,
+  "thresholds": {
+    "kind": "trap",
+    "behindHeldAheadMsBelow": 15000,
+    "reproducedPeerFractionMax": 0.1,
+    "notReproducedPeerFractionMin": 0.5,
+    "scatteredSpreadMsAbove": 4000,
+    "acceptedRunsMin": 2,
+    "attemptsMax": 3,
+    "control": {
+      "condition": "p2p-scattered",
+      "peerFractionMin": 0.5
+    }
+  },
+  "runs": [
+    {
+      "directory": "8a-p2p-scattered-2026-09-28T16-17-04.470Z",
+      "condition": "p2p-scattered",
+      "accepted": true,
+      "outcome": "complete",
+      "publishes": true,
+      "finalization": {
+        "status": "complete",
+        "outcome": "pass",
+        "exitCode": 0,
+        "writeByte": true,
+        "writeDrift": false,
+        "reason": "published"
+      },
+      "buildIds": {
+        "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+      },
+      "images": {
+        "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+        "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+      },
+      "peerFractionAggregate": 0.8,
+      "heldAheadMsRoomMedian": 143175.76218311524,
+      "positionSpreadMsMedian": 113300,
+      "behind": false,
+      "class": "not reproduced",
+      "classKey": "T3",
+      "label": "escaped"
+    },
+    {
+      "directory": "8a-trap-seek-2026-09-28T16-24-01.194Z",
+      "condition": "trap-seek",
+      "accepted": false,
+      "outcome": "refused",
+      "publishes": true,
+      "finalization": {
+        "status": "refused",
+        "outcome": "refused",
+        "exitCode": 1,
+        "writeByte": false,
+        "writeDrift": false,
+        "reason": "run-refusal"
+      },
+      "buildIds": {
+        "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+      },
+      "images": {
+        "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+        "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+      }
+    },
+    {
+      "directory": "8a-trap-seek-2026-09-28T16-29-51.227Z",
+      "condition": "trap-seek",
+      "accepted": false,
+      "outcome": "refused",
+      "publishes": true,
+      "finalization": {
+        "status": "refused",
+        "outcome": "refused",
+        "exitCode": 1,
+        "writeByte": false,
+        "writeDrift": false,
+        "reason": "run-refusal"
+      },
+      "buildIds": {
+        "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+      },
+      "images": {
+        "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+        "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+      }
+    },
+    {
+      "directory": "8a-trap-seek-2026-09-28T16-35-54.901Z",
+      "condition": "trap-seek",
+      "accepted": false,
+      "outcome": "refused",
+      "publishes": true,
+      "finalization": {
+        "status": "refused",
+        "outcome": "refused",
+        "exitCode": 1,
+        "writeByte": false,
+        "writeDrift": false,
+        "reason": "run-refusal"
+      },
+      "buildIds": {
+        "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+      },
+      "images": {
+        "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+        "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+      }
+    },
+    {
+      "directory": "8a-trap-seek-short-2026-09-28T16-41-59.580Z",
+      "condition": "trap-seek-short",
+      "accepted": false,
+      "outcome": "refused",
+      "publishes": true,
+      "finalization": {
+        "status": "refused",
+        "outcome": "refused",
+        "exitCode": 1,
+        "writeByte": false,
+        "writeDrift": false,
+        "reason": "run-refusal"
+      },
+      "buildIds": {
+        "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+      },
+      "images": {
+        "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+        "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+      }
+    },
+    {
+      "directory": "8a-trap-seek-short-2026-09-28T16-47-52.821Z",
+      "condition": "trap-seek-short",
+      "accepted": false,
+      "outcome": "refused",
+      "publishes": true,
+      "finalization": {
+        "status": "refused",
+        "outcome": "refused",
+        "exitCode": 1,
+        "writeByte": false,
+        "writeDrift": false,
+        "reason": "run-refusal"
+      },
+      "buildIds": {
+        "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+      },
+      "images": {
+        "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+        "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+      }
+    },
+    {
+      "directory": "8a-trap-seek-short-2026-09-28T16-53-39.468Z",
+      "condition": "trap-seek-short",
+      "accepted": false,
+      "outcome": "refused",
+      "publishes": true,
+      "finalization": {
+        "status": "refused",
+        "outcome": "refused",
+        "exitCode": 1,
+        "writeByte": false,
+        "writeDrift": false,
+        "reason": "run-refusal"
+      },
+      "buildIds": {
+        "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+      },
+      "images": {
+        "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+        "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+      }
+    },
+    {
+      "directory": "8a-trap-seek-2026-09-29T06-41-44.168Z",
+      "condition": "trap-seek",
+      "accepted": true,
+      "outcome": "complete",
+      "publishes": true,
+      "finalization": {
+        "status": "complete",
+        "outcome": "pass",
+        "exitCode": 0,
+        "writeByte": true,
+        "writeDrift": false,
+        "reason": "published"
+      },
+      "buildIds": {
+        "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+      },
+      "images": {
+        "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+        "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+      },
+      "peerFractionAggregate": 0.013975050975202158,
+      "heldAheadMsRoomMedian": 2231.6642840112327,
+      "positionSpreadMsMedian": 4300,
+      "behind": true,
+      "class": "reproduced",
+      "classKey": "T1",
+      "label": null
+    },
+    {
+      "directory": "8a-trap-seek-2026-09-29T06-48-03.136Z",
+      "condition": "trap-seek",
+      "accepted": true,
+      "outcome": "complete",
+      "publishes": true,
+      "finalization": {
+        "status": "complete",
+        "outcome": "pass",
+        "exitCode": 0,
+        "writeByte": true,
+        "writeDrift": false,
+        "reason": "published"
+      },
+      "buildIds": {
+        "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+      },
+      "images": {
+        "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+        "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+      },
+      "peerFractionAggregate": 0,
+      "heldAheadMsRoomMedian": 2140.177583451208,
+      "positionSpreadMsMedian": 3400,
+      "behind": true,
+      "class": "reproduced",
+      "classKey": "T1",
+      "label": null
+    },
+    {
+      "directory": "8a-trap-seek-short-2026-09-29T06-54-21.661Z",
+      "condition": "trap-seek-short",
+      "accepted": false,
+      "outcome": "refused",
+      "publishes": true,
+      "finalization": {
+        "status": "refused",
+        "outcome": "refused",
+        "exitCode": 1,
+        "writeByte": false,
+        "writeDrift": false,
+        "reason": "run-refusal"
+      },
+      "buildIds": {
+        "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+      },
+      "images": {
+        "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+        "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+      }
+    },
+    {
+      "directory": "8a-trap-seek-short-2026-09-29T07-00-33.105Z",
+      "condition": "trap-seek-short",
+      "accepted": false,
+      "outcome": "refused",
+      "publishes": true,
+      "finalization": {
+        "status": "refused",
+        "outcome": "refused",
+        "exitCode": 1,
+        "writeByte": false,
+        "writeDrift": false,
+        "reason": "run-refusal"
+      },
+      "buildIds": {
+        "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+      },
+      "images": {
+        "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+        "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+      }
+    },
+    {
+      "directory": "8a-trap-seek-short-2026-09-29T07-06-28.163Z",
+      "condition": "trap-seek-short",
+      "accepted": false,
+      "outcome": "refused",
+      "publishes": true,
+      "finalization": {
+        "status": "refused",
+        "outcome": "refused",
+        "exitCode": 1,
+        "writeByte": false,
+        "writeDrift": false,
+        "reason": "run-refusal"
+      },
+      "buildIds": {
+        "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+        "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+      },
+      "images": {
+        "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+        "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+      }
+    }
+  ],
+  "arms": {
+    "trap-seek": {
+      "reading": "reproduced",
+      "readingKey": "t1",
+      "class": "reproduced",
+      "runs": [
+        {
+          "directory": "8a-trap-seek-2026-09-28T16-24-01.194Z",
+          "condition": "trap-seek",
+          "accepted": false,
+          "outcome": "refused",
+          "publishes": true,
+          "finalization": {
+            "status": "refused",
+            "outcome": "refused",
+            "exitCode": 1,
+            "writeByte": false,
+            "writeDrift": false,
+            "reason": "run-refusal"
+          },
+          "buildIds": {
+            "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+          },
+          "images": {
+            "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+            "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+          }
+        },
+        {
+          "directory": "8a-trap-seek-2026-09-28T16-29-51.227Z",
+          "condition": "trap-seek",
+          "accepted": false,
+          "outcome": "refused",
+          "publishes": true,
+          "finalization": {
+            "status": "refused",
+            "outcome": "refused",
+            "exitCode": 1,
+            "writeByte": false,
+            "writeDrift": false,
+            "reason": "run-refusal"
+          },
+          "buildIds": {
+            "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+          },
+          "images": {
+            "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+            "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+          }
+        },
+        {
+          "directory": "8a-trap-seek-2026-09-28T16-35-54.901Z",
+          "condition": "trap-seek",
+          "accepted": false,
+          "outcome": "refused",
+          "publishes": true,
+          "finalization": {
+            "status": "refused",
+            "outcome": "refused",
+            "exitCode": 1,
+            "writeByte": false,
+            "writeDrift": false,
+            "reason": "run-refusal"
+          },
+          "buildIds": {
+            "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+          },
+          "images": {
+            "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+            "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+          }
+        },
+        {
+          "directory": "8a-trap-seek-2026-09-29T06-41-44.168Z",
+          "condition": "trap-seek",
+          "accepted": true,
+          "outcome": "complete",
+          "publishes": true,
+          "finalization": {
+            "status": "complete",
+            "outcome": "pass",
+            "exitCode": 0,
+            "writeByte": true,
+            "writeDrift": false,
+            "reason": "published"
+          },
+          "buildIds": {
+            "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+          },
+          "images": {
+            "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+            "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+          },
+          "peerFractionAggregate": 0.013975050975202158,
+          "heldAheadMsRoomMedian": 2231.6642840112327,
+          "positionSpreadMsMedian": 4300,
+          "behind": true,
+          "class": "reproduced",
+          "classKey": "T1",
+          "label": null
+        },
+        {
+          "directory": "8a-trap-seek-2026-09-29T06-48-03.136Z",
+          "condition": "trap-seek",
+          "accepted": true,
+          "outcome": "complete",
+          "publishes": true,
+          "finalization": {
+            "status": "complete",
+            "outcome": "pass",
+            "exitCode": 0,
+            "writeByte": true,
+            "writeDrift": false,
+            "reason": "published"
+          },
+          "buildIds": {
+            "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+          },
+          "images": {
+            "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+            "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+          },
+          "peerFractionAggregate": 0,
+          "heldAheadMsRoomMedian": 2140.177583451208,
+          "positionSpreadMsMedian": 3400,
+          "behind": true,
+          "class": "reproduced",
+          "classKey": "T1",
+          "label": null
+        }
+      ],
+      "acceptedCount": 2,
+      "medians": {
+        "peerFractionAggregate": 0.006987525487601079,
+        "heldAheadMsRoomMedian": 2185.9209337312204,
+        "positionSpreadMsMedian": 3850
+      },
+      "reasons": [],
+      "control": {
+        "directory": "8a-p2p-scattered-2026-09-28T16-17-04.470Z",
+        "condition": "p2p-scattered",
+        "accepted": true,
+        "peerFractionAggregate": 0.8,
+        "buildIds": {
+          "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+          "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+          "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+          "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+          "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+        },
+        "images": {
+          "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+          "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+        },
+        "qualifies": true,
+        "sameBuildAsArm": true
+      }
+    },
+    "trap-seek-short": {
+      "reading": "No reading",
+      "readingKey": "none",
+      "class": null,
+      "runs": [
+        {
+          "directory": "8a-trap-seek-short-2026-09-28T16-41-59.580Z",
+          "condition": "trap-seek-short",
+          "accepted": false,
+          "outcome": "refused",
+          "publishes": true,
+          "finalization": {
+            "status": "refused",
+            "outcome": "refused",
+            "exitCode": 1,
+            "writeByte": false,
+            "writeDrift": false,
+            "reason": "run-refusal"
+          },
+          "buildIds": {
+            "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+          },
+          "images": {
+            "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+            "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+          }
+        },
+        {
+          "directory": "8a-trap-seek-short-2026-09-28T16-47-52.821Z",
+          "condition": "trap-seek-short",
+          "accepted": false,
+          "outcome": "refused",
+          "publishes": true,
+          "finalization": {
+            "status": "refused",
+            "outcome": "refused",
+            "exitCode": 1,
+            "writeByte": false,
+            "writeDrift": false,
+            "reason": "run-refusal"
+          },
+          "buildIds": {
+            "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+          },
+          "images": {
+            "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+            "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+          }
+        },
+        {
+          "directory": "8a-trap-seek-short-2026-09-28T16-53-39.468Z",
+          "condition": "trap-seek-short",
+          "accepted": false,
+          "outcome": "refused",
+          "publishes": true,
+          "finalization": {
+            "status": "refused",
+            "outcome": "refused",
+            "exitCode": 1,
+            "writeByte": false,
+            "writeDrift": false,
+            "reason": "run-refusal"
+          },
+          "buildIds": {
+            "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+          },
+          "images": {
+            "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+            "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+          }
+        },
+        {
+          "directory": "8a-trap-seek-short-2026-09-29T06-54-21.661Z",
+          "condition": "trap-seek-short",
+          "accepted": false,
+          "outcome": "refused",
+          "publishes": true,
+          "finalization": {
+            "status": "refused",
+            "outcome": "refused",
+            "exitCode": 1,
+            "writeByte": false,
+            "writeDrift": false,
+            "reason": "run-refusal"
+          },
+          "buildIds": {
+            "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+          },
+          "images": {
+            "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+            "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+          }
+        },
+        {
+          "directory": "8a-trap-seek-short-2026-09-29T07-00-33.105Z",
+          "condition": "trap-seek-short",
+          "accepted": false,
+          "outcome": "refused",
+          "publishes": true,
+          "finalization": {
+            "status": "refused",
+            "outcome": "refused",
+            "exitCode": 1,
+            "writeByte": false,
+            "writeDrift": false,
+            "reason": "run-refusal"
+          },
+          "buildIds": {
+            "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+          },
+          "images": {
+            "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+            "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+          }
+        },
+        {
+          "directory": "8a-trap-seek-short-2026-09-29T07-06-28.163Z",
+          "condition": "trap-seek-short",
+          "accepted": false,
+          "outcome": "refused",
+          "publishes": true,
+          "finalization": {
+            "status": "refused",
+            "outcome": "refused",
+            "exitCode": 1,
+            "writeByte": false,
+            "writeDrift": false,
+            "reason": "run-refusal"
+          },
+          "buildIds": {
+            "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+            "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+          },
+          "images": {
+            "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+            "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+          }
+        }
+      ],
+      "acceptedCount": 0,
+      "medians": null,
+      "reasons": [
+        "accepted-run-count:0"
+      ],
+      "control": {
+        "directory": "8a-p2p-scattered-2026-09-28T16-17-04.470Z",
+        "condition": "p2p-scattered",
+        "accepted": true,
+        "peerFractionAggregate": 0.8,
+        "buildIds": {
+          "c01": "2026-09-28T15:49:24.303Z-80b0f1",
+          "c02": "2026-09-28T15:49:24.303Z-80b0f1",
+          "c03": "2026-09-28T15:49:24.303Z-80b0f1",
+          "c04": "2026-09-28T15:49:24.303Z-80b0f1",
+          "c05": "2026-09-28T15:49:24.303Z-80b0f1"
+        },
+        "images": {
+          "origin": "sha256:9412c174dfd1bbacee5ad9ea4602354144fc5fac93b7db9acce3e891bde0a3ac",
+          "client": "sha256:fbda0eab05a6e2c43fc0c2c91b2414e6ddc6ecdc298adf6837e9cbae2b8a7b53"
+        },
+        "qualifies": true,
+        "sameBuildAsArm": true
+      }
+    }
+  },
+  "reading": "reproduced",
+  "readingKey": "t1",
+  "reasons": [],
+  "d8": {
+    "outputPath": "results/8a-starved-recompute.json",
+    "label": "diagnostic-of-refused-runs"
+  }
+}

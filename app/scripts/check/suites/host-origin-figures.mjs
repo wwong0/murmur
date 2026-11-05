@@ -3,8 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createHostAccounting } from '../../../public/lib/host-accounting.mjs';
-import { assert, assertEqual, check, skipWithoutResults } from '../harness.mjs';
-import { recomputeRunDirectory, readRunDirectory } from '../../harness-figures.mjs';
+import { assert, assertEqual, check } from '../harness.mjs';
+import { readRunDirectory } from '../../harness-figures.mjs';
 import { computeFigures } from '../../figures/harness-figures.mjs';
 
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -93,7 +93,6 @@ function writeRun(runDir, evidence) {
 let now = 0;
 
 export default async function hostOriginFiguresSuite() {
-  if (skipWithoutResults('host-origin-figures')) return;
   await check('host-origin figures: host manifests select receipts and retain CDP requests separately', async () => {
     const root = path.join(APP_ROOT, '.tmp');
     fs.mkdirSync(root, { recursive: true });
@@ -145,24 +144,5 @@ export default async function hostOriginFiguresSuite() {
     } finally {
       fs.rmSync(runDir, { recursive: true, force: true });
     }
-  });
-
-  await check('host-origin figures: retained 6a publication is unchanged by the reader edit', async () => {
-    const runDir = path.join(APP_ROOT, 'results', '6a-repair-final-baseline-nop2p');
-    const stored = JSON.parse(fs.readFileSync(path.join(runDir, 'published-figures.json'), 'utf8'));
-    const recomputed = recomputeRunDirectory(runDir).publishedByte;
-    const storedKeys = new Set(Object.keys(stored));
-    const recomputedKeys = new Set(Object.keys(recomputed));
-    for (const key of storedKeys) {
-      assert(recomputedKeys.has(key), `retained publication key ${key} is still recomputed`);
-      assertEqual(JSON.stringify(recomputed[key]), JSON.stringify(stored[key]), `retained publication value ${key} is unchanged`);
-    }
-    const missingFromStored = [...recomputedKeys].filter((key) => !storedKeys.has(key));
-    const missingFromRecomputed = [...storedKeys].filter((key) => !recomputedKeys.has(key));
-    assertEqual(JSON.stringify(missingFromStored), JSON.stringify(['noFrameMsByClient', 'capacityBitsPerSecond']), 'the only new recompute keys are capacityBitsPerSecond and 13e-2 noFrameMsByClient');
-    assertEqual(JSON.stringify(recomputed.noFrameMsByClient), JSON.stringify({}), 'no retained 6a viewer is counted as not presenting');
-    assertEqual(JSON.stringify(missingFromRecomputed), JSON.stringify([]), 'no stored publication key disappeared');
-    const comparable = Object.fromEntries([...storedKeys].map((key) => [key, recomputed[key]]));
-    assertEqual(JSON.stringify(comparable), JSON.stringify(stored), 'the stored publication deep-equals the recomputed stored-key projection');
   });
 }

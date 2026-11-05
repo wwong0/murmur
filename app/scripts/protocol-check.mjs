@@ -24,11 +24,16 @@
 //
 // Node 24, ESM.
 
+import fs from 'node:fs';
+
 import { report, suiteFailed } from './check/harness.mjs';
 import { describeFixtures, disposeFixtures } from './check/fixtures.mjs';
 import { runSuites } from './check/run-suites.mjs';
 
 console.log(describeFixtures());
+
+// Several suites write throwaway files under app/.tmp/, which git does not keep.
+fs.mkdirSync(new URL('../.tmp/', import.meta.url), { recursive: true });
 
 // Order matters only for legibility: each suite takes rooms of its own, so none
 // of them can observe another. Every suite is imported before the first runs,
@@ -52,7 +57,6 @@ const SUITES = [
   'harness-arm-recompute',
   'harness-cadence',
   'harness-poll-shape',
-  'harness-records',
   'tracker-spawn',
   'harness-conditions',
   'harness-behind',
