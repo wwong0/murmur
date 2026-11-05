@@ -18,6 +18,9 @@ const ROOM_URL = (role, tab) => `${ORIGIN}/room.html?room=${ROOM}&role=${role}&t
 const HEADLINE = 'Watch together';
 const FIRST_SCREEN = ['#front h1', '#host', '#join-input', '#join'];
 const HEADER_LINK = '.room-header a[href]';
+const WRITEUP_URL = 'https://github.com/wwong0/murmur/blob/main/WRITEUP.md';
+// A number followed by a unit of time, rate or size, or a percent sign.
+const FIGURE = String.raw`\d(?:[\d.,]*\d)?\s*(?:ms|s|Mbit\/s|MB|GB|%)(?![A-Za-z])`;
 const ROSTER_COUNT = "document.querySelectorAll('#roster li').length";
 const WIDTH_PX = 0.5;
 const VIEWPORTS = {
@@ -89,6 +92,27 @@ async function rowFont() {
   }, { beforeNavigate: record });
 }
 
+// The front page holds one link, and it is the write-up on the public repo.
+async function rowWriteupLink() {
+  return driver.withTab(`${ORIGIN}/`, 'FP7', async (tab) => {
+    const front = await until(tab, present('#host'), Boolean);
+    if (!front.ok) return { exercised: false, detail: 'the front page did not render' };
+    const hrefs = await read(tab, "[...document.querySelectorAll('a[href]')].map((a) => a.href)");
+    return { exercised: true, ok: hrefs?.length === 1 && hrefs[0] === WRITEUP_URL, detail: { links: hrefs?.length ?? null, isWriteup: hrefs?.[0] === WRITEUP_URL } };
+  });
+}
+
+// The front page's rendered text states no figure.
+async function rowNoFigure() {
+  return driver.withTab(`${ORIGIN}/`, 'FP8', async (tab) => {
+    const front = await until(tab, present('#host'), Boolean);
+    if (!front.ok) return { exercised: false, detail: 'the front page did not render' };
+    const figures = await read(tab, `(document.body.innerText.match(new RegExp(${JSON.stringify(FIGURE)}, 'g')) ?? []).length`);
+    const length = await read(tab, 'document.body.innerText.length');
+    return { exercised: length > 0, ok: figures === 0, detail: { figures, textLength: length } };
+  });
+}
+
 async function rowName() {
   const front = await driver.withTab(`${ORIGIN}/`, 'FP4/front', async (tab) => {
     const shown = await until(tab, present('#host'), Boolean);
@@ -157,4 +181,6 @@ await driver.run(async () => {
   await driver.runRow('FP4 the title reads Murmur on the front page and in a room, and the header shows it', rowName);
   await driver.runRow('FP5 a viewer following the header link reaches the front page and leaves the room', rowViewerLeaves);
   await driver.runRow("FP6 opening Stats keeps the player's and the right column's widths", rowStatsKeepsWidths);
+  await driver.runRow('FP7 the front page holds exactly one link, to the write-up', rowWriteupLink);
+  await driver.runRow('FP8 the front page states no figure', rowNoFigure);
 });

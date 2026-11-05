@@ -810,6 +810,7 @@
 
   .front-footer { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-top: 7rem; padding: 1.75rem 0 2.5rem; border-top: 1px solid var(--hairline); font-size: 0.95rem; color: var(--secondary); }
   .front-footer-name { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.01em; color: var(--ink); }
+  .front-footer-link { color: var(--ink); text-decoration: underline; text-underline-offset: 0.2em; }
 
   @media (max-width: 767.98px) {
     .front-wrap { padding: 0 0.25rem; }

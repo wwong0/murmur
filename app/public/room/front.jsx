@@ -14,6 +14,8 @@ const SUPPORTS = [
   ['No account, no install', "Guests open the link in their browser and they're in. Nobody has to sign up."],
 ];
 const CHIP_TONES = ['host', '1', '2'];
+// The write-up on the public repo, where the figures sit with the setup they were measured in.
+const WRITEUP_URL = 'https://github.com/wwong0/murmur/blob/main/WRITEUP.md';
 
 function Chips({ className }) {
   return <span className={className}>{CHIP_TONES.map((tone) => <b key={tone} className={`front-chip member-chip-tone-${tone}`} />)}</span>;
@@ -96,7 +98,7 @@ export function Front({ view, actions }) {
           </li>)}
         </ol>
       </section>
-      <footer className="front-footer"><span className="front-footer-name">Murmur</span><span>Watch parties, peer to peer</span></footer>
+      <footer className="front-footer"><span className="front-footer-name">Murmur</span><span>Watch parties, peer to peer · <a className="front-footer-link" href={WRITEUP_URL}>How it was built and tested</a></span></footer>
     </div>
   </div>;
 }
